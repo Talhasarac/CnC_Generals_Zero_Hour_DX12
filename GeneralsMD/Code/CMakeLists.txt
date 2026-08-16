@@ -129,3 +129,64 @@ add_library(wwsaveload STATIC
   ${WW}/WWSaveLoad/twiddler.cpp            ${WW}/WWSaveLoad/wwsaveload.cpp)
 target_include_directories(wwsaveload PUBLIC ${WW}/WWSaveLoad PRIVATE ${WW}/WWLib ${WW}/WWMath ${WW}/Wwutil)
 target_link_libraries(wwsaveload PRIVATE wwdebug wwlib wwmath)
+
+# ---- ww3d2 (renderer core) ------------------------------------------------
+# wwshade is header-only here on purpose: no .dsp links wwshade.lib and its
+# shd*bump* sources need shdpp/NVASM-generated headers.  Revisit at exe link.
+# dx8webbrowser.cpp stays inert (ENABLE_EMBEDDED_BROWSER unset).
+add_library(ww3d2 STATIC
+
+  ${WW}/WW3D2/FramGrab.cpp ${WW}/WW3D2/aabtree.cpp ${WW}/WW3D2/aabtreebuilder.cpp 
+  ${WW}/WW3D2/agg_def.cpp ${WW}/WW3D2/animatedsoundmgr.cpp ${WW}/WW3D2/animobj.cpp 
+  ${WW}/WW3D2/assetmgr.cpp ${WW}/WW3D2/assetstatus.cpp ${WW}/WW3D2/bitmaphandler.cpp 
+  ${WW}/WW3D2/bmp2d.cpp ${WW}/WW3D2/boxrobj.cpp ${WW}/WW3D2/bwrender.cpp 
+  ${WW}/WW3D2/camera.cpp ${WW}/WW3D2/collect.cpp ${WW}/WW3D2/coltest.cpp 
+  ${WW}/WW3D2/composite.cpp ${WW}/WW3D2/dazzle.cpp ${WW}/WW3D2/ddsfile.cpp 
+  ${WW}/WW3D2/decalmsh.cpp ${WW}/WW3D2/decalsys.cpp ${WW}/WW3D2/distlod.cpp 
+  ${WW}/WW3D2/dx8caps.cpp ${WW}/WW3D2/dx8fvf.cpp ${WW}/WW3D2/dx8indexbuffer.cpp 
+  ${WW}/WW3D2/dx8polygonrenderer.cpp ${WW}/WW3D2/dx8renderer.cpp ${WW}/WW3D2/dx8rendererdebugger.cpp 
+  ${WW}/WW3D2/dx8texman.cpp ${WW}/WW3D2/dx8vertexbuffer.cpp ${WW}/WW3D2/dx8webbrowser.cpp 
+  ${WW}/WW3D2/dx8wrapper.cpp ${WW}/WW3D2/dynamesh.cpp ${WW}/WW3D2/font3d.cpp 
+  ${WW}/WW3D2/formconv.cpp ${WW}/WW3D2/hanim.cpp ${WW}/WW3D2/hanimmgr.cpp 
+  ${WW}/WW3D2/hcanim.cpp ${WW}/WW3D2/hlod.cpp ${WW}/WW3D2/hmdldef.cpp 
+  ${WW}/WW3D2/hmorphanim.cpp ${WW}/WW3D2/hrawanim.cpp ${WW}/WW3D2/htree.cpp 
+  ${WW}/WW3D2/htreemgr.cpp ${WW}/WW3D2/intersec.cpp ${WW}/WW3D2/layer.cpp 
+  ${WW}/WW3D2/light.cpp ${WW}/WW3D2/lightenvironment.cpp ${WW}/WW3D2/line3d.cpp 
+  ${WW}/WW3D2/linegrp.cpp ${WW}/WW3D2/mapper.cpp ${WW}/WW3D2/matinfo.cpp 
+  ${WW}/WW3D2/matpass.cpp ${WW}/WW3D2/matrixmapper.cpp ${WW}/WW3D2/mesh.cpp 
+  ${WW}/WW3D2/meshbuild.cpp ${WW}/WW3D2/meshdam.cpp ${WW}/WW3D2/meshgeometry.cpp 
+  ${WW}/WW3D2/meshmatdesc.cpp ${WW}/WW3D2/meshmdl.cpp ${WW}/WW3D2/meshmdlio.cpp 
+  ${WW}/WW3D2/metalmap.cpp ${WW}/WW3D2/missingtexture.cpp ${WW}/WW3D2/motchan.cpp 
+  ${WW}/WW3D2/nullrobj.cpp ${WW}/WW3D2/part_buf.cpp ${WW}/WW3D2/part_emt.cpp 
+  ${WW}/WW3D2/part_ldr.cpp ${WW}/WW3D2/pivot.cpp ${WW}/WW3D2/pointgr.cpp 
+  ${WW}/WW3D2/polyinfo.cpp ${WW}/WW3D2/predlod.cpp ${WW}/WW3D2/prim_anim.cpp 
+  ${WW}/WW3D2/projector.cpp ${WW}/WW3D2/proto.cpp ${WW}/WW3D2/render2d.cpp 
+  ${WW}/WW3D2/render2dsentence.cpp ${WW}/WW3D2/renderobjectrecycler.cpp ${WW}/WW3D2/rendobj.cpp 
+  ${WW}/WW3D2/rinfo.cpp ${WW}/WW3D2/ringobj.cpp ${WW}/WW3D2/scene.cpp 
+  ${WW}/WW3D2/segline.cpp ${WW}/WW3D2/seglinerenderer.cpp ${WW}/WW3D2/shader.cpp 
+  ${WW}/WW3D2/shattersystem.cpp ${WW}/WW3D2/snappts.cpp ${WW}/WW3D2/sortingrenderer.cpp 
+  ${WW}/WW3D2/soundrobj.cpp ${WW}/WW3D2/sphereobj.cpp ${WW}/WW3D2/static_sort_list.cpp 
+  ${WW}/WW3D2/statistics.cpp ${WW}/WW3D2/streak.cpp ${WW}/WW3D2/streakRender.cpp 
+  ${WW}/WW3D2/stripoptimizer.cpp ${WW}/WW3D2/surfaceclass.cpp ${WW}/WW3D2/texfcach.cpp 
+  ${WW}/WW3D2/texproject.cpp ${WW}/WW3D2/texture.cpp ${WW}/WW3D2/texturefilter.cpp 
+  ${WW}/WW3D2/textureloader.cpp ${WW}/WW3D2/texturethumbnail.cpp ${WW}/WW3D2/txt.cpp 
+  ${WW}/WW3D2/vertmaterial.cpp ${WW}/WW3D2/visrasterizer.cpp ${WW}/WW3D2/w3d_dep.cpp 
+  ${WW}/WW3D2/w3d_util.cpp ${WW}/WW3D2/w3dexclusionlist.cpp ${WW}/WW3D2/ww3d.cpp 
+  ${WW}/WW3D2/ww3dformat.cpp 
+)
+target_include_directories(ww3d2
+  PUBLIC ${WW}/WW3D2
+  PRIVATE ${WW}/WWLib ${WW}/WWMath ${WW}/WWDebug ${WW}/WWSaveLoad ${WW}/Wwutil
+          ${WW}/wwshade ${WW}/WWAudio ${WW}/Miles6/include
+          ${CMAKE_CURRENT_SOURCE_DIR}/Libraries/DirectX/Include)
+target_link_directories(ww3d2 PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/Libraries/DirectX/Lib)
+target_link_libraries(ww3d2 PUBLIC d3d8 d3dx8 dxguid PRIVATE wwlib wwmath wwdebug wwsaveload)
+# ponytail: VC6 for-scope leaks at ~40 sites across ww3d2; scoped flag beats mass
+# edits in render code. Burn the sites down later, then drop the flag.
+target_compile_options(ww3d2 PRIVATE /Zc:forScope-)
+
+# Phase 1 checkpoint: vendored DX8 SDK + OS d3d8.dll create a real device.
+add_executable(dx8_smoke ${WW}/WW3D2/test_dx8_smoke.cpp)
+target_include_directories(dx8_smoke PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/Libraries/DirectX/Include)
+target_link_directories(dx8_smoke PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/Libraries/DirectX/Lib)
+target_link_libraries(dx8_smoke PRIVATE d3d8 user32)
