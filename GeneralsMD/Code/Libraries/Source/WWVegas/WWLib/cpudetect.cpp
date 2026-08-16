@@ -1068,7 +1068,7 @@ void CPUDetectClass::Init_Processor_Log()
 	}
 
 	if (CPUDetectClass::Get_L1_Instruction_Trace_Cache_Size()) {
-		SYSLOG(("L1 Instruction Trace Cache: %d way set associative, %dk µOPs\r\n",
+		SYSLOG(("L1 Instruction Trace Cache: %d way set associative, %dk ï¿½OPs\r\n",
 			CPUDetectClass::Get_L1_Instruction_Cache_Set_Associative(),
 			CPUDetectClass::Get_L1_Instruction_Cache_Size()/1024));
 	}
@@ -1265,12 +1265,17 @@ void Get_OS_Info(
 	unsigned build_minor=(OSVersionBuildNumber&0xff0000)>>16;
 	unsigned build_sub=(OSVersionBuildNumber&0xffff);
 
+	// Seed the defaults up front.  Several paths below (notably NT with a major
+	// version above 5, i.e. every Windows since Vista) fall out of the switch
+	// without assigning Code, and os_info comes in uninitialised - the callers
+	// print it with %s, so leaving it unset dereferences a junk stack pointer.
+	memset(&os_info,0,sizeof(os_info));
+	os_info.Code="UNKNOWN";
+	os_info.SubCode="UNKNOWN";
+	os_info.VersionString="UNKNOWN";
+
 	switch (OSVersionPlatformId) {
 	default:
-		memset(&os_info,0,sizeof(os_info));
-		os_info.Code="UNKNOWN";
-		os_info.SubCode="UNKNOWN";
-		os_info.VersionString="UNKNOWN";
 		break;
 	case VER_PLATFORM_WIN32_WINDOWS:
 		{
