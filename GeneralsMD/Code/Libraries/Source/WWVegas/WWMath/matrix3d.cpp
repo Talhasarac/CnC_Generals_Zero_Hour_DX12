@@ -65,7 +65,6 @@
 #include "matrix3.h"
 #include "matrix4.h"
 #include "quat.h"
-#include "D3dx8math.h"
 
 // some static matrices which are sometimes useful
 const Matrix3D Matrix3D::Identity
@@ -513,29 +512,17 @@ void Matrix3D::Obj_Look_At(const Vector3 &p,const Vector3 &t,float roll)
  *=============================================================================================*/
 void Matrix3D::Get_Inverse(Matrix3D & inv) const
 {
-	// TODO: Implement the general purpose inverse function here (once we need it :-)
-	//Get_Orthogonal_Inverse(inv);
+	// Matrix3D is affine: [A | t].  Its inverse is [A^-1 | -A^-1 * t], so the 3x3
+	// Gauss-Jordan inverse we already have is all this needs (was D3DXMatrixInverse).
+	Matrix3x3 a_inv = Matrix3x3(*this).Inverse();
+	Vector3 inv_t = -(a_inv * Get_Translation());
 
-	Matrix4x4	mat4(*this);
-	Matrix4x4	mat4Inv;
-
-	float det;
-	D3DXMatrixInverse((D3DXMATRIX *)&mat4Inv, &det, (D3DXMATRIX*)&mat4);
-
-	inv.Row[0][0]=mat4Inv[0][0];
-	inv.Row[0][1]=mat4Inv[0][1];
-	inv.Row[0][2]=mat4Inv[0][2];
-	inv.Row[0][3]=mat4Inv[0][3];
-
-	inv.Row[1][0]=mat4Inv[1][0];
-	inv.Row[1][1]=mat4Inv[1][1];
-	inv.Row[1][2]=mat4Inv[1][2];
-	inv.Row[1][3]=mat4Inv[1][3];
-
-	inv.Row[2][0]=mat4Inv[2][0];
-	inv.Row[2][1]=mat4Inv[2][1];
-	inv.Row[2][2]=mat4Inv[2][2];
-	inv.Row[2][3]=mat4Inv[2][3];
+	for (int r = 0; r < 3; r++) {
+		inv.Row[r][0] = a_inv[r][0];
+		inv.Row[r][1] = a_inv[r][1];
+		inv.Row[r][2] = a_inv[r][2];
+		inv.Row[r][3] = inv_t[r];
+	}
 }
 
 /*********************************************************************************************** 
