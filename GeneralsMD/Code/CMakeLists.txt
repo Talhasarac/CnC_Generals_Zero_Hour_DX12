@@ -96,7 +96,8 @@ add_library(wwlib STATIC
   ${WW}/WWLib/cpudetect.cpp  ${WW}/WWLib/crc.cpp        ${WW}/WWLib/cstraw.cpp
   ${WW}/WWLib/data.cpp       ${WW}/WWLib/ddraw.cpp      ${WW}/WWLib/dsurface.cpp
   ${WW}/WWLib/Except.cpp     ${WW}/WWLib/FastAllocator.cpp
-  ${WW}/WWLib/ffactory.cpp   ${WW}/WWLib/gcd_lcm.cpp    ${WW}/WWLib/hash.cpp
+  ${WW}/WWLib/ffactory.cpp   ${WW}/WWLib/fixed.cpp      ${WW}/WWLib/md5.cpp
+  ${WW}/WWLib/gcd_lcm.cpp    ${WW}/WWLib/hash.cpp
   ${WW}/WWLib/hsv.cpp        ${WW}/WWLib/ini.cpp        ${WW}/WWLib/int.cpp
   ${WW}/WWLib/jshell.cpp     ${WW}/WWLib/keyboard.cpp   ${WW}/WWLib/LaunchWeb.cpp
   ${WW}/WWLib/lcw.cpp        ${WW}/WWLib/load.cpp       ${WW}/WWLib/mixfile.cpp
@@ -117,7 +118,9 @@ add_library(wwlib STATIC
   ${WW}/WWLib/wwfile.cpp     ${WW}/WWLib/wwfont.cpp     ${WW}/WWLib/wwstring.cpp
   ${WW}/WWLib/xpipe.cpp      ${WW}/WWLib/xstraw.cpp     ${WW}/WWLib/xsurface.cpp)
 target_include_directories(wwlib PUBLIC ${WW}/WWLib PRIVATE ${WW}/WWMath ${WW}/Wwutil)
-target_link_libraries(wwlib PRIVATE wwdebug PUBLIC winmm)  # timeGetTime/timeBeginPeriod
+# winmm: timeGetTime/timeBeginPeriod.  version: verchk.cpp's GetFileVersionInfo,
+# which Wwutil drags in for Get_File_Id_String.
+target_link_libraries(wwlib PRIVATE wwdebug PUBLIC winmm version)
 
 # ---- wwsaveload -----------------------------------------------------------
 add_library(wwsaveload STATIC
@@ -180,7 +183,14 @@ target_include_directories(ww3d2
           ${WW}/wwshade ${WW}/WWAudio ${WW}/Miles6/include
           ${CMAKE_CURRENT_SOURCE_DIR}/Libraries/DirectX/Include)
 target_link_directories(ww3d2 PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/Libraries/DirectX/Lib)
-target_link_libraries(ww3d2 PUBLIC d3d8 d3dx8 dxguid PRIVATE wwlib wwmath wwdebug wwsaveload)
+# vfw32: FramGrab.cpp writes AVIs.  legacy_stdio_definitions: d3dx8.lib calls
+# _vsnprintf, which the modern CRT only provides as an inline.
+target_link_libraries(ww3d2
+  PUBLIC d3d8 d3dx8 dxguid vfw32 legacy_stdio_definitions
+  PRIVATE wwlib wwmath wwdebug wwsaveload)
+# The 2001 d3dx8.lib predates SAFESEH and was built against the long-gone
+# libci.lib CRT, so anything linking it has to opt out of both.
+target_link_options(ww3d2 INTERFACE /SAFESEH:NO /NODEFAULTLIB:libci.lib)
 # ponytail: VC6 for-scope leaks at ~40 sites across ww3d2; scoped flag beats mass
 # edits in render code. Burn the sites down later, then drop the flag.
 target_compile_options(ww3d2 PRIVATE /Zc:forScope-)
@@ -211,6 +221,9 @@ add_library(debug STATIC
   ${LIBSRC}/debug/debug_stack.cpp)
 target_include_directories(debug PUBLIC ${LIBSRC}/debug)
 target_link_libraries(debug PUBLIC dbghelp comctl32 ws2_32)
+# "debug" is also a target_link_libraries config keyword, so it can never be
+# passed as a plain library name.  Link this alias instead.
+add_library(debuglib ALIAS debug)
 
 # ---- wwdownload -----------------------------------------------------------
 # FTP patch downloader.  Its wlib/resource.h includes are all commented out in
@@ -266,3 +279,57 @@ set(GS_SECURESECONNECT  OFF CACHE BOOL "" FORCE)
 set(GS_BUILD_TESTS      OFF CACHE BOOL "" FORCE)
 set(GS_INCLUDE_VOICE    OFF CACHE BOOL "" FORCE)
 add_subdirectory(${LIBSRC}/GameSpy ${CMAKE_CURRENT_BINARY_DIR}/gamespy)
+
+# ===========================================================================
+# Tests.  Run with:  ctest --test-dir build -C Release --output-on-failure
+# ===========================================================================
+enable_testing()
+
+set(TESTS ${CMAKE_CURRENT_SOURCE_DIR}/Tests)
+
+# Shared runner for the micro-harness in Tests/test_harness.h; every test
+# binary links it instead of writing its own main().
+add_library(test_harness STATIC ${TESTS}/test_main.cpp)
+target_include_directories(test_harness PUBLIC ${TESTS})
+
+# add_lib_test(<name> <libs...>) -> Tests/<name>.cpp, built and registered.
+function(add_lib_test name)
+  add_executable(${name} ${TESTS}/${name}.cpp)
+  target_link_libraries(${name} PRIVATE test_harness ${ARGN})
+  add_test(NAME ${name} COMMAND ${name})
+endfunction()
+
+add_lib_test(test_wwmath wwmath wwlib wwsaveload wwdebug)
+target_include_directories(test_wwmath PRIVATE ${WW}/WWLib ${WW}/WWSaveLoad ${WW}/Wwutil)
+
+add_lib_test(test_wwlib wwlib wwmath wwsaveload wwdebug)
+target_include_directories(test_wwlib PRIVATE ${WW}/WWLib ${WW}/WWMath ${WW}/WWSaveLoad ${WW}/Wwutil)
+
+add_lib_test(test_wwsaveload wwsaveload wwlib wwmath wwdebug)
+target_include_directories(test_wwsaveload PRIVATE ${WW}/WWSaveLoad ${WW}/WWLib ${WW}/WWMath ${WW}/WWDebug ${WW}/Wwutil)
+
+add_lib_test(test_wwutil wwutil wwmath wwlib wwdebug)
+target_include_directories(test_wwutil PRIVATE ${WW}/Wwutil ${WW}/WWLib ${WW}/WWMath)
+
+add_lib_test(test_compression compression)
+
+# ww3d2 needs the same /Zc:forScope- as the library: its headers are included
+# here and dx8fvf.h et al were written for VC6 for-scope rules.
+add_lib_test(test_ww3d2 ww3d2 wwsaveload wwlib wwmath wwdebug)
+target_include_directories(test_ww3d2 PRIVATE
+  ${WW}/WW3D2 ${WW}/WWLib ${WW}/WWMath ${WW}/WWDebug ${WW}/WWSaveLoad ${WW}/Wwutil
+  ${CMAKE_CURRENT_SOURCE_DIR}/Libraries/DirectX/Include)
+target_compile_options(test_ww3d2 PRIVATE /Zc:forScope-)
+
+add_lib_test(test_wwdownload wwdownload)
+target_include_directories(test_wwdownload PRIVATE ${WW}/WWDownload)
+
+add_lib_test(test_debug debuglib)
+
+add_lib_test(test_support benchmark eabrowserdispatch)
+
+# The three hand-written self-checks predate the harness; run them from ctest
+# too so one command covers everything.
+add_test(NAME wwmath_selfcheck COMMAND wwmath_selfcheck)
+add_test(NAME compression_selfcheck COMMAND compression_selfcheck)
+add_test(NAME dx8_smoke COMMAND dx8_smoke)
