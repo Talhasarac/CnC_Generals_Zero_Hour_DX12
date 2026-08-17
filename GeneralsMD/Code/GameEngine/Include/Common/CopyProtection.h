@@ -33,7 +33,12 @@
 #define COPYPROTECTION_H
 
 // Comment out the following line to disable copy protection checks
-#define DO_COPY_PROTECTION
+// Off for this port: the checks talk to the EA/SafeDisc launcher over a window
+// message, and without it WinMain creates the app window and then bails
+// immediately ("Launcher is not running - about to bail"), which looks exactly
+// like a splash screen that flashes and disappears.  The launcher is not in the
+// source release.
+//#define DO_COPY_PROTECTION
 
 #ifdef DO_COPY_PROTECTION
 
