@@ -243,7 +243,10 @@ StringClass::Format_Args (const TCHAR *format, const va_list & arg_list )
 	//
 	// Make a guess at the maximum length of the resulting string
 	//
-	TCHAR temp_buffer[512] = { 0 };
+	//	_vsnprintf writes no terminator when the result fills the buffer
+	//	exactly, so the array is one TCHAR longer than the count handed to it
+	//	and the extra slot is left as the zero from the initialiser.
+	TCHAR temp_buffer[512 + 1] = { 0 };
 	int retval = 0;
 
 	//
@@ -278,7 +281,10 @@ StringClass::Format (const TCHAR *format, ...)
 	//
 	// Make a guess at the maximum length of the resulting string
 	//
-	TCHAR temp_buffer[512] = { 0 };
+	//	_vsnprintf writes no terminator when the result fills the buffer
+	//	exactly, so the array is one TCHAR longer than the count handed to it
+	//	and the extra slot is left as the zero from the initialiser.
+	TCHAR temp_buffer[512 + 1] = { 0 };
 	int retval = 0;
 
 	//

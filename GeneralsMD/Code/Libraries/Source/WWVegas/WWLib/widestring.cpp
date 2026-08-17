@@ -253,7 +253,10 @@ WideStringClass::Format_Args (const WCHAR *format, const va_list & arg_list )
 	//
 	// Make a guess at the maximum length of the resulting string
 	//
-	WCHAR temp_buffer[512] = { 0 };
+	//	_vsnwprintf writes no terminator when the result fills the buffer
+	//	exactly, so the array is one WCHAR longer than the count handed to it
+	//	and the extra slot is left as the zero from the initialiser.
+	WCHAR temp_buffer[512 + 1] = { 0 };
 
 	//
 	//	Format the string
@@ -287,7 +290,10 @@ WideStringClass::Format (const WCHAR *format, ...)
 	//
 	// Make a guess at the maximum length of the resulting string
 	//
-	WCHAR temp_buffer[512] = { 0 };
+	//	_vsnwprintf writes no terminator when the result fills the buffer
+	//	exactly, so the array is one WCHAR longer than the count handed to it
+	//	and the extra slot is left as the zero from the initialiser.
+	WCHAR temp_buffer[512 + 1] = { 0 };
 
 	//
 	//	Format the string

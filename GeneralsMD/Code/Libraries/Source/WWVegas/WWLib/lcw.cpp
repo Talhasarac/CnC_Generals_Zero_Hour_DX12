@@ -198,6 +198,25 @@ int LCW_Uncomp(void const * source, void * dest, unsigned long )
 int LCW_Comp(void const * source, void * dest, int datasize)
 {
 	int retval = 0;
+
+	/*
+	**	The assembler below opens by unconditionally emitting a "length of 1"
+	**	code plus the first source byte, and only then starts testing for the
+	**	end of the input.  With one byte of input the source pointer is already
+	**	spent at that point, so it walks off the end and emits a second, bogus
+	**	byte.  Handle the two degenerate sizes here rather than restructuring
+	**	the asm.
+	*/
+	if (datasize <= 1) {
+		unsigned char * dest_ptr = (unsigned char *)dest;
+		if (datasize == 1) {
+			*dest_ptr++ = 0x81;								// medium copy, one byte follows
+			*dest_ptr++ = *(unsigned char const *)source;
+		}
+		*dest_ptr++ = 0x80;									// end of data
+		return ((int)(dest_ptr - (unsigned char *)dest));
+	}
+
 #ifdef _WINDOWS
 	long inlen = 0;
 	long a1stdest = 0;
