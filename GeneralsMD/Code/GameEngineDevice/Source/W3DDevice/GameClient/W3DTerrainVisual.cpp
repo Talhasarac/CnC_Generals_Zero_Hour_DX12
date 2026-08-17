@@ -103,7 +103,8 @@ class TestSeismicFilter : public SeismicSimulationFilterBase
 
       for ( Real *t = workspace; t < workspaceEnd; ++t ) *t = 0.0f;// clear the workspace
 
-      for (Int x = 0; x < radius; ++x)
+      Int x;	// VC6 leaked it out to the copy-back loop below
+      for (x = 0; x < radius; ++x)
       {
         for (Int y = 0; y < radius; ++y)
         {

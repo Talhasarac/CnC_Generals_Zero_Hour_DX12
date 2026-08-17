@@ -159,6 +159,22 @@ TEST(boot_memory_manager)
 	CHECK( wcscmp( u.str(), L"Command & Conquer: Generals" ) == 0 );
 }
 
+/* winnt.h defines BitTest as the _bittest intrinsic, which takes a LONG*, so if
+   windows.h ever gets to redefine the game's macro then every bit-flag test in
+   the engine either stops compiling or silently changes meaning.  BaseType.h
+   pulls windef.h in first and then takes the name back; this fails to compile
+   if that ever regresses, and checks the semantics while it is here. */
+TEST(bittest_macro_is_the_games_not_the_intrinsics)
+{
+	UnsignedInt flags = 0x0A;		// bits 1 and 3
+
+	CHECK( BitTest( flags, 0x02 ) );
+	CHECK( BitTest( flags, 0x08 ) );
+	CHECK( BitTest( flags, 0x04 ) == 0 );
+	/* the intrinsic takes a bit *index*, the macro takes a mask - 0x0A & 0x0A */
+	CHECK( BitTest( flags, 0x0A ) );
+}
+
 TEST(name_key_generator_round_trips)
 {
 	CHECK( bootOnce() );

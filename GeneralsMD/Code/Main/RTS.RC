@@ -7,7 +7,10 @@
 //
 // Generated from the TEXTINCLUDE 2 resource.
 //
-#include "afxres.h"
+// afxres.h is MFC's, and MFC is an optional VS component this port does not
+// need - winres.h is the Windows SDK's equivalent for plain resource scripts,
+// and the only thing in here is the application icon.
+#include <winres.h>
 
 /////////////////////////////////////////////////////////////////////////////
 #undef APSTUDIO_READONLY_SYMBOLS

@@ -701,7 +701,12 @@ Int W3DShadowGeometry::initFromHLOD(RenderObjClass *robj)
 		}
 
 		
-#if (1) //(cnc3)(gth) Support for ShaderMeshes!
+// ponytail: off, because wwshade is not built (no .dsp ever linked wwshade.lib
+// either, and its bump shaders need the missing shdpp/NVASM tools).  ShdMeshClass
+// is the only thing that returns CLASSID_SHDMESH, so with wwshade absent this test
+// can never be true - keeping it on only costs two unresolved externals at link.
+// Turn it back to 1 the day wwshade builds.
+#if (0) //(cnc3)(gth) Support for ShaderMeshes!
 // I'm coding this as a completely independent block rather than re-factoring the code above
 // because it will probably save us pain in future merges.
 		if (hlod->Peek_Lod_Model(top,i) && hlod->Peek_Lod_Model(top,i)->Class_ID() == RenderObjClass::CLASSID_SHDMESH)

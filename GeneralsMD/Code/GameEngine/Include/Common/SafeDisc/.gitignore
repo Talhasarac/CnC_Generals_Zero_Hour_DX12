@@ -2,3 +2,6 @@
 *
 # Except this file
 !.gitignore
+# ...and CdaPfn.h, which is our own stub: the SafeDisc SDK is binary-only and
+# absent, and a hand-written file cannot be re-fetched.
+!CdaPfn.h

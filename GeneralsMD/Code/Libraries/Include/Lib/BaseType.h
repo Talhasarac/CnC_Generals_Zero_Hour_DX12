@@ -169,6 +169,17 @@ inline Real deg2rad(Real rad) { return rad * (PI/180); }
 //-----------------------------------------------------------------------------
 // For twiddling bits
 //-----------------------------------------------------------------------------
+// winnt.h claims BitTest for the _bittest intrinsic.  Pull it in here (windef.h
+// is the smallest header that reaches it) so its include guard is already
+// closed, then take the name back: otherwise any header that gets to winnt.h
+// after this one silently rewrites every use below into an intrinsic that takes
+// a LONG* and the game's bit fields stop compiling.  Not <windows.h>: that also
+// drags in winsock.h, and the device code includes winsock2.h.
+#if defined(_M_IX86) && !defined(_X86_)
+#define _X86_		// windows.h does this before it reaches windef.h, and winnt.h
+#endif				// #errors with "No Target Architecture" without it
+#include <windef.h>
+#undef BitTest
 #define BitTest( x, i ) ( ( (x) & (i) ) != 0 )
 #define BitSet( x, i ) ( (x) |= (i) )
 #define BitClear( x, i ) ( (x ) &= ~(i) )

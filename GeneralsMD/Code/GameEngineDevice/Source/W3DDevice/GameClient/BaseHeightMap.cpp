@@ -1695,6 +1695,7 @@ void BaseHeightMapRenderObjClass::updateShorelineTiles(Int minX, Int minY, Int m
 			shoreLineSortInfosXMajor=TRUE;
 	}
 
+	Int j;	// VC6 leaked the 'j' of an earlier for() out to here
 	if (shoreLineSortInfosXMajor)
 		for (Int i=minX; i<maxX; i++)
 			for (j=minY; j<maxY; j++)
@@ -2697,9 +2698,12 @@ void BaseHeightMapRenderObjClass::renderShoreLinesSorted(CameraClass *pCamera)
 
 			try {
 			//Loop over visible terrain and extract all the tiles that need shoreline blend
+			// VC6 let these outlive their for(), and the flushVertexBuffer labels
+			// below read them to record how far the batch got.
+			Int x, y;
 			if (m_shoreLineSortInfosXMajor)	//map is wider than taller.
-			{	
-				for (Int x=drawStartX; x<drawEdgeX; x++)
+			{
+				for (x=drawStartX; x<drawEdgeX; x++)
 				{	//figure out how many tiles are available in this column
 					shoreLineTileSortInfo *sortInfo=&m_shoreLineSortInfos[x];
 
@@ -2819,7 +2823,7 @@ flushVertexBuffer0:
 			}
 			else
 			{
-				for (Int y=drawStartY; y<drawEdgeY; y++)
+				for (y=drawStartY; y<drawEdgeY; y++)
 				{	//figure out how many tiles are available in this row
 					shoreLineTileSortInfo *sortInfo=&m_shoreLineSortInfos[y];
 

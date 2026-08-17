@@ -1,2 +1,5 @@
 # CMake build tree (see CLAUDE.md for the configure/build commands)
 build/
+
+# Build/test logs from the CMake port loop
+*.log

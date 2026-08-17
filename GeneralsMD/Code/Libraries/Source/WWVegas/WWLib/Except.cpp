@@ -168,6 +168,12 @@ static char const *ImagehelpFunctionNames[] =
  * HISTORY:                                                                                    *
  *   8/22/00 11:42AM ST : Created                                                              *
  *=============================================================================================*/
+// The debug library replaces _purecall too (debug_purecall.cpp, which reports the
+// call through DCRASH_RELEASE instead of an int 3), and the exe links both libs -
+// two definitions of a CRT symbol is a hard link error.  The debug one wins: it
+// says something in a Release build, this one only breaks into a debugger that is
+// not attached.
+#if 0
 int __cdecl _purecall(void)
 {
 	int return_code = 0;
@@ -182,6 +188,7 @@ int __cdecl _purecall(void)
 
 	return(return_code);
 }
+#endif
 
 
 
