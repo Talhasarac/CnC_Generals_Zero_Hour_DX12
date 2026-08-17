@@ -203,7 +203,9 @@ static void playerTooltip(GameWindow *window,
 													UnsignedInt mouse)
 {
 	Int idx = -1;
-	for (Int i=0; i<MAX_SLOTS; ++i)
+	// i is used after the loop; VC6 for-scope let it escape.
+	Int i;
+	for (i =0; i<MAX_SLOTS; ++i)
 	{
 		if (window && window == GadgetComboBoxGetEditBox(comboBoxPlayer[i]))
 		{
@@ -214,7 +216,9 @@ static void playerTooltip(GameWindow *window,
 	if (idx == -1)
 		return;
 
-	LANGameSlot *slot = TheLAN->GetMyGame()->getLANSlot(i);
+	// was i, the loop counter above: it only escaped its scope under VC6, and the
+	// loop breaks the instant it sets idx = i, so the two are the same value here.
+	LANGameSlot *slot = TheLAN->GetMyGame()->getLANSlot(idx);
 	if (!slot)
 		return;
 

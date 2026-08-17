@@ -131,7 +131,9 @@ Bool Transport::init( UnsignedInt ip, UnsignedShort port )
 	}
 
 	// ------- Clear buffers --------
-	for (int i=0; i<MAX_MESSAGES; ++i)
+	// i is used after the loop; VC6 for-scope let it escape.
+	int i;
+	for (i =0; i<MAX_MESSAGES; ++i)
 	{
 		m_outBuffer[i].length = 0;
 		m_inBuffer[i].length = 0;

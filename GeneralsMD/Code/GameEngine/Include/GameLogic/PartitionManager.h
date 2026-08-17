@@ -517,7 +517,11 @@ public:
 
 	inline Int wasSeenByAnyPlayers() const	///<check if a player in the game has seen the object but is now looking at fogged version.
 	{	
-		for (Int i=0; i<MAX_PLAYER_COUNT; i++)
+		// i is declared outside the loop because the trailing return reads it:
+		// under VC6 for-scope that was MAX_PLAYER_COUNT, and callers treat any
+		// value >= MAX_PLAYER_COUNT as "nobody".
+		Int i;
+		for (i=0; i<MAX_PLAYER_COUNT; i++)
 			if (m_everSeenByPlayer[i] && m_shroudedness[i] == OBJECTSHROUD_FOGGED)
 				return i;
 		return i;

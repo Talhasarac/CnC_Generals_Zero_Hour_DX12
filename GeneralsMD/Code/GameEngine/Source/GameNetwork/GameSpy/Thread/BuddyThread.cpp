@@ -270,7 +270,9 @@ void BuddyThreadClass::Thread_Function()
 	_set_se_translator( DumpExceptionInfo ); // Hook that allows stack trace.
 	GPConnection gpCon;
 	GPConnection *con = &gpCon;
-	gpInitialize( con, 0 );
+	// the vendored SDK is newer than the 2003 one and wants namespace/partner ids
+	// too; 0/0 is "no namespace, default partner", i.e. what the old call meant.
+	gpInitialize( con, 0, 0, 0 );
 	m_isConnected = m_isConnecting = false;
 
 	gpSetCallback( con, GP_ERROR,								callbackWrapper,	(void *)CALLBACK_ERROR );
@@ -308,7 +310,9 @@ void BuddyThreadClass::Thread_Function()
 				break;
 			case BuddyRequest::BUDDYREQUEST_DELETEACCT:
 				m_isdeleting =  true;
-				gpDeleteProfile( con );
+				// newer SDK takes a completion callback; nothing here watched the
+				// result, so pass none.
+				gpDeleteProfile( con, NULL, NULL );
 				break;
 			case BuddyRequest::BUDDYREQUEST_LOGOUT:
 				m_isConnecting = m_isConnected = false;
@@ -328,8 +332,11 @@ void BuddyThreadClass::Thread_Function()
 					m_email = incomingRequest.arg.login.email;
 					m_pass = incomingRequest.arg.login.password;
 					m_isNewAccount = TRUE;
-					m_isConnected = (gpConnectNewUser( con, incomingRequest.arg.login.nick, incomingRequest.arg.login.email,
-						incomingRequest.arg.login.password, (incomingRequest.arg.login.hasFirewall)?GP_FIREWALL:GP_NO_FIREWALL,
+					// newer SDK grew uniquenick and cdkey params; the game never had
+					// either, so reuse the nick and leave the cdkey empty.
+					m_isConnected = (gpConnectNewUser( con, incomingRequest.arg.login.nick, incomingRequest.arg.login.nick,
+						incomingRequest.arg.login.email, incomingRequest.arg.login.password, "",
+						(incomingRequest.arg.login.hasFirewall)?GP_FIREWALL:GP_NO_FIREWALL,
 						GP_BLOCKING, callbackWrapper, (void *)CALLBACK_CONNECT ) == GP_NO_ERROR);
 					if (m_isNewAccount) // if we didn't re-login
 					{

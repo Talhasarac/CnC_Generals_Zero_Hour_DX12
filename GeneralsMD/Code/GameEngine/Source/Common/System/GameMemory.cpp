@@ -1635,7 +1635,9 @@ void* MemoryPool::allocateBlockDoNotZeroImplementation(DECLARE_LITERALSTRING_ARG
 	{
 		// hmm... the current 'free' blob has nothing available. look and see if there
 		// are any other existing blobs with freespace.
-		for (MemoryPoolBlob *blob = m_firstBlob; blob != NULL; blob = blob->getNextInList()) 
+		// blob is read after the loop, so it outlives the for-scope.
+		MemoryPoolBlob *blob;
+		for (blob = m_firstBlob; blob != NULL; blob = blob->getNextInList())
 		{
 			if (blob->hasAnyFreeBlocks())
 			 	break;
@@ -3450,7 +3452,10 @@ void initMemoryManager()
 	linktest = new char[8];
 	delete [] linktest;
 
-	linktest = new char("",1);
+	// Was new char("",1): VC6 read the parentheses as an initializer with a comma
+	// operator, i.e. a third plain scalar new, which is what theLinkTester == 6
+	// counts.  Modern C++ reads it as a two-argument initializer and rejects it.
+	linktest = new char(1);
 	delete linktest;
 
 #ifdef MEMORYPOOL_OVERRIDE_MALLOC

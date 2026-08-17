@@ -225,6 +225,17 @@ target_link_libraries(debug PUBLIC dbghelp comctl32 ws2_32)
 # passed as a plain library name.  Link this alias instead.
 add_library(debuglib ALIAS debug)
 
+# ---- profile --------------------------------------------------------------
+# EA's in-repo sampling/function profiler.  GameEngine includes profile.h, whose
+# #pragma comment(lib, "profile.lib") makes this a hard link dependency even
+# though almost nothing calls into it.
+add_library(profile STATIC
+  ${LIBSRC}/profile/profile.cpp           ${LIBSRC}/profile/profile_cmd.cpp
+  ${LIBSRC}/profile/profile_funclevel.cpp ${LIBSRC}/profile/profile_highlevel.cpp
+  ${LIBSRC}/profile/profile_result.cpp)
+target_include_directories(profile PUBLIC ${LIBSRC}/profile)
+target_link_libraries(profile PUBLIC debuglib)
+
 # ---- wwdownload -----------------------------------------------------------
 # FTP patch downloader.  Its wlib/resource.h includes are all commented out in
 # the shipped source, so it needs nothing but winsock.
@@ -281,6 +292,57 @@ set(GS_INCLUDE_VOICE    OFF CACHE BOOL "" FORCE)
 add_subdirectory(${LIBSRC}/GameSpy ${CMAKE_CURRENT_BINARY_DIR}/gamespy)
 
 # ===========================================================================
+# Phase 3 - GameEngine.  ~580 files of game logic; no DX8, no device code.
+# ===========================================================================
+set(GE ${CMAKE_CURRENT_SOURCE_DIR}/GameEngine)
+
+# The source tree is a frozen 2003 snapshot, so a glob cannot go stale the way
+# it would in a live project - and 580 explicit paths would drown this file.
+file(GLOB_RECURSE GAMEENGINE_SOURCES ${GE}/Source/*.cpp)
+# On disk but absent from GameEngine.dsp, i.e. never in the shipping build:
+# dead experiments (SimplePlayer, urlLaunch, VideoStream), an older copy of
+# DrawableManager that GameClient/Drawable/ supersedes, and GameSpeech, whose
+# hash uses std::hash<const char*> on strings that outlive nothing.
+list(REMOVE_ITEM GAMEENGINE_SOURCES
+  ${GE}/Source/Common/Audio/GameSpeech.cpp
+  ${GE}/Source/Common/Audio/simpleplayer.cpp
+  ${GE}/Source/Common/Audio/urllaunch.cpp
+  ${GE}/Source/GameClient/DrawableManager.cpp
+  ${GE}/Source/GameClient/VideoStream.cpp)
+# GameNetwork/GameSpy.h and the two .cpp files that owned it were stripped from
+# the release, and these two are all that include it.  Multiplayer is out of
+# scope (PLAN.md), so they stay out until the exe link says otherwise.
+list(REMOVE_ITEM GAMEENGINE_SOURCES
+  ${GE}/Source/GameNetwork/GameSpyChat.cpp
+  ${GE}/Source/GameNetwork/GameSpyGP.cpp)
+# EA's own header says "#error this file is obsolete", and this .cpp is its only
+# includer - the live code went to GameNetwork/GameSpy/ instead.
+list(REMOVE_ITEM GAMEENGINE_SOURCES
+  ${GE}/Source/GameNetwork/GameSpyGameInfo.cpp)
+
+add_library(gameengine STATIC ${GAMEENGINE_SOURCES})
+target_include_directories(gameengine PUBLIC
+  ${GE}/Include ${GE}/Include/Precompiled
+  ${CMAKE_CURRENT_SOURCE_DIR}/Libraries/Include
+  ${WW} ${WW}/WWLib
+  # The game includes "GameSpy/Peer/Peer.h", the SDK's own headers include each
+  # other as "gscommon.h", so both levels have to be on the path.
+  ${LIBSRC}/GameSpy/include ${LIBSRC}/GameSpy/include/gamespy ${COMP}
+  ${CMAKE_CURRENT_SOURCE_DIR}/Libraries/DirectX/Include)
+# _RELEASE/_DEBUG pick the game's own build flavour; IG_DEBUG_STACKTRACE and
+# Z_PREFIX are what GameEngine.dsp sets.
+target_compile_definitions(gameengine PUBLIC
+  IG_DEBUG_STACKTRACE Z_PREFIX
+  $<$<CONFIG:Debug>:_DEBUG> $<$<NOT:$<CONFIG:Debug>>:_RELEASE>)
+# C++17 for the std::hash_map -> unordered_map alias and string_view hashing in
+# STLTypedefs.h.
+set_target_properties(gameengine PROPERTIES CXX_STANDARD 17)
+target_link_libraries(gameengine PUBLIC
+  ww3d2 wwlib wwmath wwsaveload wwdebug wwutil compression debuglib wwdownload
+  benchmark eabrowserdispatch profile gamespy
+  dinput8 wininet imagehlp imm32)
+
+# ===========================================================================
 # Tests.  Run with:  ctest --test-dir build -C Release --output-on-failure
 # ===========================================================================
 enable_testing()
@@ -327,6 +389,14 @@ target_include_directories(test_wwdownload PRIVATE ${WW}/WWDownload)
 add_lib_test(test_debug debuglib)
 
 add_lib_test(test_support benchmark eabrowserdispatch)
+
+# Phase 3 checkpoint: boots the memory manager, name keys and file system, then
+# runs a real INI file through the parser.
+add_lib_test(test_gameengine gameengine)
+# the well-known Dict keys and a handful of device/exe entry points live in
+# GameEngineDevice, which Phase 4 ports; stand-ins until then.
+target_sources(test_gameengine PRIVATE ${TESTS}/test_gameengine_stubs.cpp)
+set_target_properties(test_gameengine PROPERTIES CXX_STANDARD 17)
 
 # The three hand-written self-checks predate the harness; run them from ctest
 # too so one command covers everything.

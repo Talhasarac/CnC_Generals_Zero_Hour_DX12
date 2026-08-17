@@ -316,8 +316,11 @@ static void queuePatch(Bool mandatory, AsciiString downloadURL)
 ///////////////////////////////////////////////////////////////////////////////////////
 
 static GHTTPBool motdCallback( GHTTPRequest request, GHTTPResult result,
-															char * buffer, int bufferLen, void * param )
+															char * buffer, GHTTPByteCount bufferLen64, void * param )
 {
+	// the SDK widened its byte count to 64 bits; the body wants the old Int.
+	Int bufferLen = (Int)bufferLen64;
+	(void)bufferLen;	// only read by DEBUG_LOG in some of these, which Release compiles out
 	Int run = (Int)param;
 	if (run != timeThroughOnline)
 	{
@@ -356,8 +359,11 @@ static GHTTPBool motdCallback( GHTTPRequest request, GHTTPResult result,
 ///////////////////////////////////////////////////////////////////////////////////////
 
 static GHTTPBool configCallback( GHTTPRequest request, GHTTPResult result,
-																char * buffer, int bufferLen, void * param )
+																char * buffer, GHTTPByteCount bufferLen64, void * param )
 {
+	// the SDK widened its byte count to 64 bits; the body wants the old Int.
+	Int bufferLen = (Int)bufferLen64;
+	(void)bufferLen;	// only read by DEBUG_LOG in some of these, which Release compiles out
 	Int run = (Int)param;
 	if (run != timeThroughOnline)
 	{
@@ -421,8 +427,11 @@ static GHTTPBool configCallback( GHTTPRequest request, GHTTPResult result,
 ///////////////////////////////////////////////////////////////////////////////////////
 
 static GHTTPBool configHeadCallback( GHTTPRequest request, GHTTPResult result,
-																		char * buffer, int bufferLen, void * param )
+																		char * buffer, GHTTPByteCount bufferLen64, void * param )
 {
+	// the SDK widened its byte count to 64 bits; the body wants the old Int.
+	Int bufferLen = (Int)bufferLen64;
+	(void)bufferLen;	// only read by DEBUG_LOG in some of these, which Release compiles out
 	Int run = (Int)param;
 	if (run != timeThroughOnline)
 	{
@@ -508,8 +517,11 @@ static GHTTPBool configHeadCallback( GHTTPRequest request, GHTTPResult result,
 
 ///////////////////////////////////////////////////////////////////////////////////////
 
-static GHTTPBool gamePatchCheckCallback( GHTTPRequest request, GHTTPResult result, char * buffer, int bufferLen, void * param )
+static GHTTPBool gamePatchCheckCallback( GHTTPRequest request, GHTTPResult result, char * buffer, GHTTPByteCount bufferLen64, void * param )
 {
+	// the SDK widened its byte count to 64 bits; the body wants the old Int.
+	Int bufferLen = (Int)bufferLen64;
+	(void)bufferLen;	// only read by DEBUG_LOG in some of these, which Release compiles out
 	Int run = (Int)param;
 	if (run != timeThroughOnline)
 	{
@@ -598,8 +610,11 @@ void CancelPatchCheckCallback( void )
 
 ///////////////////////////////////////////////////////////////////////////////////////
 
-static GHTTPBool overallStatsCallback( GHTTPRequest request, GHTTPResult result, char * buffer, int bufferLen, void * param )
+static GHTTPBool overallStatsCallback( GHTTPRequest request, GHTTPResult result, char * buffer, GHTTPByteCount bufferLen64, void * param )
 {
+	// the SDK widened its byte count to 64 bits; the body wants the old Int.
+	Int bufferLen = (Int)bufferLen64;
+	(void)bufferLen;	// only read by DEBUG_LOG in some of these, which Release compiles out
 	DEBUG_LOG(("overallStatsCallback() - Result=%d, len=%d\n", result, bufferLen));
 	if (result != GHTTPSuccess)
 	{
@@ -612,8 +627,11 @@ static GHTTPBool overallStatsCallback( GHTTPRequest request, GHTTPResult result,
 
 ///////////////////////////////////////////////////////////////////////////////////////
 
-static GHTTPBool numPlayersOnlineCallback( GHTTPRequest request, GHTTPResult result, char * buffer, int bufferLen, void * param )
+static GHTTPBool numPlayersOnlineCallback( GHTTPRequest request, GHTTPResult result, char * buffer, GHTTPByteCount bufferLen64, void * param )
 {
+	// the SDK widened its byte count to 64 bits; the body wants the old Int.
+	Int bufferLen = (Int)bufferLen64;
+	(void)bufferLen;	// only read by DEBUG_LOG in some of these, which Release compiles out
 	DEBUG_LOG(("numPlayersOnlineCallback() - Result=%d, buffer=[%s], len=%d\n", result, buffer, bufferLen));
 	if (result != GHTTPSuccess)
 	{

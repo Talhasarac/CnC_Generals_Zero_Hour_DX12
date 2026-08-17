@@ -1322,7 +1322,10 @@ void ThingTemplate::initForLTA(const AsciiString& name)
 
 	char buffer[1024];
 	strncpy(buffer, name.str(), sizeof(buffer));
-	for (int i=0; buffer[i]; i++) {
+	// i indexes buffer after the loop: it is the character past the first '/', or
+	// the terminator when the name has none.
+	int i;
+	for (i=0; buffer[i]; i++) {
 		if (buffer[i] == '/') {
 			i++;
 			break;

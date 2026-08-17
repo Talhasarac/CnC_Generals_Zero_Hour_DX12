@@ -576,6 +576,8 @@ static void updateLadderDetails( Int selID, GameWindow *staticTextLadderName, Ga
 
 	// maps
 	AsciiStringList validMaps = info->validMaps;
+	// it is used after the loop; VC6 for-scope let it escape.
+	AsciiStringList::iterator it;
 	for (it = validMaps.begin(); it != validMaps.end(); ++it)
 	{
 		const MapMetaData *md = TheMapCache->findMap(*it);

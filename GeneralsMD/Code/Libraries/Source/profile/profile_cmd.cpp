@@ -135,7 +135,9 @@ bool ProfileCmdInterface::Execute(class Debug& dbg, const char *cmd, CommandMode
     }
     else
     {
-      for (unsigned k=0;k<numResIf;k++)
+      // k is used after the loop; VC6 for-scope let it escape.
+      unsigned k;
+      for (k =0;k<numResIf;k++)
         if (!strcmp(argv[0],resIf[k].name))
           break;
       if (k==numResIf)
@@ -203,7 +205,9 @@ bool ProfileCmdInterface::Execute(class Debug& dbg, const char *cmd, CommandMode
     // must fixup lastPatternEntry now
     if (Profile::firstPatternEntry)
     {
-      for (Profile::PatternListEntry *cur=Profile::firstPatternEntry;cur->next;cur=cur->next);
+      // cur is used after the loop; VC6 for-scope let it escape.
+      Profile::PatternListEntry * cur;
+      for (cur =Profile::firstPatternEntry;cur->next;cur=cur->next);
       Profile::lastPatternEntry=cur;
     }
     else

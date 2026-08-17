@@ -111,7 +111,9 @@ ThingFactory::ThingFactory()
 	m_firstTemplate = NULL;
 	m_nextTemplateID = 1;	// not zero!
 
-	m_templateHashMap.resize( TEMPLATE_HASH_SIZE );
+	// SGI hash_map::resize(n) sized the bucket array; unordered_map spells that
+	// reserve(), which takes an element count and sizes buckets from it.
+	m_templateHashMap.reserve( TEMPLATE_HASH_SIZE );
 }  // end ThingFactory
 
 //-------------------------------------------------------------------------------------------------

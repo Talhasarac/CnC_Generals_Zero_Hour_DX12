@@ -107,7 +107,9 @@ RailroadBehavior::RailroadBehavior( Thing *thing, const ModuleData *moduleData )
 {
 	const RailroadBehaviorModuleData *modData = getRailroadBehaviorModuleData();
 
-	m_carriageTemplateNameIterator = 0;
+	// was = 0: STLport's const_iterator was a bare pointer.  Nothing reads this
+	// before hitchNewCarriagebyTemplate() reseats it, so default-construct.
+	m_carriageTemplateNameIterator = TemplateNameIterator();
 
 	m_nextStationTask = DO_NOTHING;
 	m_trailerID = INVALID_ID;

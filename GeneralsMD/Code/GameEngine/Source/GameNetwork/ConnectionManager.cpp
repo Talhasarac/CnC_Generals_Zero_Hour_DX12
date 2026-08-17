@@ -75,7 +75,9 @@ ConnectionManager::~ConnectionManager(void)
 		m_transport = NULL;
 	}
 
-	for (Int i = 0; i < MAX_SLOTS; ++i) {
+	// i is used after the loop; VC6 for-scope let it escape.
+	Int i;
+	for (i = 0; i < MAX_SLOTS; ++i) {
 		if (m_frameData[i] != NULL) {
 			m_frameData[i]->deleteInstance();
 			m_frameData[i] = NULL;
@@ -151,7 +153,9 @@ void ConnectionManager::init()
 //	}
 //	m_transport->reset();
 
-	for (UnsignedInt i = 0; i < NUM_CONNECTIONS; ++i) {
+	// i is used after the loop; VC6 for-scope let it escape.
+	UnsignedInt i;
+	for (i = 0; i < NUM_CONNECTIONS; ++i) {
 		m_connections[i] = NULL;
 	}
 
@@ -229,7 +233,9 @@ void ConnectionManager::reset()
 		m_transport = NULL;
 	}
 
-	for (Int i = 0; i < NUM_CONNECTIONS; ++i) {
+	// i is used after the loop; VC6 for-scope let it escape.
+	Int i;
+	for (i = 0; i < NUM_CONNECTIONS; ++i) {
 		if (m_connections[i] != NULL) {
 			m_connections[i]->deleteInstance();
 			m_connections[i] = NULL;
@@ -1553,7 +1559,9 @@ Bool ConnectionManager::allCommandsReady(UnsignedInt frame, Bool justTesting /* 
 	Bool retval = TRUE;
 	FrameDataReturnType frameRetVal;
 //	retval = FALSE;  // ****for testing purposes only!!!!!!****
-	for (Int i = 0; (i < MAX_SLOTS) && retval; ++i) {
+	// i is used after the loop; VC6 for-scope let it escape.
+	Int i;
+	for (i = 0; (i < MAX_SLOTS) && retval; ++i) {
 		if ((m_frameData[i] != NULL) && (m_frameData[i]->getIsQuitting() == FALSE)) {
 /*
 			if (!(m_frameData[i]->allCommandsReady(frame, (frame != commandsReadyDebugSpewage) && (justTesting == FALSE)))) {

@@ -67,7 +67,9 @@ public:
 		DRAW_IMAGE_ADDITIVE	//additive blend the image into frame buffer
 	};
 
-	typedef void (DebugDisplayCallback)( DebugDisplayInterface *debugDisplay, void *userData, FILE *fp = NULL );
+	// No default argument here: a function *type* cannot carry one, and nothing
+	// ever calls through this pointer with fewer than three arguments.
+	typedef void (DebugDisplayCallback)( DebugDisplayInterface *debugDisplay, void *userData, FILE *fp );
 
 	Display();
 	virtual ~Display();

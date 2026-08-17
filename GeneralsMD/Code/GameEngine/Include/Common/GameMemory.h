@@ -878,8 +878,12 @@ extern void userMemoryAdjustPoolSize(const char *poolName, Int& initialAllocatio
 	// additional overloads for 'placement new'
 	//inline void* __cdecl operator new							(size_t s, void *p) { return p; }
 	//inline void __cdecl operator delete						(void *, void *p)		{ }
+	#if _MSC_VER < 1300
+	// vcruntime declares the placement array forms itself now, exactly as
+	// WWLib/always.h already had to work around.
 	inline void* __cdecl operator new[]						(size_t s, void *p) { return p; }
 	inline void __cdecl operator delete[]					(void *, void *p)		{ }
+	#endif
 
 #endif
 

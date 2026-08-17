@@ -159,7 +159,8 @@ UnicodeString QuotedPrintableToUnicodeString(AsciiString original)
 
 	*c = 0;
 
-	UnicodeString out(dest);
+	// VC6's wchar_t was a typedef for unsigned short; it is a distinct type now.
+	UnicodeString out((const WideChar *)dest);
 	return out;
 }
 

@@ -523,7 +523,8 @@ static enum CallbackType
 	CALLBACK_MAX
 };
 
-void connectCallbackWrapper( PEER peer, PEERBool success, void *param )
+// the newer SDK passes a failure reason as well; nothing here reports it.
+void connectCallbackWrapper( PEER peer, PEERBool success, Int failureReason, void *param )
 {
 #ifdef SERVER_DEBUGGING
 	DEBUG_LOG(("In connectCallbackWrapper()\n"));
@@ -535,7 +536,9 @@ void connectCallbackWrapper( PEER peer, PEERBool success, void *param )
 	}
 }
 
-void nickErrorCallbackWrapper( PEER peer, Int type, const char *nick, void *param )
+// the newer SDK hands the nick-error callback a list of suggested nicks too;
+// nothing here offers them to the user, so they are ignored.
+void nickErrorCallbackWrapper( PEER peer, Int type, const char *nick, Int numSuggestedNicks, const char **suggestedNicks, void *param )
 {
 	if (param != NULL)
 	{
@@ -662,7 +665,7 @@ static void playerFlagsChangedCallback(PEER peer, RoomType roomType, const char 
 static void listingGamesCallback(PEER peer, PEERBool success, const char * name, SBServer server, PEERBool staging, int msg, Int percentListed, void * param);
 static void roomUTMCallback(PEER peer, RoomType roomType, const char * nick, const char * command, const char * parameters, PEERBool authenticated, void * param);
 static void playerUTMCallback(PEER peer, const char * nick, const char * command, const char * parameters, PEERBool authenticated, void * param);
-static void gameStartedCallback(PEER peer, UnsignedInt IP, const char *message, void *param);
+static void gameStartedCallback(PEER peer, SBServer server, const char *message, void *param);
 static void globalKeyChangedCallback(PEER peer, const char *nick, const char *key, const char *val, void *param);
 static void roomKeyChangedCallback(PEER peer, RoomType roomType, const char *nick, const char *key, const char *val, void *param);
 
@@ -1831,7 +1834,9 @@ void PeerThreadClass::handleQMMatch(PEER peer, Int mapIndex, Int seed,
 		m_qmStatus = QM_MATCHED;
 		peerLeaveRoom(peer, GroupRoom, "");
 
-		for (Int i=0; i<MAX_SLOTS; ++i)
+		// i is used after the loop; VC6 for-scope let it escape.
+		Int i;
+		for (i =0; i<MAX_SLOTS; ++i)
 		{
 			if (playerName[i] && stricmp(playerName[i], m_loginName.c_str()))
 			{
@@ -2421,7 +2426,9 @@ void roomMessageCallback(PEER peer, RoomType roomType, const char * nick, const 
 	}
 }
 
-void gameStartedCallback( PEER peer, UnsignedInt IP, const char *message, void *param )
+// the newer SDK passes the host's server object where the 2003 one passed a raw
+// IP; this callback never looked at it.
+void gameStartedCallback( PEER peer, SBServer server, const char *message, void *param )
 {
 	PeerResponse resp;
 	resp.peerResponseType = PeerResponse::PEERRESPONSE_GAMESTART;

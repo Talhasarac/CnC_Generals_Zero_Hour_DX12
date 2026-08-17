@@ -71,7 +71,9 @@ void SpawnPointProductionExitUpdate::exitObjectViaDoor( Object *newObj, ExitDoor
 	Object *creationObject = getObject();
 	if (creationObject)
 	{
-		for( Int positionIndex = 0; positionIndex < m_spawnPointCount; positionIndex++ )
+		// positionIndex is used after the loop; VC6 for-scope let it escape.
+		Int positionIndex;
+		for( positionIndex = 0; positionIndex < m_spawnPointCount; positionIndex++ )
 		{
 			if( m_spawnPointOccupier[positionIndex] == INVALID_ID )
 				break;
@@ -149,7 +151,9 @@ void SpawnPointProductionExitUpdate::initializeBonePositions()
 		return;
 
 	Matrix3D boneTransforms[MAX_SPAWN_POINTS];
-	for( Int matrixIndex = 0; matrixIndex < MAX_SPAWN_POINTS; matrixIndex++ )
+	// matrixIndex is used after the loop; VC6 for-scope let it escape.
+	Int matrixIndex;
+	for( matrixIndex = 0; matrixIndex < MAX_SPAWN_POINTS; matrixIndex++ )
 		boneTransforms[matrixIndex].Make_Identity();
 
 	// Get all the bones of the right name

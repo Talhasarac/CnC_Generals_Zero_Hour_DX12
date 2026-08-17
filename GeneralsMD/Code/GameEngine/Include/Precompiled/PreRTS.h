@@ -41,20 +41,29 @@ class STLSpecialAlloc;
 // PLEASE DO NOT ABUSE WINDOWS OR IT WILL BE REMOVED ENTIRELY. :-)
 //--------------------------------------------------------------------------------- System Includes 
 #define WIN32_LEAN_AND_MEAN
+// winuser.h declares AnimateWindow() only for WINVER >= 0x0500, which VC6 never
+// reached, so GameClient could name a class AnimateWindow.  A modern SDK always
+// declares it, and the function name then hides the class at every use.  Rename
+// the API on the way in - the game never calls it - instead of renaming a class
+// that GameMemory.ini looks up by name.
+#define AnimateWindow AnimateWindow_Win32Unused
 #include <atlbase.h>
 #include <windows.h>
+#undef AnimateWindow
 
 #include <assert.h>
 #include <ctype.h>
 #include <direct.h>
 #include <EXCPT.H>
 #include <float.h>
-#include <fstream.h>
+// <fstream.h> (pre-standard iostream) was dropped from MSVC long ago.  Nothing
+// in GameEngine uses a stream, so it goes rather than becoming <fstream>.
 #include <imagehlp.h>
 #include <io.h>
 #include <limits.h>
 #include <lmcons.h>
-#include <mapicode.h>
+// <mapicode.h> came with the MAPI SDK, which no Windows SDK carries any more.
+// Nothing here references a MAPI symbol.
 #include <math.h>
 #include <memory.h>
 #include <mmsystem.h>

@@ -1165,7 +1165,9 @@ Bool RecorderClass::playbackFile(AsciiString filename)
  * Read a unicode string from the current file position. The string is assumed to be 0-terminated.
  */
 UnicodeString RecorderClass::readUnicodeString() {
-	UnsignedShort str[1024] = L"";
+	// Was UnsignedShort: VC6's wchar_t was a typedef for it, so L"" initialised it
+	// and UnicodeString took it.  wchar_t is its own type now.
+	WideChar str[1024] = L"";
 	Int index = 0;
 
 	Int c = fgetwc(m_file);
@@ -1174,7 +1176,9 @@ UnicodeString RecorderClass::readUnicodeString() {
 	}
 	str[index] = c;
 
-	while (index < 1024 && str[index] != 0) {
+	// Was index < 1024: the body pre-increments and then writes str[index], so the
+	// last iteration stored one element past the end of the buffer.
+	while (index < 1023 && str[index] != 0) {
 		++index;
 		Int c = fgetwc(m_file);
 		if (c == EOF) {
@@ -1202,7 +1206,9 @@ AsciiString RecorderClass::readAsciiString() {
 	}
 	str[index] = c;
 
-	while (index < 1024 && str[index] != 0) {
+	// Was index < 1024: the body pre-increments and then writes str[index], so the
+	// last iteration stored one element past the end of the buffer.
+	while (index < 1023 && str[index] != 0) {
 		++index;
 		Int c = fgetc(m_file);
 		if (c == EOF) {

@@ -82,7 +82,9 @@ void DisconnectManager::init() {
 	m_currentPacketRouterIndex = 0;
 	m_timeOfDisconnectScreenOn = 0;
 
-	for (Int i = 0; i < MAX_SLOTS; ++i) {
+	// i is used after the loop; VC6 for-scope let it escape.
+	Int i;
+	for (i = 0; i < MAX_SLOTS; ++i) {
 		for (Int j = 0; j < MAX_SLOTS; ++j) {
 			m_playerVotes[i][j].vote = FALSE;
 			m_playerVotes[i][j].frame = 0;

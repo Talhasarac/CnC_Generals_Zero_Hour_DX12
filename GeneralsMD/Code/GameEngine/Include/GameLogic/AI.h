@@ -311,7 +311,13 @@ class Waypoint;
 class Team;
 class Weapon;
 
-// Note - written out in save/load xfer and .map files, don't change these numbers.  
+// ws2def.h (pulled in by winsock2.h) defines AI_PASSIVE as a getaddrinfo hint
+// flag, which turns the enumerator below into 0x00000001=-1.  Nothing here calls
+// getaddrinfo, and the enumerator's value is written into save games and .map
+// files, so the macro is what gives way.
+#undef AI_PASSIVE
+
+// Note - written out in save/load xfer and .map files, don't change these numbers.
 enum AttitudeType { AI_SLEEP = -2, AI_PASSIVE=-1, AI_NORMAL=0, AI_ALERT=1, AI_AGGRESSIVE=2, AI_INVALID=3 };		///< AI "attitude" behavior modifiers
 
 enum CommandSourceType;

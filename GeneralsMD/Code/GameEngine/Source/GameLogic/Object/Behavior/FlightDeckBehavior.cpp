@@ -405,7 +405,7 @@ FlightDeckBehavior::FlightDeckInfo* FlightDeckBehavior::findPPI(ObjectID id)
 	for (std::vector<FlightDeckInfo>::iterator it = m_spaces.begin(); it != m_spaces.end(); ++it)
 	{
 		if (it->m_objectInSpace == id)
-			return it;
+			return &*it;
 	}
 
 	return NULL; 
@@ -420,7 +420,7 @@ FlightDeckBehavior::FlightDeckInfo* FlightDeckBehavior::findEmptyPPI()
 	for (std::vector<FlightDeckInfo>::iterator it = m_spaces.begin(); it != m_spaces.end(); ++it)
 	{
 		if( it->m_objectInSpace == INVALID_ID )
-			return it;
+			return &*it;
 	}
 
 	return NULL;
@@ -853,7 +853,9 @@ Bool FlightDeckBehavior::calcBestParkingAssignment( ObjectID id, Coord3D *pos, I
 	//Find the runway the object is assigned to.
 	Int runway = -1;
 	Int myIndex = 0;
-	for( std::vector<FlightDeckInfo>::iterator myIt = m_spaces.begin(); myIt != m_spaces.end(); myIt++, myIndex++ )
+	// myIt is used after the loop; VC6 for-scope let it escape.
+	std::vector<FlightDeckInfo>::iterator myIt;
+	for( myIt = m_spaces.begin(); myIt != m_spaces.end(); myIt++, myIndex++ )
 	{
 		if( myIt->m_objectInSpace == id )
 		{
@@ -879,7 +881,9 @@ Bool FlightDeckBehavior::calcBestParkingAssignment( ObjectID id, Coord3D *pos, I
 	//the back and keep looking at empty spaces until we find one with a plane blocking.
 
 	Bool checkForPlaneInWay = FALSE;
-	std::vector<FlightDeckInfo>::iterator bestIt = NULL;
+	// was a vector iterator initialised to NULL, which only compiled while STLport's
+	// iterator was a bare pointer.
+	FlightDeckInfo *bestIt = NULL;
 	Object *bestJet = NULL;
 	Int bestIndex = 0, index = 0;
 	for( std::vector<FlightDeckInfo>::iterator thatIt = m_spaces.begin(); thatIt != m_spaces.end(); thatIt++, index++ )
@@ -923,7 +927,7 @@ Bool FlightDeckBehavior::calcBestParkingAssignment( ObjectID id, Coord3D *pos, I
 				if( !checkForPlaneInWay )
 				{
 					//We can take this spot! But first find the flight deck info entry for it.Now handle assignment swap.
-					bestIt = thatIt;
+					bestIt = &*thatIt;
 					bestJet = nonIdleJet;
 					bestIndex = index;
 					checkForPlaneInWay = TRUE;
@@ -1193,7 +1197,9 @@ UpdateSleepTime FlightDeckBehavior::update()
 		m_startedProductionFrame = FOREVER;
 	}
 
-	for( std::vector<FlightDeckInfo>::iterator it = m_spaces.begin(); it != m_spaces.end(); it++ )
+	// it is used after the loop; VC6 for-scope let it escape.
+	std::vector<FlightDeckInfo>::iterator it;
+	for( it = m_spaces.begin(); it != m_spaces.end(); it++ )
 	{
 		//Unassigned space?... so we can build a replacement. 
 		if( it->m_objectInSpace == INVALID_ID )
@@ -1354,7 +1360,8 @@ void FlightDeckBehavior::exitObjectViaDoor( Object *newObj, ExitDoorType exitDoo
 		return;
 	}
 
-	newObj->setPosition( pCreationLocations->begin() );
+	// begin() was a Coord3D* under STLport; setPosition still wants the pointer.
+	newObj->setPosition( &pCreationLocations->front() );
 	newObj->setOrientation( m_runways[ ppi->m_runway ].m_startOrient );
 	TheAI->pathfinder()->addObjectToPathfindMap( newObj );
 

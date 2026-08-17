@@ -72,7 +72,9 @@ void FrameMetrics::init() {
 	m_averageLatency = (Real)0.2;
 	m_minimumCushion = -1;
 
-	for (Int i = 0; i < TheGlobalData->m_networkFPSHistoryLength; ++i) {
+	// i is used after the loop; VC6 for-scope let it escape.
+	Int i;
+	for (i = 0; i < TheGlobalData->m_networkFPSHistoryLength; ++i) {
 		m_fpsList[i] = 30.0;
 	}
 	m_fpsListIndex = 0;

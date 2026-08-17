@@ -560,7 +560,10 @@ void DumpExceptionInfo( unsigned int u, EXCEPTION_POINTERS* e_info )
 	/*
 	** Match the exception type with the error string and print it out
 	*/
-	for ( int i=0 ; _codes[i] != 0xffffffff ; i++ )
+	// i indexes _code_txt after the loop, so it outlives the for-scope; the last
+	// _code_txt entry is the catch-all that pairs with the 0xffffffff sentinel.
+	int i;
+	for ( i=0 ; _codes[i] != 0xffffffff ; i++ )
 	{
 		if ( _codes[i] == e_info->ExceptionRecord->ExceptionCode )
 		{

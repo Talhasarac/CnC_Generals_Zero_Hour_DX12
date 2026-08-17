@@ -737,7 +737,9 @@ void positionStartSpots( AsciiString mapName, GameWindow *buttonMapStartPosition
 		}
 
 		positionAdditionalImages(NULL, mapWindow, TRUE);
-		for (Int i = 0; i < MAX_SLOTS; ++i)
+		// i is used after the loop; VC6 for-scope let it escape.
+		Int i;
+		for (i = 0; i < MAX_SLOTS; ++i)
 		{
 			if (buttonMapStartPositions[i] != NULL)
 			{
@@ -777,7 +779,10 @@ void positionStartSpots( AsciiString mapName, GameWindow *buttonMapStartPosition
 		positionAdditionalImages(&mmd, mapWindow, TRUE);
 
 		AsciiString waypointName;				
-		for(Int i = 0; i < mmd.m_numPlayers && mmd.m_isMultiplayer; ++i )
+		// The "hide the rest" loop below picks up where this one stopped, so i has
+		// to outlive the VC6 for-scope.
+		Int i;
+		for(i = 0; i < mmd.m_numPlayers && mmd.m_isMultiplayer; ++i )
 		{
 			waypointName.format("Player_%d_Start", i+1); // start pos waypoints are 1-based
 			WaypointMap::iterator wmIt = mmd.m_waypoints.find(waypointName);
@@ -854,7 +859,7 @@ void updateMapStartSpots( GameInfo *myGame, GameWindow *buttonMapStartPositions[
 		  }
     }
 	}
-	for( i = 0; i < MAX_SLOTS; ++i)
+	for( Int i = 0; i < MAX_SLOTS; ++i)
 	{
     if ( buttonMapStartPositions[i] == NULL )
       continue;
@@ -1173,7 +1178,7 @@ void InitSkirmishGameGadgets( void )
 		DEBUG_ASSERTCRASH(buttonMapStartPosition[i], ("Could not find the ButtonMapStartPosition[%d]",i ));
 	}
    
-	for (i = 0; i < MAX_SLOTS; ++i)
+	for (Int i = 0; i < MAX_SLOTS; ++i)
 	{
 		PopulateColorComboBox(i, comboBoxColor, TheSkirmishGameInfo );
 		GadgetComboBoxSetSelectedPos(comboBoxColor[i], 0);

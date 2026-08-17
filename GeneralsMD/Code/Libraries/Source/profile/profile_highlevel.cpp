@@ -217,7 +217,9 @@ int ProfileId::FrameStart(void)
 {
   ProfileFastCS::Lock lock(cs);
 
-  for (unsigned i=0;i<MAX_FRAME_RECORDS;i++)
+  // i is used after the loop; VC6 for-scope let it escape.
+  unsigned i;
+  for (i =0;i<MAX_FRAME_RECORDS;i++)
     if (!(frameRecordMask&(1<<i)))
       break;
   if (i==MAX_FRAME_RECORDS)
@@ -311,7 +313,9 @@ ProfileHighLevel::Id ProfileHighLevel::AddProfile(const char *name, const char *
 bool ProfileHighLevel::EnumProfile(unsigned index, Id &id)
 {
   ProfileFastCS::Lock lock(cs);
-  for (ProfileId *cur=ProfileId::GetFirst();cur&&index--;cur=cur->GetNext());
+  // cur is used after the loop; VC6 for-scope let it escape.
+  ProfileId * cur;
+  for (cur =ProfileId::GetFirst();cur&&index--;cur=cur->GetNext());
   id.m_idPtr=cur;
   return cur!=NULL;
 }

@@ -3222,7 +3222,9 @@ void ControlBar::updateRadarAttackGlow ( void )
 void ControlBar::initSpecialPowershortcutBar( Player *player)
 {
 
-	for( Int i = 0; i < MAX_SPECIAL_POWER_SHORTCUTS; ++i )
+	// Second loop further down reuses this i under VC6 for-scope.
+	Int i;
+	for( i = 0; i < MAX_SPECIAL_POWER_SHORTCUTS; ++i )
 	{
 		m_specialPowerShortcutButtonParents[i] = NULL;
 		m_specialPowerShortcutButtons[i] = NULL;

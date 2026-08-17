@@ -323,7 +323,10 @@ static INIBlockParse findBlockParse(const char* token)
 //-------------------------------------------------------------------------------------------------
 static INIFieldParseProc findFieldParse(const FieldParse* parseTable, const char* token, int& offset, const void*& userData)
 {
-	for (const FieldParse* parse = parseTable; parse->token; ++parse)
+	// parse is read after the loop (the catch-all entry with a null token), so
+	// it cannot live in the for-scope the way VC6 let it.
+	const FieldParse* parse;
+	for (parse = parseTable; parse->token; ++parse)
 	{
 		if (strcmp( parse->token, token ) == 0)
 		{
@@ -1504,7 +1507,9 @@ void INI::initFromINIMulti( void *what, const MultiIniFieldParse& parseTableList
 				for (int ptIdx = 0; ptIdx < parseTableList.getCount(); ++ptIdx)
 				{
 					int offset = 0;
-					void* userData = 0;
+					// findFieldParse takes this by non-const reference and the
+					// parse procs take it as const void*, so const it is.
+					const void* userData = 0;
 					INIFieldParseProc parse = findFieldParse(parseTableList.getNthFieldParse(ptIdx), field, offset, userData);
 					if (parse)
 					{

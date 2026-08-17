@@ -2013,7 +2013,9 @@ void GarrisonContain::loadStationGarrisonPoints( void )
 
 
     Coord3D tempBuffer[MAX_GARRISON_POINTS];
-  	for( int t = 0; t < MAX_GARRISON_POINTS; ++t )
+  	// t is used after the loop; VC6 for-scope let it escape.
+  	int t;
+  	for( t = 0; t < MAX_GARRISON_POINTS; ++t )
 		  tempBuffer[ t ] = *(structure->getPosition());
 
 		count = structure->getMultiLogicalBonePosition("STATION", modData->m_containMax, tempBuffer, NULL);

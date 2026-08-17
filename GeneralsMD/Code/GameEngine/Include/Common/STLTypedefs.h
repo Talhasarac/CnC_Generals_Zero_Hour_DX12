@@ -70,14 +70,26 @@ enum DrawableID;
 
 #include <algorithm>
 #include <bitset>
-#include <hash_map>
 #include <list>
 #include <map>
 #include <queue>
 #include <set>
 #include <stack>
 #include <string>
+#include <string_view>
+#include <unordered_map>
 #include <vector>
+
+// STLport put the SGI hash_map in namespace std as
+// hash_map<Key, Val, HashFcn, EqualKey, Alloc>, which is unordered_map's
+// parameter list.  MSVC's own <hash_map> is not a substitute: stdext::hash_map
+// takes a single traits class where this code passes a hasher and a comparator.
+// Aliasing it here keeps the ~12 call sites unchanged.
+namespace std
+{
+	template <class K, class V, class H, class E>
+	using hash_map = unordered_map<K, V, H, E>;
+}
 
 // List of AsciiStrings to allow list of ThingTemplate names from INI and such
 typedef std::list< AsciiString >													AsciiStringList;
@@ -191,9 +203,13 @@ namespace rts
 	template<> struct hash<AsciiString>
 	{
 		size_t operator()(AsciiString ast) const
-		{ 
-			std::hash<const char *> tmp;
-			return tmp((const char *) ast.str());
+		{
+			// STLport's std::hash<const char*> was the SGI string hash, i.e. it
+			// hashed the characters.  The standard one hashes the pointer, which
+			// with equal_to<AsciiString> comparing by value would make every
+			// lookup on a differently-allocated copy of the same string miss.
+			std::hash<std::string_view> tmp;
+			return tmp(std::string_view(ast.str()));
 		}
 	};
 

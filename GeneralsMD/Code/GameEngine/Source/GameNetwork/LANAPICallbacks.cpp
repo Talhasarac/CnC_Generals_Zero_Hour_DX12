@@ -105,7 +105,9 @@ void LANAPI::OnAccept( UnsignedInt playerIP, Bool status )
 	if( AmIHost() )
 	{
 		
-		for (Int i = 0; i < MAX_SLOTS; i++)
+		// i is used after the loop; VC6 for-scope let it escape.
+		Int i;
+		for (i = 0; i < MAX_SLOTS; i++)
 		{
 			if (m_currentGame->getIP(i) == playerIP)
 			{
@@ -139,7 +141,9 @@ void LANAPI::OnHasMap( UnsignedInt playerIP, Bool status )
 	if( AmIHost() )
 	{
 		
-		for (Int i = 0; i < MAX_SLOTS; i++)
+		// i is used after the loop; VC6 for-scope let it escape.
+		Int i;
+		for (i = 0; i < MAX_SLOTS; i++)
 		{
 			if (m_currentGame->getIP(i) == playerIP)
 			{

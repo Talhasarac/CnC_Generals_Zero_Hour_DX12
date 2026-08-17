@@ -112,9 +112,12 @@ class WebBrowser :
 	// IUnknown methods
 	//---------------------------------------------------------------------------
 	protected:
-		HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** ppvObject);
-		ULONG STDMETHODCALLTYPE AddRef(void);
-		ULONG STDMETHODCALLTYPE Release(void);
+		// noexcept is part of the function type from C++17 on, and the modern SDK
+		// declares IUnknown's three methods noexcept - without it these no longer
+		// override, they just clash.
+		HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** ppvObject) noexcept;
+		ULONG STDMETHODCALLTYPE AddRef(void) noexcept;
+		ULONG STDMETHODCALLTYPE Release(void) noexcept;
 
 	//---------------------------------------------------------------------------
 	// IBrowserDispatch methods
