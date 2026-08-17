@@ -22,7 +22,7 @@
 // $Revision: #1 $
 // $DateTime: 2003/07/03 11:55:26 $
 //
-// ©2003 Electronic Arts
+// ï¿½2003 Electronic Arts
 //
 // main Debug object (singleton)
 //////////////////////////////////////////////////////////////////////////////
@@ -255,7 +255,9 @@ DLOG( "My HResult is: " << Debug::HResult(SomeHRESULTValue) << "\n" );
   /// \internal Performs actuals width switch
   Debug& operator<<(Width &w)
   {
-    m_width=w.m_width;
+    // the padding loop compares an unsigned length against this, so a negative
+    // width used to wrap round and append four billion fill characters
+    m_width=w.m_width>0?w.m_width:0;
     return *this;
   }
 

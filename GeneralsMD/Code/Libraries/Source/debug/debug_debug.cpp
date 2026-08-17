@@ -22,7 +22,7 @@
 // $Revision: #2 $
 // $DateTime: 2003/07/09 10:57:23 $
 //
-// ©2003 Electronic Arts
+// ï¿½2003 Electronic Arts
 //
 // Debug class implementation
 //////////////////////////////////////////////////////////////////////////////
@@ -172,10 +172,10 @@ void Debug::PostStaticInit(void)
       if (!q)
         q=p+strlen(p);
       if (p!=q)
-      {
         Instance.ExecCommand(p,q);
-        p=*q?q+1:NULL;
-      }
+      // advancing only for non-empty lines meant any empty line - a leading or
+      // doubled '\n' - spun here forever
+      p=*q?q+1:NULL;
     }
   }
 
@@ -224,12 +224,18 @@ void Debug::StaticExit(void)
 
 Debug& Debug::operator<<(RepeatChar &c)
 {
+  // the old loop decremented before testing, so it always overshot into
+  // negative territory and the single char tail below never ran: any count >=10
+  // that was not a multiple of 10 lost its remainder (79 came out as 70)
   if (c.m_count>=10)
   {
     char help[10];
     memset(help,c.m_char,10);
-    while ((c.m_count-=10)>=0)
+    while (c.m_count>=10)
+    {
       AddOutput(help,10);
+      c.m_count-=10;
+    }
   }
   while (c.m_count-->0)
     AddOutput(&c.m_char,1);
@@ -242,6 +248,9 @@ Debug::Format::Format(const char *format, ...)
   va_start(va,format);
   _vsnprintf(m_buffer,sizeof(m_buffer)-1,format,va);
   va_end(va);
+  // _vsnprintf writes no NUL when it fills the buffer exactly, and m_buffer has
+  // no initialiser - the operator<< below would then strlen past the object
+  m_buffer[sizeof(m_buffer)-1]=0;
 }
 
 Debug::~Debug()
@@ -978,9 +987,12 @@ void Debug::AddHResultTranslator(unsigned prio, HResultTranslator func, void *us
       break;
 
   // grow & move
+  // (every size below used to be computed with sizeof(void *), i.e. a third of
+  // an entry, so the array was allocated too small and every insert past the
+  // first wrote over the heap)
   Instance.hrTranslators=(HResultTranslatorEntry *)
-    DebugReAllocMemory(Instance.hrTranslators,(Instance.numHrTranslators+1)*sizeof(void *));
-  memmove(Instance.hrTranslators+k+1,Instance.hrTranslators+k,(Instance.numHrTranslators-k)*sizeof(void *));
+    DebugReAllocMemory(Instance.hrTranslators,(Instance.numHrTranslators+1)*sizeof(HResultTranslatorEntry));
+  memmove(Instance.hrTranslators+k+1,Instance.hrTranslators+k,(Instance.numHrTranslators-k)*sizeof(HResultTranslatorEntry));
 
   // add new
   ++Instance.numHrTranslators;
@@ -1001,11 +1013,16 @@ void Debug::RemoveHResultTranslator(HResultTranslator func, void *user)
         Instance.hrTranslators[k].user==user)
     {
       // remove it
+      // (this used to decrement the array pointer instead of the count and to
+      // size everything with sizeof(void *) - the count never dropped, the
+      // pointer walked backwards and the next realloc got a bogus block)
       memmove(Instance.hrTranslators+k,Instance.hrTranslators+k+1,
-        (Instance.numHrTranslators-k-1)*sizeof(void *));
-      --Instance.hrTranslators;
+        (Instance.numHrTranslators-k-1)*sizeof(HResultTranslatorEntry));
+      --Instance.numHrTranslators;
       Instance.hrTranslators=(HResultTranslatorEntry *)
-        DebugReAllocMemory(Instance.hrTranslators,Instance.numHrTranslators*sizeof(void *));
+        DebugReAllocMemory(Instance.hrTranslators,Instance.numHrTranslators*sizeof(HResultTranslatorEntry));
+      // entry k is a different one now, so look at it again
+      --k;
     }
 }
 
@@ -1301,9 +1318,12 @@ void Debug::AddOutput(const char *str, unsigned remainingLen)
           DebugReAllocMemory(ioBuffer[curType].buffer,ioBuffer[curType].alloc);
     }
 
-    // add to buffer (with NUL)
-    memcpy(ioBuffer[curType].buffer+ioBuffer[curType].used,str,len+1);
+    // add to buffer, then terminate it ourselves - copying len+1 bytes read one
+    // past the caller's range, which for ExecCommand's echo is a caller-owned
+    // buffer that can end exactly at its last byte
+    memcpy(ioBuffer[curType].buffer+ioBuffer[curType].used,str,len);
     ioBuffer[curType].used+=len;
+    ioBuffer[curType].buffer[ioBuffer[curType].used]=0;
 
     // last char CR?
     ioBuffer[curType].lastWasCR=str[len-1]=='\n';
@@ -1546,10 +1566,15 @@ void Debug::ExecCommand(const char *cmdstart, const char *cmdend)
     AddOutput("\n",1);
 
     // command group known?
-    for (CmdInterfaceListEntry *cur=firstCmdGroup;cur;cur=cur->next)
-      if (!strcmp(curCommandGroup,cur->group))
+    // (the two searches below used to declare their own 'cur', which shadowed
+    // nothing under VC6 for-scope rules but goes out of scope under standard
+    // ones - the !cur tests then looked at the char *cur above, which is never
+    // NULL, so none of the three error messages could ever be printed)
+    CmdInterfaceListEntry *group;
+    for (group=firstCmdGroup;group;group=group->next)
+      if (!strcmp(curCommandGroup,group->group))
         break;
-    if (!cur)
+    if (!group)
     {
       // nope, show error message
       (*this) << "Unknown command group " << curCommandGroup;
@@ -1561,18 +1586,18 @@ void Debug::ExecCommand(const char *cmdstart, const char *cmdend)
       // must have command...
 
       // search for a matching command handler
-      for (CmdInterfaceListEntry *cur=firstCmdGroup;cur;cur=cur->next)
+      for (group=firstCmdGroup;group;group=group->next)
       {
-        if (strcmp(curCommandGroup,cur->group))
+        if (strcmp(curCommandGroup,group->group))
           continue;
 
-        bool doneCommand=cur->cmdif->Execute(*this,p,mode,numParts-1,parts+1);
+        bool doneCommand=group->cmdif->Execute(*this,p,mode,numParts-1,parts+1);
         if (doneCommand&&(strcmp(p,"help")||numParts>1))
           break;
       }
 
       // display error message if command not found, break away
-      if (!cur&&mode==DebugCmdInterface::CommandMode::Normal)
+      if (!group&&mode==DebugCmdInterface::CommandMode::Normal)
       {
         if (strcmp(p,"help"))
           operator<<("Unknown command");
