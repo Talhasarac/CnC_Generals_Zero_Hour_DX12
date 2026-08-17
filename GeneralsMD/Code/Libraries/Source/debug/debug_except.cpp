@@ -158,7 +158,9 @@ void DebugExceptionhandler::LogFPURegisters(Debug &dbg, struct _EXCEPTION_POINTE
       << " ErrSel:  "    << Debug::Width(8) << flt.ErrorSelector << "\n"
       << "DataOfs:     " << Debug::Width(8) << flt.DataOffset
       << " DataSel: "    << Debug::Width(8) << flt.DataSelector << "\n"
-      << "Cr0NpxState: " << Debug::Width(8) << flt.Cr0NpxState << "\n";
+      // Cr0NpxState was renamed to Spare0 in the modern Windows SDK's
+      // _FLOATING_SAVE_AREA; same offset, same contents.
+      << "Cr0NpxState: " << Debug::Width(8) << flt.Spare0 << "\n";
 
   for (unsigned k=0;k<SIZE_OF_80387_REGISTERS/10;++k)
   {

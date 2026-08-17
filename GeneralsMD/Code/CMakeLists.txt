@@ -190,3 +190,79 @@ add_executable(dx8_smoke ${WW}/WW3D2/test_dx8_smoke.cpp)
 target_include_directories(dx8_smoke PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/Libraries/DirectX/Include)
 target_link_directories(dx8_smoke PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/Libraries/DirectX/Lib)
 target_link_libraries(dx8_smoke PRIVATE d3d8 user32)
+
+# ===========================================================================
+# Phase 2 - remaining support libs.  None of these touch DX8.
+# ===========================================================================
+set(LIBSRC ${CMAKE_CURRENT_SOURCE_DIR}/Libraries/Source)
+
+# ---- debug ----------------------------------------------------------------
+# EA's in-repo debug/logging lib (RTS.dsp links it as debug.lib).  Self-contained
+# apart from the Win32 SDK.  The test1-6/, netserv/ and debug_dlg/ subdirs are
+# separate .dsp projects, not part of the lib.
+add_library(debug STATIC
+  ${LIBSRC}/debug/debug.cpp        ${LIBSRC}/debug/debug_cmd.cpp
+  ${LIBSRC}/debug/debug_debug.cpp  ${LIBSRC}/debug/debug_except.cpp
+  ${LIBSRC}/debug/debug_getdefaultcommands.cpp
+  ${LIBSRC}/debug/debug_internal.cpp
+  ${LIBSRC}/debug/debug_io_con.cpp ${LIBSRC}/debug/debug_io_flat.cpp
+  ${LIBSRC}/debug/debug_io_net.cpp ${LIBSRC}/debug/debug_io_ods.cpp
+  ${LIBSRC}/debug/debug_purecall.cpp
+  ${LIBSRC}/debug/debug_stack.cpp)
+target_include_directories(debug PUBLIC ${LIBSRC}/debug)
+target_link_libraries(debug PUBLIC dbghelp comctl32 ws2_32)
+
+# ---- wwdownload -----------------------------------------------------------
+# FTP patch downloader.  Its wlib/resource.h includes are all commented out in
+# the shipped source, so it needs nothing but winsock.
+add_library(wwdownload STATIC
+  ${WW}/WWDownload/Download.cpp ${WW}/WWDownload/FTP.CPP
+  ${WW}/WWDownload/registry.cpp ${WW}/WWDownload/urlBuilder.cpp)
+target_include_directories(wwdownload PUBLIC ${WW}/WWDownload ${WW})
+target_link_libraries(wwdownload PUBLIC wsock32 winmm)
+
+# ---- benchmark ------------------------------------------------------------
+# BYTEmark sources are missing; benchmark_stub.c stands in for them.  See the
+# file header for why a constant is enough and when to revisit.
+add_library(benchmark STATIC ${LIBSRC}/Benchmark/benchmark_stub.c)
+target_include_directories(benchmark PUBLIC ${LIBSRC}/Benchmark)
+
+# ---- eabrowserdispatch ----------------------------------------------------
+# Only BrowserDispatch.idl shipped; the .h/_i.c that GameEngine's WebBrowser.h
+# expects are MIDL output.  Generate them at build time (MSBuild puts cl.exe,
+# MIDL's preprocessor, on PATH) into a dir laid out so the shipped
+# #include "EABrowserDispatch/BrowserDispatch.h" resolves unchanged.
+set(EABD_GEN ${CMAKE_CURRENT_BINARY_DIR}/generated/EABrowserDispatch)
+file(MAKE_DIRECTORY ${EABD_GEN})
+# midl.exe ships with the Windows SDK, not on PATH at configure time.
+file(GLOB MIDL_HINTS "$ENV{ProgramFiles\(x86\)}/Windows Kits/10/bin/*/x86")
+find_program(MIDL_EXECUTABLE midl HINTS ${MIDL_HINTS} REQUIRED)
+add_custom_command(
+  OUTPUT ${EABD_GEN}/BrowserDispatch.h ${EABD_GEN}/BrowserDispatch_i.c
+  COMMAND ${MIDL_EXECUTABLE} /nologo /env win32 /win32
+          /h ${EABD_GEN}/BrowserDispatch.h
+          /iid ${EABD_GEN}/BrowserDispatch_i.c
+          /proxy ${EABD_GEN}/BrowserDispatch_p.c
+          /dlldata ${EABD_GEN}/dlldata.c
+          /tlb ${EABD_GEN}/BrowserDispatch.tlb
+          ${LIBSRC}/EABrowserDispatch/BrowserDispatch.idl
+  DEPENDS ${LIBSRC}/EABrowserDispatch/BrowserDispatch.idl
+  COMMENT "MIDL BrowserDispatch.idl")
+add_library(eabrowserdispatch STATIC
+  ${EABD_GEN}/BrowserDispatch_i.c ${EABD_GEN}/BrowserDispatch.h)
+target_include_directories(eabrowserdispatch
+  PUBLIC ${CMAKE_CURRENT_BINARY_DIR}/generated)
+
+# ---- gamespy --------------------------------------------------------------
+# PLAN.md called for hand-written stubs behind the five GameSpy* libs, but the
+# real SDK is open source (TheSuperHackers/GamespySDK, itself CMake-based), so
+# vendor and build it instead: correct signatures, structs and enum values
+# rather than 73 guessed prototypes.  Multiplayer stays out of scope - this only
+# has to compile and link; nothing needs to reach a live GameSpy server.
+# OpenSSL/HTTPS off so the SDK does not FetchContent OpenSSL for services that
+# have been dead since 2014; voice and tests off for the same reason.
+set(GS_OPENSSL          OFF CACHE BOOL "" FORCE)
+set(GS_SECURESECONNECT  OFF CACHE BOOL "" FORCE)
+set(GS_BUILD_TESTS      OFF CACHE BOOL "" FORCE)
+set(GS_INCLUDE_VOICE    OFF CACHE BOOL "" FORCE)
+add_subdirectory(${LIBSRC}/GameSpy ${CMAKE_CURRENT_BINARY_DIR}/gamespy)
