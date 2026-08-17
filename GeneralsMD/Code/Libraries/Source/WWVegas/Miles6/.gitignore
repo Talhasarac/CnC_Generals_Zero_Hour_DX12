@@ -2,3 +2,8 @@
 *
 # Except this file
 !.gitignore
+# ...and our own hand-written Miles stub (not EA/RAD code, so it is committed:
+# the real Miles SDK is binary-only and absent, and a fresh clone cannot re-fetch
+# a file we wrote ourselves).
+!include/
+!include/Mss.h
