@@ -30,8 +30,11 @@
 bool  getStringFromRegistry(HKEY root, std::string path, std::string key, std::string& val)
 {
 	HKEY handle;
-	unsigned char buffer[256];
-	unsigned long size = 256;
+	// Registry data is whatever is on disk: a zero-length value leaves buffer
+	// untouched, and REG_BINARY/REG_DWORD data carries no NUL at all.  Both used
+	// to hand the caller a std::string built from uninitialized stack.
+	unsigned char buffer[256] = { 0 };
+	unsigned long size = sizeof(buffer);
 	unsigned long type;
 	int returnValue;
 
@@ -43,6 +46,7 @@ bool  getStringFromRegistry(HKEY root, std::string path, std::string key, std::s
 
 	if (returnValue == ERROR_SUCCESS)
 	{
+		buffer[sizeof(buffer)-1] = '\0';
 		val = (char *)buffer;
 		return true;
 	}

@@ -1833,7 +1833,9 @@ bool Prepare_Directories(const char *rootdir, const char *filename)
 		memset(tempstr,0,256);
 		strncpy(tempstr,filename,cptr-filename);
 		sprintf(newdir,"%s\\%s",rootdir, tempstr);
-		if (!CreateDirectory(newdir, NULL))
+		// An existing directory is success, not failure - every download after the
+		// first into the same subdir used to bail out here.
+		if (!CreateDirectory(newdir, NULL) && GetLastError() != ERROR_ALREADY_EXISTS)
 			return false;
 		//if ((_mkdir(newdir) == -1) && ((errno == ENOENT || errno==EACCES)))
 			//return(false);
