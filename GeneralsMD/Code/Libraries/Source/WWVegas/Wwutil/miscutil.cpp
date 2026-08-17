@@ -105,12 +105,12 @@ bool cMiscUtil::File_Exists(LPCSTR filename)
 		return false;
 	}
 #else
+	//	The early "return true" used to skip Return_File, so every successful
+	//	existence check leaked the FileClass the factory handed out.
 	FileClass * file = _TheFileFactory->Get_File( filename );
-	if ( file && file->Is_Available() ) {
-		return true;
-	}
+	bool exists = (file != NULL) && file->Is_Available();
 	_TheFileFactory->Return_File( file );
-	return false;
+	return exists;
 #endif
 }
 
