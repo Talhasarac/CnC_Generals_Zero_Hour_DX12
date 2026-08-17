@@ -90,7 +90,7 @@ CollisionMath::Overlap_Test(const AAPlaneClass & plane,const SphereClass & spher
 	if (delta > sphere.Radius) {
 		return POS;
 	} 
-	if (delta < sphere.Radius) {
+	if (delta < -sphere.Radius) {
 		return NEG;
 	}
 	return BOTH;

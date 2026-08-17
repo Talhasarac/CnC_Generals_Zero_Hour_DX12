@@ -464,16 +464,16 @@ void VectorProcessorClass::Clamp(Vector4 *dst,const Vector4 *src, const float mi
 	for (i=0; i<count; i++)
 	{
 		dst[i].X=(src[i].X<min)?min:src[i].X;
-		dst[i].X=(src[i].X>max)?max:src[i].X;
+		dst[i].X=(dst[i].X>max)?max:dst[i].X;
 
 		dst[i].Y=(src[i].Y<min)?min:src[i].Y;
-		dst[i].Y=(src[i].Y>max)?max:src[i].Y;
+		dst[i].Y=(dst[i].Y>max)?max:dst[i].Y;
 
 		dst[i].Z=(src[i].Z<min)?min:src[i].Z;
-		dst[i].Z=(src[i].Z>max)?max:src[i].Z;
+		dst[i].Z=(dst[i].Z>max)?max:dst[i].Z;
 
 		dst[i].W=(src[i].W<min)?min:src[i].W;
-		dst[i].W=(src[i].W>max)?max:src[i].W;
+		dst[i].W=(dst[i].W>max)?max:dst[i].W;
 	}
 }
 

@@ -75,9 +75,9 @@ bool CollisionMath::Intersection_Test(const SphereClass & sphere,const AABoxClas
 	** against a cube which encloses the sphere...
 	*/
 	Vector3 dc = box.Center - sphere.Center;
-	if (WWMath::Fabs(dc.X) < box.Extent.X + sphere.Radius) return false;
-	if (WWMath::Fabs(dc.Y) < box.Extent.Y + sphere.Radius) return false;
-	if (WWMath::Fabs(dc.Z) < box.Extent.Z + sphere.Radius) return false;
+	if (WWMath::Fabs(dc.X) > box.Extent.X + sphere.Radius) return false;
+	if (WWMath::Fabs(dc.Y) > box.Extent.Y + sphere.Radius) return false;
+	if (WWMath::Fabs(dc.Z) > box.Extent.Z + sphere.Radius) return false;
 	return true;
 }
 
