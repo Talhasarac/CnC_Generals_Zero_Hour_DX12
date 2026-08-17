@@ -127,39 +127,16 @@ BOOL InitSymbolInfo()
 	gsSymGetLineFromAddr = (BOOL (__stdcall *)(	IN  HANDLE,IN  DWORD,OUT PDWORD,OUT PIMAGEHLP_LINE))
 							GetProcAddress(hInstDebugHlp , "SymGetLineFromAddr");
 
-	char pathname[_MAX_PATH+1];
-	char drive[10];
-	char directory[_MAX_PATH+1];
-	HANDLE process;
-
-
 	::SymSetOptions(SYMOPT_DEFERRED_LOADS | SYMOPT_UNDNAME | SYMOPT_LOAD_LINES | SYMOPT_OMAP_FIND_NEAREST);
 
-	process = GetCurrentProcess();
+	HANDLE process = GetCurrentProcess();
 
-	//Get the apps name
-	::GetModuleFileName(NULL, pathname, _MAX_PATH);
-
-	// turn it into a search path
-	_splitpath(pathname, drive, directory, NULL, NULL);
-	sprintf(pathname, "%s:\\%s", drive, directory);
-
-	// append the current directory to build a search path for SymInit
-	::lstrcat(pathname, ";.;");
-
-	if(::SymInitialize(process, pathname, FALSE))
-	{
-		// regenerate the name of the app
-		::GetModuleFileName(NULL, pathname, _MAX_PATH);
-		if(::SymLoadModule(process, NULL, pathname, NULL, 0, 0))
-		{
-				//Load any other relevant modules (ie dlls) here
-				return TRUE;
-		}
-		::SymCleanup(process);
-	}
-
-	return(FALSE);
+	// The old code built its own search path out of _splitpath, but _splitpath
+	// already hands back "D:" in drive and the format string added a second colon,
+	// so the path ("D::\dir\") pointed nowhere and every frame came out
+	// "<Unknown>".  fInvadeProcess enumerates the process' own modules instead,
+	// which finds the PDB sitting next to the exe without a path at all.
+	return ::SymInitialize(process, NULL, TRUE);
 }
 
 
@@ -332,100 +309,13 @@ void FillStackAddresses(void**addresses, unsigned int count, unsigned int skip)
 {
 	InitSymbolInfo();
 
-	STACKFRAME	stack_frame;
-
-	
-	HANDLE thread = GetCurrentThread();
-	HANDLE process = GetCurrentProcess();
-
-    memset(&gsContext, 0, sizeof(CONTEXT));
-    gsContext.ContextFlags = CONTEXT_FULL;
-
-	DWORD myeip,myesp,myebp;
-_asm
-{
-MYEIP2:
- mov eax, MYEIP2
- mov dword ptr [myeip] , eax
- mov eax, esp
- mov dword ptr [myesp] , eax
- mov eax, ebp
- mov dword ptr [myebp] , eax
- xor eax,eax
-}
-memset(&stack_frame, 0, sizeof(STACKFRAME));
-stack_frame.AddrPC.Mode = AddrModeFlat;
-stack_frame.AddrPC.Offset = myeip;
-stack_frame.AddrStack.Mode = AddrModeFlat;
-stack_frame.AddrStack.Offset = myesp;
-stack_frame.AddrFrame.Mode = AddrModeFlat;
-stack_frame.AddrFrame.Offset = myebp;
-
-{
-/*
-    if(GetThreadContext(thread, &gsContext))
-    {
-        memset(&stack_frame, 0, sizeof(STACKFRAME));
-        stack_frame.AddrPC.Mode = AddrModeFlat;
-        stack_frame.AddrPC.Offset = gsContext.Eip;
-        stack_frame.AddrStack.Mode = AddrModeFlat;
-        stack_frame.AddrStack.Offset = gsContext.Esp;
-        stack_frame.AddrFrame.Mode = AddrModeFlat;
-        stack_frame.AddrFrame.Offset = gsContext.Ebp;
-*/
-
-		Bool stillgoing = TRUE;
-//	unsigned int cd = count;
-
-		// Skip some?
-		while (stillgoing&&skip)
-		{
-			stillgoing = StackWalk(IMAGE_FILE_MACHINE_I386,
-								process,
-								thread,
-								&stack_frame,
-								NULL,	//&gsContext,
-								NULL,
-								SymFunctionTableAccess,
-								SymGetModuleBase,
-								NULL) != 0;
-			skip--;
-		}
-
-		while(stillgoing&&count)
-		{
-			stillgoing = StackWalk(IMAGE_FILE_MACHINE_I386,
-								process,
-								thread,
-								&stack_frame,
-								NULL, //&gsContext,
-								NULL,
-								SymFunctionTableAccess,
-								SymGetModuleBase,
-								NULL) != 0;
-			if (stillgoing)
-			{
-				*addresses  = (void*)stack_frame.AddrPC.Offset;				
-				addresses++;
-				count--;
-			}
-		}
-
-		// Fill remainder
-		while (count)
-		{
-			*addresses = NULL;
-			addresses++;
-			count--;
-		}
-
-	}
-/*
-	else
-	{
-		memset(addresses,NULL,count*sizeof(void*));
-	}
-*/	
+	// This used to seed a STACKFRAME from inline asm and drive StackWalk() by
+	// hand.  On this toolchain that walk returns the seeded frame once and then
+	// stops, so every crash report came back with an empty stack.  CaptureStack-
+	// BackTrace does the same job in one call and needs no symbols to do it; the
+	// +1 drops this function's own frame, which the old code also skipped.
+	memset(addresses, 0, count * sizeof(void *));
+	::CaptureStackBackTrace(skip + 1, count, addresses, NULL);
 }
 
 

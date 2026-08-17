@@ -14,6 +14,12 @@ if(MSVC)
   # /permissive- is off on purpose: this is 2003-era code and templates here rely on
   # pre-two-phase-lookup name binding (simplevec.h et al).
   add_compile_options(/W3 /permissive /EHsc)
+  # There is no debugger on the porting machine, so ReleaseCrashInfo.txt's stack
+  # dump is the only stack we get.  StackDump.cpp walks the EBP chain by hand and
+  # /O2 implies /Oy (no frame pointer), which leaves that dump empty; /Zi + /DEBUG
+  # then give the frames names instead of bare addresses.  Costs a PDB, buys Phase 5.
+  add_compile_options(/Oy- /Zi)
+  add_link_options(/DEBUG)
 endif()
 
 # ---- wwdebug --------------------------------------------------------------
@@ -397,7 +403,11 @@ target_link_libraries(generals PRIVATE gameenginedevice
 # beside Run/'s .big files to find anything (Phase 5).
 add_custom_command(TARGET generals POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
-          $<TARGET_FILE:generals> ${CMAKE_CURRENT_SOURCE_DIR}/../Run/)
+          $<TARGET_FILE:generals> ${CMAKE_CURRENT_SOURCE_DIR}/../Run/
+  # The PDB has to sit next to the exe: SymInitialize searches the exe's directory,
+  # and without it the crash log's stack is addresses with no names.
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          $<TARGET_PDB_FILE:generals> ${CMAKE_CURRENT_SOURCE_DIR}/../Run/)
 
 # ===========================================================================
 # Tests.  Run with:  ctest --test-dir build -C Release --output-on-failure

@@ -39,6 +39,7 @@
 #include "Common/FileSystem.h"
 #include "Common/GameAudio.h"
 #include "Common/Science.h"
+#include "Common/StackDump.h"	// g_LastErrorDump, see prepFile
 #include "Common/SpecialPower.h"
 #include "Common/ThingFactory.h"
 #include "Common/ThingTemplate.h"
@@ -278,6 +279,12 @@ void INI::prepFile( AsciiString filename, INILoadType loadType )
 	if( m_file == NULL )
 	{
 
+		// These INI_* constants live in an *unnamed* enum, so GameEngine::init's
+		// catch (ErrorCode) never matches them and they all end up in its catch (...),
+		// which reports "Uncaught Exception during initialization." and nothing else.
+		// Leave a trace in g_LastErrorDump so ReleaseCrashInfo.txt names the file --
+		// in a Release build DEBUG_CRASH above compiles to nothing.
+		g_LastErrorDump.format("INI::prepFile could not open '%s'\n", filename.str());
 		DEBUG_CRASH(( "INI::load, cannot open file '%s'\n", filename.str() ));
 		throw INI_CANT_OPEN_FILE;
 

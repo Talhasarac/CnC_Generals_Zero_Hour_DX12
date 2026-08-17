@@ -22,6 +22,7 @@
 #include "Common/INI.h"
 #include "Common/INIException.h"
 #include "Common/STLTypedefs.h"
+#include "Common/StackDump.h"
 #include "GameClient/Water.h"
 
 #include <stdio.h>
@@ -325,4 +326,29 @@ TEST(ini_unknown_block_aborts_the_file)
 	CHECK_EQ( WaterSettings[ TIME_OF_DAY_EVENING ].m_waterRepeatCount, -1 );
 
 	remove( TEST_INI );
+}
+
+/* ReleaseCrashInfo.txt's stack trace is the only stack this port gets - there is
+   no debugger on the porting machine - and it came back empty on the first real
+   crash, which is worth catching here rather than in the middle of a launch. */
+static char s_stackText[ 4096 ];
+
+static void collectStackLine( const char *line )
+{
+	strncat( s_stackText, line, sizeof( s_stackText ) - strlen( s_stackText ) - 1 );
+}
+
+TEST(stackdump_walks_the_callers)
+{
+	void *frames[ 12 ];
+	memset( frames, 0, sizeof( frames ) );
+	::FillStackAddresses( frames, 12, 0 );
+	CHECK( frames[ 0 ] != NULL );
+
+	s_stackText[ 0 ] = 0;
+	::StackDumpFromAddresses( frames, 12, collectStackLine );
+	/* Needs the PDB next to the exe; without symbols this is where it shows. */
+	if( strstr( s_stackText, "stackdump_walks_the_callers" ) == NULL )
+		printf( "%s\n", s_stackText );
+	CHECK( strstr( s_stackText, "stackdump_walks_the_callers" ) != NULL );
 }
