@@ -143,10 +143,17 @@ Int CompressionManager::getMaxCompressedSize( Int uncompressedLen, CompressionTy
 		case COMPRESSION_NOXLZH:
 			return CalcNewSize(uncompressedLen) + 8;
 
-		case COMPRESSION_BTREE:   // guessing here
-		case COMPRESSION_HUFF:    // guessing here
-		case COMPRESSION_REFPACK: // guessing here
-			return uncompressedLen + 8;
+		case COMPRESSION_BTREE:
+		case COMPRESSION_HUFF:
+		case COMPRESSION_REFPACK:
+			// The EAC encoders take no destination length, so this estimate is
+			// the only thing standing between incompressible input and a heap
+			// overrun -- and the original "uncompressedLen + 8" was not it.
+			// Measured worst-case expansion over noise/skewed/ramp payloads at
+			// 1..256K bytes: RefPack +15 then ~0.9%, BTree +17 then ~1.0%,
+			// Huff +129 (its symbol table) then ~1.3%.  12.5% plus a flat 512
+			// clears every one of those with room to spare.
+			return uncompressedLen + (uncompressedLen / 8) + 512 + 8;
 
 		case COMPRESSION_ZLIB1:
 		case COMPRESSION_ZLIB2:
