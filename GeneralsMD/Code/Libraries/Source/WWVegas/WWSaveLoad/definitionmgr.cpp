@@ -246,7 +246,10 @@ DefinitionMgrClass::Find_Typed_Definition (const char *name, uint32 class_id, bo
 	DynamicVectorClass<DefinitionClass*>* defs = DefinitionHash->Get(lower_case_name);
 
 	if (defs) {
-		for (int i=0;i<defs->Length();++i) {
+		//	Count(), not Length():  Length() is the allocated capacity (10 after the
+		//	first Add), so the original loop walked uninitialized slots and called
+		//	Get_Class_ID() through garbage pointers.
+		for (int i=0;i<defs->Count();++i) {
 			DefinitionClass* curr_def=(*defs)[i];
 			WWASSERT(curr_def);
 			uint32 curr_class_id = curr_def->Get_Class_ID ();

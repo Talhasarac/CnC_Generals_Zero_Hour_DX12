@@ -138,6 +138,7 @@ private:
 inline
 DefinitionClass::DefinitionClass (void)
 	:	m_ID (0),
+		m_GenericUserData (0),		//	was left uninitialized, so Get_User_Data() read stack/heap garbage
 		m_SaveEnabled (true),
 		m_DefinitionMgrLink (-1)
 {
