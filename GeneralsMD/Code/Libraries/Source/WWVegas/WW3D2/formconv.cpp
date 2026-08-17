@@ -131,7 +131,10 @@ WW3DFormat D3DFormatToWW3DFormatConversionArray[HIGHEST_SUPPORTED_D3DFORMAT + 1]
 
 #ifndef _XBOX
 #define HIGHEST_SUPPORTED_D3DFORMAT D3DFMT_X8L8V8U8
-#define HIGHEST_SUPPORTED_D3DZFORMAT D3DFMT_D24X4S4
+// D3DFMT_D16 (80) is the highest depth format used below - D3DFMT_D24X4S4 is
+// only 79, so sizing the table by it made Init_D3D_To_WW3_Conversion write one
+// past the end of the array and D3DFMT_D16 never convert back.
+#define HIGHEST_SUPPORTED_D3DZFORMAT D3DFMT_D16
 #else
 #define HIGHEST_SUPPORTED_D3DFORMAT  D3DFMT_LIN_R8G8B8A8 
 #define HIGHEST_SUPPORTED_D3DZFORMAT    D3DFMT_LIN_F16
@@ -205,7 +208,8 @@ WW3DZFormat D3DFormat_To_WW3DZFormat(D3DFORMAT d3d_format)
 */
 void Init_D3D_To_WW3_Conversion()
 {
-	for (int i=0;i<HIGHEST_SUPPORTED_D3DFORMAT;++i) {
+	// <=: the arrays are sized HIGHEST+1, so the last slot needs seeding too.
+	for (int i=0;i<=HIGHEST_SUPPORTED_D3DFORMAT;++i) {
 		D3DFormatToWW3DFormatConversionArray[i]=WW3D_FORMAT_UNKNOWN;
 	}
 
@@ -230,7 +234,7 @@ void Init_D3D_To_WW3_Conversion()
 	D3DFormatToWW3DFormatConversionArray[D3DFMT_X8L8V8U8]=WW3D_FORMAT_X8L8V8U8;	// Bumpmap
 
 	// init depth stencil conversion
-	for (i=0; i<HIGHEST_SUPPORTED_D3DZFORMAT; i++) 
+	for (i=0; i<=HIGHEST_SUPPORTED_D3DZFORMAT; i++)
 	{
 		D3DFormatToWW3DZFormatConversionArray[i]=WW3D_ZFORMAT_UNKNOWN;
 	}
