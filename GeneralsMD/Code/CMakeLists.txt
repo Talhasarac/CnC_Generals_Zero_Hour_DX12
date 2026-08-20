@@ -376,19 +376,31 @@ file(GLOB_RECURSE GAMEENGINEDEVICE_SOURCES ${GED}/Source/*.cpp)
 # shipping build uses the Win32 message mouse instead).
 list(REMOVE_ITEM GAMEENGINEDEVICE_SOURCES
   ${GED}/Source/Win32Device/GameClient/Win32DIMouse.cpp)
-# Miles and Bink are binary-only SDKs that are not in the release, so their two
-# device implementations are replaced by the null devices in Stubs/ (PLAN.md
-# Phase 4: silence and skipped movies, not a launch blocker).
+# Bink is a binary-only SDK that is not in the release, so its device is
+# replaced by the null device in Stubs/ (PLAN.md Phase 4: skipped movies).
 list(REMOVE_ITEM GAMEENGINEDEVICE_SOURCES
-  ${GED}/Source/MilesAudioDevice/MilesAudioManager.cpp
   ${GED}/Source/VideoDevice/Bink/BinkVideoPlayer.cpp)
+
+# Miles is binary-only too, but the game ships mss32.dll and it exports
+# decorated stdcall names (_AIL_startup@0, ...), so MilesAudioManager can bind
+# to the real DLL through an import library - real audio, no SDK.  Thyme's
+# recipe: build a no-op stub as mss32.dll from miles.c + miles.def (the def
+# mirrors the shipped DLL's export table); linking against the stub's import
+# lib makes the exe resolve those names from whatever mss32.dll sits next to
+# it at runtime - the game's real one.  (`lib /def` alone can't produce this
+# import lib: it prepends a second underscore to the already-decorated names.)
+add_library(milesstub SHARED
+  ${WW}/Miles6/stub/miles.c ${WW}/Miles6/stub/miles.def)
+set_target_properties(milesstub PROPERTIES OUTPUT_NAME mss32)
+target_include_directories(milesstub PRIVATE ${WW}/Miles6/stub ${WW}/Miles6/include)
 
 add_library(gameenginedevice STATIC ${GAMEENGINEDEVICE_SOURCES})
 
 target_include_directories(gameenginedevice PUBLIC
-  ${GED}/Include ${STUBS} ${CMAKE_CURRENT_SOURCE_DIR}/Main)
+  ${GED}/Include ${STUBS} ${CMAKE_CURRENT_SOURCE_DIR}/Main
+  ${WW}/Miles6/include)
 set_target_properties(gameenginedevice PROPERTIES CXX_STANDARD 17)
-target_link_libraries(gameenginedevice PUBLIC gameengine ww3d2)
+target_link_libraries(gameenginedevice PUBLIC gameengine ww3d2 milesstub)
 
 # ---- generals.exe ---------------------------------------------------------
 # BuildVersion.h and GeneratedVersion.h are normally written by Tools/

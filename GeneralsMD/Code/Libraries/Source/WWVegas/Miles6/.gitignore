@@ -2,8 +2,16 @@
 *
 # Except this file
 !.gitignore
-# ...and our own hand-written Miles stub (not EA/RAD code, so it is committed:
-# the real Miles SDK is binary-only and absent, and a fresh clone cannot re-fetch
-# a file we wrote ourselves).
+# ...and our own hand-written Miles declarations (not EA/RAD code, so they are
+# committed: the real Miles SDK is binary-only and absent, and a fresh clone
+# cannot re-fetch files we wrote ourselves).  MSS/MSS.h is the one true header
+# (reconstructed API surface); Mss.h and stub/mss/mss.h just forward to it.
 !include/
 !include/Mss.h
+!include/MSS/
+!include/MSS/MSS.h
+!stub/
+!stub/mss/
+!stub/mss/mss.h
+# stub/miles.c, stub/miles.def, stub/cleanup.c stay unvendored: they are
+# re-fetched from Thyme (see CLAUDE.md), with one local patch documented there.
