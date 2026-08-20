@@ -229,7 +229,16 @@ void W3DView::setWidth(Int width)
 
 	//we want to maintain the same scale, so we'll need to adjust the fov.
 	//default W3D fov for full-screen is 50 degrees.
-	m_3DCamera->Set_View_Plane((Real)width/(Real)TheDisplay->getWidth()*DEG_TO_RADF(50.0f),-1);
+	//Widescreen (PLAN.md Phase 6): 50 degrees is the *4:3* horizontal FOV.  The
+	//camera derives the vertical extent as X/aspect, so a wider aspect with a
+	//fixed hfov crops the vertical view (vert-).  Widen the hfov so the vertical
+	//view stays exactly what 4:3 shows and the extra screen shows more world
+	//horizontally (hor+).  At 4:3 the factor is 1 and nothing changes.
+	Real hfov = (Real)width/(Real)TheDisplay->getWidth()*DEG_TO_RADF(50.0f);
+	Real aspect = (getHeight() > 0) ? (Real)width/(Real)getHeight() : (4.0f/3.0f);
+	if (aspect > (4.0f/3.0f))
+		hfov = 2.0f * (Real)atan( tan(hfov * 0.5f) * aspect / (4.0f/3.0f) );
+	m_3DCamera->Set_View_Plane(hfov,-1);
 }
 
 //-------------------------------------------------------------------------------------------------

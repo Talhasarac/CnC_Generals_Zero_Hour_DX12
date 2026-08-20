@@ -506,9 +506,12 @@ Int W3DDisplay::getDisplayModeCount(void)
 	for (int res = 0; res < resolutions.Count ();  res ++)
 	{
 		// Is this the resolution we are looking for?
-		if (resolutions[res].BitDepth >= 24 && resolutions[res].Width >= MIN_DISPLAY_RESOLUTION_X 
-      && IS_FOUR_BY_THREE_ASPECT( (Real)resolutions[res].Width, (Real)resolutions[res].Height ) )	//only accept 4:3 aspect ratio modes.
-		{	
+		// Widescreen (PLAN.md Phase 6): the 4:3-only filter is gone - the camera
+		// now widens its FOV per aspect (W3DView::setWidth), so any mode the
+		// device offers above the floor is playable.
+		if (resolutions[res].BitDepth >= 24 && resolutions[res].Width >= MIN_DISPLAY_RESOLUTION_X
+      && resolutions[res].Height >= MIN_DISPLAY_RESOLUTOIN_Y )
+		{
 			numResolutions++;
 		}
 	}
@@ -525,9 +528,10 @@ void W3DDisplay::getDisplayModeDescription(Int modeIndex, Int *xres, Int *yres, 
 	for (int res = 0; res < resolutions.Count ();  res ++)
 	{
 		// Is this the resolution we are looking for?
-		if ( resolutions[res].BitDepth >= 24 && resolutions[res].Width >= MIN_DISPLAY_RESOLUTION_X 
-      && IS_FOUR_BY_THREE_ASPECT( (Real)resolutions[res].Width, (Real)resolutions[res].Height ) )	//only accept 4:3 aspect ratio modes.
-		{	
+		// Same filter as getDisplayModeCount - the two must agree or indices shift.
+		if ( resolutions[res].BitDepth >= 24 && resolutions[res].Width >= MIN_DISPLAY_RESOLUTION_X
+      && resolutions[res].Height >= MIN_DISPLAY_RESOLUTOIN_Y )
+		{
 			if (numResolutions == modeIndex)
 			{	//found the mode
 				*xres=resolutions[res].Width;
