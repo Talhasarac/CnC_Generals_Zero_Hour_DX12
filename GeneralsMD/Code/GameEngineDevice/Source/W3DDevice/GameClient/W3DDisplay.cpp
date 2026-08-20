@@ -1758,6 +1758,15 @@ AGAIN:
   	//
 	//PredictiveLODOptimizerClass::Optimize_LODs( 5000 );
 
+	// Only a scripted frozen-time camera pan may hold us inside the render do-loop
+	// below. The "client outran logic" case (lastFrame == getFrame()) must NOT: with
+	// rendering decoupled from the logic tick that is the common case, and looping on
+	// it kept draw() spinning - message pump dead - until the shell map's camera
+	// movement of the moment finished.
+	Bool loopForCameraMovement = TheTacticalView->isTimeFrozen() && !TheTacticalView->isCameraMovementFinished()
+		&& !TheScriptEngine->isTimeFrozenDebug() && !TheScriptEngine->isTimeFrozenScript()
+		&& !TheGameLogic->isGamePaused();
+
 	Bool freezeTime = TheTacticalView->isTimeFrozen() && !TheTacticalView->isCameraMovementFinished();
 	freezeTime = freezeTime || TheScriptEngine->isTimeFrozenDebug() || TheScriptEngine->isTimeFrozenScript();
 	freezeTime = freezeTime || TheGameLogic->isGamePaused();
@@ -1841,6 +1850,7 @@ AGAIN:
 				// limit the framerate
 				while(TheGlobalData->m_useFpsLimit && (now - prevTime) < minTime-1)
 				{
+					::Sleep(1);	// was a pure spin; this loop can run for whole camera pans
 					now = timeGetTime();
 				}
 				prevTime = now;
@@ -1997,12 +2007,17 @@ AGAIN:
 			}
 		}
 					
-		if (TheScriptEngine->isTimeFrozenDebug() || TheScriptEngine->isTimeFrozenScript() || TheGameLogic->isGamePaused())	
+		if (TheScriptEngine->isTimeFrozenDebug() || TheScriptEngine->isTimeFrozenScript() || TheGameLogic->isGamePaused())
 		{
 			freezeTime = false; // We're frozen for debug or for pause, and need to continue out of the loop.
 		}
 
-	} while (freezeTime && !TheTacticalView->isCameraMovementFinished());
+		// A scripted pan holds us in here for seconds - keep the window responsive
+		// (same pattern as LoadScreen::update).
+		if (loopForCameraMovement)
+			TheGameEngine->serviceWindowsOS();
+
+	} while (loopForCameraMovement && !TheTacticalView->isCameraMovementFinished());
 
 #ifdef EXTENDED_STATS
 	if (DX8Wrapper::stats.m_disableOverhead) {

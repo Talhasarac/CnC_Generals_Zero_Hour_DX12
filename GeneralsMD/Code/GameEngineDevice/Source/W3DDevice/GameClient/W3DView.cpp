@@ -417,8 +417,16 @@ void W3DView::buildCameraTransform( Matrix3D *transform )
 	transform->Make_Identity();
 	transform->Look_At( sourcePos, targetPos, 0 );
 
-	//WST 11/12/2002 New camera shaker system 
-	CameraShakerSystem.Timestep(1.0f/30.0f); 
+	//WST 11/12/2002 New camera shaker system
+	// This runs once per render frame (and again on every scrollBy), not once per 30Hz
+	// tick, so step the shaker by real elapsed time to keep shakes framerate-independent.
+	static DWORD prevShakeTime = timeGetTime();
+	DWORD nowShakeTime = timeGetTime();
+	Real shakeDt = (nowShakeTime - prevShakeTime) * 0.001f;
+	prevShakeTime = nowShakeTime;
+	if (shakeDt > 1.0f/30.0f)
+		shakeDt = 1.0f/30.0f;
+	CameraShakerSystem.Timestep(shakeDt);
 	CameraShakerSystem.Update_Camera_Shaker(sourcePos, &m_shakerAngles);
 	transform->Rotate_X(m_shakerAngles.X);
 	transform->Rotate_Y(m_shakerAngles.Y);
@@ -1105,6 +1113,20 @@ void W3DView::update(void)
 
 //	Int elapsedTimeMs = TheW3DFrameLengthInMsec; // Assume a constant time flow.  It just works out better.  jba.
 
+	// The camera smoothing and scripted one-frame movements below were tuned for one
+	// call per 30Hz engine tick; update() now runs once per render frame. Step them on
+	// the original wall-clock cadence so camera motion speed is framerate-independent,
+	// while the camera transform itself still updates every render frame.
+	static DWORD prevCameraStepTime = 0;
+	DWORD nowCameraStepTime = timeGetTime();
+	Bool stepTime = (nowCameraStepTime - prevCameraStepTime) >= (DWORD)TheW3DFrameLengthInMsec;
+	// During a scripted frozen-time pan, W3DDisplay::draw's inner loop calls us and
+	// paces itself to ~30fps already; gating on top of that ran the pan at half speed.
+	if (isTimeFrozen() && !isCameraMovementFinished())
+		stepTime = TRUE;
+	if (stepTime)
+		prevCameraStepTime = nowCameraStepTime;
+
 	if (TheTerrainRenderObject->doesNeedFullUpdate()) {
 		RefRenderObjListIterator *it = W3DDisplay::m_3DScene->createLightsIterator();
 		TheTerrainRenderObject->updateCenter(m_3DCamera, it);
@@ -1121,7 +1143,7 @@ void W3DView::update(void)
 	{
 		followFactor = -1;
 	}
-	if (cameraLock != INVALID_ID)
+	if (stepTime && cameraLock != INVALID_ID)
 	{
 		m_doingMoveCameraOnWaypointPath = false;
 		m_CameraArrivedAtWaypointOnPathFlag = false;
@@ -1284,7 +1306,7 @@ void W3DView::update(void)
 		}
 	}	
 
-	if (!(TheScriptEngine->isTimeFrozenDebug()/* || TheScriptEngine->isTimeFrozenScript()*/) && !TheGameLogic->isGamePaused()) {
+	if (stepTime && !(TheScriptEngine->isTimeFrozenDebug()/* || TheScriptEngine->isTimeFrozenScript()*/) && !TheGameLogic->isGamePaused()) {
 		// If we aren't frozen for debug, allow the camera to follow scripted movements.
 		if (updateCameraMovements()) {
 			didScriptedMovement = true;
@@ -1299,26 +1321,29 @@ void W3DView::update(void)
 	// Process camera shake
 	/// @todo Make this framerate-independent
 	//
-	if (m_shakeIntensity > 0.01f)
+	if (stepTime)
 	{
-		m_shakeOffset.x = m_shakeIntensity * m_shakeAngleCos;
-		m_shakeOffset.y = m_shakeIntensity * m_shakeAngleSin;
+		if (m_shakeIntensity > 0.01f)
+		{
+			m_shakeOffset.x = m_shakeIntensity * m_shakeAngleCos;
+			m_shakeOffset.y = m_shakeIntensity * m_shakeAngleSin;
 
-		// fake a stiff spring/damper
-		const Real dampingCoeff = 0.75f;
-		m_shakeIntensity *= dampingCoeff;
+			// fake a stiff spring/damper
+			const Real dampingCoeff = 0.75f;
+			m_shakeIntensity *= dampingCoeff;
 
-		// spring is so "stiff", it pulls 180 degrees opposite each frame
-		m_shakeAngleCos = -m_shakeAngleCos;
-		m_shakeAngleSin = -m_shakeAngleSin;
+			// spring is so "stiff", it pulls 180 degrees opposite each frame
+			m_shakeAngleCos = -m_shakeAngleCos;
+			m_shakeAngleSin = -m_shakeAngleSin;
 
-		recalcCamera = true;
-	}
-	else
-	{
-		m_shakeIntensity = 0.0f;
-		m_shakeOffset.x = 0.0f;
-		m_shakeOffset.y = 0.0f;
+			recalcCamera = true;
+		}
+		else
+		{
+			m_shakeIntensity = 0.0f;
+			m_shakeOffset.x = 0.0f;
+			m_shakeOffset.y = 0.0f;
+		}
 	}
 
 	//Process New C3 Camera Shaker system
@@ -1336,7 +1361,7 @@ void W3DView::update(void)
 	 */
 	m_terrainHeightUnderCamera = getHeightAroundPos(m_pos.x, m_pos.y);
 	m_currentHeightAboveGround = m_cameraOffset.z * m_zoom - m_terrainHeightUnderCamera;
-	if (TheTerrainLogic && TheGlobalData && TheInGameUI && m_okToAdjustHeight && !TheGameLogic->isGamePaused())
+	if (stepTime && TheTerrainLogic && TheGlobalData && TheInGameUI && m_okToAdjustHeight && !TheGameLogic->isGamePaused())
 	{
 		Real desiredHeight = (m_terrainHeightUnderCamera + m_heightAboveGround);
 		Real desiredZoom = desiredHeight / m_cameraOffset.z;
@@ -1812,6 +1837,17 @@ void W3DView::scrollBy( Coord2D *delta )
 	{
 		const Real SCROLL_RESOLUTION = 250.0f;
 
+		// The scroll offsets are tuned as per-30Hz-tick amounts but arrive once per render
+		// frame, so scale the applied movement by real elapsed time to keep scroll speed
+		// framerate-independent. m_scrollAmount stays unscaled - the height-adjust cutoff
+		// in update() compares it against per-tick thresholds.
+		static DWORD prevScrollTime = timeGetTime();
+		DWORD nowScrollTime = timeGetTime();
+		Real scrollDtFactor = (nowScrollTime - prevScrollTime) / (Real)TheW3DFrameLengthInMsec;
+		prevScrollTime = nowScrollTime;
+		if (scrollDtFactor > 3.0f)
+			scrollDtFactor = 3.0f;	// after a hitch or idle, don't teleport the camera
+
 		Vector3 world, worldStart, worldEnd;
 		Vector2 screen, start, end;
 
@@ -1829,9 +1865,9 @@ void W3DView::scrollBy( Coord2D *delta )
 		m_3DCamera->Device_To_World_Space( start, &worldStart );
 		m_3DCamera->Device_To_World_Space( end, &worldEnd );
 
-		world.X = worldEnd.X - worldStart.X;
-		world.Y = worldEnd.Y - worldStart.Y;
-		world.Z = worldEnd.Z - worldStart.Z;
+		world.X = (worldEnd.X - worldStart.X) * scrollDtFactor;
+		world.Y = (worldEnd.Y - worldStart.Y) * scrollDtFactor;
+		world.Z = (worldEnd.Z - worldStart.Z) * scrollDtFactor;
 
 		// scroll by delta
 		Coord3D pos = *getPosition();

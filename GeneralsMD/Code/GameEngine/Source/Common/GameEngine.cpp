@@ -739,12 +739,34 @@ void GameEngine::reset( void )
 DECLARE_PERF_TIMER(GameEngine_update)
 
 /** -----------------------------------------------------------------------------------------------
+ * Wall-clock pacing for the logic tick: update() may be called at any render rate, but a logic
+ * frame is only "due" every 1000/logicFps milliseconds. The elapsed time added per call is
+ * clamped to one logic frame, so a renderer slower than the logic rate runs one logic frame per
+ * render frame (the original slow-machine behavior) instead of a catch-up burst.
+ * Free function (not a member, not static) so test_gameengine can link straight to it.
+ */
+Bool GameEngine_isLogicFrameDue( Real& accumMs, Real elapsedMs, Int logicFps )
+{
+	if (logicFps <= 0)
+		return TRUE;
+	const Real msPerLogicFrame = 1000.0f / logicFps;
+	if (elapsedMs > msPerLogicFrame)
+		elapsedMs = msPerLogicFrame;
+	accumMs += elapsedMs;
+	if (accumMs < msPerLogicFrame)
+		return FALSE;
+	accumMs -= msPerLogicFrame;
+	return TRUE;
+}
+
+/** -----------------------------------------------------------------------------------------------
  * Update the game engine by updating the GameClient and GameLogic singletons.
- * @todo Allow the client to run as fast as possible, but limit the execution
- * of TheNetwork and TheGameLogic to a fixed framerate.
+ * The client runs as fast as possible; TheGameLogic is limited to a fixed wall-clock
+ * framerate (m_maxFPS, the game-speed setting), so game speed does not scale with the
+ * render framerate.
  */
 void GameEngine::update( void )
-{ 
+{
 	USE_PERF_TIMER(GameEngine_update)
 	{
 
@@ -770,7 +792,34 @@ void GameEngine::update( void )
 		}
 
 
-		if ((TheNetwork == NULL && !TheGameLogic->isGamePaused()) || (TheNetwork && TheNetwork->isFrameDataReady()))
+		// Fast-forward modes run a logic frame on every call; otherwise logic ticks at
+		// m_maxFPS Hz of wall clock, however fast the client/renderer above is running.
+#if defined(_ALLOW_DEBUG_CHEATS_IN_RELEASE)
+		Bool fastMode = TheGlobalData->m_TiVOFastMode;
+#else
+		Bool fastMode = TheGlobalData->m_TiVOFastMode && TheGameLogic->isInReplayGame();
+#endif
+		fastMode = fastMode || TheTacticalView->getTimeMultiplier() > 1 || TheScriptEngine->isTimeFast();
+
+		static DWORD prevLogicTime = timeGetTime();
+		static Real logicAccumMs = 0.0f;
+		DWORD now = timeGetTime();
+		Real elapsedMs = (Real)(now - prevLogicTime);
+		prevLogicTime = now;
+
+		Bool logicFrameDue;
+		if (fastMode)
+		{
+			logicAccumMs = 0.0f;
+			logicFrameDue = TRUE;
+		}
+		else
+		{
+			logicFrameDue = GameEngine_isLogicFrameDue(logicAccumMs, elapsedMs, m_maxFPS);
+		}
+
+		if (logicFrameDue &&
+				((TheNetwork == NULL && !TheGameLogic->isGamePaused()) || (TheNetwork && TheNetwork->isFrameDataReady())))
 		{
 			TheGameLogic->UPDATE();
 		}
@@ -788,8 +837,7 @@ extern HWND ApplicationHWnd;
  */
 void GameEngine::execute( void )
 {
-	
-	DWORD prevTime = timeGetTime();
+	DWORD prevLoopTime = timeGetTime();
 #if defined(_DEBUG) || defined(_INTERNAL)
 	DWORD startTime = timeGetTime() / 1000;
 #endif
@@ -859,39 +907,33 @@ void GameEngine::execute( void )
 			}	// perf
 
 			{
-
-				if (TheTacticalView->getTimeMultiplier()<=1 && !TheScriptEngine->isTimeFast()) 
+				// In a real game rendering runs uncapped - game speed stays constant because
+				// the logic tick is paced by wall clock inside update(). The menus/shell keep
+				// the original coupled cadence: their window animations step once per loop
+				// iteration and were tuned for m_maxFPS, and capping here also keeps the
+				// present queue short so the cursor stays responsive.
+				// Unconditional in menus - the window animations move a fixed step per loop
+				// iteration, so an uncapped menu makes them finish instantly after their
+				// wall-clock start delay ("wait, then pop") whatever m_useFpsLimit says.
+				Bool inMenus = !TheGameLogic->isInGame() || TheGameLogic->isInShellGame();
+				if (inMenus && m_maxFPS > 0)
 				{
+					DWORD limit = (DWORD)(1000.0f/m_maxFPS)-1;
+					DWORD now = timeGetTime();
+					while ((now - prevLoopTime) < limit)
+					{
+						::Sleep(1);
+						now = timeGetTime();
+					}
+				}
+				prevLoopTime = timeGetTime();
 
-		// I'm disabling this in internal because many people need alt-tab capability.  If you happen to be
-		// doing performance tuning, please just change this on your local system. -MDC
 		#if defined(_DEBUG) || defined(_INTERNAL)
+				// I'm disabling this in internal because many people need alt-tab capability.  If you happen to be
+				// doing performance tuning, please just change this on your local system. -MDC
+				if (TheTacticalView->getTimeMultiplier()<=1 && !TheScriptEngine->isTimeFast())
 					::Sleep(1); // give everyone else a tiny time slice.
 		#endif
-
-
-		#if defined(_ALLOW_DEBUG_CHEATS_IN_RELEASE)
-          if ( ! TheGlobalData->m_TiVOFastMode )
-		#else	//always allow this cheatkey if we're in a replaygame.
-		  if ( ! (TheGlobalData->m_TiVOFastMode && TheGameLogic->isInReplayGame()))
-		#endif
-          {
-            // limit the framerate
-					  DWORD now = timeGetTime();
-					  DWORD limit = (1000.0f/m_maxFPS)-1;
-					  while (TheGlobalData->m_useFpsLimit && (now - prevTime) < limit) 
-					  {
-						  ::Sleep(0);
-						  now = timeGetTime();
-					  }
-					  //Int slept = now - prevTime;
-					  //DEBUG_LOG(("delayed %d\n",slept));
-
-					  prevTime = now;
-
-          }        
-        
-        }
 			}
 
 		}	// perfgather for execute_loop

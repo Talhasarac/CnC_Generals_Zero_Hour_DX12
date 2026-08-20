@@ -443,3 +443,29 @@ TEST(are_music_files_on_cd_accepts_the_local_no_cd_layout)
 	CHECK_EQ( TheFileSystem->areMusicFilesOnCD(), TRUE );
 	remove( "genseczh.big" );
 }
+
+/* GameEngine.cpp: rendering is uncapped and the logic tick is paced by wall
+   clock instead of by render frames, so game speed must not scale with fps.
+   This is the pacing decision function; the statics live in update(). */
+extern Bool GameEngine_isLogicFrameDue( Real& accumMs, Real elapsedMs, Int logicFps );
+
+TEST(logic_tick_is_wall_clock_paced_not_render_paced)
+{
+	/* A 300fps renderer (3.33ms/frame) at 30fps logic: 900 render frames span
+	   3 seconds, which must yield 90 logic frames, not 900. */
+	Real accum = 0.0f;
+	Int due = 0;
+	for( Int i = 0; i < 900; ++i )
+		if( GameEngine_isLogicFrameDue( accum, 1000.0f / 300.0f, 30 ) )
+			++due;
+	CHECK( due >= 89 && due <= 91 );
+
+	/* A renderer slower than the logic rate runs exactly one logic frame per
+	   render frame (elapsed time is clamped) - never a catch-up burst. */
+	accum = 0.0f;
+	for( Int i = 0; i < 50; ++i )
+		CHECK( GameEngine_isLogicFrameDue( accum, 100.0f, 30 ) );
+
+	/* A non-positive fps never throttles (the -noFPSLimit style dev mode). */
+	CHECK( GameEngine_isLogicFrameDue( accum, 0.0f, 0 ) );
+}

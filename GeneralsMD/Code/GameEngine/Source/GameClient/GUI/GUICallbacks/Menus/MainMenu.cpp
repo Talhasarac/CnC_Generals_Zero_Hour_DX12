@@ -184,7 +184,11 @@ static GameWindow *dropDownWindows[DROPDOWN_COUNT];
 static Bool buttonPushed = FALSE;
 static Bool isShuttingDown = FALSE;
 static Bool startGame = FALSE;
-static Int	initialGadgetDelay = 210;
+// Was 210 client frames (7s at the menu's 30Hz cadence) of staring at the shell map
+// before the menu UI fades in. Retail hid most of that behind the Bink intro movies,
+// which this port stubs out, so the wait read as "the menu never comes". One second
+// keeps the fade choreography without the dead air.
+static Int	initialGadgetDelay = 30;
 
 enum
 {
