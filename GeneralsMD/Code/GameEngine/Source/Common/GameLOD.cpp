@@ -359,6 +359,10 @@ void GameLODManager::init(void)
 		TheWritableGlobalData->m_useTrees = optionPref.getTreesEnabled();
 	}
 
+	// Camera zoom-out is not a detail level: honor the Options.ini override at
+	// every preset, floored at the GameData.ini value (see getMaxCameraHeight).
+	TheWritableGlobalData->m_maxCameraHeight = optionPref.getMaxCameraHeight();
+
 	setStaticLODLevel(userSetDetail);
 }
 

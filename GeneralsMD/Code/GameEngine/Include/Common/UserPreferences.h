@@ -107,6 +107,7 @@ public:
 	Int	 getStaticGameDetail(void);	// detail level selected by the user.
 	Int	 getIdealStaticGameDetail(void);	// detail level detected for user.
  	Real getGammaValue(void);
+	Real getMaxCameraHeight(void);
 	Int	 getTextureReduction(void);
 	void getResolution(Int *xres, Int *yres);
 	Bool get3DShadowsEnabled(void);

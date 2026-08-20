@@ -708,6 +708,22 @@ Int OptionPreferences::getParticleCap(void)
 	return factor;
 }
 
+Real OptionPreferences::getMaxCameraHeight(void)
+{
+	// Not written by the options menu - a power-user Options.ini key.  The
+	// GameData.ini value (retail ~310) is the floor: raising it lets you zoom
+	// out further, lowering it below retail is never honored.
+	OptionPreferences::const_iterator it = find("MaxCameraHeight");
+	if (it == end())
+		return TheGlobalData->m_maxCameraHeight;
+
+	Real height = (Real) atof(it->second.str());
+	if (height < TheGlobalData->m_maxCameraHeight)
+		height = TheGlobalData->m_maxCameraHeight;
+
+	return height;
+}
+
 Int OptionPreferences::getTextureReduction(void)
 {
 	OptionPreferences::const_iterator it = find("TextureReduction");
