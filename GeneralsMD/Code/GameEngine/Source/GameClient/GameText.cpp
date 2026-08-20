@@ -327,9 +327,20 @@ void GameTextManager::init( void )
 		return;
 	}
 
+	// The 1.04 patch ships its two new menu strings as a text overlay - Data\Patch.str
+	// inside PatchData.big - instead of an updated CSF. The retail 1.04 exe reads it;
+	// this source drop predates that, so without it the patched MainMenu.wnd shows
+	// MISSING: 'GUI:CustomMission'. Parse it into the tail of the string table.
+	Int patchCount = 0;
+	Int mainCount = m_textCount;
+	if ( !getStringCount( "Data\\Patch.str", patchCount ) )
+	{
+		patchCount = 0;
+	}
+
 	//Allocate StringInfo Array
 
-	m_stringInfo = NEW StringInfo[m_textCount];
+	m_stringInfo = NEW StringInfo[m_textCount + patchCount];
 
 	if( m_stringInfo == NULL )
 	{
@@ -351,6 +362,20 @@ void GameTextManager::init( void )
 		{
 			deinit();
 			return;
+		}
+	}
+
+	if ( patchCount > 0 )
+	{
+		// parseStringFile fills m_stringInfo from index 0, so point it at the tail
+		// for the overlay and restore afterwards.
+		StringInfo *wholeTable = m_stringInfo;
+		m_stringInfo += mainCount;
+		Bool patchOk = parseStringFile( "Data\\Patch.str" );
+		m_stringInfo = wholeTable;
+		if ( patchOk )
+		{
+			m_textCount = mainCount + patchCount;
 		}
 	}
 
