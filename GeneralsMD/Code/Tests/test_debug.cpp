@@ -18,8 +18,9 @@
  * the literal "!debug.io flat add" and has no logic.
  *
  * Deliberately NOT covered: the con/net/ods/flat I/O classes (window, named
- * pipe, OutputDebugString, log files), DebugStackwalk (needs dbghelp and real
- * frames), the exception filter, and debug.exit (it calls exit(1)).
+ * pipe, OutputDebugString, log files), the exception filter, and debug.exit
+ * (it calls exit(1)).  DebugStackwalk is covered, but only just: it needs
+ * dbghelp and a PDB next to the test exe.
  */
 #include "test_harness.h"
 
@@ -845,4 +846,32 @@ TEST(debug_memory_realloc_truth_table)
 	CHECK_MEM(p, "01234567", 8);
 
 	CHECK_EQ(DebugReAllocMemory(p, 0), (void *)0);
+}
+
+
+/* The crash reports out of generals.exe all said "1 addresses:": on a current
+   dbghelp.dll the 32-bit-only StackWalk this used fails on its very first step,
+   and the one address in the report was the frame the walk had been seeded with.
+   Walking out of a helper and finding main() proves the walk moves and that the
+   symbols resolve - the latter needs the PDB next to the test exe. */
+static int walkFromHere(DebugStackwalk::Signature &sig)
+{
+	return DebugStackwalk::StackWalk(sig);
+}
+
+TEST(stackwalk_walks_past_the_frame_it_started_in)
+{
+	DebugStackwalk::Signature sig;
+	int count = walkFromHere(sig);
+	CHECK(count > 1);
+
+	bool sawMain = false;
+	for (unsigned i = 0; i < sig.Size(); ++i)
+	{
+		char buf[512];
+		sig.GetSymbol(sig.GetAddress(i), buf, sizeof(buf));
+		if (strstr(buf, "main+") != 0)
+			sawMain = true;
+	}
+	CHECK(sawMain);
 }

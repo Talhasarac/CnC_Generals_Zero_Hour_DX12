@@ -104,8 +104,15 @@ static void InitDbghelp(void)
     // Set options
     gDbg._SymSetOptions(gDbg._SymGetOptions()|SYMOPT_DEFERRED_LOADS|SYMOPT_LOAD_LINES);
 
-    // Init module
-    gDbg._SymInitialize((HANDLE)GetCurrentProcessId(),NULL,TRUE);
+    // Init module.  This used to pass (HANDLE)GetCurrentProcessId() here and in
+    // every Sym* call below, while StackWalk got GetCurrentProcess() -- dbghelp
+    // keys its per-process state by whatever it is handed, so the walk ran with
+    // callbacks that had no symbol context, returned the frame it was seeded with
+    // and stopped: every crash report in this port read "1 addresses:".  The real
+    // handle is what dbghelp documents and what GameEngine's StackDump.cpp already
+    // uses, so the two agree now.  Re-initializing an already-initialized handle
+    // just fails harmlessly.
+    gDbg._SymInitialize(GetCurrentProcess(),NULL,TRUE);
 
     // Check: are we using a newer version of dbghelp.dll?
     // (older versions have some serious issues.. err... bugs)
@@ -149,7 +156,7 @@ void DebugStackwalk::Signature::GetSymbol(unsigned addr, char *buf, unsigned buf
   buf+=wsprintf(buf,"%08x",addr);
 
   // determine module
-  unsigned modBase=gDbg._SymGetModuleBase((HANDLE)GetCurrentProcessId(),addr);
+  unsigned modBase=gDbg._SymGetModuleBase(GetCurrentProcess(),addr);
   if (!modBase)
 	{
 		strcpy(buf," (unknown module)");
@@ -181,7 +188,7 @@ void DebugStackwalk::Signature::GetSymbol(unsigned addr, char *buf, unsigned buf
   symPtr->SizeOfStruct=sizeof(IMAGEHLP_SYMBOL);
   symPtr->MaxNameLength=sizeof(symbolBuffer)-sizeof(IMAGEHLP_SYMBOL);
   DWORD displacement;
-  if (!gDbg._SymGetSymFromAddr((HANDLE)GetCurrentProcessId(),addr,&displacement,symPtr))
+  if (!gDbg._SymGetSymFromAddr(GetCurrentProcess(),addr,&displacement,symPtr))
     return;
   if ((unsigned int)(bufEnd-buf)<strlen(symPtr->Name)+16)
     return;
@@ -191,7 +198,7 @@ void DebugStackwalk::Signature::GetSymbol(unsigned addr, char *buf, unsigned buf
   IMAGEHLP_LINE line;
   memset(&line,0,sizeof(line));
   line.SizeOfStruct=sizeof(line);
-  if (!gDbg._SymGetLineFromAddr((HANDLE)GetCurrentProcessId(),addr,&displacement,&line))
+  if (!gDbg._SymGetLineFromAddr(GetCurrentProcess(),addr,&displacement,&line))
     return;
 
   p=strrchr(line.FileName,'\\'); // use filename only, strip off path
@@ -223,7 +230,7 @@ void DebugStackwalk::Signature::GetSymbol(unsigned addr,
   DFAIL_IF(bufFile&&sizeFile<16) return;
 
   // determine module
-  unsigned modBase=gDbg._SymGetModuleBase((HANDLE)GetCurrentProcessId(),addr);
+  unsigned modBase=gDbg._SymGetModuleBase(GetCurrentProcess(),addr);
   if (!modBase)
 	{
     if (bufMod)
@@ -264,7 +271,7 @@ void DebugStackwalk::Signature::GetSymbol(unsigned addr,
     symPtr->SizeOfStruct=sizeof(IMAGEHLP_SYMBOL);
     symPtr->MaxNameLength=sizeof(symbolBuffer)-sizeof(IMAGEHLP_SYMBOL);
     DWORD displacement;
-    if (gDbg._SymGetSymFromAddr((HANDLE)GetCurrentProcessId(),addr,&displacement,symPtr))
+    if (gDbg._SymGetSymFromAddr(GetCurrentProcess(),addr,&displacement,symPtr))
     {
       strncpy(bufSym,symPtr->Name,sizeSym);
       bufSym[sizeSym-1]=0;
@@ -282,7 +289,7 @@ void DebugStackwalk::Signature::GetSymbol(unsigned addr,
     memset(&line,0,sizeof(line));
     line.SizeOfStruct=sizeof(line);
     DWORD displacement;
-    if (!gDbg._SymGetLineFromAddr((HANDLE)GetCurrentProcessId(),addr,&displacement,&line))
+    if (!gDbg._SymGetLineFromAddr(GetCurrentProcess(),addr,&displacement,&line))
       strcpy(bufFile,"(unknown)");
     else
     {
@@ -341,11 +348,14 @@ int DebugStackwalk::StackWalk(Signature &sig, struct _CONTEXT *ctx)
   sig.m_numAddr=0;
 
   // bail out if no stack walk available
-  if (!gDbg._StackWalk)
+  if (!gDbg._StackWalk64)
     return 0;
 
 	// Set up the stack frame structure for the start point of the stack walk (i.e. here).
-	STACKFRAME stackFrame;
+	// STACKFRAME/StackWalk (the 32-bit-only originals) are what this used to use, but
+	// on a current dbghelp.dll that call fails on its first step with
+	// ERROR_PARTIAL_COPY and the walk produces nothing at all.
+	STACKFRAME64 stackFrame;
 	memset(&stackFrame,0,sizeof(stackFrame));
 
 	stackFrame.AddrPC.Mode = AddrModeFlat;
@@ -379,13 +389,13 @@ int DebugStackwalk::StackWalk(Signature &sig, struct _CONTEXT *ctx)
 	// Walk the stack by the requested number of return address iterations.
   bool skipFirst=!ctx;
   while (sig.m_numAddr<Signature::MAX_ADDR&&
-		     gDbg._StackWalk(IMAGE_FILE_MACHINE_I386,GetCurrentProcess(),GetCurrentThread(),
-                         &stackFrame,NULL,NULL,gDbg._SymFunctionTableAccess,gDbg._SymGetModuleBase,NULL))
+		     gDbg._StackWalk64(IMAGE_FILE_MACHINE_I386,GetCurrentProcess(),GetCurrentThread(),
+                           &stackFrame,NULL,NULL,gDbg._SymFunctionTableAccess64,gDbg._SymGetModuleBase64,NULL))
   {
     if (skipFirst)
       skipFirst=false;
     else
-      sig.m_addr[sig.m_numAddr++]=stackFrame.AddrPC.Offset;
+      sig.m_addr[sig.m_numAddr++]=(unsigned)stackFrame.AddrPC.Offset;
   }
 
 	return sig.m_numAddr;

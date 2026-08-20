@@ -57,6 +57,26 @@ DBGHELP(SymGetLineFromAddr,
         (HANDLE hProcess, DWORD dwAddr, PDWORD pdwDisplacement, 
         PIMAGEHLP_LINE Line))
 
+// StackWalk/SymFunctionTableAccess/SymGetModuleBase are the 32-bit-only originals.
+// On a current dbghelp.dll the legacy StackWalk fails outright (ERROR_PARTIAL_COPY
+// on its very first step), so the walker uses the 64-bit trio instead; the Sym*
+// lookups above still work, they only take an address.
+DBGHELP(StackWalk64,
+        BOOL,
+        (DWORD MachineType, HANDLE hProcess, HANDLE hThread, LPSTACKFRAME64 StackFrame,
+        PVOID ContextRecord, PREAD_PROCESS_MEMORY_ROUTINE64 ReadMemoryRoutine,
+        PFUNCTION_TABLE_ACCESS_ROUTINE64 FunctionTableAccessRoutine,
+        PGET_MODULE_BASE_ROUTINE64 GetModuleBaseRoutine,
+        PTRANSLATE_ADDRESS_ROUTINE64 TranslateAddress))
+
+DBGHELP(SymFunctionTableAccess64,
+        PVOID,
+        (HANDLE hProcess, DWORD64 AddrBase))
+
+DBGHELP(SymGetModuleBase64,
+        DWORD64,
+        (HANDLE hProcess, DWORD64 dwAddr))
+
 // keep this always as last entry
 DBGHELP(SymCleanup,
         BOOL,
