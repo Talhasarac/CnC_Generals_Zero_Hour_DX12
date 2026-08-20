@@ -218,6 +218,11 @@ target_link_options(ww3d2 INTERFACE /SAFESEH:NO /NODEFAULTLIB:libci.lib)
 # edits in render code. Burn the sites down later, then drop the flag.
 target_compile_options(ww3d2 PRIVATE /Zc:forScope-)
 
+# Phase 8: 1 kHz EIP sampler that symbolizes against the linker map - the
+# machine has no debugger, so this is how hotspots get names.
+add_executable(eip_sampler ${CMAKE_CURRENT_SOURCE_DIR}/Tools/ProfileSampler/eip_sampler.cpp)
+set_target_properties(eip_sampler PROPERTIES CXX_STANDARD 17)
+
 # Phase 1 checkpoint: vendored DX8 SDK + OS d3d8.dll create a real device.
 add_executable(dx8_smoke ${WW}/WW3D2/test_dx8_smoke.cpp)
 target_include_directories(dx8_smoke PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/Libraries/DirectX/Include)
