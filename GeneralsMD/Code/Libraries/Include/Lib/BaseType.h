@@ -206,14 +206,18 @@ __forceinline long fast_float2long_round(float f)
 // code courtesy of Martin Hoffesommer (grin)
 __forceinline float fast_float_trunc(float f)
 {
+  // EDX, not EBX, for the zero: an __asm block has to leave EBX/ESI/EDI the way it
+  // found them, and this one did not.  Where the compiler parks the saved ESP in EBX
+  // (W3DTreeBuffer::doLighting does) the epilogue's "mov esp,ebx" then set ESP to 0
+  // and the next pop faulted -- the crash that ended every run at the main menu.
   _asm
   {
     mov ecx,[f]
     shr ecx,23
     mov eax,0xff800000
-    xor ebx,ebx
+    xor edx,edx
     sub cl,127
-    cmovc eax,ebx
+    cmovc eax,edx
     sar eax,cl
     and [f],eax
   }

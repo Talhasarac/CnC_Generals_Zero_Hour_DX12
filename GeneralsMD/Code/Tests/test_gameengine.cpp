@@ -10,6 +10,10 @@
  * is not ported yet, so the test supplies its own out of LocalFile, which is
  * plain CRT _open/_read and does live in gameengine.
  */
+/* crc.h pulls winsock2.h, so it has to come before anything that drags in
+   windows.h (and with it winsock.h) - otherwise ws2def.h redefines sockaddr. */
+#include "Common/crc.h"
+
 #include "test_harness.h"
 
 #include "Common/AsciiString.h"
@@ -351,4 +355,75 @@ TEST(stackdump_walks_the_callers)
 	if( strstr( s_stackText, "stackdump_walks_the_callers" ) == NULL )
 		printf( "%s\n", s_stackText );
 	CHECK( strstr( s_stackText, "stackdump_walks_the_callers" ) != NULL );
+}
+
+/* Two __asm blocks in headers everything includes wrote to registers that belong
+   to the caller.  fast_float_trunc's "xor ebx,ebx" is what killed every run at the
+   main menu: W3DTreeBuffer::doLighting keeps its saved ESP in EBX, so the epilogue's
+   "mov esp,ebx" set ESP to zero and the following pop faulted.  The witnesses below
+   put a sentinel in each register, run the block, and read the register back. */
+static unsigned truncEbxWitness( float f )
+{
+	unsigned ebxOut;
+	volatile float t;
+	__asm mov ebx, 0x0BADF00D
+	t = fast_float_trunc( f );
+	__asm mov ebxOut, ebx
+	(void)t;
+	return ebxOut;
+}
+
+TEST(fast_float_trunc_leaves_ebx_alone)
+{
+	CHECK_EQ( truncEbxWitness( 3.75f ), 0x0BADF00D );
+	CHECK_NEAR( fast_float_trunc( 3.75f ), 3.0f, 0.0001f );
+	CHECK_NEAR( fast_float_trunc( -3.75f ), -3.0f, 0.0001f );
+}
+
+/* The length is a parameter and not a strlen() call on purpose: anything the compiler
+   emits between the two blocks below is free to use these registers itself, so the
+   witness only stays honest while the call is the only thing in between. */
+static void crcRegisterWitness( const char *text, Int len, unsigned *ebxOut, unsigned *esiOut, unsigned *ediOut )
+{
+	CRC crc;
+	__asm
+	{
+		mov ebx, 0x0BADF00D
+		mov esi, 0x0BADBEEF
+		mov edi, 0x0BADCAFE
+	}
+	crc.computeCRC( text, len );
+	__asm
+	{
+		mov eax, ebxOut
+		mov dword ptr [eax], ebx
+		mov eax, esiOut
+		mov dword ptr [eax], esi
+		mov eax, ediOut
+		mov dword ptr [eax], edi
+	}
+}
+
+TEST(crc_computecrc_leaves_the_callee_saved_registers_alone)
+{
+	const char *text = "the quick brown fox";
+	unsigned ebxOut = 0, esiOut = 0, ediOut = 0;
+	crcRegisterWitness( text, (Int)strlen( text ), &ebxOut, &esiOut, &ediOut );
+	CHECK_EQ( ebxOut, 0x0BADF00D );
+	CHECK_EQ( esiOut, 0x0BADBEEF );
+	CHECK_EQ( ediOut, 0x0BADCAFE );
+
+	/* ...and it still computes what the C++ version in the header's comment does. */
+	UnsignedInt expected = 0;
+	for( const UnsignedByte *p = (const UnsignedByte *)text; *p; ++p )
+	{
+		UnsignedInt hibit = ( expected & 0x80000000 ) ? 1 : 0;
+		expected <<= 1;
+		expected += *p;
+		expected += hibit;
+	}
+
+	CRC crc;
+	crc.computeCRC( text, (Int)strlen( text ) );
+	CHECK_EQ( crc.get(), expected );
 }

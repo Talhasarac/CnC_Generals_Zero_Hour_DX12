@@ -87,8 +87,15 @@ public:
 
     // ASM version, verified by comparing resulting data with C++ version data
     unsigned *crcPtr=&crc;
+    // Same rule as fast_float_trunc in BaseType.h: EBX, ESI and EDI belong to the
+    // caller, and this block uses all three.  Nothing has crashed on it yet, but that
+    // is luck -- whichever of them the compiler happens to hold a live value in is
+    // gone when the block ends.
     _asm
     {
+      push ebx
+      push esi
+      push edi
       mov esi,[buf]
       mov ecx,[len]
       dec ecx
@@ -103,6 +110,9 @@ public:
       dec ecx
       jns lp
       mov dword ptr [edi],ebx
+      pop edi
+      pop esi
+      pop ebx
     };
   }
 
