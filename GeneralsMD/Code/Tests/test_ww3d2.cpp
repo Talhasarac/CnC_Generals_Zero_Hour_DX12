@@ -1557,3 +1557,94 @@ TEST(w3d_shader_struct_is_the_size_the_file_format_expects)
 	CHECK_EQ(sizeof(W3dVectorStruct), 12u);
 	CHECK_EQ(sizeof(W3dQuaternionStruct), 16u);
 }
+
+/* ------------------------------------------------------------------ */
+/* DX8Wrapper::Convert_Color / Clamp_Color register discipline.
+ *
+ * Both are WWINLINE __asm blocks in dx8wrapper.h, inlined into every
+ * renderer that converts a color.  The Convert_Color block used EAX,
+ * EBX, ECX, EDX, ESI and EDI as scratch without handing them back;
+ * VS2022 keeps live values in those registers across the inlined block
+ * (SegLineRendererClass::Render held its point count in EAX and its
+ * transform reference in EBX), so the shell map died in Render with a
+ * color value where a pointer should have been.  Same class of bug as
+ * fast_float_trunc and CRC::computeCRC, witnessed the same way: plant
+ * a sentinel, run the block, read the sentinel back.  The witnesses
+ * cover the callee-saved registers only - the compiler is entitled to
+ * use EAX/ECX/EDX for its own glue between the two asm blocks.       */
+
+#include "dx8wrapper.h"
+
+static void convertColorRegisterWitness(const Vector3 *rgb, float alpha, unsigned *colOut,
+	unsigned *ebxOut, unsigned *esiOut, unsigned *ediOut)
+{
+	__asm
+	{
+		mov ebx, 0x0BADF00D
+		mov esi, 0x0BADBEEF
+		mov edi, 0x0BADCAFE
+	}
+	*colOut = DX8Wrapper::Convert_Color(*rgb, alpha);
+	__asm
+	{
+		mov eax, ebxOut
+		mov dword ptr [eax], ebx
+		mov eax, esiOut
+		mov dword ptr [eax], esi
+		mov eax, ediOut
+		mov dword ptr [eax], edi
+	}
+}
+
+TEST(convert_color_leaves_the_callee_saved_registers_alone)
+{
+	Vector3 rgb(0.4f, 0.8f, 0.2f);
+	unsigned col = 0, ebxOut = 0, esiOut = 0, ediOut = 0;
+	convertColorRegisterWitness(&rgb, 1.0f, &col, &ebxOut, &esiOut, &ediOut);
+	CHECK_EQ(ebxOut, 0x0BADF00D);
+	CHECK_EQ(esiOut, 0x0BADBEEF);
+	CHECK_EQ(ediOut, 0x0BADCAFE);
+
+	/* ...and it still converts: truncate(x*255), packed AARRGGBB. */
+	unsigned expected = ((unsigned)(1.0f * 255.0f) << 24)
+							| ((unsigned)(0.4f * 255.0f) << 16)
+							| ((unsigned)(0.8f * 255.0f) << 8)
+							| (unsigned)(0.2f * 255.0f);
+	CHECK_EQ(col, expected);
+}
+
+static void clampColorRegisterWitness(Vector4 *color,
+	unsigned *ebxOut, unsigned *esiOut, unsigned *ediOut)
+{
+	__asm
+	{
+		mov ebx, 0x0BADF00D
+		mov esi, 0x0BADBEEF
+		mov edi, 0x0BADCAFE
+	}
+	DX8Wrapper::Clamp_Color(*color);
+	__asm
+	{
+		mov eax, ebxOut
+		mov dword ptr [eax], ebx
+		mov eax, esiOut
+		mov dword ptr [eax], esi
+		mov eax, ediOut
+		mov dword ptr [eax], edi
+	}
+}
+
+TEST(clamp_color_leaves_the_callee_saved_registers_alone)
+{
+	Vector4 color(-0.5f, 0.5f, 2.0f, 1.0f);
+	unsigned ebxOut = 0, esiOut = 0, ediOut = 0;
+	clampColorRegisterWitness(&color, &ebxOut, &esiOut, &ediOut);
+	CHECK_EQ(ebxOut, 0x0BADF00D);
+	CHECK_EQ(esiOut, 0x0BADBEEF);
+	CHECK_EQ(ediOut, 0x0BADCAFE);
+
+	CHECK_NEAR(color.X, 0.0f, 0.0001f);
+	CHECK_NEAR(color.Y, 0.5f, 0.0001f);
+	CHECK_NEAR(color.Z, 1.0f, 0.0001f);
+	CHECK_NEAR(color.W, 1.0f, 0.0001f);
+}

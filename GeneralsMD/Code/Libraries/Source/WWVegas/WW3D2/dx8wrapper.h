@@ -1011,6 +1011,18 @@ WWINLINE unsigned int DX8Wrapper::Convert_Color(const Vector3& color,float alpha
 	// such that 32 bit ingeger has AAAAAAAARRRRRRRRGGGGGGGGBBBBBBBB.
 	__asm
 	{
+		// This block is inlined wherever colors are converted, and VS2022 keeps live
+		// values in ANY of these registers across it -- SegLineRendererClass::Render
+		// held its point count in EAX and its transform reference in EBX, and both
+		// came back as color bytes (the fast_float_trunc lesson, one register wider).
+		// Hand back every register the way it was found; col carries the result out.
+		push	eax
+		push	ecx
+		push	edx
+		push	ebx
+		push	esi
+		push	edi
+
 		sub	esp,20					// space for a, r, g and b float plus fpu rounding mode
 
 		// Store the fpu rounding mode
@@ -1068,6 +1080,13 @@ not_changed:
 		add	esp,20
 
 		mov	col,eax
+
+		pop	edi
+		pop	esi
+		pop	ebx
+		pop	edx
+		pop	ecx
+		pop	eax
 	}
 	return col;
 }
@@ -1090,6 +1109,12 @@ WWINLINE void DX8Wrapper::Clamp_Color(Vector4& color)
 
 	__asm
 	{
+		// Same contract as Convert_Color above: leave every register as found.
+		push	edx
+		push	ebx
+		push	esi
+		push	edi
+
 		mov	esi,dword ptr color
 
 		mov edx,0x3f800000
@@ -1129,6 +1154,11 @@ WWINLINE void DX8Wrapper::Clamp_Color(Vector4& color)
 		cmp edi,edx		// if no less than 1.0 set to 1.0
 		cmovnb edi,edx
 		mov dword ptr[esi+12],edi
+
+		pop	edi
+		pop	esi
+		pop	ebx
+		pop	edx
 	}
 }
 
