@@ -1,0 +1,4 @@
+# Vendored, never committed (EA's design for third-party drops): re-fetch from
+# https://github.com/crosire/d3d8to9 @ 6cdb8a8 - whole repo, minus .git.
+*
+!.gitignore

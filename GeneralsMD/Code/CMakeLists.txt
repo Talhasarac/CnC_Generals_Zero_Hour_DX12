@@ -314,6 +314,12 @@ set(GS_BUILD_TESTS      OFF CACHE BOOL "" FORCE)
 set(GS_INCLUDE_VOICE    OFF CACHE BOOL "" FORCE)
 add_subdirectory(${LIBSRC}/GameSpy ${CMAKE_CURRENT_BINARY_DIR}/gamespy)
 
+# d3d8to9 (vendored, github.com/crosire/d3d8to9): builds our own d3d8.dll that
+# translates every D3D8 call to Direct3D 9.  It sits next to generals.exe, the
+# loader prefers the application directory over system32, and the whole
+# renderer runs on the DX9 runtime without touching the ~5600 D3D8 call sites.
+add_subdirectory(${LIBSRC}/d3d8to9 ${CMAKE_CURRENT_BINARY_DIR}/d3d8to9)
+
 # ===========================================================================
 # Phase 3 - GameEngine.  ~580 files of game logic; no DX8, no device code.
 # ===========================================================================
@@ -439,7 +445,11 @@ add_custom_command(TARGET generals POST_BUILD
   # The PDB has to sit next to the exe: SymInitialize searches the exe's directory,
   # and without it the crash log's stack is addresses with no names.
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
-          $<TARGET_PDB_FILE:generals> ${CMAKE_CURRENT_SOURCE_DIR}/../Run/)
+          $<TARGET_PDB_FILE:generals> ${CMAKE_CURRENT_SOURCE_DIR}/../Run/
+  # d3d8to9's d3d8.dll next to the exe = the renderer runs on Direct3D 9.
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          $<TARGET_FILE:d3d8to9> ${CMAKE_CURRENT_SOURCE_DIR}/../Run/)
+add_dependencies(generals d3d8to9)
 
 # ===========================================================================
 # Tests.  Run with:  ctest --test-dir build -C Release --output-on-failure
