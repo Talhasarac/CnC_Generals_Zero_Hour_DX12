@@ -69,8 +69,20 @@ void Win32BIGFileSystem::init() {
     // GeneralsZH...
     DEBUG_ASSERTCRASH(installPath != "", ("Be 1337! Go install Generals!"));
 #endif
-    if (installPath!="")
-      loadBigFilesFromDirectory(installPath, "*.big");
+    if (installPath=="")
+    {
+      // Zero Hour is not standalone: the base game's bigs carry most of the art,
+      // audio and the music tracks, and the CD check in AudioManager::init spins
+      // on a "Missing CD" prompt without them.  A retail install registers the
+      // key above; the Steam build does not, it ships the base game's bigs in a
+      // ZH_Generals subdirectory next to the exe instead.  Fall back to that
+      // layout so a copied-over Steam install works with no registry writes.
+      installPath = "ZH_Generals\\";
+      DEBUG_LOG(("Win32BIGFileSystem::init - no Generals install registered, trying %s\n", installPath.str()));
+    }
+    // Loaded second on purpose: loadIntoDirectoryTree does not overwrite, so the
+    // Zero Hour bigs already in the tree win over the base game's copies.
+    loadBigFilesFromDirectory(installPath, "*.big");
 }
 
 void Win32BIGFileSystem::reset() {
