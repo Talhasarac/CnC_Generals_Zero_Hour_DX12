@@ -266,6 +266,15 @@ Bool FileSystem::createDirectory(AsciiString directory)
 //============================================================================
 Bool FileSystem::areMusicFilesOnCD()
 {
+	// No-CD layouts (Steam) ship the security big next to the exe instead of on
+	// a disc; finding it there is the same proof of media this check wants, so
+	// look locally first and never prompt for a CD the install cannot have.
+	File *localSec = TheLocalFileSystem->openFile("genseczh.big");
+	if (localSec) {
+		localSec->close();
+		return TRUE;
+	}
+
 	if (!TheCDManager) {
 		DEBUG_LOG(("FileSystem::areMusicFilesOnCD() - No CD Manager; returning false\n"));
 		return FALSE;

@@ -427,3 +427,19 @@ TEST(crc_computecrc_leaves_the_callee_saved_registers_alone)
 	crc.computeCRC( text, (Int)strlen( text ) );
 	CHECK_EQ( crc.get(), expected );
 }
+
+/* Skirmish's Play button (and campaign start) gate on IsFirstCDPresent, which
+   is TheFileSystem->areMusicFilesOnCD().  A no-CD layout (Steam) has no disc
+   to find but ships the security big next to the exe; the check accepts that
+   as the same proof of media instead of prompting for a CD forever. */
+TEST(are_music_files_on_cd_accepts_the_local_no_cd_layout)
+{
+	CHECK( bootOnce() );
+
+	/* No local big and the test's CD manager is the NULL stub: no media. */
+	CHECK_EQ( TheFileSystem->areMusicFilesOnCD(), FALSE );
+
+	writeFile( "genseczh.big", "contents are irrelevant, presence is the proof" );
+	CHECK_EQ( TheFileSystem->areMusicFilesOnCD(), TRUE );
+	remove( "genseczh.big" );
+}
