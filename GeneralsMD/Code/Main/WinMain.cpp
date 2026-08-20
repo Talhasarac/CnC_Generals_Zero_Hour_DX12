@@ -868,6 +868,17 @@ char *nextParam(char *newSource, char *seps)
 // Necessary to allow memory managers and such to have useful critical sections
 static CriticalSection critSec1, critSec2, critSec3, critSec4, critSec5;
 
+// _set_se_translator below only covers the thread that installs it, so a fault on one
+// of the engine's worker threads (WW3D's texture loader, the GameSpy threads) took the
+// process down with nothing in the log at all.  The unhandled-exception filter is
+// process-wide and is handed the same EXCEPTION_POINTERS, so it feeds the same dump.
+static LONG WINAPI dumpUnhandledException( EXCEPTION_POINTERS *e_info )
+{
+	DEBUG_LOG(("Unhandled exception on thread %d\n", GetCurrentThreadId()));
+	DumpExceptionInfo( e_info->ExceptionRecord->ExceptionCode, e_info );
+	return EXCEPTION_EXECUTE_HANDLER;
+}
+
 // WinMain ====================================================================
 /** Application entry point */
 //=============================================================================
@@ -883,6 +894,7 @@ Int APIENTRY WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance,
 	try {
 
 		_set_se_translator( DumpExceptionInfo ); // Hook that allows stack trace.
+		SetUnhandledExceptionFilter( dumpUnhandledException ); // ...on every other thread too.
 		//
 		// there is something about checkin in and out the .dsp and .dsw files 
 		// that blows the working directory information away on each of the 

@@ -71,6 +71,9 @@ AsciiString MapObject::getWaypointName( void )
 //////////////////////////////////////////////////////////////////////////////
 
 HWND ApplicationHWnd = NULL;
+
+/* Debug.cpp names its log file after this; WinMain.cpp owns it in the real exe. */
+char *gAppPrefix = "test_";
 ProjectedShadowManager *TheProjectedShadowManager = NULL;
 
 const Char *g_strFile = "data\\Generals.str";

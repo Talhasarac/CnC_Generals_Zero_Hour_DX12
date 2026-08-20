@@ -10,10 +10,27 @@ set(WW ${CMAKE_CURRENT_SOURCE_DIR}/Libraries/Source/WWVegas)
 set(COMP ${CMAKE_CURRENT_SOURCE_DIR}/Libraries/Source/Compression)
 
 add_compile_definitions(WIN32 _WINDOWS _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_WARNINGS)
+
+# EA's own switch for exactly this situation ("Good for startup problems", Debug.h):
+# it turns DEBUG_LOG back on in a Release build so the hundreds of existing log
+# calls in GameEngine::init land in Run/generals.exe-<machine>.log.  Without it a
+# quiet failure in init leaves nothing behind at all - GameEngine::init's
+# catch (ErrorCode) swallows everything that is not ERROR_INVALID_D3D, and WinMain's
+# outer catch (...) swallows the rest, so the exe just returns 0.  Applied per target
+# at the bottom of this file, not globally: WWVegas' wwdebug.h includes GameEngine's
+# Debug.h and routes WWDEBUG_SAY into DEBUG_LOG, so a global define makes wwmath and
+# friends call DebugLog(), which only exists in gameengine - every leaf test exe then
+# fails to link.  The WW libraries' own chatter is not what we are after anyway.
+option(RELEASE_DEBUG_LOGGING "Write the startup debug log in Release builds" ON)
 if(MSVC)
   # /permissive- is off on purpose: this is 2003-era code and templates here rely on
   # pre-two-phase-lookup name binding (simplevec.h et al).
-  add_compile_options(/W3 /permissive /EHsc)
+  # /EHa, not /EHsc: WinMain installs _set_se_translator(DumpExceptionInfo) to turn an
+  # access violation into a C++ exception and write ReleaseCrashInfo.txt on the way.  A
+  # translator only runs in code compiled with asynchronous EH, so under /EHsc the hook
+  # is dead (MSVC says so: "warning C4535: _set_se_translator() requires /EHa") and a
+  # faulting frame just kills the process with 0xC0000005 and no log at all.
+  add_compile_options(/W3 /permissive /EHa)
   # There is no debugger on the porting machine, so ReleaseCrashInfo.txt's stack
   # dump is the only stack we get.  StackDump.cpp walks the EBP chain by hand and
   # /O2 implies /Oy (no frame pointer), which leaves that dump empty; /Zi + /DEBUG
@@ -396,6 +413,9 @@ file(WRITE ${GENERATED}/GeneratedVersion.h
 add_executable(generals WIN32 ${CMAKE_CURRENT_SOURCE_DIR}/Main/WinMain.cpp
                              ${CMAKE_CURRENT_SOURCE_DIR}/Main/RTS.RC)
 target_include_directories(generals PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/Main ${GENERATED})
+# A .map turns the "fault offset" in the Windows Application Error event into a
+# function name without a debugger: find the last entry whose RVA is <= the offset.
+target_link_options(generals PRIVATE /MAP)
 set_target_properties(generals PROPERTIES CXX_STANDARD 17)
 target_link_libraries(generals PRIVATE gameenginedevice
   winmm dsound wsock32 ole32 oleaut32 uuid)
@@ -470,3 +490,9 @@ set_target_properties(test_gameengine PROPERTIES CXX_STANDARD 17)
 add_test(NAME wwmath_selfcheck COMMAND wwmath_selfcheck)
 add_test(NAME compression_selfcheck COMMAND compression_selfcheck)
 add_test(NAME dx8_smoke COMMAND dx8_smoke)
+
+if(RELEASE_DEBUG_LOGGING)
+  target_compile_definitions(gameengine PRIVATE RELEASE_DEBUG_LOGGING)
+  target_compile_definitions(gameenginedevice PRIVATE RELEASE_DEBUG_LOGGING)
+  target_compile_definitions(generals PRIVATE RELEASE_DEBUG_LOGGING)
+endif()
