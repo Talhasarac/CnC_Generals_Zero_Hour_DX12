@@ -57,6 +57,8 @@
 #include "GameLogic/Module/BodyModule.h"
 #include "GameLogic/Module/ContainModule.h"
 #include "GameLogic/Module/PhysicsUpdate.h"
+#include "GameLogic/Module/ProductionUpdate.h"
+#include "Common/Upgrade.h"
 #include "GameLogic/Module/StealthUpdate.h"
 #include "GameLogic/Module/StickyBombUpdate.h"
 #include "GameLogic/Module/BattlePlanUpdate.h"
@@ -3945,10 +3947,52 @@ void Drawable::drawHealthBar(const IRegion2D* healthBarRegion)
 		TheDisplay->drawOpenRect( healthBarRegion->lo.x, healthBarRegion->lo.y, healthBoxWidth, healthBoxHeight,
 															healthBoxOutlineSize, outlineColor );
 
-		// draw a filled bar for the health
-		TheDisplay->drawFillRect( healthBarRegion->lo.x + 1, healthBarRegion->lo.y + 1,
-															(healthBoxWidth - 2) * healthRatio, healthBoxHeight - 2,
-															color );
+		// selected drawables get a white overline (1px gap above the bar; below collides with the container pips) so they stand out now that all bars are always on
+		// (+1: drawOpenRect covers width+1 columns, drawFillRect only width)
+		if( isSelected() )
+			TheDisplay->drawFillRect( healthBarRegion->lo.x, healthBarRegion->lo.y - 2, healthBoxWidth + 1, 1,
+																GameMakeColor( 255, 255, 255, 255 ) );
+
+		// own producers show a yellow production-progress bar above the (selection) line, with seconds left at its top-left
+		ProductionUpdateInterface *pu = obj->isLocallyControlled() ? obj->getProductionUpdateInterface() : NULL;
+		const ProductionEntry *pe = pu ? pu->firstProduction() : NULL;
+		if( pe )
+		{
+			Int prodY = healthBarRegion->lo.y - 3 - healthBoxHeight;
+			Real pct = pe->getPercentComplete();
+			TheDisplay->drawOpenRect( healthBarRegion->lo.x, prodY, healthBoxWidth, healthBoxHeight,
+																healthBoxOutlineSize, GameMakeColor( 128, 128, 0, 255 ) );
+			TheDisplay->drawFillRect( healthBarRegion->lo.x + 1, prodY + 1,
+																(healthBoxWidth - 2) * pct * 0.01f, healthBoxHeight - 2,
+																GameMakeColor( 255, 255, 0, 255 ) );
+
+			Player *player = obj->getControllingPlayer();
+			Int totalFrames = pe->getProductionType() == PRODUCTION_UNIT
+												? pe->getProductionObject()->calcTimeToBuild( player )
+												: pe->getProductionUpgrade()->calcTimeToBuild( player );
+			// clamp: the entry lingers at >100% while the unit exits the factory
+			Int secondsLeft = REAL_TO_INT_CEIL( totalFrames * (1.0f - pct * 0.01f) / LOGICFRAMES_PER_SECOND );
+			if( secondsLeft < 0 )
+				secondsLeft = 0;
+
+			// one shared string: draw() renders immediately, and the manager lives for the whole app
+			static DisplayString *prodTimeString = NULL;
+			if( prodTimeString == NULL )
+			{
+				prodTimeString = TheDisplayStringManager->newDisplayString();
+				prodTimeString->setFont( TheFontLibrary->getFont( TheInGameUI->getDrawableCaptionFontName(),
+																TheGlobalLanguageData->adjustFontSize( TheInGameUI->getDrawableCaptionPointSize() - 2 ),
+																FALSE ) );
+			}
+			UnicodeString text;
+			text.format( L"%ds", secondsLeft );
+			if( prodTimeString->getText().compare( text ) != 0 )
+				prodTimeString->setText( text );
+			Int textW, textH;
+			prodTimeString->getSize( &textW, &textH );
+			prodTimeString->draw( healthBarRegion->lo.x, prodY - textH,
+														GameMakeColor( 255, 255, 255, 255 ), GameMakeColor( 0, 0, 0, 255 ) );
+		}
 	}  // end if
 
 }  // end drawHealthBar

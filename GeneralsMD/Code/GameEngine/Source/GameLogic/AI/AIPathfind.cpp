@@ -245,6 +245,7 @@ m_path(NULL),
 m_pathTail(NULL),
 m_isOptimized(FALSE), 
 m_blockedByAlly(FALSE),
+m_usageHead(NULL),
 m_cpopRecentStart(NULL),
 m_cpopCountdown(MAX_CPOP),
 m_cpopValid(FALSE)
@@ -259,7 +260,10 @@ Path::~Path( void )
 {
 	PathNode *node, *nextNode;
 
-	// delete all of the path nodes	
+	if (m_usageHead && TheAI && TheAI->pathfinder())
+		TheAI->pathfinder()->unregisterPathUsage(this);
+
+	// delete all of the path nodes
 	for( node = m_path; node; node = nextNode )
 	{
 		nextNode = node->getNext();
@@ -452,10 +456,13 @@ void Path::appendNode( const Coord3D *pos, PathfindLayerEnum layer )
 void Path::updateLastNode( const Coord3D *pos )
 {
 	PathfindLayerEnum layer = TheTerrainLogic->getLayerForDestination(pos);
+	// Keep the congestion map honest: uncount the old tail cell, recount the new one.
+	if (m_usageHead) TheAI->pathfinder()->adjustPathUsage(m_pathTail, NULL, -1);
 	if (m_pathTail) {
 		m_pathTail->setPosition(pos);
 		m_pathTail->setLayer(layer);
 	}
+	if (m_usageHead) TheAI->pathfinder()->adjustPathUsage(m_pathTail, NULL, +1);
 	if (m_isOptimized && m_pathTail) 
 	{
 		PathNode *node = m_path;
@@ -877,6 +884,9 @@ void Path::computePointOnPath(
 #ifdef CPOP_STARTS_FROM_PREV_SEG
 	m_cpopRecentStart = closeNode;
 #endif
+	// Everything before the closest segment is behind us - stop charging others for it.
+	if (m_usageHead && closeNode)
+		TheAI->pathfinder()->releasePathUsageBefore(this, closeNode);
 
 	//
 	// Compute the goal movement position for this agent
@@ -1672,6 +1682,9 @@ PathfindCell *PathfindCell::removeFromClosedList( PathfindCell *list )
 
 const Int COST_ORTHOGONAL = 10;
 const Int COST_DIAGONAL = 14;
+// ponytail: congestion knob, per other-unit path crossing a cell of our footprint. Rebuild to tune;
+// move into AIData INI if it needs per-map tweaking.
+const Int PATH_CONGESTION_COST = COST_ORTHOGONAL;
 const Real COST_TO_DISTANCE_FACTOR = 1.0f/10.0f;
 const Real COST_TO_DISTANCE_FACTOR_SQR = COST_TO_DISTANCE_FACTOR*COST_TO_DISTANCE_FACTOR;
 
@@ -3825,7 +3838,7 @@ void PathfindLayer::classifyWallMapCell( Int i, Int j , PathfindCell *cell, Obje
 
 //----------------------- Pathfinder ---------------------------------------
 
-Pathfinder::Pathfinder( void ) :m_map(NULL)
+Pathfinder::Pathfinder( void ) :m_map(NULL), m_pathUsage(NULL)
 {
 	debugPath = NULL;
 	PathfindCellInfo::allocateCellInfos();
@@ -3846,9 +3859,13 @@ void Pathfinder::reset( void )
 		delete []m_blockOfMapCells;
 		m_blockOfMapCells = NULL;
 	}
-	if (m_map) {	 
+	if (m_map) {
 		delete [] m_map;
 		m_map = NULL;
+	}
+	if (m_pathUsage) {
+		delete [] m_pathUsage;
+		m_pathUsage = NULL;
 	}
 
 	Int i;
@@ -4576,6 +4593,8 @@ void Pathfinder::newMap( void )
 		for (i=0; i<=bounds.hi.x; i++) {
 			m_map[i] = &m_blockOfMapCells[i*(bounds.hi.y+1)];
 		}
+		m_pathUsage = MSGNEW("PathfindMapCells") UnsignedByte[(bounds.hi.x+1)*(bounds.hi.y+1)];
+		memset(m_pathUsage, 0, (bounds.hi.x+1)*(bounds.hi.y+1));
 		for (i=0; i<LAYER_LAST; i++) {
 			if (!m_layers[i].isUnused()) {
 				m_layers[i].allocateCells(&m_extent);
@@ -5179,7 +5198,53 @@ void Pathfinder::snapClosestGoalPosition(Object *obj, Coord3D *pos)
 	//DEBUG_LOG(("Couldn't find goal.\n"));
 }
 
-/** 
+//-------------------------------------------------------------------------------------------------
+// Congestion map.  Each registered path stamps the cell under every raw node (one per A* cell).
+Int Pathfinder::getPathUsage( Int x, Int y ) const
+{
+	if (!m_pathUsage || x < m_extent.lo.x || x > m_extent.hi.x || y < m_extent.lo.y || y > m_extent.hi.y)
+		return 0;
+	return m_pathUsage[x*(m_extent.hi.y+1)+y];
+}
+
+void Pathfinder::adjustPathUsage( const PathNode *from, const PathNode *to, Int delta )
+{
+	if (!m_pathUsage) return;	// map torn down; counts went with it
+	for (const PathNode *node = from; node && node != to; node = node->getNext()) {
+		ICoord2D cell;
+		if (worldToCell(node->getPosition(), &cell)) continue;	// off map
+		UnsignedByte &u = m_pathUsage[cell.x*(m_extent.hi.y+1)+cell.y];
+		if (delta > 0) { if (u < 255) u++; }
+		else           { if (u > 0)   u--; }
+	}
+}
+
+void Pathfinder::registerPathUsage( const Path *path )
+{
+	if (!path || path->isUsageRegistered() || !m_pathUsage || !path->getFirstNode()) return;
+	adjustPathUsage(path->getFirstNode(), NULL, +1);
+	path->setUsageHead(path->getFirstNode());
+}
+
+void Pathfinder::unregisterPathUsage( const Path *path )
+{
+	if (!path || !path->isUsageRegistered()) return;
+	adjustPathUsage(path->getUsageHead(), NULL, -1);
+	path->setUsageHead(NULL);
+}
+
+void Pathfinder::releasePathUsageBefore( const Path *path, const PathNode *node )
+{
+	if (!path || !path->isUsageRegistered() || !node) return;
+	// node must lie at or after the head; if the unit got shoved back behind it, nothing new to release.
+	const PathNode *n = path->getUsageHead();
+	while (n && n != node) n = n->getNext();
+	if (!n) return;
+	adjustPathUsage(path->getUsageHead(), node, -1);
+	path->setUsageHead(node);
+}
+
+/**
  * Returns coordinates of goal.
  *
  */
@@ -6125,6 +6190,9 @@ Int Pathfinder::examineNeighboringCells(PathfindCell *parentCell, PathfindCell *
 		Bool canPathThroughUnits = false;
 		if (obj && obj->getAIUpdateInterface()) {
 			canPathThroughUnits = obj->getAIUpdateInterface()->canPathThroughUnits();
+			// Our own current path must not repel us while we repath (the caller only destroys it
+			// once the new one is built).  O(1) after the first neighbour expansion of a search.
+			unregisterPathUsage(obj->getAIUpdateInterface()->getPath());
 		}
 		Bool isCrusher = obj ? obj->getCrusherLevel() > 0 : false;
 		if (attackDistance==NO_ATTACK && !m_isTunneling && !locomotorSet.isDownhillOnly() && goalCell) {
@@ -6283,6 +6351,15 @@ Int Pathfinder::examineNeighboringCells(PathfindCell *parentCell, PathfindCell *
 			newCostSoFar = newCell->costSoFar( parentCell );
 			if (info.allyMoving && dx<10 && dy<10) {
 				newCostSoFar += 3*COST_DIAGONAL;
+			}
+			if (m_pathUsage) {
+				// Other units' live paths through our footprint: pay per path so we pick a parallel lane.
+				Int usage = 0;
+				Int above = radius + (centerInCell ? 1 : 0);
+				for (Int ux = newCellCoord.x-radius; ux < newCellCoord.x+above; ux++)
+					for (Int uy = newCellCoord.y-radius; uy < newCellCoord.y+above; uy++)
+						usage += getPathUsage(ux, uy);
+				newCostSoFar += usage * PATH_CONGESTION_COST;
 			}
 			if (newCell->getType() == PathfindCell::CELL_CLIFF && !newCell->getPinched() ) {
 				Coord3D fromPos;
@@ -8991,6 +9068,8 @@ Path *Pathfinder::buildActualPath( const Object *obj, LocomotorSurfaceTypeMask a
 	// cleanup the path by checking line of sight
 	path->optimize(obj, acceptableSurfaces, blocked);
 
+	registerPathUsage(path);
+
 #if defined _DEBUG || defined _INTERNAL
 	if (TheGlobalData->m_debugAI==AI_DEBUG_PATHS) 
 	{
@@ -10515,6 +10594,7 @@ Path *Pathfinder::patchPath( const Object *obj, const LocomotorSet& locomotorSet
 
 			// cleanup the path by checking line of sight
 			path->optimize(obj, locomotorSet.getValidSurfaces(), blocked);
+			registerPathUsage(path);
 			parentCell->releaseInfo();
 			cleanOpenAndClosedLists();
 			candidateGoal->releaseInfo();

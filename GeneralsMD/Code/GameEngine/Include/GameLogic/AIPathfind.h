@@ -150,6 +150,7 @@ public:
 	Path();
 	
 	PathNode *getFirstNode( void ) { return m_path; }
+	const PathNode *getFirstNode( void ) const { return m_path; }
 	PathNode *getLastNode( void ) { return m_pathTail; }
 
 	void updateLastNode( const Coord3D *pos );
@@ -174,6 +175,10 @@ public:
 	/// Given a location, return closest location on path, and along-path dist to end as function result
 	void markOptimized(void) {m_isOptimized = true;}
 
+	Bool isUsageRegistered(void) const {return m_usageHead != NULL;}
+	const PathNode *getUsageHead(void) const {return m_usageHead;}
+	void setUsageHead(const PathNode *node) const {m_usageHead = node;}
+
 protected:
 	// snapshot interface
 	virtual void crc( Xfer *xfer );
@@ -188,6 +193,7 @@ protected:
 	PathNode*		m_pathTail;
 	Bool				m_isOptimized;											///< True if the path has been optimized
 	Bool				m_blockedByAlly;										///< An ally needs to move off of this path.
+	mutable const PathNode *m_usageHead;						///< First raw node still counted in Pathfinder's congestion map (NULL = not registered); cells behind the unit are released as it advances, ~Path releases the rest.
 	// caching info for computePointOnPath.
 	Bool										m_cpopValid;
 	Int											m_cpopCountdown;				///< We only return the same cpop MAX_CPOP times.  It is occasionally possible to get stuck.
@@ -670,7 +676,14 @@ public:
 	Bool worldToCell( const Coord3D *pos, ICoord2D *cell );	///< Given a world position, return grid cell coordinate
 
 	const ICoord2D *getExtent(void) const {return &m_extent.hi;}
-	
+
+	/// Congestion map: how many live unit paths run through each cell.  A* charges extra per path, so
+	/// units ordered along the same route spread into parallel lanes instead of stacking on one line.
+	void registerPathUsage( const Path *path );
+	void unregisterPathUsage( const Path *path );
+	void releasePathUsageBefore( const Path *path, const PathNode *node );	///< unit has passed everything before node
+	void adjustPathUsage( const PathNode *from, const PathNode *to, Int delta );	///< [from, to) raw nodes, +1/-1
+
 	void setIgnoreObstacleID( ObjectID objID );					///< if non-zero, the pathfinder will ignore the given obstacle
 
 	Bool validMovementPosition( Bool isCrusher, LocomotorSurfaceTypeMask acceptableSurfaces, PathfindCell *toCell, PathfindCell *fromCell = NULL );		///< Return true if given position is a valid movement location
@@ -835,6 +848,8 @@ private:
 	/// This uses WAY too much memory.  Should at least be array of pointers to cells w/ many fewer cells
 	PathfindCell *m_blockOfMapCells;		///< Pathfinding map - contains iconic representation of the map
 	PathfindCell **m_map;		///< Pathfinding map indexes - contains matrix indexing into the map.
+	UnsignedByte *m_pathUsage;	///< Congestion map, (hi.x+1)*(hi.y+1), indexed [x*(hi.y+1)+y]
+	Int getPathUsage( Int x, Int y ) const;
 	IRegion2D m_extent;														///< Grid extent limits
 	IRegion2D m_logicalExtent;										///< Logical grid extent limits
 
