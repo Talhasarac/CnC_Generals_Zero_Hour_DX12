@@ -2954,9 +2954,7 @@ void Drawable::drawContained( const IRegion2D *healthBarRegion )
 	if (!container->getContainerPipsToShow(numTotal, numFull))
 		return;
 
-	// if empty, don't show nothin'
-	if (numFull == 0)
-		return;
+	// empty containers still show their (empty) pips
 
 	Int numInfantry = 0;
 	const ContainedItemsList* contained = container->getContainedItemsList();
