@@ -1329,10 +1329,10 @@ Bool AIUpdateInterface::blockedBy(Object *other)
 
 	AIUpdateInterface* aiOther = other->getAI();
 
+	if (!aiOther) return FALSE; // Ignore it.
 	if (!aiOther->isDoingGroundMovement()) {
 		return FALSE; // Can't be blocked if the other is airborne.
 	}
-	if (!aiOther) return FALSE; // Ignore it.
 
 	if (getCurLocomotor() && getCurLocomotor()->isMovingBackwards()) {
 		return false; // don't collide.
@@ -1525,8 +1525,22 @@ Bool AIUpdateInterface::processCollision(PhysicsBehavior *physics, Object *other
 			if (!needToRotate()) 
 			{
 				// If we are already pointing in the right direction, we may be stuck.
-				if (!otherMoving) 
+				if (!otherMoving)
 				{
+					// Before giving up and repathing, ask an idle allied blocker to step aside
+					// (EA only did this for vehicles blocked by infantry).  Same guards as the
+					// 1.01 patch above: never disturb a busy unit or one using an ability.
+					if (getObject()->getRelationship(other)==ALLIES && aiOther->isIdle() &&
+							!other->testStatus(OBJECT_STATUS_IS_USING_ABILITY))
+					{
+						aiOther->aiMoveAwayFromUnit(getObject(), CMD_FROM_AI);
+						if (getNumFramesBlocked() < LOGICFRAMES_PER_SECOND)
+						{
+							// Give it a moment to clear; AIStates' 2 second rule still repaths us
+							// if it never does (immobile, held, or refused).
+							return FALSE;
+						}
+					}
 					// Intense logging jba
 					// DEBUG_LOG(("Blocked&Stuck !otherMoving\n"));
 					m_isBlockedAndStuck = TRUE;
@@ -1576,8 +1590,22 @@ Bool AIUpdateInterface::processCollision(PhysicsBehavior *physics, Object *other
 		Real dx = getObject()->getPosition()->x - otherPos.x;
 		Real dy = getObject()->getPosition()->y - otherPos.y;
 		Real curDSqr = dx*dx+dy*dy;
-		if (!otherMoving && curDSqr < PATHFIND_CELL_SIZE_F*PATHFIND_CELL_SIZE_F*0.25f) 
-		{	
+		// Two idle units count as stacked when their centers are within half of their
+		// combined pathfind footprints — the old fixed half-cell test never separated
+		// vehicles wider than a cell that ended up half overlapped.  For a pair of
+		// single-cell units this degenerates to exactly the old half-cell threshold,
+		// and it stays below the legal parked separation, so no jitter for units
+		// standing on properly allocated adjacent goal cells.
+		Int sepCells = 1;
+		Bool centerUnused;
+		Int radiusCells;
+		TheAI->pathfinder()->getRadiusAndCenter(getObject(), radiusCells, centerUnused);
+		sepCells += radiusCells;
+		TheAI->pathfinder()->getRadiusAndCenter(other, radiusCells, centerUnused);
+		sepCells += radiusCells;
+		Real minSep = 0.5f*PATHFIND_CELL_SIZE_F*sepCells;
+		if (!otherMoving && curDSqr < minSep*minSep)
+		{
 			if (this->getCurrentStateID() == AI_BUSY) {
 				return false;
 			}

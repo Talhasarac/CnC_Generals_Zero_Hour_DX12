@@ -743,6 +743,7 @@ public:
 
 	static void classifyMapCell( Int x, Int y, PathfindCell *cell);					///< Classify the given map cell
 	Int clearCellForDiameter( Bool crusher, Int cellX, Int cellY, PathfindLayerEnum layer, Int pathDiameter );		///< Return true if given position is a valid movement location
+	void getRadiusAndCenter(const Object *obj, Int &iRadius, Bool &center);
 
 protected:
 	virtual Path *internalFindPath( Object *obj, const LocomotorSet& locomotorSet, const Coord3D *from, const Coord3D *to);	///< Find a short, valid path between given locations
@@ -761,9 +762,8 @@ protected:
 	Bool checkForTarget(const Object *obj, 	Int cellX, Int cellY, const Weapon *weapon,
 																const Object *victim, const Coord3D *victimPos,
 																Int iRadius, Bool center,Coord3D *dest) ;
-	Bool checkForPossible(Bool isCrusher, Int fromZone,  Bool center, const LocomotorSet& locomotorSet, 
+	Bool checkForPossible(Bool isCrusher, Int fromZone,  Bool center, const LocomotorSet& locomotorSet,
 		Int cellX, Int cellY, PathfindLayerEnum layer, Coord3D *dest, Bool startingInObstacle) ;
-	void getRadiusAndCenter(const Object *obj, Int &iRadius, Bool &center);
 	void adjustCoordToCell(Int cellX, Int cellY, Bool centerInCell, Coord3D &pos, PathfindLayerEnum layer);
 	Bool checkDestination(const Object *obj, Int cellX, Int cellY, PathfindLayerEnum layer, Int iRadius, Bool centerInCell);
 	Bool checkForMovement(const Object *obj, TCheckMovementInfo &info);

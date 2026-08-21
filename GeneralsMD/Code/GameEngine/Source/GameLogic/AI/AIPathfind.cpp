@@ -6376,7 +6376,9 @@ Int Pathfinder::examineNeighboringCells(PathfindCell *parentCell, PathfindCell *
 					newCostSoFar += 7*COST_DIAGONAL;
 				}
 			} else if (newCell->getPinched()) {
-				newCostSoFar += COST_ORTHOGONAL;
+				// Pinched = clear cell hugging an obstacle.  Charge by footprint so wide
+				// vehicles prefer open corridors while infantry threads the gap as before.
+				newCostSoFar += COST_ORTHOGONAL*(1+radius);
 			}
 			newCell->setBlockedByAlly(false);
 			if (info.allyFixedCount>0) {
