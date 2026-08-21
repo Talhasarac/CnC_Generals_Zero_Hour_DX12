@@ -1310,6 +1310,14 @@ CanMakeType BuildAssistant::canMakeUnit( Object *builder, const ThingTemplate *w
 	if (builder->testScriptStatusBit(OBJECT_STATUS_SCRIPT_DISABLED) || builder->testScriptStatusBit(OBJECT_STATUS_SCRIPT_UNPOWERED))
 		return CANMAKE_FACTORY_IS_DISABLED;
 
+	//
+	// a factory that is not finished (or is on its way out) takes no production. The single
+	// select UI never offers the build buttons for one, but a multi select can hold a mix of
+	// finished and unfinished factories and the build has to skip the unfinished ones
+	//
+	if (builder->testStatus(OBJECT_STATUS_UNDER_CONSTRUCTION) || builder->testStatus(OBJECT_STATUS_SOLD))
+		return CANMAKE_FACTORY_IS_DISABLED;
+
 	ProductionUpdateInterface* pu = builder->getProductionUpdateInterface();
 
 	//If our builder is actually constructing an object via a special power, then allow it if the templates match.
