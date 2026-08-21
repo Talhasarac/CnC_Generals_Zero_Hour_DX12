@@ -103,29 +103,6 @@ void JetAIUpdate::setFlag( FlagType f, Bool v)
 }
 
 
-// ---------------------------------------------------------------------------
-// TEMPORARY DIAGNOSTIC (jet reload/resume).  Remove once the attack-move
-// reload cycle is understood; every line is prefixed JETRELOAD: so the whole
-// trace can be pulled out of Run/DebugLogFile.txt with a single grep.
-// ---------------------------------------------------------------------------
-static void jetReloadTrace(const Object *jet, const char *what, const char *detail)
-{
-	AsciiString ammo;
-	for (Int i = 0; i < WEAPONSLOT_COUNT; ++i)
-	{
-		const Weapon *w = jet->getWeaponInWeaponSlot((WeaponSlotType)i);
-		if (w == NULL)
-			continue;
-		AsciiString one;
-		one.format(" w%d[%s ammo=%d/%d status=%d rt=%d]", i, w->getName().str(),
-			w->getRemainingAmmo(), w->getClipSize(), (Int)w->getStatus(), (Int)w->getReloadType());
-		ammo.concat(one);
-	}
-	DEBUG_LOG(("JETRELOAD: obj %d (%s) %s %s frame=%d%s\n",
-		(Int)jet->getID(), jet->getTemplate()->getName().str(), what, detail,
-		(Int)TheGameLogic->getFrame(), ammo.str()));
-}
-
 //-------------------------------------------------------------------------------------------------
 Bool JetAIUpdate::isOutOfSpecialReloadAmmo() const
 {
@@ -1502,11 +1479,6 @@ public:
 		if (m_reloadTime < 1)
 			m_reloadTime = 1;
 		m_reloadDoneFrame = m_reloadTime + TheGameLogic->getFrame();
-		{
-			AsciiString d;
-			d.format("(reloadTime=%d)", (Int)m_reloadTime);
-			jetReloadTrace(jet, "RELOAD-ENTER", d.str());
-		}
 		return STATE_CONTINUE;
 	}
 
@@ -1532,7 +1504,6 @@ public:
 
 		if (allDone)
 		{
-			jetReloadTrace(jet, "RELOAD-DONE", "");
 			return STATE_SUCCESS;
 		}
 
@@ -1931,11 +1902,6 @@ UpdateSleepTime JetAIUpdate::update()
 			m_mostRecentCommand.reconstitute(parms);
 			setFlag(HAS_PENDING_COMMAND, false);
 
-			{
-				AsciiString d;
-				d.format("(cmd=%d, airLoco=%d)", (Int)parms.m_cmd, (Int)getFlag(ALLOW_AIR_LOCO));
-				jetReloadTrace(jet, "RESUME-PENDING", d.str());
-			}
  			aiDoCommand(&parms);
 		}
 		else if (m_returnToBaseFrame != 0 && now >= m_returnToBaseFrame && getFlag(ALLOW_AIR_LOCO))
@@ -1961,12 +1927,6 @@ UpdateSleepTime JetAIUpdate::update()
 		if (getFlag(ALLOW_INTERRUPT_AND_RESUME_OF_CUR_STATE_FOR_RELOAD) && 
 						isOutOfSpecialReloadAmmo() && getFlag(ALLOW_AIR_LOCO))
 		{
-			{
-				AsciiString d;
-				d.format("(saved cmd=%d, state=%d)", (Int)m_mostRecentCommand.getCommandType(),
-					(Int)getStateMachine()->getCurrentStateID());
-				jetReloadTrace(jet, "INTERRUPT-FOR-RELOAD", d.str());
-			}
 			setFlag(USE_SPECIAL_RETURN_LOCO, true);
 			setFlag(HAS_PENDING_COMMAND, true);
 			setFlag(ALLOW_INTERRUPT_AND_RESUME_OF_CUR_STATE_FOR_RELOAD, false);
@@ -2452,15 +2412,6 @@ void JetAIUpdate::aiDoCommand(const AICommandParms* parms)
 	if (!isAllowedToRespondToAiCommands(parms))
 		return;
 		
-	{
-		AsciiString d;
-		d.format("(cmd=%d, src=%d, airLoco=%d, takeoff=%d, landing=%d, state=%d)",
-			(Int)parms->m_cmd, (Int)parms->m_cmdSource, (Int)getFlag(ALLOW_AIR_LOCO),
-			(Int)getFlag(TAKEOFF_IN_PROGRESS), (Int)getFlag(LANDING_IN_PROGRESS),
-			(Int)getStateMachine()->getCurrentStateID());
-		jetReloadTrace(getObject(), "DO-COMMAND", d.str());
-	}
-
 	// note that we always store this, even if nothing will be "pending".
 	m_mostRecentCommand.store(*parms);
 
