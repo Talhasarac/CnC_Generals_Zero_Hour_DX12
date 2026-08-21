@@ -2732,9 +2732,7 @@ static Bool computeHealthRegion( const Drawable *draw, IRegion2D& region )
 
 Bool Drawable::drawsAnyUIText( void )
 {
-	if (!isSelected()) 
-		return FALSE;
-
+	// group numbers are always on (was: only when selected)
 	const Object *obj = getObject();
 	if ( !obj || !obj->isLocallyControlled() )  
 		return FALSE;
@@ -2944,9 +2942,9 @@ void Drawable::drawContained( const IRegion2D *healthBarRegion )
 	if (!container)
 		return;
 
+	// container pips are always on for own objects (was: only when selected or moused over)
 	if (!(
-				TheGlobalData->m_showObjectHealth && 
-				(isSelected() || (TheInGameUI && (TheInGameUI->getMousedOverDrawableID() == getID()))) &&
+				TheGlobalData->m_showObjectHealth &&
 				obj->getControllingPlayer() == ThePlayerList->getLocalPlayer()
 			))
 		return;
@@ -3851,12 +3849,8 @@ void Drawable::drawHealthBar(const IRegion2D* healthBarRegion)
 	if (!healthBarRegion)
 		return;
 
-	//
-	// only draw health for selected drawbles and drawables that have been moused over
-	// by the cursor
-	//
-	if( TheGlobalData->m_showObjectHealth && 
-			(isSelected() || (TheInGameUI && (TheInGameUI->getMousedOverDrawableID() == getID()))) )
+	// health bars are always on (was: only when selected or moused over)
+	if( TheGlobalData->m_showObjectHealth )
 	{
 		Object *obj = getObject();
 
