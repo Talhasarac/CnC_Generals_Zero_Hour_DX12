@@ -1327,13 +1327,24 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 		//---------------------------------------------------------------------------------------------
 		case GameMessage::MSG_QUEUE_UNIT_CREATE:
 		{
-			Object *producer = getSingleObjectFromSelection(currentlySelectedGroup);
+			Object *producer = NULL;
 			const ThingTemplate *whatToCreate;
 			ProductionID productionID;
 
 			// get data from the message
 			whatToCreate = TheThingFactory->findByTemplateID( msg->getArgument( 0 )->integer );
 			productionID = (ProductionID)msg->getArgument( 1 )->integer;
+
+			// an explicit producer (multi-select build) must be one of the selected objects
+			if( msg->getArgumentCount() > 2 && currentlySelectedGroup )
+			{
+				ObjectID producerID = msg->getArgument( 2 )->objectID;
+				const VecObjectID& ids = currentlySelectedGroup->getAllIDs();
+				if( std::find( ids.begin(), ids.end(), producerID ) != ids.end() )
+					producer = TheGameLogic->findObjectByID( producerID );
+			}
+			else
+				producer = getSingleObjectFromSelection(currentlySelectedGroup);
 
 			// sanity
 			if ( producer == NULL || whatToCreate == NULL )

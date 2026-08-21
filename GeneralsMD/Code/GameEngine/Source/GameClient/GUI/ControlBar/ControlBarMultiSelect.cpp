@@ -127,8 +127,12 @@ void ControlBar::addCommonCommands( Drawable *draw, Bool firstDrawable )
 			// get command
 			command = commandSet->getCommandButton(i);
 
-			// add if present and can be used in a multi select
-			if( command && BitTest( command->getOptions(), OK_FOR_MULTI_SELECT ) == TRUE )
+			// add if present and can be used in a multi select. Unit builds are allowed too: the
+			// later drawables only keep a slot whose button is identical, so they survive only
+			// when every selected factory shares the same command set (processCommandUI then
+			// routes the build to the selected factory with the shortest queue)
+			if( command && ( BitTest( command->getOptions(), OK_FOR_MULTI_SELECT ) == TRUE ||
+											 command->getCommandType() == GUI_COMMAND_UNIT_BUILD ) )
 			{
 
 				// put it in the common command set

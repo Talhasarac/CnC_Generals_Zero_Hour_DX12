@@ -3047,7 +3047,8 @@ Bool Object::isSelectable() const
 //-------------------------------------------------------------------------------------------------
 Bool Object::isMassSelectable() const
 {
-	return isSelectable() && !isKindOf(KINDOF_STRUCTURE);
+	// structures are group-selectable too (SelectionXlat keeps them apart from units)
+	return isSelectable();
 }
 
 //-------------------------------------------------------------------------------------------------

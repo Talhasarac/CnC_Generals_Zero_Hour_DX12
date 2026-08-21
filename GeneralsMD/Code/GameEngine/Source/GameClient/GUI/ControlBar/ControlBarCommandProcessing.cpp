@@ -396,8 +396,30 @@ CBCommandStatus ControlBar::processCommandUI( GameWindow *control,
 			//
 			const ThingTemplate *whatToBuild = commandButton->getThingTemplate();
 
-			// get the "factory" object that is going to make the thing
+			// get the "factory" object that is going to make the thing. With several factories
+			// selected (multi-select context) use the one with the fewest queued items that can
+			// actually make it, so repeated clicks spread the work over all selected factories
 			Object *factory = obj;
+			if( factory == NULL && m_currContext == CB_CONTEXT_MULTI_SELECT )
+			{
+				UnsignedInt bestCount = 0;
+				const DrawableList *selected = TheInGameUI->getAllSelectedDrawables();
+				for( DrawableListCIt it = selected->begin(); it != selected->end(); ++it )
+				{
+					Object *candidate = (*it)->getObject();
+					ProductionUpdateInterface *cpu = candidate ? candidate->getProductionUpdateInterface() : NULL;
+					if( cpu == NULL || TheBuildAssistant->canMakeUnit( candidate, whatToBuild ) != CANMAKE_OK )
+						continue;
+					if( factory == NULL || cpu->getProductionCount() < bestCount )
+					{
+						factory = candidate;
+						bestCount = cpu->getProductionCount();
+					}
+				}
+				// nothing can take it: fall back to the first factory so the usual messages fire
+				if( factory == NULL && !selected->empty() )
+					factory = selected->front()->getObject();
+			}
 			if( factory == NULL )
 				break;
 
@@ -458,6 +480,7 @@ CBCommandStatus ControlBar::processCommandUI( GameWindow *control,
 			GameMessage *msg = TheMessageStream->appendMessage( GameMessage::MSG_QUEUE_UNIT_CREATE );
 			msg->appendIntegerArgument( whatToBuild->getTemplateID() );
 			msg->appendIntegerArgument( productionID );
+			msg->appendObjectIDArgument( factory->getID() );	// which of the selected factories builds it
 
 			break;
 

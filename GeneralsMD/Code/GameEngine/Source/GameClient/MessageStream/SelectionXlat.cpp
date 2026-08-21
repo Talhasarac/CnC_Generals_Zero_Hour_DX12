@@ -533,7 +533,8 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 					selectMore->appendBooleanArgument(FALSE);
 					for (DrawableListIt it = listOfSelectedDrawables.begin(); it != listOfSelectedDrawables.end(); ++it) {
 						Drawable *draw = *it;
-						if (draw && draw->isSelectable()) {
+						// buildings and units stay in separate selections
+						if (draw && draw->isSelectable() && draw->isKindOf( KINDOF_STRUCTURE ) == picked->isKindOf( KINDOF_STRUCTURE )) {
 							TheInGameUI->selectDrawable(draw);
 							selectMore->appendObjectIDArgument(draw->getObject()->getID());
 						}
@@ -642,8 +643,7 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 
 			if (si.currentCountEnemies > 0 || 
 					si.currentCountCivilians > 0 || 
-					si.currentCountFriends > 0 ||
-					si.currentCountMineBuildings > 0) 
+					si.currentCountFriends > 0) 
 			{
 				// force a new group creation
 				addToGroup = FALSE;
@@ -654,46 +654,21 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 			{
 				si.selectMine = TRUE;
 
-        // EXACTLY ONE CLICKED OR DRAGGED BUILDING
-				if ( si.newCountMineBuildings == 1 && si.newCountMine == 1 ) 
+				//
+				// Buildings can be group-selected (click, drag, shift-add) like units, but buildings and
+				// units never share one selection: a pick of one kind replaces a selection of the other.
+				// A pick containing both keeps only the units, as it always did.
+				//
+				if ( si.newCountMine == si.newCountMineBuildings )
+				{
+					si.selectMineBuildings = TRUE;
+					if ( si.currentCountMine > si.currentCountMineBuildings )
+						addToGroup = FALSE;
+				}
+				else if ( si.currentCountMineBuildings > 0 )
 				{
 					addToGroup = FALSE;
-					si.selectMineBuildings = TRUE;
-        }
-        else if ( si.newCountMineBuildings > 0 )////////////// SO SORRY, I KNOW THIS IS MICKEY MOUSE ///////////////////
-        { // What we are after here is to allow the drag select to get the building, 
-          // if the other things in the list are going to be ignored anyway
-          // so we find out whether the other things are not selectible
-          // this came up with the new AmericaBuildingFireBase, which shows its contained
-          // but does not let you select them. The selection is propagated to the container
-          // in new code in SelectionInfo.cpp, in the static addDrawableToList();
-          // -Mark Lorenzen, 6/12/03
-          Bool onlyTheOneBuildingIsSelectableAnyway = TRUE;
-          DrawableID buildingID = INVALID_DRAWABLE_ID;
-          for (DrawableListIt it = drawablesThatWillSelect.begin(); it != drawablesThatWillSelect.end(); ++it) 
-				  {
-            const Drawable *d = *it;
-            if ( d->isKindOf( KINDOF_STRUCTURE ) ) 
-            {// make sure there is really only the one building in the list, as it may be multiply listed
-              
-              if ( buildingID == INVALID_DRAWABLE_ID ) // this is the first building
-                buildingID = d->getID();  
-              else if ( buildingID != d->getID() )//oops, more than one building!
-                onlyTheOneBuildingIsSelectableAnyway = FALSE;
-            }
-					  else if ( d->isSelectable() )
-              onlyTheOneBuildingIsSelectableAnyway = FALSE;
-
-            if ( ! onlyTheOneBuildingIsSelectableAnyway )
-              break;
-          }
-          if ( onlyTheOneBuildingIsSelectableAnyway )
-          {
-					  addToGroup = FALSE;
-					  si.selectMineBuildings = TRUE;
-          }
 				}
-
 			}
 			else if (si.newCountEnemies > 0 && si.newCountCivilians > 0 && si.newCountFriends > 0) 
 			{
