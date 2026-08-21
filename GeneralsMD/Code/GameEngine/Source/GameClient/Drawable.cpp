@@ -3861,6 +3861,10 @@ void Drawable::drawHealthBar(const IRegion2D* healthBarRegion)
 		if( obj == NULL )
 			return;
 
+		// projectiles (missiles, shells, bombs) are in flight for a moment and their bar is just noise
+		if( obj->isKindOf( KINDOF_PROJECTILE ) )
+			return;
+
 		if( obj->isKindOf( KINDOF_FORCEATTACKABLE ) )
 		{
 			//Currently (Nov 2002), everything that is forceattackable are civ fences, and they all have a
