@@ -3519,6 +3519,8 @@ AIAttackMoveToState::AIAttackMoveToState( StateMachine *machine ) : AIMoveToStat
 	m_victimID = INVALID_ID;
 	m_engageStartFrame = 0;
 	m_frameToScanOn = 0;
+	m_reengageGoalDistSqr = 0.0f;
+	m_groupSpeed = FAST_AS_POSSIBLE;
 	m_isEngaging = FALSE;
 	m_chaseWasAllowed = FALSE;
 	m_attackMoveMachine = newInstance(AIAttackMoveStateMachine)(getMachineOwner(), "AIAttackMoveMachine");
@@ -3544,7 +3546,7 @@ void AIAttackMoveToState::crc( Xfer *xfer )
 void AIAttackMoveToState::xfer( Xfer *xfer )
 {
   // version
-  XferVersion currentVersion = 3;
+  XferVersion currentVersion = 4;
   XferVersion version = currentVersion;
   xfer->xferVersion( &version, currentVersion );
 
@@ -3562,6 +3564,10 @@ void AIAttackMoveToState::xfer( Xfer *xfer )
 		xfer->xferUnsignedInt(&m_frameToScanOn);
 		xfer->xferBool(&m_isEngaging);
 		xfer->xferBool(&m_chaseWasAllowed);
+	}
+	if (version>=4) {
+		xfer->xferReal(&m_reengageGoalDistSqr);
+		xfer->xferReal(&m_groupSpeed);
 	}
 	xfer->xferSnapshot(m_attackMoveMachine);
 }  // end xfer
@@ -3601,10 +3607,41 @@ StateReturnType AIAttackMoveToState::onEnter()
 	m_victimID = INVALID_ID;
 	m_engageStartFrame = 0;
 	m_engageOrigin = *owner->getPosition();
+	m_reengageGoalDistSqr = 0.0f;
 	// spread the scans of a group that was all ordered on the same frame over the scan interval.
 	m_frameToScanOn = TheGameLogic->getFrame() + ((UnsignedInt)owner->getID() % ATTACK_MOVE_SCAN_RATE);
 
-	return AIMoveToState::onEnter();
+	// An attack move arrives as a group or it arrives as a queue of single units, so the ground
+	// units go at the pace of the slowest one.  The order is still running inside the AIGroup that
+	// issued it, so the group is still reachable here; it is gone by the next update.
+	m_groupSpeed = FAST_AS_POSSIBLE;
+	AIGroup *group = ai->getGroup();
+	if (group != NULL && ai->isDoingGroundMovement())
+	{
+		Real speed = group->getSpeed();
+		if (speed > 0.0f && speed < FAST_AS_POSSIBLE)
+			m_groupSpeed = speed;
+	}
+
+	StateReturnType ret = AIMoveToState::onEnter();
+	// AIInternalMoveToState::onEnter resets the desired speed, so this has to follow it.
+	applyGroupSpeed();
+	return ret;
+}
+
+//----------------------------------------------------------------------------------------------------------
+/**
+ * Hold this unit to the group's speed.  Called after every (re)path, since entering the move state
+ * puts the speed back to FAST_AS_POSSIBLE.
+ */
+void AIAttackMoveToState::applyGroupSpeed( void )
+{
+	if (m_groupSpeed >= FAST_AS_POSSIBLE)
+		return;
+
+	AIUpdateInterface *ai = getMachineOwner()->getAI();
+	if (ai != NULL)
+		ai->setDesiredSpeed(m_groupSpeed);
 }
 
 //----------------------------------------------------------------------------------------------------------
@@ -3701,32 +3738,41 @@ Bool AIAttackMoveToState::hasLeftTheLeash( void )
 	return (dx*dx + dy*dy) > sqr(ATTACK_MOVE_LEASH_CELLS*PATHFIND_CELL_SIZE_F);
 }
 
-
-// ---------------------------------------------------------------------------
-// TEMPORARY DIAGNOSTIC (jet reload/resume).  Remove with the matching probes
-// in JetAIUpdate.cpp; every line is prefixed JETRELOAD:.
-// ---------------------------------------------------------------------------
-static void jetStateTrace(const Object *obj, const char *what, const char *detail)
+//----------------------------------------------------------------------------------------------------------
+/**
+ * The leash alone does not bound a chase: it is measured from wherever the fight started, so a
+ * victim that keeps backing off is re-acquired from a leash length further along every time and
+ * walks the unit off the map one leash at a time.  After a broken leash the unit therefore owes the
+ * attack move a leash length of progress toward its goal before it may pick another fight.
+ */
+void AIAttackMoveToState::requireProgressTowardGoal( void )
 {
-	AIUpdateInterface *ai = ((Object *)obj)->getAI();
-	if (ai == NULL || ai->getJetAIUpdate() == NULL)
-		return;			// only trace jets
-
-	AsciiString ammo;
-	for (Int i = 0; i < WEAPONSLOT_COUNT; ++i)
-	{
-		const Weapon *w = obj->getWeaponInWeaponSlot((WeaponSlotType)i);
-		if (w == NULL)
-			continue;
-		AsciiString one;
-		one.format(" w%d[ammo=%d/%d status=%d max=%d]", i,
-			w->getRemainingAmmo(), w->getClipSize(), (Int)w->getStatus(), w->getMaxShotCount());
-		ammo.concat(one);
-	}
-	DEBUG_LOG(("JETRELOAD: obj %d %s %s frame=%d outOfAmmo=%d%s\n",
-		(Int)obj->getID(), what, detail, (Int)TheGameLogic->getFrame(),
-		(Int)((Object *)obj)->isOutOfAmmo(), ammo.str()));
+	Object *owner = getMachineOwner();
+	Real dx = owner->getPosition()->x - m_goalPosition.x;
+	Real dy = owner->getPosition()->y - m_goalPosition.y;
+	Real distToGoal = sqrt(dx*dx + dy*dy) - ATTACK_MOVE_LEASH_CELLS*PATHFIND_CELL_SIZE_F;
+	m_reengageGoalDistSqr = (distToGoal > 0.0f) ? sqr(distToGoal) : 0.0f;
 }
+
+//----------------------------------------------------------------------------------------------------------
+/**
+ * True unless a broken leash left us owing the attack move some progress toward its goal.
+ */
+Bool AIAttackMoveToState::mayEngageYet( void )
+{
+	if (m_reengageGoalDistSqr <= 0.0f)
+		return TRUE;
+
+	Object *owner = getMachineOwner();
+	Real dx = owner->getPosition()->x - m_goalPosition.x;
+	Real dy = owner->getPosition()->y - m_goalPosition.y;
+	if ((dx*dx + dy*dy) > m_reengageGoalDistSqr)
+		return FALSE;
+
+	m_reengageGoalDistSqr = 0.0f;		// paid up
+	return TRUE;
+}
+
 
 //----------------------------------------------------------------------------------------------------------
 StateReturnType AIAttackMoveToState::update()
@@ -3740,8 +3786,6 @@ StateReturnType AIAttackMoveToState::update()
 	JetAIUpdate *jetAI = ai->getJetAIUpdate();
 	if( jetAI && jetAI->isOutOfSpecialReloadAmmo() )
 	{
-		if ((TheGameLogic->getFrame() % 30) == 0)
-			jetStateTrace(owner, "ATTACKMOVE-OUT-OF-RELOAD-AMMO", "(returning STATE_SUCCESS)");
 		//We need to return to base to reload!
 		return STATE_SUCCESS;
 	}
@@ -3755,14 +3799,15 @@ StateReturnType AIAttackMoveToState::update()
 			stopEngaging();
 			ai->friend_setLastCommandSource(m_commandSrc);
 			m_frameToScanOn = TheGameLogic->getFrame() + ATTACK_MOVE_REACQUIRE_DELAY;
+			requireProgressTowardGoal();
 			shouldRepathThisFrame = true;
 		}
 		else
 		{
-			// we shoot standing still: the move goal is cleared every frame, and only the attack
-			// machine's own approach may set a new one.
-			ai->setLocomotorGoalNone();
-			owner->clearModelConditionState(MODELCONDITION_MOVING);
+			// The move stopped once, in startEngaging; from here the attack machine owns the
+			// locomotor, so that its approach can close with the victim and its own arrival can stop
+			// it.  (Clearing the goal and the MOVING condition every frame - as this state used to -
+			// fights the approach for the locomotor and strobes the walk animation.)
 			m_attackMoveMachine->updateStateMachine();
 
 			// if the machine is now idling, then we need to attempt to get a new target
@@ -3789,7 +3834,7 @@ StateReturnType AIAttackMoveToState::update()
 		}
 
 		UnsignedInt now = TheGameLogic->getFrame();
-		if (now >= m_frameToScanOn)
+		if (now >= m_frameToScanOn && mayEngageYet())
 		{
 			m_frameToScanOn = now + ATTACK_MOVE_SCAN_RATE;
 			// Scan on our own clock rather than the unit's idle mood clock (seconds apart, long
@@ -3797,14 +3842,6 @@ StateReturnType AIAttackMoveToState::update()
 			// is already within weapon range - we stop and close with whatever we find.
 			ai->setNextMoodCheckTime(now);
 			Object* nextObjectToAttack = ai->getNextMoodTarget( true, false, true );
-			if ((now % 30) == 0 || nextObjectToAttack != NULL)
-			{
-				AsciiString dbg;
-				dbg.format("(target=%d, mood=%d)",
-					nextObjectToAttack ? (Int)nextObjectToAttack->getID() : 0,
-					(Int)(ai->getMoodMatrixActionAdjustment(MM_Action_Attack) & MAA_Action_Ok));
-				jetStateTrace(owner, "ATTACKMOVE-PICK-TARGET", dbg.str());
-			}
 			if (nextObjectToAttack != NULL)
 			{
 				startEngaging(nextObjectToAttack);
@@ -3820,10 +3857,11 @@ StateReturnType AIAttackMoveToState::update()
 		shouldRepathThisFrame = true;
 	}
 
-	if (shouldRepathThisFrame) 
+	if (shouldRepathThisFrame)
 	{
 		AIMoveToState::onEnter();
 		forceRepath();
+		applyGroupSpeed();		// re-entering the move state put the speed back to FAST_AS_POSSIBLE
 	}
 
 	StateReturnType ret = AIMoveToState::update();
@@ -5672,7 +5710,6 @@ StateReturnType AIAttackState::onEnter()
 	//from ever happening, but failed in two cases which I fixed. This is an extra check to mitigate cheats.
 	if( source->testStatus( OBJECT_STATUS_UNDER_CONSTRUCTION ) )
 	{
-		jetStateTrace(source, "ATTACK-ENTER-FAIL", "(under construction)");
 		return STATE_FAILURE;
 	}
 
@@ -5680,7 +5717,6 @@ StateReturnType AIAttackState::onEnter()
 	// (this can happen for units which never auto-reload, like the Raptor)
 	if (source->isOutOfAmmo() && !source->isKindOf(KINDOF_PROJECTILE))
 	{
-		jetStateTrace(source, "ATTACK-ENTER-FAIL", "(isOutOfAmmo)");
 		return STATE_FAILURE;
 	}
 
@@ -5715,7 +5751,6 @@ StateReturnType AIAttackState::onEnter()
 	Bool weaponPicked = chooseWeapon();
 	if( !weaponPicked )
 	{
-		jetStateTrace(source, "ATTACK-ENTER-FAIL", "(chooseWeapon failed)");
 		return STATE_FAILURE;
 	}
 
@@ -5731,12 +5766,6 @@ StateReturnType AIAttackState::onEnter()
 	m_lockedWeaponOnEnter = source->isCurWeaponLocked() ? curWeapon : NULL;
 
 	StateReturnType retType = m_attackMachine->initDefaultState();
-	{
-		AsciiString dbg;
-		dbg.format("(initDefaultState=%d, weapon=%s)", (Int)retType,
-			source->getCurrentWeapon() ? source->getCurrentWeapon()->getName().str() : "<none>");
-		jetStateTrace(source, "ATTACK-ENTER", dbg.str());
-	}
 	if( retType == STATE_CONTINUE )
 	{
 		source->setStatus( MAKE_OBJECT_STATUS_MASK( OBJECT_STATUS_IS_ATTACKING ) );

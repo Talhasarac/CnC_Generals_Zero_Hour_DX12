@@ -599,6 +599,9 @@ protected:
 	void startEngaging( Object *victim );				///< stop here and hand the victim to the attack sub-machine
 	void stopEngaging( void );									///< the fight is over; put back what startEngaging changed
 	Bool hasLeftTheLeash( void );								///< has the victim dragged us too far off the attack move?
+	Bool mayEngageYet( void );									///< has the required progress toward the goal been made?
+	void requireProgressTowardGoal( void );			///< refuse to fight again until we are closer to the goal
+	void applyGroupSpeed( void );								///< hold this unit to the ordered group's speed
 
 	CommandSourceType	m_commandSrc;		// Original command source.  We switch to CMD_FROM_AI when auto-acquiring.
 	StateMachine *m_attackMoveMachine;
@@ -608,6 +611,8 @@ protected:
 	ObjectID			m_victimID;						///< who we picked
 	UnsignedInt		m_engageStartFrame;		///< when we picked it
 	UnsignedInt		m_frameToScanOn;			///< next frame we may look for a target
+	Real					m_reengageGoalDistSqr;	///< no new fight until we are this close to the goal (0 = no gate)
+	Real					m_groupSpeed;					///< speed of the slowest member of the ordered group
 	Bool					m_isEngaging;					///< true while the attack sub-machine owns us
 	Bool					m_chaseWasAllowed;		///< the owner's chase flag, saved while we engage
 protected:

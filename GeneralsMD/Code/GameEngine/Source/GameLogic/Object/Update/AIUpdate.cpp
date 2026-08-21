@@ -4610,7 +4610,17 @@ Object* AIUpdateInterface::getNextMoodTarget( Bool calledByAI, Bool calledDuring
 	// Use Guard Outer, which typically corresponds to the total range
 	Real rangeToFindWithin = TheAI->getAdjustedVisionRangeForObject(obj, AI_VISIONFACTOR_OWNERTYPE | AI_VISIONFACTOR_MOOD);
 
-	if (rangeToFindWithin <= 0.0f) 
+	// A caller that closes with what it finds (attack move) is not limited by what the unit can see:
+	// a unit whose weapon outranges its vision - artillery, rocket infantry, a Scud launcher - found
+	// nothing at all this way and walked past everything it was ordered to kill.
+	if (allowOutOfWeaponRangeTargets)
+	{
+		Real weaponRange = obj->getLargestWeaponRange();
+		if (weaponRange > rangeToFindWithin)
+			rangeToFindWithin = weaponRange;
+	}
+
+	if (rangeToFindWithin <= 0.0f)
 		return NULL;
 
 	//If we are contained by an object, add it's bounding radius so that large buildings can auto acquire everything in
@@ -4647,7 +4657,14 @@ Object* AIUpdateInterface::getNextMoodTarget( Bool calledByAI, Bool calledDuring
 		flags |= AI::IGNORE_INSIGNIFICANT_BUILDINGS; 
 	}
 	
-	if( d->m_autoAcquireEnemiesWhenIdle & AAS_Idle_Attack_Buildings )
+	//
+	// Idle auto-acquire ignores buildings unless the unit is one of the few with AttackBuildings in
+	// its AutoAcquireEnemiesWhenIdle, which is right for a unit standing around, and wrong for an
+	// attack move: the player pointed at the enemy base and the group walked through it without
+	// firing at a single structure.  A caller that closes with what it finds takes buildings too;
+	// the CAN_ATTACK filter still rejects the ones this unit's weapons cannot hurt.
+	//
+	if( (d->m_autoAcquireEnemiesWhenIdle & AAS_Idle_Attack_Buildings) || allowOutOfWeaponRangeTargets )
 	{
 		flags |= AI::ATTACK_BUILDINGS;
 	}

@@ -2283,17 +2283,65 @@ void AIGroup::groupAttackPosition( const Coord3D *pos, Int maxShotsToFire, Comma
  */
 void AIGroup::groupAttackMoveToPosition( const Coord3D *pos, Int maxShotsToFire, CommandSourceType cmdSource )
 {
+	//
+	// This used to hand every member the same single coordinate, so a group attack move arrived as
+	// a queue rather than a group: everyone pathed to one point, at their own top speed.  Spread the
+	// destination the way groupMoveToPosition does (each member keeps its offset from the group
+	// centroid) and hold the ground units to the speed of the slowest one so the group stays
+	// together on the way in - the whole point of an attack move is arriving able to fight.
+	//
+	if (m_dirty)
+		recompute();
+
+	Coord3D center;
+	Coord2D min;
+	Coord2D max;
+	getMinMaxAndCenter( &min, &max, &center );
+
+	// path the members closest to the goal first; it leaves fewer of them to collide on arrival.
+	MemoryPoolObjectHolder iterHolder;
+	SimpleObjectIterator *iter = newInstance(SimpleObjectIterator);
+	iterHolder.hold(iter);
 	std::list<Object *>::iterator i;
 	for( i = m_memberList.begin(); i != m_memberList.end(); ++i )
 	{
-		AIUpdateInterface *ai = (*i)->getAIUpdateInterface();
-		if (ai)
+		Object *member = *i;
+		if (member->isDisabledByType( DISABLED_HELD ))
+			continue;			// don't bother telling the occupants to move
+		if (member->isKindOf( KINDOF_IMMOBILE ))
+			continue;
+		if (member->getAIUpdateInterface() == NULL)
+			continue;
+
+		TheAI->pathfinder()->removeGoal( member );
+		Real dx = member->getPosition()->x - pos->x;
+		Real dy = member->getPosition()->y - pos->y;
+		iter->insert( member, dx*dx + dy*dy );
+	}
+	iter->sort( ITER_SORTED_NEAR_TO_FAR );
+
+	Coord3D goalPos = *pos;
+	Bool firstUnit = true;
+	Object *theUnit;
+	for( theUnit = iter->first(); theUnit; theUnit = iter->next() )
+	{
+		AIUpdateInterface *ai = theUnit->getAIUpdateInterface();
+		if (firstUnit)
 		{
-			if ((*i)->isAbleToAttack())
-				ai->aiAttackMoveToPosition( pos, maxShotsToFire, cmdSource );
-			else
-				ai->aiMoveToPosition( pos, cmdSource );
+			// the member nearest the goal defines the shape; everyone else keeps its offset from it.
+			center = *theUnit->getPosition();
+			firstUnit = false;
 		}
+
+		Coord3D dest;
+		computeIndividualDestination( &dest, &goalPos, theUnit, &center, FALSE );
+
+		// the speed of the slowest member is picked up by AIAttackMoveToState::onEnter, which runs
+		// inside this order - the move state resets the desired speed, so it cannot be set here.
+		if (theUnit->isAbleToAttack())
+			ai->aiAttackMoveToPosition( &dest, maxShotsToFire, cmdSource );
+		else
+			ai->aiMoveToPosition( &dest, cmdSource );
 	}
 }
 
