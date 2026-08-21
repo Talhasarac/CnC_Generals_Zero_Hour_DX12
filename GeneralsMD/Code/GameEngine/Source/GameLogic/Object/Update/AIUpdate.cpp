@@ -250,6 +250,8 @@ AIUpdateInterface::AIUpdateInterface( Thing *thing, const ModuleData* moduleData
 	m_nextGoalPathIndex = -1;
 	m_moveOutOfWay1 = INVALID_ID;
 	m_moveOutOfWay2 = INVALID_ID;
+	m_exitProductionRallyPoint.zero();
+	m_hasExitProductionRallyPoint = FALSE;
 	m_locomotorSet.clear();
 	m_curLocomotor = NULL;
 	m_curLocomotorSet = LOCOMOTORSET_INVALID;
@@ -1020,6 +1022,18 @@ UpdateSleepTime AIUpdateInterface::update( void )
 	UpdateSleepTime subMachineSleep = UPDATE_SLEEP_FOREVER;
 
 	StateReturnType stRet = getStateMachine()->updateStateMachine();
+
+	// A unit that was just built walks a short exit path out of its producer and then, if the player
+	// set a rally point, attack moves to it - so it stops and fights whatever it runs into on the way
+	// instead of taking the shots and walking on.  This is checked right after the machine ran,
+	// because finishing (or failing) the exit path is what drops us into idle in the first place.
+	if (m_hasExitProductionRallyPoint && getAIStateType() == AI_IDLE)
+	{
+		Coord3D rallyPoint = m_exitProductionRallyPoint;
+		m_hasExitProductionRallyPoint = FALSE;
+		privateAttackMoveToPosition( &rallyPoint, NO_MAX_SHOTS_LIMIT, CMD_FROM_AI );
+		stRet = STATE_CONTINUE;
+	}
 
 	if (IS_STATE_SLEEP(stRet))
 	{
@@ -2628,6 +2642,11 @@ void AIUpdateInterface::aiDoCommand(const AICommandParms* parms)
 	if (!isAllowedToRespondToAiCommands(parms))
 		return;
 
+	// Any order at all replaces the trip to the producer's rally point - except the exit path itself,
+	// which is the leg that precedes it.
+	if (parms->m_cmd != AICMD_FOLLOW_EXITPRODUCTION_PATH)
+		m_hasExitProductionRallyPoint = FALSE;
+
 #ifdef ALLOW_SURRENDER
 	// surrendered items have very limited options, and only via AI cmds
 	if (isSurrendered())
@@ -3374,6 +3393,17 @@ void AIUpdateInterface::privateFollowPathAppend( const Coord3D *pos, CommandSour
 		path.push_back( *pos );
 		privateFollowPath( &path, NULL, cmdSource, false );
 	}
+}
+
+//----------------------------------------------------------------------------------------
+/**
+ * Remember the rally point of the producer that just built us.  The exit path is only the step out
+ * of the door; update() turns this into an attack move once that step is done.
+ */
+void AIUpdateInterface::friend_setExitProductionRallyPoint( const Coord3D *pos )
+{
+	m_exitProductionRallyPoint = *pos;
+	m_hasExitProductionRallyPoint = TRUE;
 }
 
 //----------------------------------------------------------------------------------------
@@ -5021,7 +5051,7 @@ void AIUpdateInterface::crc( Xfer *x )
 void AIUpdateInterface::xfer( Xfer *xfer )
 {
   // version
-  const XferVersion currentVersion = 4;
+  const XferVersion currentVersion = 5;
   XferVersion version = currentVersion;
   xfer->xferVersion( &version, currentVersion );
  
@@ -5232,6 +5262,12 @@ void AIUpdateInterface::xfer( Xfer *xfer )
 	{
 		Int repulsorCountdown = 0;
 		xfer->xferInt(&repulsorCountdown);
+	}
+
+	if (version >= 5)
+	{
+		xfer->xferCoord3D(&m_exitProductionRallyPoint);
+		xfer->xferBool(&m_hasExitProductionRallyPoint);
 	}
 
 

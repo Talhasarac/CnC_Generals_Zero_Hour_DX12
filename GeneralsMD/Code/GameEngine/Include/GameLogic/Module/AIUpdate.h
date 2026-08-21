@@ -649,6 +649,9 @@ public:
 
 	// this is intended for use ONLY by AIFollowPathState.
 	inline void friend_setCurrentGoalPathIndex( Int index ) { m_nextGoalPathIndex = index; }
+
+	// this is intended for use ONLY by the production exit modules.
+	void friend_setExitProductionRallyPoint( const Coord3D *pos );
 #if defined(_DEBUG) || defined(_INTERNAL)	
 	inline const Coord3D *friend_getRequestedDestination() const { return &m_requestedDestination; }
 	inline const Coord3D *friend_getRequestedDestination2() const { return &m_requestedDestination2; }
@@ -740,6 +743,8 @@ private:
 	Int					m_nextGoalPathIndex;				///< The simple goal path index we are moving to next.
 	ObjectID		m_moveOutOfWay1;
 	ObjectID		m_moveOutOfWay2;
+	Coord3D			m_exitProductionRallyPoint;	///< Rally point to attack-move to once we are clear of the producer that just built us.
+	Bool				m_hasExitProductionRallyPoint;	///< True while m_exitProductionRallyPoint is still waiting to be ordered.
 
 	// Locomotors -------------------------------------------------------------------------------------------------
 	enum LocoGoalType	 // Note - written out in save/load xfer, don't change these numbers.  jba.

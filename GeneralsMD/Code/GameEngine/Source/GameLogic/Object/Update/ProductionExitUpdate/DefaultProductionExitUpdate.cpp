@@ -106,15 +106,15 @@ void DefaultProductionExitUpdate::exitObjectViaDoor( Object *newObj, ExitDoorTyp
 		exitPath.push_back(tmp);
 
 		AIUpdateInterface  *ai = newObj->getAIUpdateInterface();
-		if (m_rallyPointExists)
+		if (m_rallyPointExists && ai && ai->isDoingGroundMovement())
 		{
 			tmp = m_rallyPoint;
-			if (ai && ai->isDoingGroundMovement()) 
-			{
-				if (TheAI->pathfinder()->adjustDestination(newObj, ai->getLocomotorSet(), &tmp))
-					exitPath.push_back(tmp);
-
-			}
+			//
+			// the rally point is not a leg of the exit path any more - the unit attack moves there
+			// once it is out the door, so it fights what it meets on the way instead of walking past it
+			//
+			if (TheAI->pathfinder()->adjustDestination(newObj, ai->getLocomotorSet(), &tmp))
+				ai->friend_setExitProductionRallyPoint( &tmp );
 		}
 		if (ai) {
 			ai->aiFollowExitProductionPath( &exitPath, creationObject, CMD_FROM_AI );

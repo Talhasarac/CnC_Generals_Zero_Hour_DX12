@@ -143,12 +143,15 @@ void QueueProductionExitUpdate::exitObjectViaDoor( Object *newObj, ExitDoorType 
 		AIUpdateInterface  *ai = newObj->getAIUpdateInterface();
 		if (m_rallyPointExists)
 		{
-			tmp = m_rallyPoint;
-			if (ai && ai->isDoingGroundMovement()) 
+			if (ai && ai->isDoingGroundMovement())
 			{
+				tmp = m_rallyPoint;
+				//
+				// the rally point is not a leg of the exit path any more - the unit attack moves there
+				// once it is out the door, so it fights what it meets on the way instead of walking past it
+				//
 				if (TheAI->pathfinder()->adjustDestination(newObj, ai->getLocomotorSet(), &tmp))
-					exitPath.push_back(tmp);
-
+					ai->friend_setExitProductionRallyPoint( &tmp );
 			}
 		} else {
 			// Double the destination to keep redguards from stacking.
