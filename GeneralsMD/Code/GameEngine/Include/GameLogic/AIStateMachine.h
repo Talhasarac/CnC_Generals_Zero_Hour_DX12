@@ -591,10 +591,25 @@ public:
 protected:
 	enum {ATTACK_RETRY_COUNT=5};
 	enum {ATTACK_CLOSE_ENOUGH_CELLS=8};
+	enum {ATTACK_MOVE_SCAN_RATE=10};						///< frames between target scans (the idle mood clock is seconds apart)
+	enum {ATTACK_MOVE_LEASH_CELLS=12};					///< how far a victim may pull us off the attack move
+	enum {ATTACK_MOVE_DUD_ENGAGE_FRAMES=15};		///< a fight shorter than this, with the victim still alive, never started
+	enum {ATTACK_MOVE_REACQUIRE_DELAY=30};			///< frames of pure movement after a dud fight or a broken leash
+
+	void startEngaging( Object *victim );				///< stop here and hand the victim to the attack sub-machine
+	void stopEngaging( void );									///< the fight is over; put back what startEngaging changed
+	Bool hasLeftTheLeash( void );								///< has the victim dragged us too far off the attack move?
+
 	CommandSourceType	m_commandSrc;		// Original command source.  We switch to CMD_FROM_AI when auto-acquiring.
 	StateMachine *m_attackMoveMachine;
 	UnsignedInt		m_frameToSleepUntil;
 	Int						m_retryCount;
+	Coord3D				m_engageOrigin;				///< where we stood when we picked the current victim
+	ObjectID			m_victimID;						///< who we picked
+	UnsignedInt		m_engageStartFrame;		///< when we picked it
+	UnsignedInt		m_frameToScanOn;			///< next frame we may look for a target
+	Bool					m_isEngaging;					///< true while the attack sub-machine owns us
+	Bool					m_chaseWasAllowed;		///< the owner's chase flag, saved while we engage
 protected:
 	// snapshot interface
 	virtual void crc( Xfer *xfer );

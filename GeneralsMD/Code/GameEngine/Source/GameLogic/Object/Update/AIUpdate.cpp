@@ -4492,7 +4492,7 @@ Bool AIUpdateInterface::canAutoAcquireWhileStealthed() const
 /**
  * Return the next object that our mood suggests we should attack.
  */
-Object* AIUpdateInterface::getNextMoodTarget( Bool calledByAI, Bool calledDuringIdle )
+Object* AIUpdateInterface::getNextMoodTarget( Bool calledByAI, Bool calledDuringIdle, Bool allowOutOfWeaponRangeTargets )
 {
 	Object *obj = getObject();
 
@@ -4625,7 +4625,9 @@ Object* AIUpdateInterface::getNextMoodTarget( Bool calledByAI, Bool calledDuring
 	// if we're called by AI, and are human controlled, then our AI will not
 	// allow us to pursue the target. therefore, we should ensure that we only
 	// look for targets that are already within attack range (as opposed to vision range).
-	if (calledByAI && obj->getControllingPlayer()->getPlayerType() == PLAYER_HUMAN)
+	// The caller can lift that restriction (attack move does) when it will actually close
+	// with what it finds instead of driving past it.
+	if (calledByAI && !allowOutOfWeaponRangeTargets && obj->getControllingPlayer()->getPlayerType() == PLAYER_HUMAN)
 	{
 		flags |= AI::WITHIN_ATTACK_RANGE;
 	}

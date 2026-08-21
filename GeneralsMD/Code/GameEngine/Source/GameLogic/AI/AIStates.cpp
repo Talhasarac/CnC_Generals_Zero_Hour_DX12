@@ -3515,6 +3515,12 @@ AIAttackMoveToState::AIAttackMoveToState( StateMachine *machine ) : AIMoveToStat
 	m_isMoveTo = false;
 	m_frameToSleepUntil = 0;
 	m_retryCount = ATTACK_RETRY_COUNT;
+	m_engageOrigin.zero();
+	m_victimID = INVALID_ID;
+	m_engageStartFrame = 0;
+	m_frameToScanOn = 0;
+	m_isEngaging = FALSE;
+	m_chaseWasAllowed = FALSE;
 	m_attackMoveMachine = newInstance(AIAttackMoveStateMachine)(getMachineOwner(), "AIAttackMoveMachine");
 	m_attackMoveMachine->initDefaultState();
 }
@@ -3538,7 +3544,7 @@ void AIAttackMoveToState::crc( Xfer *xfer )
 void AIAttackMoveToState::xfer( Xfer *xfer )
 {
   // version
-  XferVersion currentVersion = 2;
+  XferVersion currentVersion = 3;
   XferVersion version = currentVersion;
   xfer->xferVersion( &version, currentVersion );
 
@@ -3548,6 +3554,14 @@ void AIAttackMoveToState::xfer( Xfer *xfer )
 	if (version>=2) {
 		xfer->xferUnsignedInt(&m_frameToSleepUntil);
 		xfer->xferInt(&m_retryCount);
+	}
+	if (version>=3) {
+		xfer->xferCoord3D(&m_engageOrigin);
+		xfer->xferObjectID(&m_victimID);
+		xfer->xferUnsignedInt(&m_engageStartFrame);
+		xfer->xferUnsignedInt(&m_frameToScanOn);
+		xfer->xferBool(&m_isEngaging);
+		xfer->xferBool(&m_chaseWasAllowed);
 	}
 	xfer->xferSnapshot(m_attackMoveMachine);
 }  // end xfer
@@ -3582,14 +3596,109 @@ StateReturnType AIAttackMoveToState::onEnter()
 	m_retryCount = ATTACK_RETRY_COUNT;
 	m_frameToSleepUntil = 0;
 
+	m_isEngaging = FALSE;
+	m_chaseWasAllowed = ai->isAllowedToChase();
+	m_victimID = INVALID_ID;
+	m_engageStartFrame = 0;
+	m_engageOrigin = *owner->getPosition();
+	// spread the scans of a group that was all ordered on the same frame over the scan interval.
+	m_frameToScanOn = TheGameLogic->getFrame() + ((UnsignedInt)owner->getID() % ATTACK_MOVE_SCAN_RATE);
+
 	return AIMoveToState::onEnter();
 }
 
 //----------------------------------------------------------------------------------------------------------
 void AIAttackMoveToState::onExit( StateExitType status )
 {
+	stopEngaging();
 	m_attackMoveMachine->setState(AI_IDLE);
 	AIMoveToState::onExit(status);
+}
+
+//----------------------------------------------------------------------------------------------------------
+/**
+ * Stop where we are and hand the victim to the attack sub-machine.  A unit on attack move fights
+ * from a standstill: the only movement allowed while it is engaged belongs to the attack machine's
+ * own approach, which stops the moment the weapon is in range.
+ */
+void AIAttackMoveToState::startEngaging( Object *victim )
+{
+	Object *owner = getMachineOwner();
+	AIUpdateInterface *ai = owner->getAI();
+
+	ai->friend_endingMove();
+	ai->destroyPath();		// drop the attack move path; it is rebuilt when the fight is over
+
+	m_engageOrigin = *owner->getPosition();
+	m_victimID = victim->getID();
+	m_engageStartFrame = TheGameLogic->getFrame();
+	m_chaseWasAllowed = ai->isAllowedToChase();
+	m_isEngaging = TRUE;
+
+	// A human player's unit refuses to approach anything it auto-acquired (see
+	// AIAttackApproachTargetState::onEnter), so on attack move it used to lock onto a target it
+	// never closed with and keep driving to the goal instead.  Attack move is an explicit order to
+	// engage, so let it approach; hasLeftTheLeash() bounds how far the victim can drag it.
+	if (owner->getControllingPlayer()->getPlayerType() == PLAYER_HUMAN)
+		ai->setAllowedToChase(TRUE);
+
+	m_attackMoveMachine->setGoalObject(victim);
+	// Note that we picked up this command from the ai.  This is set *before* the state change so
+	// that the approach and pursue states see the same command source on the frame they are entered
+	// as on every frame after it.
+	ai->friend_setLastCommandSource(CMD_FROM_AI);
+	m_attackMoveMachine->setState( AI_ATTACK_OBJECT );
+}
+
+//----------------------------------------------------------------------------------------------------------
+/**
+ * The fight is over (victim dead, out of reach, or leashed off).  Put back what startEngaging
+ * changed, and if the fight never really started, keep moving for a moment instead of picking the
+ * same untouchable target again on the next scan.
+ */
+void AIAttackMoveToState::stopEngaging( void )
+{
+	if (!m_isEngaging)
+		return;
+
+	m_isEngaging = FALSE;
+
+	Object *owner = getMachineOwner();
+	AIUpdateInterface *ai = owner->getAI();
+	// If this is the result of the state machine being deleted, then there is no AI.
+	if (ai == NULL)
+		return;
+
+	if (owner->getControllingPlayer()->getPlayerType() == PLAYER_HUMAN)
+		ai->setAllowedToChase(m_chaseWasAllowed);
+
+	UnsignedInt now = TheGameLogic->getFrame();
+	Object *victim = TheGameLogic->findObjectByID(m_victimID);
+	if (victim && !victim->isEffectivelyDead() && now - m_engageStartFrame < ATTACK_MOVE_DUD_ENGAGE_FRAMES)
+	{
+		// we could not touch it (unreachable, cannot attack it, out of ammo) - move on for a second.
+		m_frameToScanOn = now + ATTACK_MOVE_REACQUIRE_DELAY;
+	}
+	m_victimID = INVALID_ID;
+}
+
+//----------------------------------------------------------------------------------------------------------
+/**
+ * True when the approach has pulled us further than ATTACK_MOVE_LEASH_CELLS from the spot where we
+ * picked the victim.  Computer and script attack moves keep their retail chase behavior.
+ */
+Bool AIAttackMoveToState::hasLeftTheLeash( void )
+{
+	if (!m_isEngaging)
+		return FALSE;
+
+	Object *owner = getMachineOwner();
+	if (owner->getControllingPlayer()->getPlayerType() != PLAYER_HUMAN)
+		return FALSE;
+
+	Real dx = owner->getPosition()->x - m_engageOrigin.x;
+	Real dy = owner->getPosition()->y - m_engageOrigin.y;
+	return (dx*dx + dy*dy) > sqr(ATTACK_MOVE_LEASH_CELLS*PATHFIND_CELL_SIZE_F);
 }
 
 
@@ -3626,7 +3735,6 @@ StateReturnType AIAttackMoveToState::update()
 	Object *owner = getMachineOwner();
 	AIUpdateInterface *ai = owner->getAI();
 
-	Bool forceRetargetThisFrame = false;
 	Bool shouldRepathThisFrame = false;
 
 	JetAIUpdate *jetAI = ai->getJetAIUpdate();
@@ -3638,19 +3746,33 @@ StateReturnType AIAttackMoveToState::update()
 		return STATE_SUCCESS;
 	}
 
-	if (!m_attackMoveMachine->isInIdleState()) 
+	if (!m_attackMoveMachine->isInIdleState())
 	{
-		ai->setLocomotorGoalNone();
-		owner->clearModelConditionState(MODELCONDITION_MOVING);
-		m_attackMoveMachine->updateStateMachine();
-		
-		// if the machine is now idling, then we need to attempt to get a new target
-		if (m_attackMoveMachine->isInIdleState()) {
-			forceRetargetThisFrame = true;
-			shouldRepathThisFrame = true;
+		if (hasLeftTheLeash())
+		{
+			// the victim is walking us off the attack move - let it go and get back on the path.
+			m_attackMoveMachine->setState( AI_IDLE );
+			stopEngaging();
 			ai->friend_setLastCommandSource(m_commandSrc);
-		} else {
-			return STATE_CONTINUE;
+			m_frameToScanOn = TheGameLogic->getFrame() + ATTACK_MOVE_REACQUIRE_DELAY;
+			shouldRepathThisFrame = true;
+		}
+		else
+		{
+			// we shoot standing still: the move goal is cleared every frame, and only the attack
+			// machine's own approach may set a new one.
+			ai->setLocomotorGoalNone();
+			owner->clearModelConditionState(MODELCONDITION_MOVING);
+			m_attackMoveMachine->updateStateMachine();
+
+			// if the machine is now idling, then we need to attempt to get a new target
+			if (m_attackMoveMachine->isInIdleState()) {
+				stopEngaging();
+				shouldRepathThisFrame = true;
+				ai->friend_setLastCommandSource(m_commandSrc);
+			} else {
+				return STATE_CONTINUE;
+			}
 		}
 	}
 
@@ -3665,28 +3787,30 @@ StateReturnType AIAttackMoveToState::update()
 			m_attackMoveMachine->setState( AI_PICK_UP_CRATE );
 			return STATE_CONTINUE;
 		}
-		
-		Object* nextObjectToAttack;
-		nextObjectToAttack = ai->getNextMoodTarget( !forceRetargetThisFrame, false );
-		if ((TheGameLogic->getFrame() % 30) == 0 || nextObjectToAttack != NULL)
+
+		UnsignedInt now = TheGameLogic->getFrame();
+		if (now >= m_frameToScanOn)
 		{
-			AsciiString dbg;
-			dbg.format("(target=%d, forceRetarget=%d, mood=%d)",
-				nextObjectToAttack ? (Int)nextObjectToAttack->getID() : 0,
-				(Int)forceRetargetThisFrame,
-				(Int)(ai->getMoodMatrixActionAdjustment(MM_Action_Attack) & MAA_Action_Ok));
-			jetStateTrace(owner, "ATTACKMOVE-PICK-TARGET", dbg.str());
-		}
-		if (nextObjectToAttack != NULL)
-		{
-			ai->friend_endingMove();
-			m_attackMoveMachine->setGoalObject(nextObjectToAttack);
-			m_attackMoveMachine->setState( AI_ATTACK_OBJECT );
-			shouldRepathThisFrame = false;	// we're about to drop out of this function, but this is semantic emphasis.
-			// Note that we picked up this command from the ai.
-			ai->friend_setLastCommandSource(CMD_FROM_AI);
-			// we don't want an update to take place 'till next frame.
-			return STATE_CONTINUE;
+			m_frameToScanOn = now + ATTACK_MOVE_SCAN_RATE;
+			// Scan on our own clock rather than the unit's idle mood clock (seconds apart, long
+			// enough to drive right past an enemy), and take anything in vision range, not just what
+			// is already within weapon range - we stop and close with whatever we find.
+			ai->setNextMoodCheckTime(now);
+			Object* nextObjectToAttack = ai->getNextMoodTarget( true, false, true );
+			if ((now % 30) == 0 || nextObjectToAttack != NULL)
+			{
+				AsciiString dbg;
+				dbg.format("(target=%d, mood=%d)",
+					nextObjectToAttack ? (Int)nextObjectToAttack->getID() : 0,
+					(Int)(ai->getMoodMatrixActionAdjustment(MM_Action_Attack) & MAA_Action_Ok));
+				jetStateTrace(owner, "ATTACKMOVE-PICK-TARGET", dbg.str());
+			}
+			if (nextObjectToAttack != NULL)
+			{
+				startEngaging(nextObjectToAttack);
+				// we don't want an update to take place 'till next frame.
+				return STATE_CONTINUE;
+			}
 		}
 	}
 
