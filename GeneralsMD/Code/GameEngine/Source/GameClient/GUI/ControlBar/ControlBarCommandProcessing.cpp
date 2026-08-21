@@ -50,11 +50,15 @@
 #include "GameClient/GameWindow.h"
 #include "GameClient/GameWindowManager.h"
 #include "GameClient/InGameUI.h"
+#include "GameClient/Keyboard.h"
 #include "GameClient/AnimateWindowManager.h"
 
 #include "GameLogic/GameLogic.h"
 #include "GameLogic/Object.h"
 #include "GameLogic/Module/ProductionUpdate.h"
+
+// how many units a shift-click on a build button queues at once
+static const Int SHIFT_BUILD_QUEUE_COUNT = 5;
 
 #ifdef _INTERNAL
 // for occasional debugging...
@@ -396,13 +400,26 @@ CBCommandStatus ControlBar::processCommandUI( GameWindow *control,
 			//
 			const ThingTemplate *whatToBuild = commandButton->getThingTemplate();
 
-			// get the "factory" object that is going to make the thing. With several factories
-			// selected (multi-select context) use the one with the fewest queued items that can
-			// actually make it, so repeated clicks spread the work over all selected factories
-			Object *factory = obj;
-			if( factory == NULL && m_currContext == CB_CONTEXT_MULTI_SELECT )
+			// sanity, we must have something to build
+			DEBUG_ASSERTCRASH( whatToBuild, ("Undefined BUILD command for object '%s'\n",
+												 commandButton->getThingTemplate()->getName().str()) );
+
+			// holding shift queues a whole batch with one click
+			Int wanted = TheKeyboard->isShift() ? SHIFT_BUILD_QUEUE_COUNT : 1;
+
+			// gather the "factory" objects that could make the thing. With several factories
+			// selected (multi-select context) every one that can make it is a candidate, and each
+			// unit of the batch goes to the least loaded one, so the work spreads over all of them
+			std::vector<Object *> factories;
+			std::vector<UnsignedInt> queued;		// real production count plus what this click already gave it
+			if( obj )
 			{
-				UnsignedInt bestCount = 0;
+				ProductionUpdateInterface *opu = obj->getProductionUpdateInterface();
+				factories.push_back( obj );
+				queued.push_back( opu ? opu->getProductionCount() : 0 );
+			}
+			else if( m_currContext == CB_CONTEXT_MULTI_SELECT )
+			{
 				const DrawableList *selected = TheInGameUI->getAllSelectedDrawables();
 				for( DrawableListCIt it = selected->begin(); it != selected->end(); ++it )
 				{
@@ -410,77 +427,90 @@ CBCommandStatus ControlBar::processCommandUI( GameWindow *control,
 					ProductionUpdateInterface *cpu = candidate ? candidate->getProductionUpdateInterface() : NULL;
 					if( cpu == NULL || TheBuildAssistant->canMakeUnit( candidate, whatToBuild ) != CANMAKE_OK )
 						continue;
-					if( factory == NULL || cpu->getProductionCount() < bestCount )
-					{
-						factory = candidate;
-						bestCount = cpu->getProductionCount();
-					}
+					factories.push_back( candidate );
+					queued.push_back( cpu->getProductionCount() );
 				}
 				// nothing can take it: fall back to the first factory so the usual messages fire
-				if( factory == NULL && !selected->empty() )
-					factory = selected->front()->getObject();
+				if( factories.empty() && !selected->empty() && selected->front()->getObject() )
+				{
+					factories.push_back( selected->front()->getObject() );
+					queued.push_back( 0 );
+				}
 			}
-			if( factory == NULL )
+			if( factories.empty() )
 				break;
 
-			// sanity, we must have something to build
-			DEBUG_ASSERTCRASH( whatToBuild, ("Undefined BUILD command for object '%s'\n", 
-												 commandButton->getThingTemplate()->getName().str()) );
-			
-			CanMakeType cmt = TheBuildAssistant->canMakeUnit(factory, whatToBuild);
-
-			if (cmt == CANMAKE_NO_MONEY)
+			for( Int built = 0; built < wanted; built++ )
 			{
-				TheEva->setShouldPlay(EVA_InsufficientFunds);
-				TheInGameUI->message( "GUI:NotEnoughMoneyToBuild" );
-				break;
-			} 
-			else if (cmt == CANMAKE_QUEUE_FULL)
-			{
-				TheInGameUI->message( "GUI:ProductionQueueFull" );
-				break;
-			}
-			else if (cmt == CANMAKE_PARKING_PLACES_FULL)
-			{
-				TheInGameUI->message( "GUI:ParkingPlacesFull" );
-				break;
-			}
-			else if( cmt == CANMAKE_MAXED_OUT_FOR_PLAYER )
-			{
-				TheInGameUI->message( "GUI:UnitMaxedOut" );
-				break;
-			} 
-			else if (cmt != CANMAKE_OK)
-			{
-				DEBUG_ASSERTCRASH( 0, ("Cannot create '%s' because the factory object '%s' returns false for canMakeUnit\n", 
-																whatToBuild->getName().str(), 
-																factory->getTemplate()->getName().str()) );
-				break;
-			}
+				// least loaded factory takes this one
+				Int best = 0;
+				for( Int i = 1; i < (Int)factories.size(); i++ )
+					if( queued[ i ] < queued[ best ] )
+						best = i;
+				Object *factory = factories[ best ];
 
-			// get the production interface from the factory object
-			ProductionUpdateInterface *pu = factory->getProductionUpdateInterface();
+				CanMakeType cmt = TheBuildAssistant->canMakeUnit(factory, whatToBuild);
 
-			// sanity, we can't build things if we can't produce units
-			if( pu == NULL )
-			{
+				if (cmt == CANMAKE_NO_MONEY)
+				{
+					TheEva->setShouldPlay(EVA_InsufficientFunds);
+					TheInGameUI->message( "GUI:NotEnoughMoneyToBuild" );
+					break;
+				} 
+				else if (cmt == CANMAKE_QUEUE_FULL)
+				{
+					TheInGameUI->message( "GUI:ProductionQueueFull" );
+					break;
+				}
+				else if (cmt == CANMAKE_PARKING_PLACES_FULL)
+				{
+					TheInGameUI->message( "GUI:ParkingPlacesFull" );
+					break;
+				}
+				else if( cmt == CANMAKE_MAXED_OUT_FOR_PLAYER )
+				{
+					TheInGameUI->message( "GUI:UnitMaxedOut" );
+					break;
+				} 
+				else if (cmt != CANMAKE_OK)
+				{
+					DEBUG_ASSERTCRASH( 0, ("Cannot create '%s' because the factory object '%s' returns false for canMakeUnit\n", 
+																	whatToBuild->getName().str(), 
+																	factory->getTemplate()->getName().str()) );
+					break;
+				}
 
-				DEBUG_ASSERTCRASH( 0, ("Cannot create '%s' because the factory object '%s' is not capable of producting units\n", 
-																whatToBuild->getName().str(), 
-																factory->getTemplate()->getName().str()) );
-				break;
+				// get the production interface from the factory object
+				ProductionUpdateInterface *pu = factory->getProductionUpdateInterface();
 
-			}  // end if
-			
-			// get a new production id to assign to this
-			ProductionID productionID = pu->requestUniqueUnitID();
+				// sanity, we can't build things if we can't produce units
+				if( pu == NULL )
+				{
 
-			// create a message to build this thing
+					DEBUG_ASSERTCRASH( 0, ("Cannot create '%s' because the factory object '%s' is not capable of producting units\n", 
+																	whatToBuild->getName().str(), 
+																	factory->getTemplate()->getName().str()) );
+					break;
 
-			GameMessage *msg = TheMessageStream->appendMessage( GameMessage::MSG_QUEUE_UNIT_CREATE );
-			msg->appendIntegerArgument( whatToBuild->getTemplateID() );
-			msg->appendIntegerArgument( productionID );
-			msg->appendObjectIDArgument( factory->getID() );	// which of the selected factories builds it
+				}  // end if
+
+				// get a new production id to assign to this
+				ProductionID productionID = pu->requestUniqueUnitID();
+
+				// create a message to build this thing
+
+				GameMessage *msg = TheMessageStream->appendMessage( GameMessage::MSG_QUEUE_UNIT_CREATE );
+				msg->appendIntegerArgument( whatToBuild->getTemplateID() );
+				msg->appendIntegerArgument( productionID );
+				msg->appendObjectIDArgument( factory->getID() );	// which of the selected factories builds it
+
+				//
+				// the real production count only catches up once the logic runs these messages, so
+				// count it here to keep spreading the rest of the batch
+				//
+				queued[ best ]++;
+
+			}  // end for, one message per unit of the batch
 
 			break;
 

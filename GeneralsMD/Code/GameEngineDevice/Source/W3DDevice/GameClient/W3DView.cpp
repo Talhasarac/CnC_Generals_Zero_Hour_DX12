@@ -261,6 +261,10 @@ void W3DView::setOrigin( Int x, Int y)
 /** @todo This is inefficient. We should construct the matrix directly using vectors. */
 //-------------------------------------------------------------------------------------------------
 #define MIN_CAPPED_ZOOM (0.5f) //WST 10.19.2002. JSC integrated 5/20/03.
+// how far past the map's default max camera height the player may zoom out by hand.
+// only the manual zoom limit is stretched - the default/scripted views still use
+// m_maxHeightAboveGround, so a map still opens framed the way its author meant it to.
+#define ZOOM_OUT_LIMIT_FACTOR (1.6f)
 void W3DView::buildCameraTransform( Matrix3D *transform )
 {
 	Vector3 sourcePos, targetPos;
@@ -1361,7 +1365,19 @@ void W3DView::update(void)
 	 */
 	m_terrainHeightUnderCamera = getHeightAroundPos(m_pos.x, m_pos.y);
 	m_currentHeightAboveGround = m_cameraOffset.z * m_zoom - m_terrainHeightUnderCamera;
-	if (stepTime && TheTerrainLogic && TheGlobalData && TheInGameUI && m_okToAdjustHeight && !TheGameLogic->isGamePaused())
+	//
+	// The settle below is an exponential approach tuned for one 30Hz step. Gating it on
+	// stepTime made the zoom crawl in visible 30Hz jumps on a faster display; run it every
+	// render frame instead and convert m_cameraAdjustSpeed into the equivalent rate for the
+	// time this frame actually took, so the zoom is smooth and its speed stays the same.
+	//
+	static DWORD prevZoomStepTime = 0;
+	Real zoomSteps = (Real)(nowCameraStepTime - prevZoomStepTime) / (Real)TheW3DFrameLengthInMsec;
+	prevZoomStepTime = nowCameraStepTime;
+	if (zoomSteps <= 0.0f || zoomSteps > 10.0f)
+		zoomSteps = 1.0f;		// first frame ever, or a hitch: take one plain step
+	Real cameraAdjustSpeed = 1.0f - (Real)pow(1.0f - TheGlobalData->m_cameraAdjustSpeed, zoomSteps);
+	if (TheTerrainLogic && TheGlobalData && TheInGameUI && m_okToAdjustHeight && !TheGameLogic->isGamePaused())
 	{
 		Real desiredHeight = (m_terrainHeightUnderCamera + m_heightAboveGround);
 		Real desiredZoom = desiredHeight / m_cameraOffset.z;
@@ -1375,9 +1391,9 @@ void W3DView::update(void)
 		if (TheInGameUI->isScrolling())
 		{
 			// if scrolling, only adjust if we're too close or too far
-			if (m_scrollAmount.length() < m_scrollAmountCutoff || (m_currentHeightAboveGround < m_minHeightAboveGround) || (TheGlobalData->m_enforceMaxCameraHeight && m_currentHeightAboveGround > m_maxHeightAboveGround))
+			if (m_scrollAmount.length() < m_scrollAmountCutoff || (m_currentHeightAboveGround < m_minHeightAboveGround) || (TheGlobalData->m_enforceMaxCameraHeight && m_currentHeightAboveGround > m_maxHeightAboveGround * ZOOM_OUT_LIMIT_FACTOR))
 			{
-				Real zoomAdj = (desiredZoom - m_zoom)*TheGlobalData->m_cameraAdjustSpeed;
+				Real zoomAdj = (desiredZoom - m_zoom)*cameraAdjustSpeed;
 				if (fabs(zoomAdj) >= 0.0001)	// only do positive
 				{
 					m_zoom += zoomAdj;
@@ -1388,7 +1404,7 @@ void W3DView::update(void)
 		else
 		{
 			// we're not scrolling; settle toward desired height above ground
-			Real zoomAdj = (m_zoom - desiredZoom)*TheGlobalData->m_cameraAdjustSpeed;
+			Real zoomAdj = (m_zoom - desiredZoom)*cameraAdjustSpeed;
 			Real zoomAdjAbs = fabs(zoomAdj);
 			if (zoomAdjAbs >= 0.0001 && !didScriptedMovement)
 			{
@@ -1975,8 +1991,8 @@ void W3DView::setHeightAboveGround(Real z)
 		if (m_heightAboveGround < m_minHeightAboveGround)
 			m_heightAboveGround = m_minHeightAboveGround;
 
-		if (m_heightAboveGround > m_maxHeightAboveGround)
-			m_heightAboveGround = m_maxHeightAboveGround;
+		if (m_heightAboveGround > m_maxHeightAboveGround * ZOOM_OUT_LIMIT_FACTOR)
+			m_heightAboveGround = m_maxHeightAboveGround * ZOOM_OUT_LIMIT_FACTOR;
 
 	}  // end if
 
