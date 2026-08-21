@@ -3861,8 +3861,19 @@ void Drawable::drawHealthBar(const IRegion2D* healthBarRegion)
 		if( obj == NULL )
 			return;
 
-		// projectiles (missiles, shells, bombs) are in flight for a moment and their bar is just noise
-		if( obj->isKindOf( KINDOF_PROJECTILE ) )
+		//
+		// health bars are always on in this fork, so anything with a body draws one. Effect
+		// objects (projectiles in flight, toxin and radiation fields, parachutes, fire walls,
+		// wrecked hulks, subobject turrets) are not things the player commands or targets, so
+		// their bars are pure clutter.
+		//
+		if( obj->isKindOf( KINDOF_PROJECTILE ) ||
+				obj->isKindOf( KINDOF_INERT ) ||
+				obj->isKindOf( KINDOF_CLEANUP_HAZARD ) ||
+				obj->isKindOf( KINDOF_UNATTACKABLE ) ||
+				obj->isKindOf( KINDOF_PARACHUTE ) ||
+				obj->isKindOf( KINDOF_HULK ) ||
+				obj->isKindOf( KINDOF_CLICK_THROUGH ) )
 			return;
 
 		if( obj->isKindOf( KINDOF_FORCEATTACKABLE ) )
