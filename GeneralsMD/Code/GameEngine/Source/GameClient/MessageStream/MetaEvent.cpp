@@ -415,6 +415,19 @@ static const char * findGameMessageNameByType(GameMessage::Type type)
 }
 
 //-------------------------------------------------------------------------------------------------
+/** The command bar slot keys have to behave exactly like a click on the cell they press, and a
+	* shift-click on a build button queues a whole batch instead of one unit. Holding shift must
+	* therefore not stop the slot from matching. Every other modifier still has to match exactly,
+	* and a slot the player deliberately bound to shift is compared as-is. */
+//-------------------------------------------------------------------------------------------------
+static Bool metaIgnoresShift(const MetaMapRec *map)
+{
+	return map->m_meta >= GameMessage::MSG_META_COMMAND_SLOT01 &&
+				 map->m_meta <= GameMessage::MSG_META_COMMAND_SLOT14 &&
+				 (map->m_modState & SHIFT) == 0;
+}
+
+//-------------------------------------------------------------------------------------------------
 GameMessageDisposition MetaEventTranslator::translateGameMessage(const GameMessage *msg)
 {
 	GameMessageDisposition disp = KEEP_MESSAGE;
@@ -490,9 +503,10 @@ GameMessageDisposition MetaEventTranslator::translateGameMessage(const GameMessa
 			}
 
 			// ok, now check for "normal" key transitions.
+			Int cmpModState = metaIgnoresShift(map) ? (newModState & ~SHIFT) : newModState;
 			if (
 						map->m_key == key && 
-						map->m_modState == newModState &&
+						map->m_modState == cmpModState &&
 						(
 							(map->m_transition == UP && (keyState & KEY_STATE_UP)) ||
 							(map->m_transition == DOWN && (keyState & KEY_STATE_DOWN)) //||

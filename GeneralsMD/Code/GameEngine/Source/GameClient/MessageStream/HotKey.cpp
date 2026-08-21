@@ -96,7 +96,9 @@ GameMessageDisposition HotKeyTranslator::translateGameMessage(const GameMessage 
 		{
 			newModState |= ALT;
 		}
-		if(newModState != 0)
+		// shift is allowed through: a shift-click on a build button queues a batch of units, and
+		// the label hotkey is meant to be that click's equal. Ctrl and alt still block the hotkey.
+		if(newModState & ~SHIFT)
 			return disp;
 		WideChar key = TheKeyboard->getPrintableKey(msg->getArgument(0)->integer, 0);
 		UnicodeString uKey;
