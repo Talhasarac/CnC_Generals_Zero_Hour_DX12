@@ -2474,6 +2474,9 @@ void JetAIUpdate::aiDoCommand(const AICommandParms* parms)
 		case AICMD_GUARD_AREA:
 		case AICMD_HUNT:
 		case AICMD_GUARD_RETALIATE:
+		// like hunt, an attack-move is a standing order: if we run dry partway through it,
+		// go reload and then pick the order back up, rather than dropping it and idling.
+		case AICMD_ATTACKMOVE_TO_POSITION:
 			setFlag(ALLOW_INTERRUPT_AND_RESUME_OF_CUR_STATE_FOR_RELOAD, true);
 			break;
 		default:
