@@ -3592,6 +3592,33 @@ void AIAttackMoveToState::onExit( StateExitType status )
 	AIMoveToState::onExit(status);
 }
 
+
+// ---------------------------------------------------------------------------
+// TEMPORARY DIAGNOSTIC (jet reload/resume).  Remove with the matching probes
+// in JetAIUpdate.cpp; every line is prefixed JETRELOAD:.
+// ---------------------------------------------------------------------------
+static void jetStateTrace(const Object *obj, const char *what, const char *detail)
+{
+	AIUpdateInterface *ai = ((Object *)obj)->getAI();
+	if (ai == NULL || ai->getJetAIUpdate() == NULL)
+		return;			// only trace jets
+
+	AsciiString ammo;
+	for (Int i = 0; i < WEAPONSLOT_COUNT; ++i)
+	{
+		const Weapon *w = obj->getWeaponInWeaponSlot((WeaponSlotType)i);
+		if (w == NULL)
+			continue;
+		AsciiString one;
+		one.format(" w%d[ammo=%d/%d status=%d max=%d]", i,
+			w->getRemainingAmmo(), w->getClipSize(), (Int)w->getStatus(), w->getMaxShotCount());
+		ammo.concat(one);
+	}
+	DEBUG_LOG(("JETRELOAD: obj %d %s %s frame=%d outOfAmmo=%d%s\n",
+		(Int)obj->getID(), what, detail, (Int)TheGameLogic->getFrame(),
+		(Int)((Object *)obj)->isOutOfAmmo(), ammo.str()));
+}
+
 //----------------------------------------------------------------------------------------------------------
 StateReturnType AIAttackMoveToState::update()
 {
@@ -3605,6 +3632,8 @@ StateReturnType AIAttackMoveToState::update()
 	JetAIUpdate *jetAI = ai->getJetAIUpdate();
 	if( jetAI && jetAI->isOutOfSpecialReloadAmmo() )
 	{
+		if ((TheGameLogic->getFrame() % 30) == 0)
+			jetStateTrace(owner, "ATTACKMOVE-OUT-OF-RELOAD-AMMO", "(returning STATE_SUCCESS)");
 		//We need to return to base to reload!
 		return STATE_SUCCESS;
 	}
@@ -3639,6 +3668,15 @@ StateReturnType AIAttackMoveToState::update()
 		
 		Object* nextObjectToAttack;
 		nextObjectToAttack = ai->getNextMoodTarget( !forceRetargetThisFrame, false );
+		if ((TheGameLogic->getFrame() % 30) == 0 || nextObjectToAttack != NULL)
+		{
+			AsciiString dbg;
+			dbg.format("(target=%d, forceRetarget=%d, mood=%d)",
+				nextObjectToAttack ? (Int)nextObjectToAttack->getID() : 0,
+				(Int)forceRetargetThisFrame,
+				(Int)(ai->getMoodMatrixActionAdjustment(MM_Action_Attack) & MAA_Action_Ok));
+			jetStateTrace(owner, "ATTACKMOVE-PICK-TARGET", dbg.str());
+		}
 		if (nextObjectToAttack != NULL)
 		{
 			ai->friend_endingMove();
@@ -5510,13 +5548,17 @@ StateReturnType AIAttackState::onEnter()
 	//from ever happening, but failed in two cases which I fixed. This is an extra check to mitigate cheats.
 	if( source->testStatus( OBJECT_STATUS_UNDER_CONSTRUCTION ) )
 	{
+		jetStateTrace(source, "ATTACK-ENTER-FAIL", "(under construction)");
 		return STATE_FAILURE;
 	}
 
 	// if all of our weapons are out of ammo, can't attack.
 	// (this can happen for units which never auto-reload, like the Raptor)
 	if (source->isOutOfAmmo() && !source->isKindOf(KINDOF_PROJECTILE))
+	{
+		jetStateTrace(source, "ATTACK-ENTER-FAIL", "(isOutOfAmmo)");
 		return STATE_FAILURE;
+	}
 
 	// create new state machine for attack behavior
 	//CRCDEBUG_LOG(("AIAttackState::onEnter() - constructing state machine for object %d\n", getMachineOwner()->getID()));
@@ -5548,7 +5590,10 @@ StateReturnType AIAttackState::onEnter()
 	// our Primary (default pick) regardless of legality.
 	Bool weaponPicked = chooseWeapon();
 	if( !weaponPicked )
+	{
+		jetStateTrace(source, "ATTACK-ENTER-FAIL", "(chooseWeapon failed)");
 		return STATE_FAILURE;
+	}
 
 	Weapon* curWeapon = source->getCurrentWeapon();
 	if (curWeapon)
@@ -5562,6 +5607,12 @@ StateReturnType AIAttackState::onEnter()
 	m_lockedWeaponOnEnter = source->isCurWeaponLocked() ? curWeapon : NULL;
 
 	StateReturnType retType = m_attackMachine->initDefaultState();
+	{
+		AsciiString dbg;
+		dbg.format("(initDefaultState=%d, weapon=%s)", (Int)retType,
+			source->getCurrentWeapon() ? source->getCurrentWeapon()->getName().str() : "<none>");
+		jetStateTrace(source, "ATTACK-ENTER", dbg.str());
+	}
 	if( retType == STATE_CONTINUE )
 	{
 		source->setStatus( MAKE_OBJECT_STATUS_MASK( OBJECT_STATUS_IS_ATTACKING ) );
