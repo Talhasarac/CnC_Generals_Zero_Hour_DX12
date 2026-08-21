@@ -2944,6 +2944,10 @@ void Drawable::drawContained( const IRegion2D *healthBarRegion )
 	if (!container)
 		return;
 
+	// a building being put up cannot hold anyone yet, so its (empty) pips are just noise
+	if (obj->getStatusBits().test( OBJECT_STATUS_UNDER_CONSTRUCTION ))
+		return;
+
 	// container pips are always on for own objects (was: only when selected or moused over)
 	if (!(
 				TheGlobalData->m_showObjectHealth &&
