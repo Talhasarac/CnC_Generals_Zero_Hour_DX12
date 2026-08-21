@@ -138,6 +138,14 @@ static void drawButtonText( GameWindow *window, WinInstanceData *instData )
 		textPos.y = origin.y + (size.y / 2) - (height / 2);
 	}
 
+	// Shortcut text sits on top of the button's own art, which can be any colour at all -
+	// a light unit portrait swallowed the letter.  Lay a translucent black plate under it.
+	if( BitTest( window->winGetStatus(), WIN_STATUS_SHORTCUT_BUTTON ) && width > 0 && height > 0 )
+	{
+		TheDisplay->drawFillRect( textPos.x - 2, textPos.y, width + 4, height,
+														GameMakeColor( 0, 0, 0, 160 ) );
+	}
+
 	// draw it
 	text->draw( textPos.x, textPos.y, textColor, dropColor );
 

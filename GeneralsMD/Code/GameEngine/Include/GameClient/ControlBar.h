@@ -683,6 +683,10 @@ public:
 																											GadgetGameMessage gadgetMessage );
 	
 
+	/** press a command bar button by its slot index (0..MAX_COMMANDS_PER_SET-1), exactly as
+		a mouse click would.  This is what the COMMAND_SLOTnn grid keys are wired to. */
+	void pressCommandButton( Int index );
+
 	/// is the drawable the currently selected drawable for the context sensitive UI?
 	Bool isDrivingContextUI( Drawable *draw ) const { return draw == m_currentSelectedDrawable; }
 

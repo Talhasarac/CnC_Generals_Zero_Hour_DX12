@@ -36,6 +36,7 @@
 #define DEFINE_RADIUSCURSOR_NAMES
 
 #include "Common/ActionManager.h"
+#include "Common/GameAudio.h"
 #include "Common/GameType.h"
 #include "Common/MultiplayerSettings.h"
 #include "Common/NameKeyGenerator.h"
@@ -78,6 +79,8 @@
 #include "GameClient/ControlBarResizer.h"
 #include "GameClient/GadgetListBox.h"
 #include "GameClient/HotKey.h"
+#include "GameClient/Keyboard.h"
+#include "GameClient/MetaEvent.h"
 #include "GameClient/GameWindowTransitions.h"
 #include "GameClient/GUICallbacks.h"
 
@@ -133,6 +136,38 @@ static void commandButtonTooltip(GameWindow *window,
 {
 	TheControlBar->showBuildTooltipLayout(window);
 }
+
+//-------------------------------------------------------------------------------------------------
+/** Press a command bar button by slot index.  Mirrors HotKeyManager::executeHotKey: a hidden
+	slot does nothing at all, an enabled one gets the same GBM_SELECTED the mouse would send,
+	and a disabled one just makes the rejection noise. */
+//-------------------------------------------------------------------------------------------------
+void ControlBar::pressCommandButton( Int index )
+{
+	if( index < 0 || index >= MAX_COMMANDS_PER_SET )
+		return;
+
+	GameWindow *win = m_commandWindows[ index ];
+	if( win == NULL || BitTest( win->winGetStatus(), WIN_STATUS_HIDDEN ) )
+		return;
+
+	if( BitTest( win->winGetStatus(), WIN_STATUS_ENABLED ) )
+	{
+		TheWindowManager->winSendSystemMsg( win->winGetParent(), GBM_SELECTED,
+																						(WindowMsgData)win, win->winGetWindowId() );
+
+		AudioEventRTS buttonClick( "GUIClick" );
+		if( TheAudio )
+			TheAudio->addAudioEvent( &buttonClick );
+	}
+	else
+	{
+		AudioEventRTS disabledClick( "GUIClickDisabled" );
+		if( TheAudio )
+			TheAudio->addAudioEvent( &disabledClick );
+	}
+
+}  // end pressCommandButton
 
 /// mark the UI as dirty so the context of everything is re-evaluated
 void ControlBar::markUIDirty( void )
@@ -2424,6 +2459,42 @@ void ControlBar::setCommandBarBorder( GameWindow *button, CommandButtonMappedBor
 //-------------------------------------------------------------------------------------------------
 /** Set the command data into the control */
 //-------------------------------------------------------------------------------------------------
+//-------------------------------------------------------------------------------------------------
+/** The letter currently bound to command bar slot 'slot' (0 based), or an empty string when the
+	slot has no unmodified binding.  Read live out of the meta map so rebinding the key in
+	Options > Keyboard re-labels the button. */
+//-------------------------------------------------------------------------------------------------
+static UnicodeString getGridHotKeyLabel( Int slot )
+{
+	UnicodeString label;
+
+	if( TheMetaMap == NULL || TheKeyboard == NULL )
+		return label;
+
+	GameMessage::Type wanted = (GameMessage::Type)(GameMessage::MSG_META_COMMAND_SLOT01 + slot);
+	for( const MetaMapRec *rec = TheMetaMap->getFirstMetaMapRec(); rec; rec = rec->m_next )
+	{
+		// only a plain, unmodified key makes a readable one character label
+		if( rec->m_meta != wanted || rec->m_modState != 0 )
+			continue;
+
+		WideChar c = TheKeyboard->getPrintableKey( (UnsignedByte)rec->m_key, 0 );
+		if( c )
+		{
+			if( c >= L'a' && c <= L'z' )
+				c -= (L'a' - L'A');
+
+			WideChar text[ 2 ] = { c, 0 };
+			label.set( text );
+		}
+		break;
+	}
+
+	return label;
+
+}  // end getGridHotKeyLabel
+
+//-------------------------------------------------------------------------------------------------
 void ControlBar::setControlCommand( GameWindow *button, const CommandButton *commandButton )
 {
 
@@ -2493,11 +2564,35 @@ void ControlBar::setControlCommand( GameWindow *button, const CommandButton *com
 	
 	setCommandBarBorder(button, commandButton->getCommandButtonMappedBorderType());
 	
-	if (TheHotKeyManager)
+	// The '&' letter buried in each localized button label and the grid keys are two rival
+	// input schemes for the same buttons: the letter fires on KEY_UP out of HotKeyTranslator,
+	// the grid keys on KEY_DOWN out of MetaEventTranslator, so leaving both live makes one
+	// keystroke do two things.  Grid mode therefore never registers the letters.
+	if (TheHotKeyManager && !TheGlobalData->m_useGridHotKeys)
 	{
 		AsciiString hotKey =	TheHotKeyManager->searchHotKey(commandButton->getTextLabel());
 		if(hotKey.isNotEmpty())
 			TheHotKeyManager->addHotKey(button, hotKey);
+	}
+
+	if( TheGlobalData->m_useGridHotKeys )
+	{
+		// paint the grid letter in the button's top left corner.  Only the real command bar
+		// slots get one - the communicator, options and science buttons are not on the grid.
+		for( Int slot = 0; slot < MAX_COMMANDS_PER_SET; slot++ )
+		{
+			if( m_commandWindows[ slot ] != button )
+				continue;
+
+			UnicodeString label = getGridHotKeyLabel( slot );
+			if( label.isEmpty() )
+				button->winClearStatus( WIN_STATUS_SHORTCUT_BUTTON );
+			else
+				button->winSetStatus( WIN_STATUS_SHORTCUT_BUTTON );
+
+			GadgetButtonSetText( button, label );
+			break;
+		}
 	}
 	GadgetButtonSetAltSound(button, "GUICommandBarClick");
 

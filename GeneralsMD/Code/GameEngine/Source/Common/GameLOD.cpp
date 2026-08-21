@@ -363,6 +363,9 @@ void GameLODManager::init(void)
 	// every preset, floored at the GameData.ini value (see getMaxCameraHeight).
 	TheWritableGlobalData->m_maxCameraHeight = optionPref.getMaxCameraHeight();
 
+	// Grid command-bar keys are an input scheme, not a detail level either.
+	TheWritableGlobalData->m_useGridHotKeys = optionPref.getUseGridHotKeys();
+
 	setStaticLODLevel(userSetDetail);
 }
 

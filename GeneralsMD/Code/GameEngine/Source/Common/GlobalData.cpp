@@ -180,6 +180,7 @@ GlobalData* GlobalData::m_theOriginal = NULL;
 	{ "CameraYaw",									INI::parseReal,				NULL,			offsetof( GlobalData, m_cameraYaw ) },
 	{ "CameraHeight",								INI::parseReal,				NULL,			offsetof( GlobalData, m_cameraHeight ) },
 	{ "MaxCameraHeight",						INI::parseReal,				NULL,			offsetof( GlobalData, m_maxCameraHeight ) },
+	{ "UseGridHotKeys",						INI::parseBool,				NULL,			offsetof( GlobalData, m_useGridHotKeys ) },
 	{ "MinCameraHeight",						INI::parseReal,				NULL,			offsetof( GlobalData, m_minCameraHeight ) },
 	{ "TerrainHeightAtEdgeOfMap",					INI::parseReal,				NULL,			offsetof( GlobalData, m_terrainHeightAtEdgeOfMap ) },
 	{ "UnitDamagedThreshold",				INI::parseReal,				NULL,			offsetof( GlobalData, m_unitDamagedThresh ) },
@@ -980,6 +981,7 @@ GlobalData::GlobalData()
 	m_scrollAmountCutoff = 10.0f;
 	m_cameraAdjustSpeed = 0.1f;
 	m_enforceMaxCameraHeight = TRUE;
+	m_useGridHotKeys = FALSE;
 	
 	m_animateWindows = TRUE;
 	

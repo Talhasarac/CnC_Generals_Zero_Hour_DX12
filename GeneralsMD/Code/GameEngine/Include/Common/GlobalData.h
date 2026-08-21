@@ -323,6 +323,7 @@ public:
 	Real m_scrollAmountCutoff;				///< Scroll speed to not adjust camera height
 	Real m_cameraAdjustSpeed;					///< Rate at which we adjust camera height
 	Bool m_enforceMaxCameraHeight;		///< Enfoce max camera height while scrolling?
+	Bool m_useGridHotKeys;				///< command bar keys come from the slot grid, not the '&' letter in each button's label
 	Bool m_buildMapCache;
 	AsciiString m_initialFile;				///< If this is specified, load a specific map/replay from the command-line
 	AsciiString m_pendingFile;				///< If this is specified, use this map at the next game start

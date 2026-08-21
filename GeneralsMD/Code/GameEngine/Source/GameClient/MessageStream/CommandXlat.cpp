@@ -2594,6 +2594,42 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 		}	// end select previous unit
 
 		//-----------------------------------------------------------------------------------------
+		//-----------------------------------------------------------------------------------------
+		case GameMessage::MSG_META_SELECT_NEXT_IDLE_WORKER:
+		{
+			// same list the control bar's idle-worker button cycles; when every dozer and worker
+			// has a job the list is empty and selectNextIdleWorker returns without doing anything.
+			TheInGameUI->selectNextIdleWorker();
+
+			disp = DESTROY_MESSAGE;
+			break;
+		}		// end select next idle worker
+
+		case GameMessage::MSG_META_COMMAND_SLOT01:
+		case GameMessage::MSG_META_COMMAND_SLOT02:
+		case GameMessage::MSG_META_COMMAND_SLOT03:
+		case GameMessage::MSG_META_COMMAND_SLOT04:
+		case GameMessage::MSG_META_COMMAND_SLOT05:
+		case GameMessage::MSG_META_COMMAND_SLOT06:
+		case GameMessage::MSG_META_COMMAND_SLOT07:
+		case GameMessage::MSG_META_COMMAND_SLOT08:
+		case GameMessage::MSG_META_COMMAND_SLOT09:
+		case GameMessage::MSG_META_COMMAND_SLOT10:
+		case GameMessage::MSG_META_COMMAND_SLOT11:
+		case GameMessage::MSG_META_COMMAND_SLOT12:
+		case GameMessage::MSG_META_COMMAND_SLOT13:
+		case GameMessage::MSG_META_COMMAND_SLOT14:
+		{
+			// Grid mode only.  Off, these keys stay unbound so the retail '&' letter hot keys
+			// keep the command bar to themselves.
+			if( TheGlobalData->m_useGridHotKeys )
+			{
+				TheControlBar->pressCommandButton( t - GameMessage::MSG_META_COMMAND_SLOT01 );
+				disp = DESTROY_MESSAGE;
+			}
+			break;
+		}		// end command bar grid slots
+
 		case GameMessage::MSG_META_SELECT_NEXT_WORKER:
 		{
 			/* because list is prepended, iterate through backwards */

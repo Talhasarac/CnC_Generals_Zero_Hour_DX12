@@ -724,6 +724,18 @@ Real OptionPreferences::getMaxCameraHeight(void)
 	return height;
 }
 
+Bool OptionPreferences::getUseGridHotKeys(void)
+{
+	// Not written by the options menu - a power-user Options.ini key.  With it on, the
+	// command bar is driven by the COMMAND_SLOT01..14 keys from CommandMap.ini instead of
+	// the '&' letter buried in each button's localized label.
+	OptionPreferences::const_iterator it = find("UseGridHotKeys");
+	if (it == end())
+		return TheGlobalData->m_useGridHotKeys;
+
+	return stricmp(it->second.str(), "yes") == 0;
+}
+
 Int OptionPreferences::getTextureReduction(void)
 {
 	OptionPreferences::const_iterator it = find("TextureReduction");
