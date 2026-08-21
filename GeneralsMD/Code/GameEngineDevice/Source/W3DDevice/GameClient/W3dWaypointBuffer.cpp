@@ -105,6 +105,7 @@ W3DWaypointBuffer::W3DWaypointBuffer(void)
 	m_line = new SegmentedLineClass;
 
 	m_texture = WW3DAssetManager::Get_Instance()->Get_Texture( "EXLaser.tga" );
+	m_linesUsed = 0;
 
 
   setDefaultLineStyle();
@@ -120,6 +121,30 @@ W3DWaypointBuffer::~W3DWaypointBuffer(void)
 	REF_PTR_RELEASE( m_waypointNodeRobj );
 	REF_PTR_RELEASE( m_texture );
 	REF_PTR_RELEASE( m_line );
+	for( size_t i = 0; i < m_linePool.size(); ++i )
+		REF_PTR_RELEASE( m_linePool[ i ] );
+}
+
+//=============================================================================
+// A SegmentedLineClass renders through the static sort list (deferred to the end of the
+// scene, drawn over the buildings with PASS_ALWAYS), but every WW3D::Render() of a puck
+// flushes that list. Rendering one shared line per selected object therefore drew all but
+// the last line during the terrain pass, where the building meshes then covered the piece
+// coming out of the door. So each line gets its own object and they are rendered together
+// after the last puck, so they all stay deferred.
+//=============================================================================
+void W3DWaypointBuffer::queueLine( Int numPoints, Vector3 *points )
+{
+	if( m_linesUsed >= (Int)m_linePool.size() )
+		m_linePool.push_back( new SegmentedLineClass( *m_line ) );	// copies texture, shader, width, color
+	m_linePool[ m_linesUsed++ ]->Set_Points( numPoints, points );
+}
+
+void W3DWaypointBuffer::renderQueuedLines( RenderInfoClass &rinfo )
+{
+	for( Int i = 0; i < m_linesUsed; ++i )
+		m_linePool[ i ]->Render( rinfo );
+	m_linesUsed = 0;
 }
 
 //=============================================================================
@@ -209,11 +234,11 @@ void W3DWaypointBuffer::drawWaypoints(RenderInfoClass &rinfo)
 						}
 					}
 					//Now render the lines in one pass!
-					m_line->Set_Points( numPoints, points );
-					m_line->Render( localRinfo );
+					queueLine( numPoints, points );
 				}
 			}
 		}
+		renderQueuedLines( localRinfo );
 	}
 	else // maybe we want to draw rally points, then?
 	{
@@ -525,13 +550,13 @@ void W3DWaypointBuffer::drawWaypoints(RenderInfoClass &rinfo)
 					WW3D::Render(*m_waypointNodeRobj,localRinfo); //The little hockey puck
 
 
-					m_line->Set_Points( numPoints, points );
-					m_line->Render( localRinfo );
+					queueLine( numPoints, points );
 
 				}// end if exit interface
 				
 			}
 		}
+		renderQueuedLines( localRinfo );
 
 	}
 }

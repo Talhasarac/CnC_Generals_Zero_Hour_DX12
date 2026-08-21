@@ -65,6 +65,7 @@
 #include "vertmaterial.h"
 #include "Lib/BaseType.h"
 #include "common/GameType.h"
+#include <vector>
 
 class SegmentedLineClass;
 
@@ -82,10 +83,14 @@ public:
 
 private:
   void setDefaultLineStyle();
+	void queueLine( Int numPoints, Vector3 *points );				///< hand the points to a pooled line object (not rendered yet)
+	void renderQueuedLines( RenderInfoClass &rinfo );			///< render every queued line; all stay deferred on the static sort list together
 
 	RenderObjClass *m_waypointNodeRobj;
 	SegmentedLineClass *m_line;
 	TextureClass *m_texture;
+	std::vector<SegmentedLineClass *> m_linePool;				///< one line object per line drawn this frame, grown on demand
+	Int m_linesUsed;
 };
 
 #endif  // end __W3D_WAYPOINT_BUFFER_H
