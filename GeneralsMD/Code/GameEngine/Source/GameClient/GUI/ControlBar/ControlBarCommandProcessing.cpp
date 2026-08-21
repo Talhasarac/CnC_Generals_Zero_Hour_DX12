@@ -169,6 +169,20 @@ CBCommandStatus ControlBar::processCommandUI( GameWindow *control,
 	if( commandButton == NULL )
 		return CBC_COMMAND_NOT_USED;
 
+	//
+	// a builder's page menu buttons only move the command bar between its own pages - none of
+	// the command handling below applies to them, they never reach the game logic at all.
+	//
+	if( commandButton->getCommandType() == GUI_COMMAND_BUILD_PAGE )
+	{
+		Int page = BUILD_PAGE_ROOT;
+		for( Int i = 0; i < BUILD_PAGE_COUNT; i++ )
+			if( commandButton == m_buildPageButton[ i ] )
+				page = i;
+		setBuildPage( page );
+		return CBC_COMMAND_USED;
+	}
+
 	// if the button is flashing, tell it to stop flashing
 	commandButton->setFlashCount(0);
 	TheControlBar->setFlash( FALSE );

@@ -215,6 +215,7 @@ enum GUICommandType
 	GUI_COMMAND_SPECIAL_POWER_CONSTRUCT_FROM_SHORTCUT, ///< do a shortcut special power using the construct building interface
 	
 	GUI_COMMAND_SELECT_ALL_UNITS_OF_TYPE,
+	GUI_COMMAND_BUILD_PAGE,								///< switch the command bar between the builder's structure pages
 
 	// add more commands here, don't forget to update the string command list below too ...
 
@@ -265,6 +266,7 @@ static const char *TheGuiCommandNames[] =
 	"SPECIAL_POWER_CONSTRUCT",					
 	"SPECIAL_POWER_CONSTRUCT_FROM_SHORTCUT", 
 	"SELECT_ALL_UNITS_OF_TYPE",
+	"BUILD_PAGE",
 
 	NULL
 };
@@ -364,6 +366,8 @@ public:
 	
 	// only for ControlBar!
 	void friend_addToList(CommandButton** list) {	m_next = *list;	*list = this; }
+	void friend_setCommandType(GUICommandType c) { m_command = c; }
+	void friend_setBorderType(CommandButtonMappedBorderType t) { m_commandButtonBorder = t; }
 	CommandButton* friend_getNext() { return m_next; }
 
 private:
@@ -687,6 +691,14 @@ public:
 		a mouse click would.  This is what the COMMAND_SLOTnn grid keys are wired to. */
 	void pressCommandButton( Int index );
 
+	/** A builder with more structures than BUILD_PAGE_ONE_SIZE does not show them all at once.
+		The command bar opens on two menu buttons instead - the first grid keys, Q and W - and
+		each one opens its own page of structures, so a structure is two keystrokes away (Q-Q,
+		Q-W, ... W-Q, ...) instead of competing for the fourteen slots.  Page one holds the
+		first BUILD_PAGE_ONE_SIZE structures of the command set, page two holds the rest. */
+	enum { BUILD_PAGE_ROOT = -1, BUILD_PAGE_COUNT = 2, BUILD_PAGE_ONE_SIZE = 4 };
+	void setBuildPage( Int page );
+
 	/// is the drawable the currently selected drawable for the context sensitive UI?
 	Bool isDrivingContextUI( Drawable *draw ) const { return draw == m_currentSelectedDrawable; }
 
@@ -834,6 +846,8 @@ protected:
 	static void populateButtonProc( Object *obj, void *userData );
 	void populatePurchaseScience(Player* player);
 	void populateCommand( Object *obj );
+	void buildCommandLayout( Object *obj, const CommandSet *commandSet, const CommandButton **slot );
+	void makeBuildPageButtons( void );
 	void populateMultiSelect( void );
 	void populateBuildQueue( Object *producer );
 	void populateStructureInventory( Object *building );
@@ -922,6 +936,11 @@ protected:
 
 	GameWindow *m_commandWindows[ MAX_COMMANDS_PER_SET ];			///< command window controls for easy access
 	const CommandButton *m_commonCommands[ MAX_COMMANDS_PER_SET ];	///< shared commands we will use for multi-selection
+
+	CommandButton *m_buildPageButton[ BUILD_PAGE_COUNT ];	///< the two menu buttons a paged builder opens on
+	CommandButton *m_buildPageBackButton;									///< takes a page back to the menu buttons
+	Int m_buildPage;																			///< BUILD_PAGE_ROOT, or the page being shown
+	ObjectID m_buildPageObjectID;													///< builder the page belongs to; a new one starts at the menu
 
 		// removed from multiplayer branch
 	//GameWindow *m_commandMarkers[ MAX_COMMANDS_PER_SET ];			///< When we don't have a command, they want to show an image	

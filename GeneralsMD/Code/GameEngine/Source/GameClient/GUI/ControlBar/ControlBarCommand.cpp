@@ -59,6 +59,7 @@
 #include "GameClient/GameWindow.h"
 #include "GameClient/GameWindowManager.h"
 #include "GameClient/GadgetPushButton.h"
+#include "GameClient/Image.h"
 
 #ifdef _INTERNAL
 // for occasional debugging...
@@ -266,6 +267,113 @@ void ControlBar::doTransportInventoryUI( Object *transport, const CommandSet *co
 }  // end doTransportInventoryUI
 
 //-------------------------------------------------------------------------------------------------
+/** The command bar is two rows of seven, and the grid keys run along the top row first:
+	slot 0 is Q, slot 2 is W, slot 4 is E and so on to slot 12 for U, then the bottom row
+	from slot 1 for Z through slot 13 for M.  A build page lays its structures out along
+	that order so the first four of them are Q, W, E and R.  Slot 1 (Z) is left out - it is
+	where the back button sits. */
+//-------------------------------------------------------------------------------------------------
+static const Int s_buildPageSlots[] = { 0, 2, 4, 6, 8, 10, 12, 3, 5, 7, 9, 11, 13 };
+static const Int s_buildPageSlotCount = sizeof( s_buildPageSlots ) / sizeof( s_buildPageSlots[ 0 ] );
+static const Int s_buildPageBackSlot = 1;
+
+//-------------------------------------------------------------------------------------------------
+/** Which command button belongs in each of the command bar's slots for this object.  Normally
+	that is just the command set, slot for slot.  A builder with more structures than one page
+	holds instead gets its structures replaced by the two page menu buttons, or - once a page is
+	open - by that page's structures plus a button back to the menu.  Commands that are not
+	structures keep the slot the data gave them on every page. */
+//-------------------------------------------------------------------------------------------------
+void ControlBar::buildCommandLayout( Object *obj, const CommandSet *commandSet,
+																		 const CommandButton **slot )
+{
+	Int i;
+
+	for( i = 0; i < MAX_COMMANDS_PER_SET; i++ )
+		slot[ i ] = commandSet->getCommandButton( i );
+
+	//
+	// the pages are worked with the grid keys, so without them a page would be a menu the
+	// keyboard cannot reach.  Leave the command set alone.
+	//
+	if( TheGlobalData->m_useGridHotKeys == FALSE || m_buildPageButton[ 0 ] == NULL )
+	{
+		m_buildPage = BUILD_PAGE_ROOT;
+		return;
+	}
+
+	// a different builder starts at the menu rather than wherever the last one was left
+	if( obj->getID() != m_buildPageObjectID )
+	{
+		m_buildPageObjectID = obj->getID();
+		m_buildPage = BUILD_PAGE_ROOT;
+	}
+
+	// the structures, in command set order
+	const CommandButton *structure[ MAX_COMMANDS_PER_SET ];
+	Int structureCount = 0;
+	for( i = 0; i < MAX_COMMANDS_PER_SET; i++ )
+		if( slot[ i ] != NULL && slot[ i ]->getCommandType() == GUI_COMMAND_DOZER_CONSTRUCT )
+			structure[ structureCount++ ] = slot[ i ];
+
+	// a set that already fits on one page has nothing to gain from a menu in front of it
+	if( structureCount <= BUILD_PAGE_ONE_SIZE )
+	{
+		m_buildPage = BUILD_PAGE_ROOT;
+		return;
+	}
+
+	// page two is whatever page one did not take
+	Int pageFirst[ BUILD_PAGE_COUNT ], pageLast[ BUILD_PAGE_COUNT ];
+	pageFirst[ 0 ] = 0;
+	pageLast[ 0 ] = BUILD_PAGE_ONE_SIZE;
+	pageFirst[ 1 ] = BUILD_PAGE_ONE_SIZE;
+	pageLast[ 1 ] = structureCount;
+
+	// the structures give their slots up; everything else in the set stays where it is
+	for( i = 0; i < MAX_COMMANDS_PER_SET; i++ )
+		if( slot[ i ] != NULL && slot[ i ]->getCommandType() == GUI_COMMAND_DOZER_CONSTRUCT )
+			slot[ i ] = NULL;
+
+	// what the page puts on the bar, in the order the grid keys run
+	const CommandButton *paged[ MAX_COMMANDS_PER_SET ];
+	Int pagedCount = 0;
+	if( m_buildPage == BUILD_PAGE_ROOT )
+	{
+		for( Int page = 0; page < BUILD_PAGE_COUNT; page++ )
+		{
+			// the menu button wears the cameo of the first structure behind it
+			m_buildPageButton[ page ]->setButtonImage( structure[ pageFirst[ page ] ]->getButtonImage() );
+			paged[ pagedCount++ ] = m_buildPageButton[ page ];
+		}
+	}
+	else
+	{
+		if( TheMappedImageCollection != NULL && m_buildPageBackButton->getButtonImage() == NULL )
+			m_buildPageBackButton->setButtonImage( TheMappedImageCollection->findImageByName( AsciiString( "SSStop" ) ) );
+		if( slot[ s_buildPageBackSlot ] == NULL )
+			slot[ s_buildPageBackSlot ] = m_buildPageBackButton;
+
+		for( i = pageFirst[ m_buildPage ]; i < pageLast[ m_buildPage ]; i++ )
+			paged[ pagedCount++ ] = structure[ i ];
+	}
+
+	// drop them into the free slots, keeping the grid key order
+	Int next = 0;
+	for( i = 0; i < s_buildPageSlotCount && next < pagedCount; i++ )
+	{
+		Int where = s_buildPageSlots[ i ];
+		if( slot[ where ] != NULL )
+			continue;
+		slot[ where ] = paged[ next++ ];
+	}
+
+	DEBUG_ASSERTCRASH( next == pagedCount, ("buildCommandLayout: command set '%s' left %d structures with no slot to sit in\n",
+																					commandSet->getName().str(), pagedCount - next) );
+
+}  // end buildCommandLayout
+
+//-------------------------------------------------------------------------------------------------
 //-------------------------------------------------------------------------------------------------
 void ControlBar::populateCommand( Object *obj )
 {
@@ -302,6 +410,10 @@ void ControlBar::populateCommand( Object *obj )
 	if( obj->getContain()  &&  obj->getContain()->isDisplayedOnControlBar() )
 		doTransportInventoryUI( obj, commandSet );
 
+	// what goes in each slot; a builder's structures may be spread across pages
+	const CommandButton *slot[ MAX_COMMANDS_PER_SET ];
+	buildCommandLayout( obj, commandSet, slot );
+
 	// populate the button with commands defined
 	const CommandButton *commandButton;
 	for( i = 0; i < MAX_COMMANDS_PER_SET; i++ )
@@ -310,7 +422,7 @@ void ControlBar::populateCommand( Object *obj )
 		if (! m_commandWindows[ i ]) continue;
 
 		// get command button
-		commandButton = commandSet->getCommandButton(i);
+		commandButton = slot[ i ];
 
 		// if button is not present, just hide the window
 		if( commandButton == NULL )

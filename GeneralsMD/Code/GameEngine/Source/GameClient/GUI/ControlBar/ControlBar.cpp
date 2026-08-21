@@ -169,6 +169,44 @@ void ControlBar::pressCommandButton( Int index )
 
 }  // end pressCommandButton
 
+//-------------------------------------------------------------------------------------------------
+/** Build the menu and back buttons a paged builder shows.  They carry no thing template and no
+	text label of their own - the page they open is told by the cameo of its first structure, and
+	by the grid letter setControlCommand paints in the corner. */
+//-------------------------------------------------------------------------------------------------
+void ControlBar::makeBuildPageButtons( void )
+{
+	AsciiString name;
+	for( Int page = 0; page < BUILD_PAGE_COUNT; page++ )
+	{
+		name.format( "NonCommand_BuildPage%d", page + 1 );
+		m_buildPageButton[ page ] = newCommandButton( name );
+		m_buildPageButton[ page ]->friend_setCommandType( GUI_COMMAND_BUILD_PAGE );
+		m_buildPageButton[ page ]->friend_setBorderType( COMMAND_BUTTON_BORDER_SYSTEM );
+	}
+
+	m_buildPageBackButton = newCommandButton( AsciiString( "NonCommand_BuildPageBack" ) );
+	m_buildPageBackButton->friend_setCommandType( GUI_COMMAND_BUILD_PAGE );
+	m_buildPageBackButton->friend_setBorderType( COMMAND_BUTTON_BORDER_SYSTEM );
+
+}  // end makeBuildPageButtons
+
+//-------------------------------------------------------------------------------------------------
+/** Show 'page' of the selected builder's structures, BUILD_PAGE_ROOT for the menu buttons. */
+//-------------------------------------------------------------------------------------------------
+void ControlBar::setBuildPage( Int page )
+{
+	if( page < BUILD_PAGE_ROOT || page >= BUILD_PAGE_COUNT )
+		page = BUILD_PAGE_ROOT;
+
+	if( m_buildPage == page )
+		return;
+
+	m_buildPage = page;
+	markUIDirty();
+
+}  // end setBuildPage
+
 /// mark the UI as dirty so the context of everything is re-evaluated
 void ControlBar::markUIDirty( void )
 { 
@@ -966,6 +1004,11 @@ ControlBar::ControlBar( void )
 	m_communicatorButton = NULL;
 	m_currentSelectedDrawable = NULL;
 	m_currContext = CB_CONTEXT_NONE;
+	for( i = 0; i < BUILD_PAGE_COUNT; i++ )
+		m_buildPageButton[ i ] = NULL;
+	m_buildPageBackButton = NULL;
+	m_buildPage = BUILD_PAGE_ROOT;
+	m_buildPageObjectID = INVALID_ID;
 	m_rallyPointDrawableID = INVALID_DRAWABLE_ID;
 	m_displayedConstructPercent = -1.0f;
 	m_displayedOCLTimerSeconds = 0;
@@ -1095,6 +1138,9 @@ void ControlBar::init( void )
 
 	// post process step after loading the command buttons and command sets
 	postProcessCommands();
+
+	// the builder's page menu buttons are ours, not the data's
+	makeBuildPageButtons();
 
 	// Init the scheme manager, this will call it's won INI init funciton.
 	m_controlBarSchemeManager = NEW ControlBarSchemeManager;
@@ -1338,6 +1384,9 @@ void ControlBar::reset( void )
 
 	m_displayedConstructPercent = -1.0f;
 	m_displayedOCLTimerSeconds = 0;
+
+	m_buildPage = BUILD_PAGE_ROOT;
+	m_buildPageObjectID = INVALID_ID;
 
 	m_isObserverCommandBar = FALSE; // reset us to use a normal command bar
 	m_observerLookAtPlayer = NULL;
@@ -2556,7 +2605,12 @@ void ControlBar::setControlCommand( GameWindow *button, const CommandButton *com
 		button->winSetTooltipFunc(commandButtonTooltip);
 	}
 	else
+	{
+		// a button with no label has no build tooltip either - clear the func, the window is
+		// recycled and would otherwise keep the one the previous occupant installed.
+		button->winSetTooltipFunc( NULL );
 		GadgetButtonSetText( button, UnicodeString( L"" ) );
+	}
 
 	// save the command in the user data of the window
 	GadgetButtonSetData(button, (void*)commandButton);
