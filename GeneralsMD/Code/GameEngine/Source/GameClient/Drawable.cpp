@@ -3718,17 +3718,16 @@ void Drawable::drawConstructPercent( const IRegion2D *healthBarRegion )
 	if( m_constructDisplayString == NULL )
 		m_constructDisplayString = TheDisplayStringManager->newDisplayString();
 
-	// set the string if the value has changed
-	if( m_lastConstructDisplayed != obj->getConstructionPercent() )
+	// set the string if the value has changed (seconds left, not percent)
+	Int secondsLeft = obj->getConstructionSecondsRemaining();
+	if( m_lastConstructDisplayed != INT_TO_REAL( secondsLeft ) )
 	{
 		UnicodeString buffer;
-
-		
-		buffer.format( TheGameText->fetch("CONTROLBAR:UnderConstructionDesc"), obj->getConstructionPercent());
+		buffer.format( L"%ds", secondsLeft );
 		m_constructDisplayString->setText( buffer );
 
-		// record this percent as our last displayed so we don't un-necessarily rebuild the string
-		m_lastConstructDisplayed = obj->getConstructionPercent();
+		// record this value as our last displayed so we don't un-necessarily rebuild the string
+		m_lastConstructDisplayed = INT_TO_REAL( secondsLeft );
 				
 	}  // end if
 

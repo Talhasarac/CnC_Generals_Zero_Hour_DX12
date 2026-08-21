@@ -54,13 +54,12 @@ void ControlBar::updateConstructionTextDisplay( Object *obj )
 	// santiy
 	DEBUG_ASSERTCRASH( descWindow, ("Under construction window not found\n") );
 
-	// format the message
-	text.format( TheGameText->fetch( "CONTROLBAR:UnderConstructionDesc" ), 
-							 obj->getConstructionPercent() );
+	// format the message: seconds left rather than percent
+	text.format( L"%ds", obj->getConstructionSecondsRemaining() );
 	GadgetStaticTextSetText( descWindow, text );
 
-	// record this as the last percentage displayed
-	m_displayedConstructPercent = obj->getConstructionPercent();
+	// record this as the last value displayed
+	m_displayedConstructPercent = INT_TO_REAL( obj->getConstructionSecondsRemaining() );
 
 }  // end updateConstructionTextDisplay
 
@@ -117,7 +116,7 @@ void ControlBar::updateContextUnderConstruction( void )
 	}  // end if
 
 	// if the construction percent has changed since what was last shown to the user update the text
-	if( m_displayedConstructPercent != obj->getConstructionPercent() )
+	if( m_displayedConstructPercent != INT_TO_REAL( obj->getConstructionSecondsRemaining() ) )
 		updateConstructionTextDisplay( obj );
 
 }  // end updatecontextUnderConstruction

@@ -290,6 +290,9 @@ Object::Object( const ThingTemplate *tt, const ObjectStatusMaskType &objectStatu
 	m_group = NULL;
 
 	m_constructionPercent = CONSTRUCTION_COMPLETE;  // complete by default
+	m_constructionRate = 0.0f;
+	m_constructionRateAccum = 0.0f;
+	m_constructionRateFrame = 0;
 
 	m_visionRange = tt->friend_calcVisionRange();
 	m_shroudClearingRange = tt->friend_calcShroudClearingRange();
@@ -3042,6 +3045,37 @@ Bool Object::isSelectable() const
 					return TRUE;
 
   return FALSE;
+}
+
+//-------------------------------------------------------------------------------------------------
+void Object::setConstructionPercent( Real percent )
+{
+	// every builder adds its share once per logic frame; sum a frame's gains to get the real rate
+	UnsignedInt now = TheGameLogic->getFrame();
+	if( now != m_constructionRateFrame )
+	{
+		if( m_constructionRateAccum > 0.0f )
+			m_constructionRate = m_constructionRateAccum;
+		m_constructionRateAccum = 0.0f;
+		m_constructionRateFrame = now;
+	}
+	Real delta = percent - m_constructionPercent;
+	if( delta > 0.0f )
+		m_constructionRateAccum += delta;
+	m_constructionPercent = percent;
+}
+
+//-------------------------------------------------------------------------------------------------
+Int Object::getConstructionSecondsRemaining() const
+{
+	Real rate = m_constructionRate;
+	if( rate <= 0.0f )
+	{
+		Int framesToBuild = getTemplate()->calcTimeToBuild( getControllingPlayer() );
+		rate = 100.0f / INT_TO_REAL( max( 1, framesToBuild ) );
+	}
+	Real left = max( 0.0f, 100.0f - m_constructionPercent );
+	return REAL_TO_INT_CEIL( left / rate / LOGICFRAMES_PER_SECOND );
 }
 
 //-------------------------------------------------------------------------------------------------

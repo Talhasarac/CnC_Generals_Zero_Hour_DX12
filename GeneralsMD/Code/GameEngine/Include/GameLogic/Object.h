@@ -397,8 +397,9 @@ public:
 	ObjectID calculateCountermeasureToDivertTo( const Object& victim );
 
 	void calcNaturalRallyPoint(Coord2D *pt); ///< calc the "natural" starting rally point
-  void setConstructionPercent( Real percent ) { m_constructionPercent = percent; }
+  void setConstructionPercent( Real percent );
 	Real getConstructionPercent() const { return m_constructionPercent; }
+	Int getConstructionSecondsRemaining() const;	///< estimate from the rate the builders actually achieve (nominal single-builder rate until measured)
 
   void setLayer( PathfindLayerEnum layer );
 	PathfindLayerEnum getLayer() const { return m_layer; }
@@ -756,6 +757,9 @@ private:
 	UnsignedInt										m_containedByFrame;	///< frame we were contained by m_containedBy
 
 	Real													m_constructionPercent;			///< for objects being built ... this is the amount completed (0.0 to 100.0)
+	Real													m_constructionRate;					///< percent gained per logic frame, all builders summed (0 = not measured yet)
+	Real													m_constructionRateAccum;		///< percent gained so far in frame m_constructionRateFrame
+	UnsignedInt										m_constructionRateFrame;
 	UpgradeMaskType								m_objectUpgradesCompleted;	///< Bit field of upgrades locally completed.
 
 	Team*													m_team;								///< team that is current owner of this guy
