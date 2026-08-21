@@ -1355,7 +1355,15 @@ void StreakRendererClass::RenderStreak
 				vertex->X = vertexArray[i].x;
 				vertex->Y = vertexArray[i].y;
 				vertex->Z = vertexArray[i].z;
-				*reinterpret_cast<unsigned int *>(vb + diffuseOffset) = DX8Wrapper::Convert_Color_Clamp(colors[MIN((i/2), point_cnt)]); // TODO: Does not work correctly when subdivision are not 0
+				// Two vertices per point, and colors[] is indexed over the whole line, not
+				// over this chunk: without chunkIndex every chunk past the first restarted
+				// the gradient at colors[0].  MIN against point_cnt (rather than point_cnt-1)
+				// also read one Vector4 past the end of the chunk's share of the array.
+				// point_cnt is the post-subdivision count here, so the bound is only exact
+				// while SubdivisionLevel is 0 - clamp to the array instead of trusting it.
+				unsigned int colorIndex = chunkIndex + MIN((i/2), point_cnt - 1);
+				if (colorIndex >= num_points) colorIndex = num_points - 1;
+				*reinterpret_cast<unsigned int *>(vb + diffuseOffset) = DX8Wrapper::Convert_Color_Clamp(colors[colorIndex]);
 				Vector2 *texture = reinterpret_cast<Vector2 *>(vb + textureOffset);
 				texture->U = vertexArray[i].u1;
 				texture->V = vertexArray[i].v1;
