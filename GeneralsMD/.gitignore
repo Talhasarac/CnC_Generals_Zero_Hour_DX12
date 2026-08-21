@@ -101,3 +101,7 @@ generatedVersion.h
 *.ncb
 *.opt
 *.plg
+
+# ProfileSampler is our own tooling, not a VC6 "Profile" build output folder.
+!Code/Tools/ProfileSampler/
+!Code/Tools/ProfileSampler/**
