@@ -513,22 +513,22 @@ void W3DView::calcCameraConstraints()
 
 	*/
 		Real maxEdgeZ = m_groundLevel;
-//		const Real BORDER_FUDGE = MAP_XY_FACTOR * 1.414f;
-		Coord3D center, bottom;
+		Coord3D center;
 		ICoord2D screen;
+		Vector3 rayStart,rayEnd;
 
 		//Pick at the center
 		screen.x=0.5f*getWidth()+m_originX;
 		screen.y=0.5f*getHeight()+m_originY;
-
-		Vector3 rayStart,rayEnd;
-
 		getPickRay(&screen,&rayStart,&rayEnd);
-
 		center.x = Vector3::Find_X_At_Z(maxEdgeZ, rayStart, rayEnd);
 		center.y = Vector3::Find_Y_At_Z(maxEdgeZ, rayStart, rayEnd);
 		center.z = maxEdgeZ;
 
+		// the near (bottom) screen edge may reach the map edge, like retail - the player can
+		// look at the map corners; the terrain is drawn whole so nothing past the edge is
+		// visible but the true map boundary
+		Coord3D bottom;
 		screen.y = m_originY+ 0.95f*getHeight();
  		getPickRay(&screen,&rayStart,&rayEnd);
  		bottom.x = Vector3::Find_X_At_Z(maxEdgeZ, rayStart, rayEnd);
@@ -548,6 +548,12 @@ void W3DView::calcCameraConstraints()
 		// this looks inverted, but is correct
 		m_cameraConstraint.lo.y = mapRegion.lo.y + offset;
 		m_cameraConstraint.hi.y = mapRegion.hi.y - offset;
+
+		// a map smaller than twice the offset cannot satisfy both sides - center on it
+		if (m_cameraConstraint.lo.x > m_cameraConstraint.hi.x)
+			m_cameraConstraint.lo.x = m_cameraConstraint.hi.x = 0.5f * (mapRegion.lo.x + mapRegion.hi.x);
+		if (m_cameraConstraint.lo.y > m_cameraConstraint.hi.y)
+			m_cameraConstraint.lo.y = m_cameraConstraint.hi.y = 0.5f * (mapRegion.lo.y + mapRegion.hi.y);
 		m_cameraConstraintValid = true;
 	}
 }
@@ -1067,15 +1073,14 @@ Bool W3DView::updateCameraMovements()
 		pitchCameraOneFrame();
 		didUpdate = true;
 	}
-	if (m_doingRotateCamera) {	
+	if (m_doingRotateCamera) {
 		m_previousLookAtPosition = *getPosition();
 		rotateCameraOneFrame();
 		didUpdate = true;
-	} else if (m_doingMoveCameraOnWaypointPath) {
-		m_previousLookAtPosition = *getPosition();
-		moveAlongWaypointPath(TheW3DFrameLengthInMsec);
-		didUpdate = true;
 	}
+	// note: waypoint path movement is NOT stepped here anymore - it interpolates by
+	// milliseconds, so W3DView::update() advances it every render frame with real
+	// elapsed time.  Only the whole-frame-counting movers stay on the 33ms gate.
 	if (m_doingScriptedCameraLock)
 	{
 		didUpdate = true;
@@ -1129,7 +1134,25 @@ void W3DView::update(void)
 	if (isTimeFrozen() && !isCameraMovementFinished())
 		stepTime = TRUE;
 	if (stepTime)
-		prevCameraStepTime = nowCameraStepTime;
+	{
+		// carry the remainder instead of discarding it: with a render cadence that is not
+		// a multiple of 33ms (the shell caps at 45fps), discarding ran the steppers at a
+		// fraction of real speed and beat against the render rate as visible judder
+		prevCameraStepTime += (DWORD)TheW3DFrameLengthInMsec;
+		if (nowCameraStepTime - prevCameraStepTime >= (DWORD)TheW3DFrameLengthInMsec)
+			prevCameraStepTime = nowCameraStepTime;	// fell far behind (hitch, pause) - resync
+	}
+
+	// the scripted waypoint pan interpolates by milliseconds, so it does not need the
+	// 33ms gate at all: advance it below by the real time this render frame took, which
+	// is what makes shell-map camera moves smooth at any framerate
+	static DWORD prevWaypointTime = 0;
+	Int waypointElapsedMs = (Int)(nowCameraStepTime - prevWaypointTime);
+	prevWaypointTime = nowCameraStepTime;
+	if (waypointElapsedMs < 0)
+		waypointElapsedMs = 0;
+	if (waypointElapsedMs > 100)
+		waypointElapsedMs = 100;	// a hitch should not teleport the camera down the path
 
 	if (TheTerrainRenderObject->doesNeedFullUpdate()) {
 		RefRenderObjListIterator *it = W3DDisplay::m_3DScene->createLightsIterator();
@@ -1310,7 +1333,19 @@ void W3DView::update(void)
 		}
 	}	
 
-	if (stepTime && !(TheScriptEngine->isTimeFrozenDebug()/* || TheScriptEngine->isTimeFrozenScript()*/) && !TheGameLogic->isGamePaused()) {
+	Bool scriptMovesAllowed = !(TheScriptEngine->isTimeFrozenDebug()/* || TheScriptEngine->isTimeFrozenScript()*/) && !TheGameLogic->isGamePaused();
+
+	// the waypoint pan is ms-interpolated: advance it by the real time this render frame
+	// took, every render frame - no 33ms gate, no judder (rotate still owns the camera
+	// when both are scripted, as before)
+	if (scriptMovesAllowed && m_doingMoveCameraOnWaypointPath && !m_doingRotateCamera) {
+		m_previousLookAtPosition = *getPosition();
+		moveAlongWaypointPath(waypointElapsedMs);
+		didScriptedMovement = true;
+		recalcCamera = true;
+	}
+
+	if (stepTime && scriptMovesAllowed) {
 		// If we aren't frozen for debug, allow the camera to follow scripted movements.
 		if (updateCameraMovements()) {
 			didScriptedMovement = true;

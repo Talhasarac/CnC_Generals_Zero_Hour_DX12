@@ -544,7 +544,13 @@ WorldHeightMap::WorldHeightMap(ChunkInputStream *pStrm, Bool logicalDataOnly):
 			}
 		}
 	}
-	if (TheGlobalData && TheGlobalData->m_drawEntireTerrain) {
+	//
+	// Always draw the entire terrain (GameData.ini says DrawEntireTerrain = No, a 2003
+	// performance choice): the 129x129 draw window that follows the camera was sized for the
+	// retail maximum camera height, and with this fork's higher zoom-out the view reaches past
+	// the window and the far screen corners go black.  A modern GPU draws a whole map easily.
+	//
+	{
 		m_drawWidthX=m_width;
 		m_drawHeightY=m_height;
 	}
