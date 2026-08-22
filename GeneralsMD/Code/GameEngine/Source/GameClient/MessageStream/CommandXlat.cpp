@@ -2938,34 +2938,46 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 		//-----------------------------------------------------------------------------------------
 		case GameMessage::MSG_META_SELECT_ALL:
 		case GameMessage::MSG_META_SELECT_ALL_AIRCRAFT:
+		case GameMessage::MSG_META_SELECT_ALL_MILITARY:
+		case GameMessage::MSG_META_SELECT_ALL_VEHICLES:
+		case GameMessage::MSG_META_SELECT_ALL_BARRACKS:
+		case GameMessage::MSG_META_SELECT_ALL_WARFACTORIES:
+		case GameMessage::MSG_META_SELECT_ALL_AIRFIELDS:
 		{
+			// one category per key; selectAllUnitsByType takes the screen first and the
+			// whole map when the screen has nothing new left, so a second press widens
 			KindOfMaskType requiredKindofs;
 			KindOfMaskType disqualifyingKindofs;
-			disqualifyingKindofs.set(KINDOF_DOZER);
-			disqualifyingKindofs.set(KINDOF_HARVESTER);
 			disqualifyingKindofs.set(KINDOF_IGNORES_SELECT_ALL);
-			Bool selectAircraft = FALSE;
-			
-			if( t == GameMessage::MSG_META_SELECT_ALL_AIRCRAFT )
+			switch( t )
 			{
-				requiredKindofs.set(KINDOF_AIRCRAFT);
-				selectAircraft = TRUE;
+				case GameMessage::MSG_META_SELECT_ALL_BARRACKS:     requiredKindofs.set(KINDOF_FS_BARRACKS);   break;
+				case GameMessage::MSG_META_SELECT_ALL_WARFACTORIES: requiredKindofs.set(KINDOF_FS_WARFACTORY); break;
+				case GameMessage::MSG_META_SELECT_ALL_AIRFIELDS:    requiredKindofs.set(KINDOF_FS_AIRFIELD);   break;
+				default:
+					// units: never dozers, harvesters or structures
+					disqualifyingKindofs.set(KINDOF_DOZER);
+					disqualifyingKindofs.set(KINDOF_HARVESTER);
+					disqualifyingKindofs.set(KINDOF_STRUCTURE);
+					if( t == GameMessage::MSG_META_SELECT_ALL_AIRCRAFT )
+						requiredKindofs.set(KINDOF_AIRCRAFT);
+					else if( t == GameMessage::MSG_META_SELECT_ALL_MILITARY )
+						requiredKindofs.set(KINDOF_CAN_ATTACK);	// armed units of any kind; plain SELECT_ALL takes the unarmed ones too
+					else if( t == GameMessage::MSG_META_SELECT_ALL_VEHICLES )
+					{
+						requiredKindofs.set(KINDOF_VEHICLE);
+						disqualifyingKindofs.set(KINDOF_AIRCRAFT);
+					}
+					break;
 			}
 
 			//Kris: Patch 1.03. We need to deselect all the units if any of the units we have selected
 			//are incompatible with the select all type we are triggering. This is a fix for the SCUDSTORM
-			//exploit.
+			//exploit. (Generalized: anything outside the category drops the old selection first.)
 			const DrawableList *drawList = TheInGameUI->getAllSelectedDrawables();
-			Drawable *draw;
 			for( DrawableListCIt it = drawList->begin(); it != drawList->end(); ++it )
 			{
-				draw = *it;
-				if( selectAircraft && (draw->isAnyKindOf( disqualifyingKindofs ) || !draw->isKindOf( KINDOF_AIRCRAFT )) )
-				{
-					TheInGameUI->deselectAllDrawables();
-					break;
-				}
-				else if( !selectAircraft && (draw->isAnyKindOf( disqualifyingKindofs ) || draw->isKindOf( KINDOF_STRUCTURE )) )
+				if( !(*it)->isKindOfMulti( requiredKindofs, disqualifyingKindofs ) )
 				{
 					TheInGameUI->deselectAllDrawables();
 					break;
@@ -2976,69 +2988,6 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 
 			disp = DESTROY_MESSAGE;
 			break;
-
-
-
-
-
-/*
-			TheInGameUI->deselectAllDrawables();
-
-			GameMessage *teamMsg = TheMessageStream->appendMessage( GameMessage::MSG_CREATE_SELECTED_GROUP );
-			// creating a new team so pass in true
-			teamMsg->appendBooleanArgument( TRUE );
-
-			// just loop through all the drawables in the world
-			Drawable *draw = TheGameClient->firstDrawable();
-
-			while( draw )
-			{
-				const Object *object = draw->getObject();
-
-				//Only select the object if it is locally controlled and not contained by anything.
-				KindOfMaskType disqualifyingKindofs;
-				disqualifyingKindofs.set(KINDOF_DOZER);
-				disqualifyingKindofs.set(KINDOF_HARVESTER);
-				disqualifyingKindofs.set(KINDOF_IGNORES_SELECT_ALL);
-				if( object  
-					&& object->isMobile() 
-					&& object->isLocallyControlled() 
-					&& !object->isContained() 
-					&& !object->isAnyKindOf( disqualifyingKindofs )
-					&& !object->isEffectivelyDead()
-					&& object->isMassSelectable()
-					)
-				{
-					// enforce optional unit cap
-					if (TheInGameUI->getMaxSelectCount() > 0 && TheInGameUI->getSelectCount() >= TheInGameUI->getMaxSelectCount())
-					{
-						if ( !TheInGameUI->getDisplayedMaxWarning() )
-						{
-							TheInGameUI->setDisplayedMaxWarning( TRUE );
-							UnicodeString msg;
-							msg.format(TheGameText->fetch("GUI:MaxSelectionSize").str(), TheInGameUI->getMaxSelectCount());
-							TheInGameUI->message(msg);
-						}
-					}
-					else
-					{
-						TheInGameUI->selectDrawable(draw);
-						teamMsg->appendObjectIDArgument( draw->getObject()->getID() );
-						TheInGameUI->setDisplayedMaxWarning( FALSE );
-					}
-				}
-
-				draw = draw->getNextDrawable();
-			}
-			if( TheInGameUI->getSelectCount() )
-			{
-				UnicodeString message = TheGameText->fetch( "GUI:SelectedAcrossMap" );
-				TheInGameUI->message( message );
-			}
-
-			disp = DESTROY_MESSAGE;
-			break;
-*/
 
 		}  // end select all
 
