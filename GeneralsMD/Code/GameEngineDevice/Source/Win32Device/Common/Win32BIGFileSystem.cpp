@@ -60,6 +60,12 @@ void Win32BIGFileSystem::init() {
 
 	loadBigFilesFromDirectory("", "*.big");
 
+	// loadIntoDirectoryTree keeps the FIRST archive that claims a path and the plain
+	// *.big pass above enumerates case-insensitively alphabetically, so INIZH.big claims
+	// Data\INI\... before PatchINI.big is even looked at and the 1.04 patch content is
+	// unreachable.  Re-load the patch archives with overwrite so they win, like retail.
+	loadBigFilesFromDirectory("", "Patch*.big", TRUE);
+
     // load original Generals assets
     AsciiString installPath;
     GetStringFromGeneralsRegistry("", "InstallPath", installPath );
