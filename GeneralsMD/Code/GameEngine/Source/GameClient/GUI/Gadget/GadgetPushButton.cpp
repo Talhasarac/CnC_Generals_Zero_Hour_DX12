@@ -607,8 +607,26 @@ PushButtonData * getNewPushButtonData( void )
 	p->userData = NULL;
 	p->drawBorder = FALSE;
 	p->drawClock = NO_CLOCK;
+	p->drawCount = 0;
 	p->overlayImage = NULL;
 	return p;
+}
+
+// GadgetButtonSetCount =======================================================
+/** Set the number badge drawn in the button's bottom right corner, 0 for none */
+//=============================================================================
+void GadgetButtonSetCount( GameWindow *g, Int count )
+{
+	if( g == NULL )
+		return;
+
+	PushButtonData *pData = (PushButtonData *)g->winGetUserData();
+	if(!pData)
+	{
+		pData = getNewPushButtonData();
+	}
+	pData->drawCount = count;
+	g->winSetUserData(pData);
 }
 
 // GadgetButtonSetBorder ======================================================

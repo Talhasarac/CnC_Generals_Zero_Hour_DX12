@@ -37,6 +37,7 @@
 #include "GameClient/GameClient.h"
 #include "GameClient/GadgetPushButton.h"
 #include "GameClient/GameWindow.h"
+#include "GameClient/GameWindowManager.h"
 #include "GameClient/InGameUI.h"
 #include "GameLogic/Object.h"
 
@@ -214,223 +215,241 @@ void ControlBar::addCommonCommands( Drawable *draw, Bool firstDrawable )
 //-------------------------------------------------------------------------------------------------
 void ControlBar::populateMultiSelect( void )
 {
-	Drawable *draw;
-	Bool firstDrawable = TRUE;
-	Bool portraitSet = FALSE;
-	const Image *portrait = NULL;
-	Object *portraitObj = NULL;
-
-	// first reset the common command data
-	resetCommonCommandData();
-
-	// by default, hide all the controls in the command section
-	for( Int i = 0; i < MAX_COMMANDS_PER_SET; i++ )
-	{
-		if (m_commandWindows[ i ])
-		{
-			m_commandWindows[ i ]->winHide( TRUE );
-		}
-	}
 
 	// sanity
 	DEBUG_ASSERTCRASH( TheInGameUI->getSelectCount() > 1,
 										 ("populateMultiSelect: Can't populate multiselect context cause there are only '%d' things selected\n",
 										  TheInGameUI->getSelectCount()) );
 
-	// get the list of drawable IDs from the in game UI
-	const DrawableList *selectedDrawables = TheInGameUI->getAllSelectedDrawables();
-
-	// sanity
-	DEBUG_ASSERTCRASH( selectedDrawables->empty() == FALSE, ("populateMultiSelect: Drawable list is empty\n") );
-
-	// loop through all the selected drawables
-	for( DrawableListCIt it = selectedDrawables->begin();
-			 it != selectedDrawables->end(); ++it )
-	{
-	
-		// get the drawable
-		draw = *it;
-
-		
-		if (draw->getObject()->isKindOf(KINDOF_IGNORED_IN_GUI)) // ignore these guys
-			continue;
-
-
-		//
-		// add command for this drawable, note that we also sanity check to make sure the
-		// drawable has an object as all interesting drawables that we can select should
-		// actually have an object underneath it so that we can do interesting things with
-		// it ... otherwise we should have never selected it.
-		// NOTE that we're not considering objects that are currently in the process of
-		// being sold as those objects can't be issued anymore commands
-		//
-		if( draw && draw->getObject() && 
-				!draw->getObject()->getStatusBits().test( OBJECT_STATUS_SOLD ) )
-		{
-
-			// add the common commands of this drawable to the common command set
-			addCommonCommands( draw, firstDrawable );
-
-			// not adding the first drawble anymore
-			firstDrawable = FALSE;
-
-			//
-			// keep track of the portrait images, if all units selected have the same portrait
-			// we will display it in the right HUD, otherwise we won't
-			//
-			if( portraitSet == FALSE )
-			{
-			
-				portrait = draw->getTemplate()->getSelectedPortraitImage();
-				portraitObj = draw->getObject();
-				portraitSet = TRUE;
-
-			}  // end if
-			else if( draw->getTemplate()->getSelectedPortraitImage() != portrait )
-				portrait = NULL;
-
-		}  // end if
-
-	}  // end for, drawble id iterator
-
-	// set the portrait image
-	setPortraitByObject( portraitObj );
+	//
+	// group the selection by unit type for the right HUD, then let the focused type drive
+	// the whole context: its portrait, its command set (build pages included) and the strip
+	// of type cameos.  Tab/Shift-Tab move the focus.
+	//
+	populateMultiSelectUnitList();
 
 }  // end populateMultiSelect
 
 //-------------------------------------------------------------------------------------------------
-/** Update logic for the multi select context sensitive GUI */
+/** Show what a multi-selection holds in the right HUD: one cameo per selected unit type on the
+	* small strip windows, each with a count badge.  Tab/Shift-Tab move the focus between the
+	* types; the focused type gets the portrait window and its cameo is the lit one. */
 //-------------------------------------------------------------------------------------------------
-void ControlBar::updateContextMultiSelect( void )
+void ControlBar::populateMultiSelectUnitList( void )
 {
-	Drawable *draw;
-	Object *obj;
-	const CommandButton *command;
-	GameWindow *win;
-	Int objectsThatCanDoCommand[ MAX_COMMANDS_PER_SET ];
-	Int i;
 
-	// zero the array that counts how many objects can do each command
-	memset( objectsThatCanDoCommand, 0, sizeof( objectsThatCanDoCommand ) );
+	// remember what was focused - a repopulate (a unit died, a build page turned) should not
+	// yank the player onto another type
+	const ThingTemplate *focusedTemplate = NULL;
+	if( m_multiSelectFocus >= 0 && m_multiSelectFocus < m_multiSelectGroupCount )
+		focusedTemplate = m_multiSelectGroupTemplate[ m_multiSelectFocus ];
 
-	// santiy
-	DEBUG_ASSERTCRASH( TheInGameUI->getSelectCount() > 1,
-										 ("updateContextMultiSelect: TheInGameUI only has '%d' things selected\n",
-										  TheInGameUI->getSelectCount()) );
+	m_multiSelectGroupCount = 0;
 
-	// get the list of drawable IDs from the in game UI
 	const DrawableList *selectedDrawables = TheInGameUI->getAllSelectedDrawables();
-
-	// sanity
-	DEBUG_ASSERTCRASH( selectedDrawables->empty() == FALSE, ("populateMultiSelect: Drawable list is empty\n") );
-
-	// loop through all the selected drawable IDs
-	for( DrawableListCIt it = selectedDrawables->begin();
-			 it != selectedDrawables->end(); ++it )
+	for( DrawableListCIt it = selectedDrawables->begin(); it != selectedDrawables->end(); ++it )
 	{
-	
-		// get the drawable from the ID
-		draw = *it;
+		Drawable *draw = *it;
+		Object *obj = draw ? draw->getObject() : NULL;
 
-		if (draw->getObject()->isKindOf(KINDOF_IGNORED_IN_GUI)) // ignore these guys
+		// same filter the command population uses
+		if( obj == NULL || obj->isKindOf( KINDOF_IGNORED_IN_GUI ) ||
+				obj->getStatusBits().test( OBJECT_STATUS_SOLD ) )
 			continue;
 
-
-		// get the object
-		obj = draw->getObject();
-
-		// sanity
-		if( obj == NULL )
-			continue;
-
-		// for each of the visible command windows make sure the object can execute the command
-		for( i = 0; i < MAX_COMMANDS_PER_SET; i++ )
+		// find this unit's type group, or open a new one
+		const ThingTemplate *thing = draw->getTemplate();
+		Int g;
+		for( g = 0; g < m_multiSelectGroupCount; g++ )
+			if( m_multiSelectGroupTemplate[ g ] == thing )
+				break;
+		if( g == m_multiSelectGroupCount )
 		{
-
-			// get the control window
-			win = m_commandWindows[ i ];
-
-			// our implementation doesn't necessarily make use of the max possible command buttons
-			if (!win) continue;
-
-			// don't consider hidden windows
-			if( win->winIsHidden() == TRUE )
+			// ponytail: MAX_MULTI_SELECT_GROUPS unit types; a selection with more than that
+			// drops the tail types from the display
+			if( m_multiSelectGroupCount >= MAX_MULTI_SELECT_GROUPS )
 				continue;
-
-			// get the command
-			command = (const CommandButton *)GadgetButtonGetData(win);
-			if( command == NULL )
-				continue;
-
-			// can we do the command
-			CommandAvailability availability = getCommandAvailability( command, obj, win );
-
-			win->winClearStatus( WIN_STATUS_NOT_READY );
-			win->winClearStatus( WIN_STATUS_ALWAYS_COLOR );
-
-			// enable/disable the window control
-			switch( availability )
-			{
-				case COMMAND_HIDDEN:
-					win->winHide( TRUE );
-					break;
-				case COMMAND_RESTRICTED:
-					win->winEnable( FALSE );
-					break;
-				case COMMAND_NOT_READY:
-					win->winEnable( FALSE );
-					win->winSetStatus( WIN_STATUS_NOT_READY );
-					break;
-				case COMMAND_CANT_AFFORD:
-					win->winEnable( FALSE );
-					win->winSetStatus( WIN_STATUS_ALWAYS_COLOR );
-					break;
-				default:
-					win->winEnable( TRUE );
-					break;
-			}
-
-			//If button is a CHECK_LIKE, then update it's status now.
-			if( BitTest( command->getOptions(), CHECK_LIKE ) )
-			{
-				GadgetCheckLikeButtonSetVisualCheck( win, availability == COMMAND_ACTIVE );
-			}
-
-			if( availability == COMMAND_AVAILABLE || availability == COMMAND_ACTIVE )
-					objectsThatCanDoCommand[ i ]++;
-
-		}  // end for i
+			m_multiSelectGroupTemplate[ g ] = thing;
+			m_multiSelectGroupSize[ g ] = 0;
+			m_multiSelectGroupFirst[ g ] = draw->getID();
+			m_multiSelectGroupCount++;
+		}
+		m_multiSelectGroupSize[ g ]++;
 
 	}  // end for, selected drawables
 
+	// one cell per type, laid out n x n over the right HUD
+	layoutMultiSelectTiles( m_multiSelectGroupCount );
+
+	// stay on the type that was focused if it is still selected
+	Int focus = 0;
+	for( Int g = 0; g < m_multiSelectGroupCount; g++ )
+		if( m_multiSelectGroupTemplate[ g ] == focusedTemplate )
+			focus = g;
+
+	m_multiSelectFocus = focus;
+	setMultiSelectFocus( focus );
+
+}  // end populateMultiSelectUnitList
+
+//-------------------------------------------------------------------------------------------------
+/** Focus one type group of the multi-selection: its portrait and count go to the portrait
+	* window, and the strip below shows every group's cameo with the focused one lit */
+//-------------------------------------------------------------------------------------------------
+void ControlBar::setMultiSelectFocus( Int index )
+{
+
+	if( m_multiSelectGroupCount == 0 )
+		return;
+
+	// wrap in both directions
+	m_multiSelectFocus = ( index % m_multiSelectGroupCount + m_multiSelectGroupCount )
+											 % m_multiSelectGroupCount;
+
+	Drawable *draw = TheGameClient->findDrawableByID( m_multiSelectGroupFirst[ m_multiSelectFocus ] );
+	Object *obj = draw ? draw->getObject() : NULL;
+	if( obj == NULL )
+		return;		// the next selection change repopulates the groups
+
 	//
-	// for each command, if any objects can do the command we enable the window, otherwise
-	// we disable it
+	// the focused type's representative drives the whole context: the command area shows its
+	// command set (a builder's structure pages included), and updateContextMultiSelect keeps
+	// judging those buttons through the single-selection update
 	//
-	for( i = 0; i < MAX_COMMANDS_PER_SET; i++ )
+	m_currentSelectedDrawable = draw;
+	populateCommand( obj );
+
+	// the previous representative's production queue does not belong to this one; the update
+	// re-shows the panel if the new representative is producing
+	m_contextParent[ CP_BUILD_QUEUE ]->winHide( TRUE );
+
+	// ... and the 3x3 type grid in the right HUD
+	updateMultiSelectStrip();
+
+}  // end setMultiSelectFocus
+
+//-------------------------------------------------------------------------------------------------
+/** Keep the 3x3 unit-type grid of a multi-selection alive.  Called every frame: the
+	* single-selection update trades the portrait back and forth with the build queue panel
+	* and setPortraitByObject hides the grid cells, so the multi-select look has to be
+	* re-applied after them. */
+//-------------------------------------------------------------------------------------------------
+void ControlBar::updateMultiSelectStrip( void )
+{
+
+	if( m_currContext != CB_CONTEXT_MULTI_SELECT || m_multiSelectGroupCount == 0 )
+		return;
+
+	//
+	// a selection of one unit type reads like a single selection: its portrait, upgrade
+	// cameos and all, with how many are selected written on the portrait
+	//
+	if( m_multiSelectGroupCount == 1 )
 	{
-		// our implementation doesn't necessarily make use of the max possible command buttons
-		if (! m_commandWindows[ i ]) continue;
+		Drawable *draw = TheGameClient->findDrawableByID( m_multiSelectGroupFirst[ 0 ] );
+		Object *obj = draw ? draw->getObject() : NULL;
+		setPortraitByObject( obj );		// also hides the grid cells
+		if( obj )
+			GadgetButtonSetCount( m_rightHUDCameoWindow, m_multiSelectGroupSize[ 0 ] );
+		return;
+	}
 
-		// don't consider hidden commands
-		if( m_commandWindows[ i ]->winIsHidden() == TRUE )
+	// the grid replaces the portrait while a mixed multi-selection is up
+	setPortraitByObject( NULL );
+
+	// one cell per selected type with its count; the focused type is the lit one, the rest
+	// wear the darkened overlay state
+	for( size_t i = 0; i < m_multiSelectTiles.size(); i++ )
+	{
+		GameWindow *win = m_multiSelectTiles[ i ];
+		if( win == NULL )
 			continue;
 
-		// don't consider slots that don't have commands
-		if( m_commonCommands[ i ] == NULL )
-			continue;
-		
-		// check the count of objects that can do the command and enable/disable the control,
-		if( objectsThatCanDoCommand[ i ] > 0 )
-			m_commandWindows[ i ]->winEnable( TRUE );
+		if( (Int)i < m_multiSelectGroupCount )
+		{
+			win->winHide( FALSE );
+			win->winSetEnabledImage( 0, m_multiSelectGroupTemplate[ i ]->getButtonImage() );
+			win->winEnable( (Int)i == m_multiSelectFocus );
+			GadgetButtonSetCount( win, m_multiSelectGroupSize[ i ] );
+		}
 		else
-			m_commandWindows[ i ]->winEnable( FALSE );
+			win->winHide( TRUE );
+	}
 
-	}  // end for i
+}  // end updateMultiSelectStrip
 
-	// After Every change to the m_commandWIndows, we need to show fill in the missing blanks with the images
-	// removed from multiplayer branch
-	//showCommandMarkers();
+//-------------------------------------------------------------------------------------------------
+/** Make sure 'count' grid cells exist and lay them out n x n over the right HUD, n the
+	* smallest square that holds them: one type fills the HUD, 2-4 get 2x2, 5-9 get 3x3, and
+	* so on.  Cells are plain windows created in code (ControlBar.wnd has none to spare) that
+	* borrow the push button image draw, so cameos, count badges and the darkened disabled
+	* state work. */
+//-------------------------------------------------------------------------------------------------
+void ControlBar::layoutMultiSelectTiles( Int count )
+{
+	if( m_rightHUDWindow == NULL || count <= 0 )
+		return;
 
+	Int n = 1;
+	while( n * n < count )
+		n++;
+
+	ICoord2D hudSize;
+	m_rightHUDWindow->winGetSize( &hudSize.x, &hudSize.y );
+	Int cellW = hudSize.x / n;
+	Int cellH = hudSize.y / n;
+
+	for( Int i = 0; i < count; i++ )
+	{
+		if( (Int)m_multiSelectTiles.size() <= i )
+		{
+			GameWindow *tile = TheWindowManager->winCreate( m_rightHUDWindow,
+													WIN_STATUS_ENABLED | WIN_STATUS_USE_OVERLAY_STATES | WIN_STATUS_HIDDEN,
+													0, 0, cellW, cellH, GameWinDefaultSystem );
+			if( tile )
+				tile->winSetDrawFunc( TheWindowManager->getPushButtonImageDrawFunc() );
+			m_multiSelectTiles.push_back( tile );
+		}
+
+		GameWindow *tile = m_multiSelectTiles[ i ];
+		if( tile == NULL )
+			continue;
+		Int col = i % n;
+		Int row = i / n;
+		tile->winSetPosition( col * cellW + 1, row * cellH + 1 );
+		tile->winSetSize( cellW - 2, cellH - 2 );
+	}
+
+}  // end layoutMultiSelectTiles
+
+//-------------------------------------------------------------------------------------------------
+/** Tab (+1) / Shift-Tab (-1): walk the focus through the multi-selected units */
+//-------------------------------------------------------------------------------------------------
+void ControlBar::cycleMultiSelectFocus( Int direction )
+{
+
+	if( m_currContext != CB_CONTEXT_MULTI_SELECT )
+		return;
+
+	setMultiSelectFocus( m_multiSelectFocus + direction );
+
+}  // end cycleMultiSelectFocus
+
+//-------------------------------------------------------------------------------------------------
+/** Update logic for the multi select context sensitive GUI.  The command area mirrors the
+	* focused type's representative, so the single-selection update does all the work:
+	* availability, build queue panel, reload clocks, queue count badges. */
+//-------------------------------------------------------------------------------------------------
+void ControlBar::updateContextMultiSelect( void )
+{
+
+	// the representative can die between the deselect event and the UI re-evaluation
+	if( m_currentSelectedDrawable == NULL || m_currentSelectedDrawable->getObject() == NULL )
+		return;
+
+	updateContextCommand();
+
+	// the update may have traded the portrait for a build queue - keep the type strip alive
+	updateMultiSelectStrip();
 
 }  // end updateContextMultiSelect

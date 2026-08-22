@@ -53,6 +53,7 @@
 #include "GameClient/GameWindowManager.h"
 #include "GameClient/GadgetPushButton.h"
 #include "GameClient/Display.h"
+#include "GameClient/DisplayStringManager.h"
 #include "W3DDevice/GameClient/W3DGameWindow.h"
 #include "W3DDevice/GameClient/W3DDisplay.h"
 #include "W3DDevice/GameClient/W3DGadget.h"
@@ -150,6 +151,46 @@ static void drawButtonText( GameWindow *window, WinInstanceData *instData )
 	text->draw( textPos.x, textPos.y, textColor, dropColor );
 
 }  // end drawButtonText
+
+// drawCountBadge =============================================================
+/** Draw a small number badge in the button's bottom right corner (queued unit
+	* counts, selection sizes).  One shared DisplayString serves every button. */
+//=============================================================================
+static void drawCountBadge( GameWindow *window, Int count )
+{
+	static DisplayString *badge = NULL;
+	ICoord2D origin, size, textPos;
+	Int width, height;
+
+	if( badge == NULL )
+	{
+		badge = TheDisplayStringManager->newDisplayString();
+		if( badge == NULL )
+			return;
+	}
+
+	UnicodeString text;
+	text.format( L"%d", count );
+	badge->setText( text );
+
+	if( badge->getFont() != window->winGetFont() )
+		badge->setFont( window->winGetFont() );
+
+	window->winGetScreenPosition( &origin.x, &origin.y );
+	window->winGetSize( &size.x, &size.y );
+	badge->getSize( &width, &height );
+
+	textPos.x = origin.x + size.x - width - 3;
+	textPos.y = origin.y + size.y - height - 1;
+
+	// same translucent plate the shortcut letter wears - button art can be any colour
+	TheDisplay->drawFillRect( textPos.x - 2, textPos.y, width + 4, height,
+														GameMakeColor( 0, 0, 0, 160 ) );
+	badge->draw( textPos.x, textPos.y, GameMakeColor( 255, 255, 255, 255 ),
+							 GameMakeColor( 0, 0, 0, 255 ) );
+
+}  // end drawCountBadge
+
 
 ///////////////////////////////////////////////////////////////////////////////
 // PUBLIC FUNCTIONS ///////////////////////////////////////////////////////////
@@ -282,6 +323,9 @@ void W3DGadgetPushButtonDraw( GameWindow *window, WinInstanceData *instData )
 		{
 			TheDisplay->drawOpenRect(origin.x -1, origin.y - 1, size.x + 2, size.y + 2,1 , pData->colorBorder);
 		}
+
+		if( pData->drawCount > 0 )
+			drawCountBadge( window, pData->drawCount );
 	}
 
 }  // end W3DGadgetPushButtonDraw
@@ -449,10 +493,13 @@ void W3DGadgetPushButtonImageDrawOne( GameWindow *window,
 		
 		if( pData->drawBorder && pData->colorBorder != GAME_COLOR_UNDEFINED )
 		{
-			
+
 			TheDisplay->drawOpenRect(start.x - 1, start.y - 1, size.x + 2, size.y + 2, 1, pData->colorBorder);
 
 		}
+
+		if( pData->drawCount > 0 )
+			drawCountBadge( window, pData->drawCount );
 	}
 
 	//Now render overlays that pertain to the correct state.
@@ -710,5 +757,8 @@ void W3DGadgetPushButtonImageDrawThree(GameWindow *window, WinInstanceData *inst
 		{
 			TheDisplay->drawOpenRect(start.x - 1, start.y - 1, size.x + 2, size.y + 2, 1, pData->colorBorder);
 		}
+
+		if( pData->drawCount > 0 )
+			drawCountBadge( window, pData->drawCount );
 	}
 }

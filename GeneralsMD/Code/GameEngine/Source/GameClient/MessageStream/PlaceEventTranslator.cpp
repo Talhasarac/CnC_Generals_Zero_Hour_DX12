@@ -27,6 +27,8 @@
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
 
+#include "GameClient/Keyboard.h"
+
 #include "Common/BuildAssistant.h"
 #include "Common/GameAudio.h"
 #include "Common/Player.h"
@@ -286,8 +288,12 @@ GameMessageDisposition PlaceEventTranslator::translateGameMessage(const GameMess
 
 					pickAndPlayUnitVoiceResponse( TheInGameUI->getAllSelectedDrawables(), placeMsg->getType() );
 
-					// get out of pending placement mode, this will also clear the arrow anchor status
-					TheInGameUI->placeBuildAvailable( NULL, NULL );
+					// get out of pending placement mode, this will also clear the arrow anchor status -
+					// unless shift is held, which keeps placing the same structure until released
+					if( TheKeyboard && TheKeyboard->isShift() && builderObj && builderObj->getDrawable() )
+						TheInGameUI->placeBuildAvailable( build, builderObj->getDrawable() );
+					else
+						TheInGameUI->placeBuildAvailable( NULL, NULL );
 
 				}  // end if, location legal to build at
 				else

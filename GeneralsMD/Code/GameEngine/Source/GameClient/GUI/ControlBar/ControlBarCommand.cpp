@@ -70,7 +70,7 @@
 // PRIVATE DATA ///////////////////////////////////////////////////////////////////////////////////
 static GameWindow *commandWindows[ MAX_COMMANDS_PER_SET ];
 Bool commandWindowsInitialized = FALSE;
-static Color BuildClockColor = GameMakeColor(0,0,0,100);
+static Color BuildClockColor = GameMakeColor(0,0,0,120);	///< translucent black radial fill drawn over the cameo as production progresses
 // STATIC DATA STORAGE ////////////////////////////////////////////////////////////////////////////
 ControlBar::ContainEntry ControlBar::m_containData[ MAX_COMMANDS_PER_SET ];
 
@@ -267,109 +267,18 @@ void ControlBar::doTransportInventoryUI( Object *transport, const CommandSet *co
 }  // end doTransportInventoryUI
 
 //-------------------------------------------------------------------------------------------------
-/** The command bar is two rows of seven, and the grid keys run along the top row first:
-	slot 0 is Q, slot 2 is W, slot 4 is E and so on to slot 12 for U, then the bottom row
-	from slot 1 for Z through slot 13 for M.  A build page lays its structures out along
-	that order so the first four of them are Q, W, E and R.  Slot 1 (Z) is left out - it is
-	where the back button sits. */
-//-------------------------------------------------------------------------------------------------
-static const Int s_buildPageSlots[] = { 0, 2, 4, 6, 8, 10, 12, 3, 5, 7, 9, 11, 13 };
-static const Int s_buildPageSlotCount = sizeof( s_buildPageSlots ) / sizeof( s_buildPageSlots[ 0 ] );
-static const Int s_buildPageBackSlot = 1;
-
-//-------------------------------------------------------------------------------------------------
-/** Which command button belongs in each of the command bar's slots for this object.  Normally
-	that is just the command set, slot for slot.  A builder with more structures than one page
-	holds instead gets its structures replaced by the two page menu buttons, or - once a page is
-	open - by that page's structures plus a button back to the menu.  Commands that are not
-	structures keep the slot the data gave them on every page. */
+/** Which command button belongs in each of the command bar's slots for this object: the
+	command set, slot for slot.  No paging - every structure shows at once and the ones the
+	player cannot afford or has no prerequisite for just grey out through the availability
+	pass.  (The BUILD_PAGE machinery is dormant, kept in case pages come back.) */
 //-------------------------------------------------------------------------------------------------
 void ControlBar::buildCommandLayout( Object *obj, const CommandSet *commandSet,
 																		 const CommandButton **slot )
 {
-	Int i;
-
-	for( i = 0; i < MAX_COMMANDS_PER_SET; i++ )
+	for( Int i = 0; i < MAX_COMMANDS_PER_SET; i++ )
 		slot[ i ] = commandSet->getCommandButton( i );
 
-	//
-	// the pages are worked with the grid keys, so without them a page would be a menu the
-	// keyboard cannot reach.  Leave the command set alone.
-	//
-	if( TheGlobalData->m_useGridHotKeys == FALSE || m_buildPageButton[ 0 ] == NULL )
-	{
-		m_buildPage = BUILD_PAGE_ROOT;
-		return;
-	}
-
-	// a different builder starts at the menu rather than wherever the last one was left
-	if( obj->getID() != m_buildPageObjectID )
-	{
-		m_buildPageObjectID = obj->getID();
-		m_buildPage = BUILD_PAGE_ROOT;
-	}
-
-	// the structures, in command set order
-	const CommandButton *structure[ MAX_COMMANDS_PER_SET ];
-	Int structureCount = 0;
-	for( i = 0; i < MAX_COMMANDS_PER_SET; i++ )
-		if( slot[ i ] != NULL && slot[ i ]->getCommandType() == GUI_COMMAND_DOZER_CONSTRUCT )
-			structure[ structureCount++ ] = slot[ i ];
-
-	// a set that already fits on one page has nothing to gain from a menu in front of it
-	if( structureCount <= BUILD_PAGE_ONE_SIZE )
-	{
-		m_buildPage = BUILD_PAGE_ROOT;
-		return;
-	}
-
-	// page two is whatever page one did not take
-	Int pageFirst[ BUILD_PAGE_COUNT ], pageLast[ BUILD_PAGE_COUNT ];
-	pageFirst[ 0 ] = 0;
-	pageLast[ 0 ] = BUILD_PAGE_ONE_SIZE;
-	pageFirst[ 1 ] = BUILD_PAGE_ONE_SIZE;
-	pageLast[ 1 ] = structureCount;
-
-	// the structures give their slots up; everything else in the set stays where it is
-	for( i = 0; i < MAX_COMMANDS_PER_SET; i++ )
-		if( slot[ i ] != NULL && slot[ i ]->getCommandType() == GUI_COMMAND_DOZER_CONSTRUCT )
-			slot[ i ] = NULL;
-
-	// what the page puts on the bar, in the order the grid keys run
-	const CommandButton *paged[ MAX_COMMANDS_PER_SET ];
-	Int pagedCount = 0;
-	if( m_buildPage == BUILD_PAGE_ROOT )
-	{
-		for( Int page = 0; page < BUILD_PAGE_COUNT; page++ )
-		{
-			// the menu button wears the cameo of the first structure behind it
-			m_buildPageButton[ page ]->setButtonImage( structure[ pageFirst[ page ] ]->getButtonImage() );
-			paged[ pagedCount++ ] = m_buildPageButton[ page ];
-		}
-	}
-	else
-	{
-		if( TheMappedImageCollection != NULL && m_buildPageBackButton->getButtonImage() == NULL )
-			m_buildPageBackButton->setButtonImage( TheMappedImageCollection->findImageByName( AsciiString( "SSStop" ) ) );
-		if( slot[ s_buildPageBackSlot ] == NULL )
-			slot[ s_buildPageBackSlot ] = m_buildPageBackButton;
-
-		for( i = pageFirst[ m_buildPage ]; i < pageLast[ m_buildPage ]; i++ )
-			paged[ pagedCount++ ] = structure[ i ];
-	}
-
-	// drop them into the free slots, keeping the grid key order
-	Int next = 0;
-	for( i = 0; i < s_buildPageSlotCount && next < pagedCount; i++ )
-	{
-		Int where = s_buildPageSlots[ i ];
-		if( slot[ where ] != NULL )
-			continue;
-		slot[ where ] = paged[ next++ ];
-	}
-
-	DEBUG_ASSERTCRASH( next == pagedCount, ("buildCommandLayout: command set '%s' left %d structures with no slot to sit in\n",
-																					commandSet->getName().str(), pagedCount - next) );
+	m_buildPage = BUILD_PAGE_ROOT;
 
 }  // end buildCommandLayout
 
@@ -663,13 +572,12 @@ void ControlBar::resetBuildQueueData( void )
 }  // end resetBuildQueue
 
 //-------------------------------------------------------------------------------------------------
+/** attach the ButtonQueueNN windows to m_queueData and wipe every button back to its empty,
+	* disabled state.  Shared by the production build queue and the multi-select unit list,
+	* which reuse the same windows. */
 //-------------------------------------------------------------------------------------------------
-void ControlBar::populateBuildQueue( Object *producer )
+void ControlBar::resetBuildQueueButtons( void )
 {
-/// @todo srj -- remove hard-coding here, please
-	static const CommandButton *cancelUnitCommand = findCommandButton( "Command_CancelUnitCreate" );
-/// @todo srj -- remove hard-coding here, please
-	static const CommandButton *cancelUpgradeCommand = findCommandButton( "Command_CancelUpgradeCreate" );
 	static NameKeyType buildQueueIDs[ MAX_BUILD_QUEUE_BUTTONS ];
 	static Bool idsInitialized = FALSE;
 	Int i;
@@ -684,7 +592,7 @@ void ControlBar::populateBuildQueue( Object *producer )
 
 		for( i = 0; i < MAX_BUILD_QUEUE_BUTTONS; i++ )
 		{
-			
+
 			buttonName.format( "ControlBar.wnd:ButtonQueue%02d", i + 1 );
 			buildQueueIDs[ i ] = TheNameKeyGenerator->nameToKey( buttonName );
 
@@ -715,7 +623,25 @@ void ControlBar::populateBuildQueue( Object *producer )
 		//Clear any potential veterancy rank, or else we'll see it when it's empty!
 		GadgetButtonDrawOverlayImage( m_queueData[ i ].control, NULL );
 
+		//Clear any multi-select focus border left behind
+		GadgetButtonSetBorder( m_queueData[ i ].control, GAME_COLOR_UNDEFINED, FALSE );
+		GadgetButtonSetCount( m_queueData[ i ].control, 0 );
+
 	}  // end for i
+
+}  // end resetBuildQueueButtons
+
+//-------------------------------------------------------------------------------------------------
+//-------------------------------------------------------------------------------------------------
+void ControlBar::populateBuildQueue( Object *producer )
+{
+/// @todo srj -- remove hard-coding here, please
+	static const CommandButton *cancelUnitCommand = findCommandButton( "Command_CancelUnitCreate" );
+/// @todo srj -- remove hard-coding here, please
+	static const CommandButton *cancelUpgradeCommand = findCommandButton( "Command_CancelUpgradeCreate" );
+
+	// attach and wipe the queue buttons
+	resetBuildQueueButtons();
 
 	// step through each object being built and set the image data for the buttons
 	ProductionUpdateInterface *pu = producer->getProductionUpdateInterface();
@@ -802,6 +728,13 @@ void ControlBar::populateBuildQueue( Object *producer )
 	}  // end for
 
 	//
+	// the panel has MAX_BUILD_QUEUE_BUTTONS windows but the queue can run to 100; when it
+	// overflows, the last cell wears the whole queue's length as its badge
+	//
+	if( pu->getProductionCount() > MAX_BUILD_QUEUE_BUTTONS )
+		GadgetButtonSetCount( m_queueData[ MAX_BUILD_QUEUE_BUTTONS - 1 ].control, pu->getProductionCount() );
+
+	//
 	// save the count of things being produced in the build queue, when it changes we will
 	// repopulate the queue to visually show the change
 	//
@@ -841,85 +774,15 @@ void ControlBar::updateContextCommand( void )
 	ProductionUpdateInterface *pu = obj ? obj->getProductionUpdateInterface() : NULL;
 
 	//
-	// when we have a production update, we show the build queue when there is actually
-	// something in the queue, otherwise we show the selection portrait for the object ... so if
-	// the queue is visible we need to check to see if we should hide it and show the portrait,
-	// and if the queue is hidden, we need to check and see if it should become shown
+	// the right HUD always belongs to the selection, so the build queue panel is never shown
+	// over it: a unit build button carries its own queue (radial progress, count badge,
+	// right-click cancels the last one) and the producer's world bar shows the rest
 	//
-	if( m_contextParent[ CP_BUILD_QUEUE ]->winIsHidden() == TRUE )
-	{
-
-		if( pu && pu->firstProduction() != NULL )
-		{
-
-			// don't show the portrait image
-			setPortraitByObject( NULL );
-
-			// show the build queue
-			m_contextParent[ CP_BUILD_QUEUE ]->winHide( FALSE );
-			populateBuildQueue( obj );
-
-		}  // end if
-
-	}  // end if
-	else
-	{
-
-		if( pu && pu->firstProduction() == NULL )
-		{
-
-			// hide the build queue
-			m_contextParent[ CP_BUILD_QUEUE ]->winHide( TRUE );
-
-			// show the portrait image
-			setPortraitByObject( obj );
-
-		}  // end if
-
-	}  // end else
-
-	// update a visible production queue
 	if( m_contextParent[ CP_BUILD_QUEUE ]->winIsHidden() == FALSE )
 	{
-
-		// when the build queue is enabled, the selected portrait cannot be shown
-		setPortraitByObject( NULL );
-
-		//
-		// when showing a production queue, when the production count changes of the producer
-		// object (the thing we have selected for the control bar) we will repopulate the
-		// windows to visually show the new production linup
-		//
-		if( pu )
-		{
-		
-			// update the whole queue as necessary
-			if( pu->getProductionCount() != m_displayedQueueCount )
-				populateBuildQueue( obj );
-
-			//
-			// update the build percentage on the first thing (the thing that's being built)
-			// in the queue
-			//
-			const ProductionEntry *produce = pu->firstProduction();
-			if( produce )
-			{
-				static NameKeyType winID = TheNameKeyGenerator->nameToKey( "ControlBar.wnd:ButtonQueue01" );
-				GameWindow *win = TheWindowManager->winGetWindowFromId( m_contextParent[ CP_BUILD_QUEUE ], winID );
-				
-				DEBUG_ASSERTCRASH( win, ("updateContextCommand: Unable to find first build queue button\n") );
-				//				UnicodeString text;
-				//
-				//				text.format( L"%.0f%%", produce->getPercentComplete() );
-				//				GadgetButtonSetText( win, text );
-				
-				GadgetButtonDrawInverseClock(win,produce->getPercentComplete(), m_buildUpClockColor);
-
-			}  // end if
-
-		}  // end if
-
-	}  // end if
+		m_contextParent[ CP_BUILD_QUEUE ]->winHide( TRUE );
+		setPortraitByObject( obj );
+	}
 
 	// evaluate each command on whether or not it should be enabled
 	for( i = 0; i < MAX_COMMANDS_PER_SET; i++ )
@@ -944,6 +807,34 @@ void ControlBar::updateContextCommand( void )
 		//command = (const CommandButton *)win->winGetUserData();
 		if( command == NULL )
 			continue;
+
+		//
+		// a unit build button wears its own queue: a radial fill over the cameo while its unit
+		// is the one being built, and a corner badge with how many of it are queued
+		//
+		if( command->getCommandType() == GUI_COMMAND_UNIT_BUILD && pu )
+		{
+			Int queued = 0;
+			for( const ProductionEntry *p = pu->firstProduction(); p; p = pu->nextProduction( p ) )
+				if( p->getProductionType() == PRODUCTION_UNIT &&
+						p->getProductionObject() == command->getThingTemplate() )
+					queued++;
+			GadgetButtonSetCount( win, queued );
+
+			const ProductionEntry *first = pu->firstProduction();
+			if( first && first->getProductionType() == PRODUCTION_UNIT &&
+					first->getProductionObject() == command->getThingTemplate() )
+				GadgetButtonDrawClock( win, first->getPercentComplete(), BuildClockColor );
+		}
+
+		// a structure outside the armed chord group greys out until the chord resolves
+		if( m_chordGroup >= 0 && command->getCommandType() == GUI_COMMAND_DOZER_CONSTRUCT &&
+				( i < CHORD_GROUP_SIZE ) != ( m_chordGroup == 0 ) )
+		{
+			setCommandBarBorder( win, command->getCommandButtonMappedBorderType() );
+			win->winEnable( FALSE );
+			continue;
+		}
 
 
 // LORENZEN COMMENTED THIS OUT 8/11
@@ -985,7 +876,17 @@ void ControlBar::updateContextCommand( void )
 				win->winEnable( TRUE );
 				break;
 		}
-  
+
+		// while a chord is armed, the structures of its group that can be built right now wear
+		// a green border - those are what the next key picks; otherwise the command's own border
+		if( command->getCommandType() == GUI_COMMAND_DOZER_CONSTRUCT )
+		{
+			if( m_chordGroup >= 0 && BitTest( win->winGetStatus(), WIN_STATUS_ENABLED ) )
+				GadgetButtonSetBorder( win, GameMakeColor( 60, 255, 60, 255 ), TRUE );
+			else
+				setCommandBarBorder( win, command->getCommandButtonMappedBorderType() );
+		}
+
 		//Determine by the production type of this button, whether or not the created object
 		//will have a veterancy rank
 		if( command->getCommandType() != GUI_COMMAND_EXIT_CONTAINER )

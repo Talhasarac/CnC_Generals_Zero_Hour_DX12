@@ -239,6 +239,14 @@ public:
 		MSG_META_COMMAND_SLOT12,    ///< press command bar slot 12
 		MSG_META_COMMAND_SLOT13,    ///< press command bar slot 13
 		MSG_META_COMMAND_SLOT14,    ///< press command bar slot 14
+		MSG_META_SHORTCUT_SLOT01,   ///< press general's power shortcut bar slot 01 (F1)
+		MSG_META_SHORTCUT_SLOT02,   ///< press general's power shortcut bar slot 02
+		MSG_META_SHORTCUT_SLOT03,   ///< press general's power shortcut bar slot 03
+		MSG_META_SHORTCUT_SLOT04,   ///< press general's power shortcut bar slot 04
+		MSG_META_SHORTCUT_SLOT05,   ///< press general's power shortcut bar slot 05
+		MSG_META_SHORTCUT_SLOT06,   ///< press general's power shortcut bar slot 06
+		MSG_META_SHORTCUT_SLOT07,   ///< press general's power shortcut bar slot 07
+		MSG_META_SHORTCUT_SLOT08,   ///< press general's power shortcut bar slot 08
 		MSG_META_VIEW_COMMAND_CENTER,								///< center view on command center
 		MSG_META_VIEW_LAST_RADAR_EVENT,							///< center view on last radar event
 		MSG_META_SELECT_HERO,                       ///< selects player's hero character, if exists...

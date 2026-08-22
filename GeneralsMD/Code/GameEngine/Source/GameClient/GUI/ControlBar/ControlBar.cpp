@@ -53,6 +53,11 @@
 
 #include "GameLogic/GameLogic.h"
 #include "GameLogic/Object.h"
+#include "GameLogic/Module/AIUpdate.h"
+#include "GameLogic/Module/DozerAIUpdate.h"
+#include "GameLogic/Module/SupplyTruckAIUpdate.h"
+
+static Bool builderIsFree( AIUpdateInterface *ai, DozerAIInterface *dozer );	// defined with findStandInBuilder
 #include "GameLogic/Module/ProductionUpdate.h"
 #include "GameLogic/Module/OCLUpdate.h"
 #include "GameLogic/Module/ContainModule.h"
@@ -147,6 +152,43 @@ void ControlBar::pressCommandButton( Int index )
 	if( index < 0 || index >= MAX_COMMANDS_PER_SET )
 		return;
 
+	//
+	// a builder's structures are reached by a two-key chord so the whole set can stay on
+	// screen: Q arms the structures in columns 1-4 (slots 0-7), W the ones in columns 5-7
+	// (slots 8-13), and the next grid key picks the cell inside that group by its own
+	// position - Q-Q, Q-A, ... W-Q (= T's cell), W-A (= G's cell) ...
+	//
+	Bool hasStructures = FALSE;
+	for( Int i = 0; i < MAX_COMMANDS_PER_SET && !hasStructures; i++ )
+	{
+		GameWindow *w = m_commandWindows[ i ];
+		if( w == NULL || BitTest( w->winGetStatus(), WIN_STATUS_HIDDEN ) )
+			continue;
+		const CommandButton *c = (const CommandButton *)GadgetButtonGetData( w );
+		hasStructures = ( c && c->getCommandType() == GUI_COMMAND_DOZER_CONSTRUCT );
+	}
+	if( hasStructures )
+	{
+		if( m_chordGroup < 0 )
+		{
+			if( index == CHORD_SLOT_Q || index == CHORD_SLOT_W )
+			{
+				m_chordGroup = ( index == CHORD_SLOT_Q ) ? 0 : 1;
+				return;
+			}
+		}
+		else
+		{
+			Int group = m_chordGroup;
+			m_chordGroup = -1;
+			if( index >= CHORD_GROUP_SIZE )
+				return;		// the second key must be one of the first group's cells (Q W E R A S D F)
+			index += group * CHORD_GROUP_SIZE;
+			if( index >= MAX_COMMANDS_PER_SET )
+				return;
+		}
+	}
+
 	GameWindow *win = m_commandWindows[ index ];
 	if( win == NULL || BitTest( win->winGetStatus(), WIN_STATUS_HIDDEN ) )
 		return;
@@ -168,6 +210,36 @@ void ControlBar::pressCommandButton( Int index )
 	}
 
 }  // end pressCommandButton
+
+//-------------------------------------------------------------------------------------------------
+/** The second key of a structure chord is a fixed physical cell - Q A W S E D R F for local
+	slots 0..7 (column-major, like the command bar) - whatever the grid rows are bound to, so
+	A/S stay free for attack move and stop outside a chord.  MetaEventTranslator hands the
+	raw key here while a chord is armed. */
+//-------------------------------------------------------------------------------------------------
+static const MappableKeyType s_chordKeys[ ControlBar::CHORD_GROUP_SIZE ] =
+	{ MK_Q, MK_A, MK_W, MK_S, MK_E, MK_D, MK_R, MK_F };
+static const WideChar s_chordKeyLabels[ ControlBar::CHORD_GROUP_SIZE + 1 ] = L"QAWSEDRF";
+
+Bool ControlBar::handleChordKey( Int mappableKey )
+{
+	if( m_chordGroup < 0 )
+		return FALSE;
+
+	for( Int i = 0; i < CHORD_GROUP_SIZE; i++ )
+	{
+		if( s_chordKeys[ i ] == mappableKey )
+		{
+			pressCommandButton( i );	// resolves the chord: i + group * CHORD_GROUP_SIZE
+			return TRUE;
+		}
+	}
+
+	// any other key is not ours; a grid key of another cell drops the chord in
+	// pressCommandButton, a context change drops it in switchToContext
+	return FALSE;
+
+}  // end handleChordKey
 
 //-------------------------------------------------------------------------------------------------
 /** Build the menu and back buttons a paged builder shows.  They carry no thing template and no
@@ -1007,6 +1079,16 @@ ControlBar::ControlBar( void )
 	for( i = 0; i < BUILD_PAGE_COUNT; i++ )
 		m_buildPageButton[ i ] = NULL;
 	m_buildPageBackButton = NULL;
+	m_chordGroup = -1;
+	m_standInBuilderID = INVALID_DRAWABLE_ID;
+	for( i = 0; i < MAX_MULTI_SELECT_GROUPS; i++ )
+	{
+		m_multiSelectGroupTemplate[ i ] = NULL;
+		m_multiSelectGroupSize[ i ] = 0;
+		m_multiSelectGroupFirst[ i ] = INVALID_DRAWABLE_ID;
+	}
+	m_multiSelectGroupCount = 0;
+	m_multiSelectFocus = 0;
 	m_buildPage = BUILD_PAGE_ROOT;
 	m_buildPageObjectID = INVALID_ID;
 	m_rallyPointDrawableID = INVALID_DRAWABLE_ID;
@@ -1259,10 +1341,14 @@ void ControlBar::init( void )
 		{
 			windowName.format( "ControlBar.wnd:UnitUpgrade%d", i+1 );
 			id = TheNameKeyGenerator->nameToKey( windowName.str() );
-			m_rightHUDUpgradeCameos[ i ] = 
+			m_rightHUDUpgradeCameos[ i ] =
 				TheWindowManager->winGetWindowFromId( m_rightHUDWindow, id );
 			m_rightHUDUpgradeCameos[ i ]->winSetStatus( WIN_STATUS_USE_OVERLAY_STATES );
 		}
+
+		// the multi-select unit grid cells over the right HUD are created on demand by
+		// layoutMultiSelectTiles; the windows die with the rest of the layout
+		m_multiSelectTiles.clear();
 
 //		m_transitionHandler = NEW GameWindowTransitionsHandler;
 //		m_transitionHandler->load();
@@ -1580,6 +1666,38 @@ void ControlBar::update( void )
 		updateContextPurchaseScience();
 
 	//
+	// a stand-in builder is not selected, so no deselect event tells us when it dies or when a
+	// real selection arrives; re-evaluate ourselves before anything touches its drawable
+	//
+	if( m_standInBuilderID != INVALID_DRAWABLE_ID )
+	{
+		Drawable *standIn = TheGameClient->findDrawableByID( m_standInBuilderID );
+		Object *standInObj = standIn ? standIn->getObject() : NULL;
+		if( TheInGameUI->getSelectCount() > 0 || standInObj == NULL || standInObj->isEffectivelyDead() )
+		{
+			m_standInBuilderID = INVALID_DRAWABLE_ID;
+			m_currentSelectedDrawable = NULL;
+			markUIDirty();
+		}
+		else
+		{
+			// the stand-in went to work - a builder with a job greys its structure buttons out -
+			// so hand the bar to a free builder if there is one
+			AIUpdateInterface *ai = standInObj->getAI();
+			DozerAIInterface *dozer = ai ? ai->getDozerAIInterface() : NULL;
+			if( dozer && !builderIsFree( ai, dozer ) )
+			{
+				Drawable *freeBuilder = findStandInBuilder( TRUE );
+				if( freeBuilder && freeBuilder != standIn )
+				{
+					m_standInBuilderID = INVALID_DRAWABLE_ID;
+					markUIDirty();
+				}
+			}
+		}
+	}
+
+	//
 	// first, if the UI is dirty repopulate the UI with what the user should see for all the
 	// selected drawables
 	//
@@ -1809,10 +1927,23 @@ void ControlBar::evaluateContextUI( void )
 
 	// erase any current state of the GUI by switching out to the empty context
 	switchToContext( CB_CONTEXT_NONE, NULL );
+	m_standInBuilderID = INVALID_DRAWABLE_ID;
 
-	// sanity, nothing selected
+	//
+	// nothing selected: one of the player's builders stands in and its command bar shows, so
+	// a structure can be placed without selecting a dozer first - the logic then sends the
+	// idle builder nearest the site (MSG_DOZER_CONSTRUCT)
+	//
 	if( TheInGameUI->getSelectCount() == 0 )
+	{
+		Drawable *builder = findStandInBuilder( FALSE );
+		if( builder )
+		{
+			switchToContext( CB_CONTEXT_COMMAND, builder );
+			m_standInBuilderID = builder->getID();
+		}
 		return;
+	}
 
 	// get the list of drawable IDs from the in game UI
 	const DrawableList *selectedDrawables = TheInGameUI->getAllSelectedDrawables();
@@ -2176,14 +2307,138 @@ CommandSet *ControlBar::newCommandSetOverride( CommandSet *setToOverride )
 //-------------------------------------------------------------------------------------------------
 /** Process a button click for the context sensitive GUI */
 //-------------------------------------------------------------------------------------------------
-CBCommandStatus ControlBar::processContextSensitiveButtonClick( GameWindow *button, 
+CBCommandStatus ControlBar::processContextSensitiveButtonClick( GameWindow *button,
 																																GadgetGameMessage gadgetMessage )
 {
+
+	// right-click on a unit build button takes the last one of that unit back out of the
+	// queue (the build queue panel no longer sits in the right HUD to click on)
+	if( gadgetMessage == GBM_SELECTED_RIGHT )
+	{
+		const CommandButton *command = (const CommandButton *)GadgetButtonGetData( button );
+		if( command && command->getCommandType() == GUI_COMMAND_UNIT_BUILD )
+		{
+			cancelLastQueuedUnit( command->getThingTemplate() );
+			return CBC_COMMAND_USED;
+		}
+	}
 
 	// call command processing method
 	return processCommandUI( button, gadgetMessage );
 
 }  // end processContextSensitiveButtonClick
+
+//-------------------------------------------------------------------------------------------------
+/** Cancel the last queued production of 'thing' on the representative producer */
+//-------------------------------------------------------------------------------------------------
+void ControlBar::cancelLastQueuedUnit( const ThingTemplate *thing )
+{
+	Object *producer = m_currentSelectedDrawable ? m_currentSelectedDrawable->getObject() : NULL;
+	ProductionUpdateInterface *pu = producer ? producer->getProductionUpdateInterface() : NULL;
+	if( pu == NULL || thing == NULL )
+		return;
+	if( producer->getControllingPlayer() != ThePlayerList->getLocalPlayer() )
+		return;
+
+	ProductionID last = PRODUCTIONID_INVALID;
+	for( const ProductionEntry *p = pu->firstProduction(); p; p = pu->nextProduction( p ) )
+		if( p->getProductionType() == PRODUCTION_UNIT && p->getProductionObject() == thing )
+			last = p->getProductionID();
+	if( last == PRODUCTIONID_INVALID )
+		return;
+
+	// the producer travels with the message: in a multi-selection the logic cannot tell
+	// which selected object the queue belongs to otherwise
+	GameMessage *msg = TheMessageStream->appendMessage( GameMessage::MSG_CANCEL_UNIT_CREATE );
+	msg->appendIntegerArgument( last );
+	msg->appendObjectIDArgument( producer->getID() );
+
+}  // end cancelLastQueuedUnit
+
+//-------------------------------------------------------------------------------------------------
+/** The local player's builder that stands in for an empty selection: an idle one if there is
+	* one, else any live one.  (Player::iterateObjects callback + driver.) */
+//-------------------------------------------------------------------------------------------------
+struct StandInBuilderSearch
+{
+	Object *idle;
+	Object *any;
+};
+
+/** a builder is free for a job when it has no build/repair task and is not hauling supplies -
+	walking somewhere on a plain move order does not make it busy */
+static Bool builderIsFree( AIUpdateInterface *ai, DozerAIInterface *dozer )
+{
+	if( dozer->isAnyTaskPending() )
+		return FALSE;
+	const SupplyTruckAIInterface *supply = ai->getSupplyTruckAIInterface();
+	if( supply && supply->isCurrentlyFerryingSupplies() )
+		return FALSE;
+	return TRUE;
+}
+
+static void findStandInBuilderProc( Object *obj, void *userData )
+{
+	StandInBuilderSearch *s = (StandInBuilderSearch *)userData;
+	if( obj == NULL || obj->isEffectivelyDead() || obj->getDrawable() == NULL )
+		return;
+	if( obj->testStatus( OBJECT_STATUS_UNDER_CONSTRUCTION ) || obj->testStatus( OBJECT_STATUS_SOLD ) )
+		return;
+	AIUpdateInterface *ai = obj->getAI();
+	DozerAIInterface *dozer = ai ? ai->getDozerAIInterface() : NULL;
+	if( dozer == NULL )
+		return;
+	if( s->any == NULL )
+		s->any = obj;
+	if( s->idle == NULL && builderIsFree( ai, dozer ) )
+		s->idle = obj;
+}
+
+Drawable *ControlBar::findStandInBuilder( Bool freeOnly )
+{
+	Player *player = ThePlayerList ? ThePlayerList->getLocalPlayer() : NULL;
+	if( player == NULL )
+		return NULL;
+
+	StandInBuilderSearch s;
+	s.idle = NULL;
+	s.any = NULL;
+	player->iterateObjects( findStandInBuilderProc, &s );
+
+	Object *pick = s.idle ? s.idle : ( freeOnly ? NULL : s.any );
+	return pick ? pick->getDrawable() : NULL;
+
+}  // end findStandInBuilder
+
+//-------------------------------------------------------------------------------------------------
+/** Press the index'th general's power shortcut button, as a mouse click would */
+//-------------------------------------------------------------------------------------------------
+void ControlBar::pressSpecialPowerShortcut( Int index )
+{
+	if( index < 0 || index >= m_currentlyUsedSpecialPowersButtons || m_specialPowerShortcutParent == NULL )
+		return;
+
+	GameWindow *win = m_specialPowerShortcutButtons[ index ];
+	if( win == NULL || win->winIsHidden() || m_specialPowerShortcutParent->winIsHidden() )
+		return;
+
+	if( BitTest( win->winGetStatus(), WIN_STATUS_ENABLED ) )
+	{
+		// the bar's parent runs ControlBarSystem, the same callback a real click reaches
+		TheWindowManager->winSendSystemMsg( m_specialPowerShortcutParent, GBM_SELECTED,
+																				(WindowMsgData)win, win->winGetWindowId() );
+		AudioEventRTS buttonClick( "GUIGenShortcutClick" );
+		if( TheAudio )
+			TheAudio->addAudioEvent( &buttonClick );
+	}
+	else
+	{
+		AudioEventRTS disabledClick( "GUIClickDisabled" );
+		if( TheAudio )
+			TheAudio->addAudioEvent( &disabledClick );
+	}
+
+}  // end pressSpecialPowerShortcut
 
 //-------------------------------------------------------------------------------------------------
 /** Process a button click for the context sensitive GUI */
@@ -2221,6 +2476,9 @@ void ControlBar::switchToContext( ControlBarContext context, Drawable *draw )
 
 	// save a pointer for the currently selected drawable
 	m_currentSelectedDrawable = draw;
+
+	// a half-typed structure chord does not survive a context change
+	m_chordGroup = -1;
 
 	if (IsInGameChatActive() == FALSE && TheGameLogic && !TheGameLogic->isInShellGame()) {
 		TheWindowManager->winSetFocus( NULL );
@@ -2298,27 +2556,9 @@ void ControlBar::switchToContext( ControlBarContext context, Drawable *draw )
 			// fill the specific UI info
 			populateCommand( draw->getObject() );
 
-			//
-			// for objects that are able to create units, we show a build queue if we actually
-			// actually have something in production, otherwise we show the selection portrait
-			//
+			// the selection portrait; the build queue panel never takes the right HUD over
 			if( obj )
-			{
-				ProductionUpdateInterface *pu = obj->getProductionUpdateInterface();
-
-				if( pu && pu->firstProduction() != NULL )
-				{
-
-					m_contextParent[ CP_BUILD_QUEUE ]->winHide( FALSE );
-					populateBuildQueue( obj );
-					setPortraitByObject( NULL );
-				}  // end if
-				else 
-				{
-					setPortraitByObject( obj );
-				}
-
-			}  // end if
+				setPortraitByObject( obj );
 
 			break;
 
@@ -2513,35 +2753,49 @@ void ControlBar::setCommandBarBorder( GameWindow *button, CommandButtonMappedBor
 	slot has no unmodified binding.  Read live out of the meta map so rebinding the key in
 	Options > Keyboard re-labels the button. */
 //-------------------------------------------------------------------------------------------------
-static UnicodeString getGridHotKeyLabel( Int slot )
+static UnicodeString getMetaKeyLabel( GameMessage::Type wanted )
 {
 	UnicodeString label;
 
 	if( TheMetaMap == NULL || TheKeyboard == NULL )
 		return label;
 
-	GameMessage::Type wanted = (GameMessage::Type)(GameMessage::MSG_META_COMMAND_SLOT01 + slot);
 	for( const MetaMapRec *rec = TheMetaMap->getFirstMetaMapRec(); rec; rec = rec->m_next )
 	{
-		// only a plain, unmodified key makes a readable one character label
+		// only a plain, unmodified key makes a readable short label
 		if( rec->m_meta != wanted || rec->m_modState != 0 )
 			continue;
 
-		WideChar c = TheKeyboard->getPrintableKey( (UnsignedByte)rec->m_key, 0 );
-		if( c )
+		// function keys have no printable character; name them
+		if( rec->m_key >= MK_F1 && rec->m_key <= MK_F10 )
+			label.format( L"F%d", rec->m_key - MK_F1 + 1 );
+		else if( rec->m_key == MK_F11 )
+			label.set( L"F11" );
+		else if( rec->m_key == MK_F12 )
+			label.set( L"F12" );
+		else
 		{
-			if( c >= L'a' && c <= L'z' )
-				c -= (L'a' - L'A');
+			WideChar c = TheKeyboard->getPrintableKey( (UnsignedByte)rec->m_key, 0 );
+			if( c )
+			{
+				if( c >= L'a' && c <= L'z' )
+					c -= (L'a' - L'A');
 
-			WideChar text[ 2 ] = { c, 0 };
-			label.set( text );
+				WideChar text[ 2 ] = { c, 0 };
+				label.set( text );
+			}
 		}
 		break;
 	}
 
 	return label;
 
-}  // end getGridHotKeyLabel
+}  // end getMetaKeyLabel
+
+static UnicodeString getGridHotKeyLabel( Int slot )
+{
+	return getMetaKeyLabel( (GameMessage::Type)(GameMessage::MSG_META_COMMAND_SLOT01 + slot) );
+}
 
 //-------------------------------------------------------------------------------------------------
 void ControlBar::setControlCommand( GameWindow *button, const CommandButton *commandButton )
@@ -2615,7 +2869,10 @@ void ControlBar::setControlCommand( GameWindow *button, const CommandButton *com
 	// save the command in the user data of the window
 	GadgetButtonSetData(button, (void*)commandButton);
 	//button->winSetUserData( commandButton );
-	
+
+	// a recycled button must not keep the previous occupant's count badge
+	GadgetButtonSetCount( button, 0 );
+
 	setCommandBarBorder(button, commandButton->getCommandButtonMappedBorderType());
 	
 	// The '&' letter buried in each localized button label and the grid keys are two rival
@@ -2639,6 +2896,18 @@ void ControlBar::setControlCommand( GameWindow *button, const CommandButton *com
 				continue;
 
 			UnicodeString label = getGridHotKeyLabel( slot );
+
+			// structures are reached by a chord: Q or W picks the group (columns 1-4 or 5-7),
+			// then the cell's fixed second key (Q A W S E D R F) - paint both letters, "QW", "WA", ...
+			if( commandButton->getCommandType() == GUI_COMMAND_DOZER_CONSTRUCT && !label.isEmpty() )
+			{
+				Int base = ( slot < CHORD_GROUP_SIZE ) ? 0 : CHORD_GROUP_SIZE;
+				UnicodeString chord = getGridHotKeyLabel( base == 0 ? CHORD_SLOT_Q : CHORD_SLOT_W );
+				WideChar second[ 2 ] = { s_chordKeyLabels[ slot - base ], 0 };
+				chord.concat( second );
+				label = chord;
+			}
+
 			if( label.isEmpty() )
 				button->winClearStatus( WIN_STATUS_SHORTCUT_BUTTON );
 			else
@@ -2739,6 +3008,14 @@ void ControlBar::setPortraitByImage( const Image *image )
 //-------------------------------------------------------------------------------------------------
 void ControlBar::setPortraitByObject( Object *obj )
 {
+
+	// the multi-select unit grid lives over this same HUD; a plain portrait means it must
+	// go, and so must the selection-count badge a one-type selection put on the portrait.
+	// updateMultiSelectStrip re-applies its own look right after calling in here.
+	for( size_t tile = 0; tile < m_multiSelectTiles.size(); tile++ )
+		if( m_multiSelectTiles[ tile ] )
+			m_multiSelectTiles[ tile ]->winHide( TRUE );
+	GadgetButtonSetCount( m_rightHUDCameoWindow, 0 );
 
 	if( obj )
 	{
@@ -3420,6 +3697,18 @@ void ControlBar::initSpecialPowershortcutBar( Player *player)
 		// Oh god... this is a total hack for shortcut buttons to handle rendering text top left corner...
 		m_specialPowerShortcutButtons[ i ]->winSetStatus( WIN_STATUS_SHORTCUT_BUTTON );
 
+		// the F-key label should read like the command bar's grid letters, not the big yellow
+		// font the shortcut layout ships with: borrow a command button's font and text colors
+		GameWindow *model = m_commandWindows[ 0 ];
+		if( model )
+		{
+			GameWindow *b = m_specialPowerShortcutButtons[ i ];
+			b->winSetFont( model->winGetFont() );
+			b->winSetEnabledTextColors( model->winGetEnabledTextColor(), model->winGetEnabledTextBorderColor() );
+			b->winSetDisabledTextColors( model->winGetDisabledTextColor(), model->winGetDisabledTextBorderColor() );
+			b->winSetHiliteTextColors( model->winGetHiliteTextColor(), model->winGetHiliteTextBorderColor() );
+		}
+
 		windowName.format( parentName, i+1 );
 		id = TheNameKeyGenerator->nameToKey( windowName.str() );
 		m_specialPowerShortcutButtonParents[ i ] = 
@@ -3828,39 +4117,26 @@ void ControlBar::drawSpecialPowerShortcutMultiplierText()
 		if( command == NULL )
 			continue;
 
-		//draw superweapon ready multipliers
-		for( int i = 0; i < MAX_SPECIAL_POWER_SHORTCUTS; i++ )
-		{
-			if( !m_shortcutDisplayStrings[ i ] )
-			{
-				//m_shortcutDisplayStrings[ i ] = TheDisplayStringManager->newDisplayString();
-				//m_shortcutDisplayStrings[ i ]->setFont( TheFontLibrary->getFont( "Arial", 16, false ) );
-			}
-			
-			const SpecialPowerTemplate *spTemplate = command->getSpecialPowerTemplate();
-			Int numReady = 0;
-			if( spTemplate )
-			{
-				numReady = ThePlayerList->getLocalPlayer()->countReadyShortcutSpecialPowersOfType( spTemplate->getSpecialPowerType() );
-			}
-			if( numReady > 1 ) // Lorenzen changed... Displaying a "1" is superfluous
-			{
-				UnicodeString unibuffer;
-				unibuffer.format( L"%d", numReady );
-				
-				GadgetButtonSetText( win, unibuffer );
+		// the button's text: the key that presses it (SHORTCUT_SLOTnn, F1..), then how many
+		// of its superweapons are ready - a "1" is superfluous (Lorenzen)
+		UnicodeString text;
+		if( i < 8 )
+			text = getMetaKeyLabel( (GameMessage::Type)(GameMessage::MSG_META_SHORTCUT_SLOT01 + i) );
 
-				//m_shortcutDisplayStrings[ i ]->setText( unibuffer );
-				//TheControlBar->m_shortcutDisplayStrings[ i ]->draw( 600, i * 40 + 40, GameMakeColor(255,255,255,255), GameMakeColor(0,0,0,0), 0, 0 );
-			}
-			else
-			{
-				UnicodeString unibuffer;
-				GadgetButtonSetText( win, unibuffer );
-				//TheDisplayStringManager->freeDisplayString( m_shortcutDisplayStrings[ i ] );
-				//m_shortcutDisplayStrings[ i ] = NULL;
-			}
+		const SpecialPowerTemplate *spTemplate = command->getSpecialPowerTemplate();
+		Int numReady = 0;
+		if( spTemplate )
+			numReady = ThePlayerList->getLocalPlayer()->countReadyShortcutSpecialPowersOfType( spTemplate->getSpecialPowerType() );
+		if( numReady > 1 )
+		{
+			UnicodeString count;
+			count.format( L"%d", numReady );
+			if( !text.isEmpty() )
+				text.concat( L" " );
+			text.concat( count );
 		}
+
+		GadgetButtonSetText( win, text );
 	}
 }
 

@@ -409,6 +409,7 @@ private:
 //-------------------------------------------------------------------------------------------------
 enum { MAX_COMMANDS_PER_SET = 18 };  // user interface max is 14 (but internally it's 18 for script only buttons!)
 enum { MAX_RIGHT_HUD_UPGRADE_CAMEOS = 5};
+enum { MAX_MULTI_SELECT_GROUPS = 36 };	///< unit types a multi-selection tells apart (6x6 grid, Tab focus)
 enum { 
 			 MAX_PURCHASE_SCIENCE_RANK_1 = 4,
 			 MAX_PURCHASE_SCIENCE_RANK_3 = 15,
@@ -691,13 +692,32 @@ public:
 		a mouse click would.  This is what the COMMAND_SLOTnn grid keys are wired to. */
 	void pressCommandButton( Int index );
 
+	/** press the index'th visible general's power shortcut button, exactly as a mouse click
+		would.  This is what the SHORTCUT_SLOTnn keys (F1..F8) are wired to. */
+	void pressSpecialPowerShortcut( Int index );
+
 	/** A builder with more structures than BUILD_PAGE_ONE_SIZE does not show them all at once.
-		The command bar opens on two menu buttons instead - the first grid keys, Q and W - and
-		each one opens its own page of structures, so a structure is two keystrokes away (Q-Q,
-		Q-W, ... W-Q, ...) instead of competing for the fourteen slots.  Page one holds the
-		first BUILD_PAGE_ONE_SIZE structures of the command set, page two holds the rest. */
-	enum { BUILD_PAGE_ROOT = -1, BUILD_PAGE_COUNT = 2, BUILD_PAGE_ONE_SIZE = 4 };
+		The command bar opens on two menu buttons instead - Q and W - and each one opens its
+		own page of structures, so a structure is two keystrokes away (Q-Q, Q-A, ... W-Q, ...)
+		instead of competing for the fourteen slots.  Page one holds the first
+		BUILD_PAGE_ONE_SIZE structures of the command set (the ones that sit on Q W E / A S D
+		without paging), page two holds the rest (the R T Y / F G H region). */
+	enum { BUILD_PAGE_ROOT = -1, BUILD_PAGE_COUNT = 2, BUILD_PAGE_ONE_SIZE = 6 };
 	void setBuildPage( Int page );
+
+	/** with multiple units selected the right HUD shows the unit types; Tab (+1) and
+		Shift-Tab (-1) walk the focus between them */
+	void cycleMultiSelectFocus( Int direction );
+
+	/** a builder's structures are reached by a two-key chord: the Q cell (slot 0) arms the
+		structures in columns 1-4 (slots 0..7), the W cell (slot 2) the ones in columns 5-7
+		(slots 8..), then the next grid key picks the cell within the group by its own position */
+	enum { CHORD_SLOT_Q = 0, CHORD_SLOT_W = 2, CHORD_GROUP_SIZE = 8 };
+
+	/** a raw key while a chord is armed: one of the fixed second keys (Q A W S E D R F)
+		resolves the chord and returns TRUE (the key is eaten), anything else drops it */
+	Bool handleChordKey( Int mappableKey );
+	Bool isChordArmed( void ) const { return m_chordGroup >= 0; }
 
 	/// is the drawable the currently selected drawable for the context sensitive UI?
 	Bool isDrivingContextUI( Drawable *draw ) const { return draw == m_currentSelectedDrawable; }
@@ -841,6 +861,7 @@ protected:
 	void resetCommonCommandData( void );	/// reset shared command data
 	void resetContainData( void );			/// reset container data we use to tie controls to objects IDs for containment
 	void resetBuildQueueData( void );			/// reset the build queue data we use to die queue entires to control
+	void resetBuildQueueButtons( void );	/// attach the queue button windows and wipe them to empty
 
 	// the following methods are for populating the context GUI controls for a particular context
 	static void populateButtonProc( Object *obj, void *userData );
@@ -849,6 +870,11 @@ protected:
 	void buildCommandLayout( Object *obj, const CommandSet *commandSet, const CommandButton **slot );
 	void makeBuildPageButtons( void );
 	void populateMultiSelect( void );
+	void populateMultiSelectUnitList( void );
+	void setMultiSelectFocus( Int index );
+	void updateMultiSelectStrip( void );
+	void layoutMultiSelectTiles( Int count );		///< make sure count cells exist, laid out n x n over the right HUD
+	void cancelLastQueuedUnit( const ThingTemplate *thing );	///< right-click on a build button
 	void populateBuildQueue( Object *producer );
 	void populateStructureInventory( Object *building );
 	void populateBeacon( Object *beacon );
@@ -941,6 +967,9 @@ protected:
 	CommandButton *m_buildPageBackButton;									///< takes a page back to the menu buttons
 	Int m_buildPage;																			///< BUILD_PAGE_ROOT, or the page being shown
 	ObjectID m_buildPageObjectID;													///< builder the page belongs to; a new one starts at the menu
+	Int m_chordGroup;																			///< -1, or the structure group (0 = Q, 1 = W) armed by the first chord key
+	DrawableID m_standInBuilderID;												///< with nothing selected, the builder whose command bar is shown (INVALID_DRAWABLE_ID otherwise)
+	Drawable *findStandInBuilder( Bool freeOnly );				///< the local player's free builder (or, unless freeOnly, any builder) to stand in for an empty selection
 
 		// removed from multiplayer branch
 	//GameWindow *m_commandMarkers[ MAX_COMMANDS_PER_SET ];			///< When we don't have a command, they want to show an image	
@@ -973,6 +1002,15 @@ protected:
 
 	};
 	QueueEntry m_queueData[ MAX_BUILD_QUEUE_BUTTONS ];	///< what the build queue represents
+
+	// a multi-selection grouped by unit type: one cameo cell per type, with its count, in an
+	// n x n grid over the right HUD (n = ceil(sqrt(types))); Tab walks the focus over the types
+	std::vector<GameWindow *> m_multiSelectTiles;		///< grid cells, created in code on demand over the right HUD
+	const ThingTemplate *m_multiSelectGroupTemplate[ MAX_MULTI_SELECT_GROUPS ];	///< one entry per selected unit type
+	Int m_multiSelectGroupSize[ MAX_MULTI_SELECT_GROUPS ];	///< how many of that type are selected
+	DrawableID m_multiSelectGroupFirst[ MAX_MULTI_SELECT_GROUPS ];	///< a member of the group, the context representative
+	Int m_multiSelectGroupCount;																///< number of type groups
+	Int m_multiSelectFocus;																			///< the group Tab currently focuses
 
 	//cameo flash
 	Bool m_flash;                                       ///< tells update whether or not to check for flash

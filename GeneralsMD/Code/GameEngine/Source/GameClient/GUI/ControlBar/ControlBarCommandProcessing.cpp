@@ -193,16 +193,22 @@ CBCommandStatus ControlBar::processCommandUI( GameWindow *control,
 	}
 	
 	//
-	// get the object that is driving the context sensitive UI if we're not in a multi
-	// select context
+	// get the object that is driving the context sensitive UI.  In the multi-select context
+	// that is the focused type's representative - except for unit builds, whose handler
+	// spreads the batch across every selected factory when obj is left NULL
 	//
 	Object *obj = NULL;
-	if( m_currContext != CB_CONTEXT_MULTI_SELECT && 
-			commandButton->getCommandType() != GUI_COMMAND_PURCHASE_SCIENCE &&
-			commandButton->getCommandType() != GUI_COMMAND_SPECIAL_POWER_FROM_SHORTCUT && 
+	if( commandButton->getCommandType() != GUI_COMMAND_PURCHASE_SCIENCE &&
+			commandButton->getCommandType() != GUI_COMMAND_SPECIAL_POWER_FROM_SHORTCUT &&
 			commandButton->getCommandType() != GUI_COMMAND_SPECIAL_POWER_CONSTRUCT_FROM_SHORTCUT &&
 			commandButton->getCommandType() != GUI_COMMAND_SELECT_ALL_UNITS_OF_TYPE )
-		obj = m_currentSelectedDrawable->getObject();
+	{
+		if( m_currContext != CB_CONTEXT_MULTI_SELECT )
+			obj = m_currentSelectedDrawable->getObject();
+		else if( commandButton->getCommandType() != GUI_COMMAND_UNIT_BUILD &&
+						 m_currentSelectedDrawable != NULL )
+			obj = m_currentSelectedDrawable->getObject();
+	}
 
 	//@todo Kris -- Special case code so convoy trucks can detonate nuke trucks -- if other things need this,
 	//rethink it.

@@ -37,6 +37,7 @@
 #include "Common/Team.h"
 #include "Common/ThingTemplate.h"
 
+#include "GameClient/ControlBar.h"
 #include "GameClient/Drawable.h"
 #include "GameClient/Mouse.h"
 #include "GameClient/GameClient.h"
@@ -153,6 +154,14 @@ static const LookupListRec GameMessageMetaTypeNames[] =
 	{ "COMMAND_SLOT12",											GameMessage::MSG_META_COMMAND_SLOT12 },
 	{ "COMMAND_SLOT13",											GameMessage::MSG_META_COMMAND_SLOT13 },
 	{ "COMMAND_SLOT14",											GameMessage::MSG_META_COMMAND_SLOT14 },
+	{ "SHORTCUT_SLOT01",										GameMessage::MSG_META_SHORTCUT_SLOT01 },
+	{ "SHORTCUT_SLOT02",										GameMessage::MSG_META_SHORTCUT_SLOT02 },
+	{ "SHORTCUT_SLOT03",										GameMessage::MSG_META_SHORTCUT_SLOT03 },
+	{ "SHORTCUT_SLOT04",										GameMessage::MSG_META_SHORTCUT_SLOT04 },
+	{ "SHORTCUT_SLOT05",										GameMessage::MSG_META_SHORTCUT_SLOT05 },
+	{ "SHORTCUT_SLOT06",										GameMessage::MSG_META_SHORTCUT_SLOT06 },
+	{ "SHORTCUT_SLOT07",										GameMessage::MSG_META_SHORTCUT_SLOT07 },
+	{ "SHORTCUT_SLOT08",										GameMessage::MSG_META_SHORTCUT_SLOT08 },
 	{ "SELECT_HERO",												      GameMessage::MSG_META_SELECT_HERO },
 	{ "SELECT_ALL",																GameMessage::MSG_META_SELECT_ALL },
 	{ "SELECT_ALL_AIRCRAFT",											GameMessage::MSG_META_SELECT_ALL_AIRCRAFT },
@@ -457,6 +466,39 @@ GameMessageDisposition MetaEventTranslator::translateGameMessage(const GameMessa
 			newModState |= ALT;
 		}
 
+		//
+		// a half-typed structure chord (Q or W pressed on a builder) takes the next plain key:
+		// Q A W S E D R F pick the cell, anything else drops the chord and goes on as usual
+		//
+		if( t == GameMessage::MSG_RAW_KEY_DOWN && ( newModState & ( CTRL | ALT ) ) == 0 &&
+				!( keyState & KEY_STATE_AUTOREPEAT ) &&
+				TheControlBar && TheControlBar->isChordArmed() &&
+				!( TheShell && TheShell->isShellActive() ) )
+		{
+			if( TheControlBar->handleChordKey( key ) )
+			{
+				m_lastModState = newModState;
+				return DESTROY_MESSAGE;
+			}
+		}
+
+		//
+		// Tab / Shift-Tab walks the focus through a multi-selection's units on the control bar.
+		// Handled here rather than through the MetaMap because CommandMap.ini lives in the
+		// shipped game data and has no slot for it.
+		//
+		if( t == GameMessage::MSG_RAW_KEY_DOWN && key == MK_TAB &&
+				( newModState & ( CTRL | ALT ) ) == 0 &&
+				!( keyState & KEY_STATE_AUTOREPEAT ) &&
+				TheGameClient->getFrame() >= 1 &&
+				!( TheShell && TheShell->isShellActive() ) &&
+				TheInGameUI && TheInGameUI->getSelectCount() > 1 &&
+				TheControlBar )
+		{
+			TheControlBar->cycleMultiSelectFocus( ( newModState & SHIFT ) ? -1 : 1 );
+			m_lastModState = newModState;
+			return DESTROY_MESSAGE;
+		}
 
     for (const MetaMapRec *map = TheMetaMap->getFirstMetaMapRec(); map; map = map->m_next)
 		{

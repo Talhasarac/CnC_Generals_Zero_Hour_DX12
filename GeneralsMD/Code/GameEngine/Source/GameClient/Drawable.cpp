@@ -3999,7 +3999,11 @@ void Drawable::drawHealthBar(const IRegion2D* healthBarRegion)
 			Int totalFrames = pe->getProductionType() == PRODUCTION_UNIT
 												? pe->getProductionObject()->calcTimeToBuild( player )
 												: pe->getProductionUpgrade()->calcTimeToBuild( player );
-			Int secondsLeft = REAL_TO_INT_CEIL( totalFrames * (1.0f - pct * 0.01f) / LOGICFRAMES_PER_SECOND );
+			// real seconds: the logic runs at the game-speed rate, not at a fixed 30 frames a second
+			Int logicFps = TheGameEngine ? TheGameEngine->getFramesPerSecondLimit() : 0;
+			if( logicFps <= 0 )
+				logicFps = LOGICFRAMES_PER_SECOND;
+			Int secondsLeft = REAL_TO_INT_CEIL( totalFrames * (1.0f - pct * 0.01f) / logicFps );
 
 			// everything behind the head of the queue has not started yet, so each costs its full
 			// build time (an entry builds its whole quantity at once, so quantity does not scale it)
@@ -4022,7 +4026,7 @@ void Drawable::drawHealthBar(const IRegion2D* healthBarRegion)
 			UnicodeString text;
 			if( queuedFrames > 0 )
 				text.format( L"%ds (%ds)", secondsLeft,
-										 secondsLeft + REAL_TO_INT_CEIL( INT_TO_REAL( queuedFrames ) / LOGICFRAMES_PER_SECOND ) );
+										 secondsLeft + REAL_TO_INT_CEIL( INT_TO_REAL( queuedFrames ) / logicFps ) );
 			else
 				text.format( L"%ds", secondsLeft );
 			if( prodTimeString->getText().compare( text ) != 0 )
@@ -4031,6 +4035,25 @@ void Drawable::drawHealthBar(const IRegion2D* healthBarRegion)
 			prodTimeString->getSize( &textW, &textH );
 			prodTimeString->draw( healthBarRegion->lo.x, prodY - textH,
 														GameMakeColor( 255, 255, 255, 255 ), GameMakeColor( 0, 0, 0, 255 ) );
+
+			// how many entries the queue holds, right-aligned on the bar (one is not worth saying)
+			if( pu->getProductionCount() > 1 )
+			{
+				static DisplayString *prodCountString = NULL;
+				if( prodCountString == NULL )
+				{
+					prodCountString = TheDisplayStringManager->newDisplayString();
+					prodCountString->setFont( prodTimeString->getFont() );
+				}
+				UnicodeString countText;
+				countText.format( L"x%d", pu->getProductionCount() );
+				if( prodCountString->getText().compare( countText ) != 0 )
+					prodCountString->setText( countText );
+				Int countW, countH;
+				prodCountString->getSize( &countW, &countH );
+				prodCountString->draw( healthBarRegion->hi.x - countW, prodY - countH,
+															 GameMakeColor( 255, 255, 255, 255 ), GameMakeColor( 0, 0, 0, 255 ) );
+			}
 		}
 	}  // end if
 

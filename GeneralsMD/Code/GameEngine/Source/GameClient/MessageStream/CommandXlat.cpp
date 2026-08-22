@@ -2630,6 +2630,21 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 			break;
 		}		// end command bar grid slots
 
+		case GameMessage::MSG_META_SHORTCUT_SLOT01:
+		case GameMessage::MSG_META_SHORTCUT_SLOT02:
+		case GameMessage::MSG_META_SHORTCUT_SLOT03:
+		case GameMessage::MSG_META_SHORTCUT_SLOT04:
+		case GameMessage::MSG_META_SHORTCUT_SLOT05:
+		case GameMessage::MSG_META_SHORTCUT_SLOT06:
+		case GameMessage::MSG_META_SHORTCUT_SLOT07:
+		case GameMessage::MSG_META_SHORTCUT_SLOT08:
+		{
+			// the general's power shortcut bar, one key per visible button
+			TheControlBar->pressSpecialPowerShortcut( t - GameMessage::MSG_META_SHORTCUT_SLOT01 );
+			disp = DESTROY_MESSAGE;
+			break;
+		}		// end special power shortcut slots
+
 		case GameMessage::MSG_META_SELECT_NEXT_WORKER:
 		{
 			/* because list is prepended, iterate through backwards */

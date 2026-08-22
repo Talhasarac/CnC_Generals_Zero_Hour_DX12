@@ -431,6 +431,7 @@ typedef struct _PushButtonData
 	Color colorClock;				///< The color to display the clock at
 	Bool drawBorder;				///< We only want to draw the border if we want to
 	Color colorBorder;			///< The color for the border around the button
+	Int drawCount;					///< when > 0, a small number badge drawn in the bottom right corner
 	void *userData;					///< random additional data we can set
 	const Image *overlayImage; ///< An overlay image (like a veterancy symbol)
 	AsciiString altSound;		///< use an alternitive sound if one is set
