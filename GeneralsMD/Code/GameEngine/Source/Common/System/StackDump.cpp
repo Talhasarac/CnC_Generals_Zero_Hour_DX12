@@ -160,7 +160,10 @@ void UninitSymbolInfo(void)
 //*****************************************************************************
 void MakeStackTrace(DWORD myeip,DWORD myesp,DWORD myebp, int skipFrames, void (*callback)(const char*))
 {
-STACKFRAME      stack_frame;
+// STACKFRAME/StackWalk (the 32-bit-only originals) stop after the first frame or two on a
+// current dbghelp.dll (same failure as debug_stack.cpp: ERROR_PARTIAL_COPY), which left every
+// exception dump with a one-line "stack". StackWalk64 with the matching 64-bit callbacks walks.
+STACKFRAME64    stack_frame;
 BOOL            b_ret = TRUE;
 
 HANDLE thread = GetCurrentThread();
@@ -169,7 +172,7 @@ HANDLE process = GetCurrentProcess();
 memset(&gsContext, 0, sizeof(CONTEXT));
 gsContext.ContextFlags = CONTEXT_FULL;
 
-memset(&stack_frame, 0, sizeof(STACKFRAME));
+memset(&stack_frame, 0, sizeof(stack_frame));
 stack_frame.AddrPC.Mode = AddrModeFlat;
 stack_frame.AddrPC.Offset = myeip;
 stack_frame.AddrStack.Mode = AddrModeFlat;
@@ -180,7 +183,7 @@ stack_frame.AddrFrame.Offset = myebp;
 /*
     if(GetThreadContext(thread, &gsContext))
     {
-        memset(&stack_frame, 0, sizeof(STACKFRAME));
+        memset(&stack_frame, 0, sizeof(stack_frame));
         stack_frame.AddrPC.Mode = AddrModeFlat;
         stack_frame.AddrPC.Offset = gsContext.Eip;
         stack_frame.AddrStack.Mode = AddrModeFlat;
@@ -196,14 +199,14 @@ stack_frame.AddrFrame.Offset = myebp;
 			unsigned int skip = skipFrames;
 			while (b_ret&&skip)
 			{
-					b_ret = StackWalk(      IMAGE_FILE_MACHINE_I386,
+					b_ret = StackWalk64(    IMAGE_FILE_MACHINE_I386,
 											process,
 											thread,
 											&stack_frame,
 											NULL, //&gsContext,
 											NULL,
-											SymFunctionTableAccess,
-											SymGetModuleBase,
+											SymFunctionTableAccess64,
+											SymGetModuleBase64,
 											NULL);
 					skip--;
 			}
@@ -212,14 +215,14 @@ stack_frame.AddrFrame.Offset = myebp;
 			while(b_ret&&skip)
 			{
 
-					b_ret = StackWalk(      IMAGE_FILE_MACHINE_I386,
+					b_ret = StackWalk64(    IMAGE_FILE_MACHINE_I386,
 											process,
 											thread,
 											&stack_frame,
 											NULL, //&gsContext,
 											NULL,
-											SymFunctionTableAccess,
-											SymGetModuleBase,
+											SymFunctionTableAccess64,
+											SymGetModuleBase64,
 											NULL);
 					
 

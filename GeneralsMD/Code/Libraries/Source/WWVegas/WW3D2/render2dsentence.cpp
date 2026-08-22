@@ -1220,7 +1220,13 @@ FontCharsClass::FontCharsClass (void) :
 FontCharsClass::~FontCharsClass (void) 
 {
 	while ( BufferList.Count() ) {
-		delete [] BufferList[0];
+		// One FontCharsBuffer per entry (W3DNEW, class operator new from its own pool), so scalar
+		// delete. The original "delete []" bypassed the class operator delete for the global
+		// array delete: with a virtual destructor the compiler expects an array cookie in front
+		// of the object, so it freed (p - 4) through the DynamicMemoryAllocator and read a pixel
+		// of the previous buffer as the block's owning blob (0x04000000) - a NULL-pool freeBlock
+		// in every ~W3DDisplay, i.e. a silent crash on every exit from the game.
+		delete BufferList[0];
 		BufferList.Delete(0);
 	}
 

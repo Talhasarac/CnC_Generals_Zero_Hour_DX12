@@ -28,6 +28,7 @@
 #include "vector3.h"
 #include "vector4.h"
 #include "quat.h"
+#include "render2dsentence.h"
 
 /*
  * W3DMPO_GLUE gives every pooled class an operator new that routes through
@@ -41,9 +42,23 @@ void *createW3DMemPool(const char * /*poolName*/, int /*allocationSize*/)
 	return (void *)1;			/* opaque handle; the stub never dereferences it */
 }
 
+/*
+ * Every pooled new must come back through freeFromW3DMemPool, with the very
+ * pointer it handed out.  The 16-byte prefix mirrors the game's pool block
+ * header: zeroed, so a "delete []" on a pooled object takes the same path it
+ * takes in the game (MSVC reads the array cookie at p-4, sees 0 elements and
+ * frees p-4 through the *global* operator delete[] - never through the pool).
+ */
+static int theW3DPoolAllocs = 0, theW3DPoolFrees = 0, theW3DPoolBadFrees = 0;
+enum { W3D_POOL_PREFIX = 16, W3D_POOL_MAGIC = 0x5B10C5A1 };
+
 void *allocateFromW3DMemPool(void * /*pool*/, int allocationSize)
 {
-	return ::operator new(size_t(allocationSize));
+	++theW3DPoolAllocs;
+	char *raw = (char *)::operator new(size_t(allocationSize) + W3D_POOL_PREFIX);
+	memset(raw, 0, W3D_POOL_PREFIX);
+	*(int *)raw = W3D_POOL_MAGIC;
+	return raw + W3D_POOL_PREFIX;
 }
 
 void *allocateFromW3DMemPool(void *pool, int allocationSize, const char * /*msg*/, int /*unused*/)
@@ -53,7 +68,14 @@ void *allocateFromW3DMemPool(void *pool, int allocationSize, const char * /*msg*
 
 void freeFromW3DMemPool(void * /*pool*/, void *p)
 {
-	::operator delete(p);
+	++theW3DPoolFrees;
+	char *raw = (char *)p - W3D_POOL_PREFIX;
+	if (*(int *)raw != W3D_POOL_MAGIC)
+	{
+		++theW3DPoolBadFrees;	/* not a pointer we handed out - leak it rather than corrupt the heap */
+		return;
+	}
+	::operator delete(raw);
 }
 
 /*=========================================================================
@@ -1647,4 +1669,33 @@ TEST(clamp_color_leaves_the_callee_saved_registers_alone)
 	CHECK_NEAR(color.Y, 0.5f, 0.0001f);
 	CHECK_NEAR(color.Z, 1.0f, 0.0001f);
 	CHECK_NEAR(color.W, 1.0f, 0.0001f);
+}
+
+/*=========================================================================
+   render2dsentence - FontCharsClass owns its glyph buffers
+  =========================================================================*/
+
+/*
+ * FontCharsClass keeps its glyph pixels in FontCharsBuffer objects, each a
+ * W3DMPO allocated one at a time with W3DNEW (class operator new, its own
+ * pool).  The destructor used to free them with "delete []": that skips the
+ * class operator delete for the global array delete, and since the class has
+ * a virtual destructor the compiler also expects an array cookie in front of
+ * the object, so it walked a garbage element count and freed (p - 4).  In the
+ * game that was a NULL-pool MemoryPool::freeBlock in every ~W3DDisplay - a
+ * silent access violation on every exit.  Here the pool stubs above count:
+ * with the bug the buffer never reaches freeFromW3DMemPool at all - the
+ * test binary dies with STATUS_HEAP_CORRUPTION (0xC0000374) on the p-4 free
+ * before the counters are even compared (checked by reverting the fix).
+ */
+TEST(fontchars_returns_its_glyph_buffers_to_the_pool)
+{
+	const int allocs = theW3DPoolAllocs, frees = theW3DPoolFrees;
+	FontCharsClass *font = W3DNEW FontCharsClass;
+	font->Initialize_GDI_Font("Arial", 12, false);
+	CHECK(font->Get_Char_Width(L'A') > 0);	/* stores the glyph -> allocates a FontCharsBuffer */
+	font->Release_Ref();
+	CHECK(theW3DPoolAllocs - allocs >= 2);	/* at least the font and one buffer */
+	CHECK_EQ(theW3DPoolFrees - frees, theW3DPoolAllocs - allocs);
+	CHECK_EQ(theW3DPoolBadFrees, 0);
 }
