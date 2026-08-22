@@ -965,6 +965,61 @@ enum
 };
 
 //-------------------------------------------------------------------------------------------------
+/** The nearest unfinished structure of the dozer's player, within its bored range, that no
+	* builder is working on (never started, abandoned, or its builder is dead or busy elsewhere). */
+//-------------------------------------------------------------------------------------------------
+static Object *findUnfinishedStructureToContinue( Object *dozer )
+{
+	if( dozer == NULL || dozer->getAIUpdateInterface() == NULL )
+		return NULL;
+	const DozerAIInterface *dozerAI = dozer->getAIUpdateInterface()->getDozerAIInterface();
+	if( dozerAI == NULL )
+		return NULL;
+
+	PartitionFilterSamePlayer filter1( dozer->getControllingPlayer() );
+	PartitionFilterAcceptByKindOf filter2( MAKE_KINDOF_MASK( KINDOF_STRUCTURE ), KINDOFMASK_NONE );
+	PartitionFilterSameMapStatus filterMapStatus( dozer );
+	PartitionFilter *filters[] = { &filter1, &filter2, &filterMapStatus, NULL };
+	// "nearby" is the whole base, not the 15-cell bored range the repair scan uses
+	const Real UNFINISHED_SCAN_RANGE = 1500.0f;
+	Real range = dozerAI->getBoredRange();
+	if( range < UNFINISHED_SCAN_RANGE )
+		range = UNFINISHED_SCAN_RANGE;
+	ObjectIterator *iter = ThePartitionManager->iterateObjectsInRange( dozer->getPosition(),
+																																		 range, FROM_CENTER_2D, filters );
+	MemoryPoolObjectHolder hold( iter );
+
+	Object *best = NULL;
+	Real bestDistSqr = 0.0f;
+	for( Object *obj = iter->first(); obj; obj = iter->next() )
+	{
+		if( !obj->testStatus( OBJECT_STATUS_UNDER_CONSTRUCTION ) || obj->testStatus( OBJECT_STATUS_SOLD ) ||
+				obj->isEffectivelyDead() )
+			continue;
+
+		// somebody already on it?
+		Object *builder = TheGameLogic->findObjectByID( obj->getBuilderID() );
+		if( builder && builder != dozer && !builder->isEffectivelyDead() && builder->getAIUpdateInterface() )
+		{
+			DozerAIInterface *otherDozer = builder->getAIUpdateInterface()->getDozerAIInterface();
+			if( otherDozer && otherDozer->isTaskPending( DOZER_TASK_BUILD ) &&
+					otherDozer->getTaskTarget( DOZER_TASK_BUILD ) == obj->getID() )
+				continue;
+		}
+
+		Real distSqr = ThePartitionManager->getDistanceSquared( dozer, obj, FROM_CENTER_2D );
+		if( best == NULL || distSqr < bestDistSqr )
+		{
+			best = obj;
+			bestDistSqr = distSqr;
+		}
+	}
+
+	return best;
+
+}  // end findUnfinishedStructureToContinue
+
+//-------------------------------------------------------------------------------------------------
 /** Dozer primary idle state */
 //-------------------------------------------------------------------------------------------------
 class DozerPrimaryIdleState : public State
@@ -973,11 +1028,12 @@ class DozerPrimaryIdleState : public State
 
 public:
 
-	DozerPrimaryIdleState( StateMachine *machine ) : State( machine, "DozerPrimaryIdleState" ) 
+	DozerPrimaryIdleState( StateMachine *machine ) : State( machine, "DozerPrimaryIdleState" )
 	{
 		m_idleTooLongTimestamp = 0;
 		m_idlePlayerNumber = 0;
 		m_isMarkedAsIdle   = FALSE;
+		m_nextUnfinishedScanFrame = 0;
 	}
 	virtual StateReturnType update( void );
 	virtual StateReturnType onEnter( void );
@@ -994,6 +1050,7 @@ protected:
 	UnsignedInt m_idleTooLongTimestamp;		///< when this is more than our idle too long time we try to do something about it
 	Int m_idlePlayerNumber;				///< Remeber what list we were added to.
 	Bool m_isMarkedAsIdle;
+	UnsignedInt m_nextUnfinishedScanFrame;	///< throttle for the unfinished-structure scan (not saved: a load just scans again)
 };
 EMPTY_DTOR(DozerPrimaryIdleState)
 
@@ -1103,7 +1160,25 @@ StateReturnType DozerPrimaryIdleState::update( void )
 	//
 	if( !ai->isIdle() )
 		m_idleTooLongTimestamp = TheGameLogic->getFrame();
-	
+
+	//
+	// a builder that has just gone idle next to an unfinished structure nobody is working on
+	// (its own next one, an abandoned one, a dead dozer's) picks that job up.  A second's
+	// grace lets a follow-up order from the player win; the scan itself runs once a second.
+	//
+	if( ai->isIdle() && dozerAI->isAnyTaskPending() == FALSE &&
+			TheGameLogic->getFrame() - m_idleTooLongTimestamp > LOGICFRAMES_PER_SECOND &&
+			TheGameLogic->getFrame() >= m_nextUnfinishedScanFrame )
+	{
+		m_nextUnfinishedScanFrame = TheGameLogic->getFrame() + LOGICFRAMES_PER_SECOND;
+		Object *unfinished = findUnfinishedStructureToContinue( dozer );
+		if( unfinished )
+		{
+			ai->aiResumeConstruction( unfinished, CMD_FROM_AI );
+			return STATE_CONTINUE;
+		}
+	}
+
 	//
 	// if we're just sitting here in idle, and there is no task pending ... after so long we'll
 	// try to go to the nearest command center
@@ -1737,8 +1812,11 @@ Object *DozerAIUpdate::construct( const ThingTemplate *what,
 		MAKE_MODELCONDITION_MASK(MODELCONDITION_AWAITING_CONSTRUCTION)
 	);
 
-	// we have a construction pending
-	newTask( DOZER_TASK_BUILD, obj );
+	// we have a construction pending - unless a human player's dozer is already building
+	// something, in which case the new structure waits at 0% for the next free builder
+	// (see BuildAssistant::buildObjectNow / DozerPrimaryIdleState)
+	if( !( isTaskPending( DOZER_TASK_BUILD ) && owningPlayer->getPlayerType() == PLAYER_HUMAN ) )
+		newTask( DOZER_TASK_BUILD, obj );
 
 	return obj;
 				

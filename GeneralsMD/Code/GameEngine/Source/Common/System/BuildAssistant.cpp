@@ -49,6 +49,7 @@
 #include "GameLogic/TerrainLogic.h"
 #include "GameLogic/AIPathfind.h"
 #include "GameLogic/Module/AIUpdate.h"
+#include "GameLogic/Module/DozerAIUpdate.h"
 #include "GameLogic/Module/BehaviorModule.h"
 #include "GameLogic/Module/ContainModule.h"
 #include "GameLogic/Module/CreateModule.h"
@@ -373,7 +374,17 @@ Object *BuildAssistant::buildObjectNow( Object *constructorObject, const ThingTe
 
 		if( ai )
 		{
-			ai->aiIdle(CMD_FROM_AI); // stop any current behavior.
+			//
+			// a player's builder that is already on a job keeps it: the new structure is placed
+			// and waits at 0% (this builder, or the nearest free one, picks it up when idle -
+			// DozerPrimaryIdleState) instead of the newest order yanking the builder off a
+			// half-built structure.  construct() sees the pending task and skips the retask.
+			//
+			DozerAIInterface *dozer = ai->getDozerAIInterface();
+			Bool keepsCurrentJob = owningPlayer->getPlayerType() == PLAYER_HUMAN &&
+														 dozer && dozer->isTaskPending( DOZER_TASK_BUILD );
+			if( !keepsCurrentJob )
+				ai->aiIdle(CMD_FROM_AI); // stop any current behavior.
 			return ai->construct( what, pos, angle, owningPlayer, FALSE );
 		}
 		return NULL;

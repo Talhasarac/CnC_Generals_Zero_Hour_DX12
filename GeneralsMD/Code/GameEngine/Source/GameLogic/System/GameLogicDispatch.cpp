@@ -58,6 +58,56 @@
 //#include "GameLogic/PartitionManager.h"
 #include "GameLogic/AI.h"
 #include "GameLogic/Module/AIUpdate.h"
+#include "GameLogic/Module/DozerAIUpdate.h"
+#include "GameLogic/Module/SupplyTruckAIUpdate.h"
+
+//-------------------------------------------------------------------------------------------------
+/** Which builder takes a structure job: the free one nearest the site, or failing that the
+	* nearest one at all.  Free = no build/repair task and not hauling supplies; a builder that
+	* is merely walking somewhere counts.  Fed from the selection, or from every builder of the
+	* player when nothing is selected (the control bar's stand-in builder context). */
+//-------------------------------------------------------------------------------------------------
+struct BuilderPick
+{
+	Coord3D loc;
+	Object *idle;
+	Real idleDistSqr;
+	Object *any;
+	Real anyDistSqr;
+};
+
+static void considerBuilder( Object *candidate, BuilderPick *pick )
+{
+	if( candidate == NULL || candidate->isEffectivelyDead() )
+		return;
+	if( candidate->testStatus( OBJECT_STATUS_UNDER_CONSTRUCTION ) || candidate->testStatus( OBJECT_STATUS_SOLD ) )
+		return;
+	AIUpdateInterface *ai = candidate->getAI();
+	DozerAIInterface *dozer = ai ? ai->getDozerAIInterface() : NULL;
+	if( dozer == NULL )
+		return;
+
+	Real dx = candidate->getPosition()->x - pick->loc.x;
+	Real dy = candidate->getPosition()->y - pick->loc.y;
+	Real distSqr = dx*dx + dy*dy;
+	if( distSqr < pick->anyDistSqr )
+	{
+		pick->any = candidate;
+		pick->anyDistSqr = distSqr;
+	}
+	const SupplyTruckAIInterface *supply = ai->getSupplyTruckAIInterface();
+	Bool hauling = supply && supply->isCurrentlyFerryingSupplies();
+	if( !dozer->isAnyTaskPending() && !hauling && distSqr < pick->idleDistSqr )
+	{
+		pick->idle = candidate;
+		pick->idleDistSqr = distSqr;
+	}
+}
+
+static void considerBuilderProc( Object *obj, void *userData )
+{
+	considerBuilder( obj, (BuilderPick *)userData );
+}
 #include "GameLogic/Module/BodyModule.h"
 #include "GameLogic/Module/OpenContain.h"
 #include "GameLogic/Module/ProductionUpdate.h"
@@ -1371,8 +1421,19 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 		//-------------------------------------------------------------------------------------------------
 		case GameMessage::MSG_CANCEL_UNIT_CREATE:
 		{
-			Object *producer = getSingleObjectFromSelection(currentlySelectedGroup);
+			Object *producer = NULL;
 			ProductionID productionID = (ProductionID)msg->getArgument( 0 )->integer;
+
+			// an explicit producer (right-click cancel, multi-select) must be one of the selected objects
+			if( msg->getArgumentCount() > 1 && currentlySelectedGroup )
+			{
+				ObjectID producerID = msg->getArgument( 1 )->objectID;
+				const VecObjectID& ids = currentlySelectedGroup->getAllIDs();
+				if( std::find( ids.begin(), ids.end(), producerID ) != ids.end() )
+					producer = TheGameLogic->findObjectByID( producerID );
+			}
+			else
+				producer = getSingleObjectFromSelection(currentlySelectedGroup);
 			
 			// sanity
 			if( producer == NULL )
@@ -1407,6 +1468,30 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 			place = TheThingFactory->findByTemplateID( msg->getArgument( 0 )->integer );
 			loc = msg->getArgument( 1 )->location;
 			angle = msg->getArgument( 2 )->real;
+
+			//
+			// the job goes to the idle builder nearest the site - among the selected builders,
+			// or, with nothing selected (stand-in builder command bar), among all the player's
+			// builders.  A builder already on a job is only taken when no idle one exists.
+			//
+			{
+				BuilderPick pick;
+				pick.loc = loc;
+				pick.idle = pick.any = NULL;
+				pick.idleDistSqr = pick.anyDistSqr = 1e30f;
+				if( currentlySelectedGroup )
+				{
+					const VecObjectID& ids = currentlySelectedGroup->getAllIDs();
+					for( VecObjectID::const_iterator it = ids.begin(); it != ids.end(); ++it )
+						considerBuilder( TheGameLogic->findObjectByID( *it ), &pick );
+				}
+				if( pick.any == NULL && thisPlayer )
+					thisPlayer->iterateObjects( considerBuilderProc, &pick );
+
+				Object *chosen = pick.idle ? pick.idle : pick.any;
+				if( chosen )
+					constructorObject = chosen;
+			}
 
 			if( place == NULL || constructorObject == NULL )
 				break;  //These are not crashes, as the object may have died before this message came in

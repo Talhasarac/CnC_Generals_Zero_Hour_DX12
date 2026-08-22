@@ -450,8 +450,11 @@ Object *WorkerAIUpdate::construct( const ThingTemplate *what,
 		MAKE_MODELCONDITION_MASK(MODELCONDITION_AWAITING_CONSTRUCTION)
 	);
 
-	// we have a construction pending
-	newTask( DOZER_TASK_BUILD, obj );
+	// we have a construction pending - unless a human player's worker is already building
+	// something, in which case the new structure waits at 0% for the next free builder
+	// (see BuildAssistant::buildObjectNow / DozerPrimaryIdleState)
+	if( !( isTaskPending( DOZER_TASK_BUILD ) && owningPlayer->getPlayerType() == PLAYER_HUMAN ) )
+		newTask( DOZER_TASK_BUILD, obj );
 
 	return obj;
 				
