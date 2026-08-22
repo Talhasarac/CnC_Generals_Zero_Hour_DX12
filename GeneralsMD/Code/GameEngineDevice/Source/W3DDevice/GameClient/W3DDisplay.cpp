@@ -783,6 +783,17 @@ void W3DDisplay::init( void )
 
 	}  // end if
 
+	extern bool DX8Wrapper_IsWindowed;	// dx8wrapper.cpp
+	// which runtime the device really landed on - d3d8.dll in the exe directory is our d3d8to9,
+	// so normally Direct3D 9, or Direct3D 9On12 (Direct3D 12) when the player started with -d3d12
+	// and is fullscreen (d3d8to9 keeps windowed devices on Direct3D 9 - its 9On12 windowed
+	// present is blank above ~640x480 on at least one machine)
+	DEBUG_LOG(("W3DDisplay::init - renderer runtime: %s\n",
+						 GetModuleHandleA("d3d9on12.dll") ? (DX8Wrapper_IsWindowed ? "Direct3D 9 (d3d8to9; -d3d12 given, but windowed devices stay on Direct3D 9)"
+						                                                        : "Direct3D 12 (d3d8to9 -> Direct3D 9On12)")
+						 : GetModuleHandleA("d3d9.dll")  ? "Direct3D 9 (d3d8to9)"
+						                                 : "Direct3D 8 (system d3d8.dll)"));
+
 	//Check if level was never set and default to setting most suitable for system.
 	if (TheGameLODManager->getStaticLODLevel() == STATIC_GAME_LOD_UNKNOWN)
 		TheGameLODManager->setStaticLODLevel(TheGameLODManager->findStaticLODLevel());
@@ -1668,6 +1679,9 @@ Int W3DDisplay::getLastFrameDrawCalls()
 /** Draw the entire W3D Display */
 //=============================================================================
 //DECLARE_PERF_TIMER(W3DDisplay_draw)
+static Bool s_screenShotPending = FALSE;	// F12 pressed: save the frame at the end of the next draw()
+static void saveScreenShot(void);
+
 void W3DDisplay::draw( void )
 {
 	//USE_PERF_TIMER(W3DDisplay_draw)
@@ -1994,8 +2008,13 @@ AGAIN:
 				TheGraphDraw->render();
 				TheGraphDraw->clear();
 #endif
+				if (s_screenShotPending)
+				{
+					s_screenShotPending = FALSE;
+					saveScreenShot();
+				}
 				// render is all done!
-				WW3D::End_Render();	
+				WW3D::End_Render();
 			}
 			else
 			{
@@ -3012,8 +3031,40 @@ static void CreateBMPFile(LPTSTR pszFile, char *image, Int width, Int height)
 	LocalFree( (HLOCAL) pbmi);
 }
 
-///Save Screen Capture to a file
+// A system-memory copy of the back buffer (32-bit, not multisampled), NULL when that is
+// not possible.  Taken at the end of draw(), before Present: the front-buffer path is a
+// desktop capture, and on the Direct3D 12 (9On12) runtime the window is presented through
+// a DXGI flip swap chain that desktop captures do not see - the old code saved black.
+static IDirect3DSurface8 *captureBackBuffer(void)
+{
+	IDirect3DDevice8 *dev = DX8Wrapper::_Get_D3D_Device8();
+	IDirect3DSurface8 *bb = NULL;
+	if (dev == NULL || FAILED(dev->GetBackBuffer(0, D3DBACKBUFFER_TYPE_MONO, &bb)) || bb == NULL)
+		return NULL;
+
+	D3DSURFACE_DESC desc;
+	bb->GetDesc(&desc);
+	IDirect3DSurface8 *copy = NULL;
+	if ((desc.Format == D3DFMT_X8R8G8B8 || desc.Format == D3DFMT_A8R8G8B8) && desc.MultiSampleType == D3DMULTISAMPLE_NONE)
+	{
+		if (SUCCEEDED(dev->CreateImageSurface(desc.Width, desc.Height, desc.Format, &copy)) && copy != NULL
+			&& FAILED(dev->CopyRects(bb, NULL, 0, copy, NULL)))
+		{
+			copy->Release();
+			copy = NULL;
+		}
+	}
+	bb->Release();
+	return copy;
+}
+
+///Save Screen Capture to a file - deferred to the end of the next rendered frame
 void W3DDisplay::takeScreenShot(void)
+{
+	s_screenShotPending = TRUE;
+}
+
+static void saveScreenShot(void)
 {
 	char leafname[256];
 	char pathname[1024];
@@ -3033,24 +3084,29 @@ void W3DDisplay::takeScreenShot(void)
 			done = true;
 	}
 
-	// Lock front buffer and copy
-
-	IDirect3DSurface8 *fb;
-	fb=DX8Wrapper::_Get_DX8_Front_Buffer();
-	D3DSURFACE_DESC desc;
-	fb->GetDesc(&desc);
-
 	RECT bounds;
-	POINT point;
+	IDirect3DSurface8 *fb = captureBackBuffer();
+	if (fb != NULL)
+	{
+		D3DSURFACE_DESC desc;
+		fb->GetDesc(&desc);
+		SetRect(&bounds, 0, 0, desc.Width, desc.Height);
+	}
+	else
+	{
+		// Lock front buffer and copy
+		fb=DX8Wrapper::_Get_DX8_Front_Buffer();
 
-	GetClientRect(ApplicationHWnd,&bounds);
-	point.x=bounds.left; point.y=bounds.top;
-	ClientToScreen(ApplicationHWnd, &point);
-	bounds.left=point.x; bounds.top=point.y; 
-	point.x=bounds.right; point.y=bounds.bottom;
-	ClientToScreen(ApplicationHWnd, &point);
-	bounds.right=point.x; bounds.bottom=point.y;
- 
+		POINT point;
+		GetClientRect(ApplicationHWnd,&bounds);
+		point.x=bounds.left; point.y=bounds.top;
+		ClientToScreen(ApplicationHWnd, &point);
+		bounds.left=point.x; bounds.top=point.y;
+		point.x=bounds.right; point.y=bounds.bottom;
+		ClientToScreen(ApplicationHWnd, &point);
+		bounds.right=point.x; bounds.bottom=point.y;
+	}
+
 	D3DLOCKED_RECT lrect;
 
 	DX8_ErrorCode(fb->LockRect(&lrect,&bounds,D3DLOCK_READONLY));

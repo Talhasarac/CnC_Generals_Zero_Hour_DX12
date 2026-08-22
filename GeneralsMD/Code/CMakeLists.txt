@@ -223,7 +223,9 @@ target_compile_options(ww3d2 PRIVATE /Zc:forScope-)
 add_executable(eip_sampler ${CMAKE_CURRENT_SOURCE_DIR}/Tools/ProfileSampler/eip_sampler.cpp)
 set_target_properties(eip_sampler PROPERTIES CXX_STANDARD 17)
 
-# Phase 1 checkpoint: vendored DX8 SDK + OS d3d8.dll create a real device.
+# Phase 1 checkpoint: vendored DX8 SDK + a d3d8.dll create a real device.  Our d3d8to9
+# d3d8.dll is copied next to the exe (see below, after d3d8to9 is defined) so the test
+# exercises the game's real path: Direct3D 9 by default, Direct3D 9On12 / Direct3D 12 with -d3d12.
 add_executable(dx8_smoke ${WW}/WW3D2/test_dx8_smoke.cpp)
 target_include_directories(dx8_smoke PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/Libraries/DirectX/Include)
 target_link_directories(dx8_smoke PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/Libraries/DirectX/Lib)
@@ -516,7 +518,14 @@ set_target_properties(test_gameengine PROPERTIES CXX_STANDARD 17)
 # too so one command covers everything.
 add_test(NAME wwmath_selfcheck COMMAND wwmath_selfcheck)
 add_test(NAME compression_selfcheck COMMAND compression_selfcheck)
+# dx8_smoke runs through our d3d8to9 d3d8.dll (copied next to it): once on its default,
+# Direct3D 9, once opted in to Direct3D 9On12 / Direct3D 12 via -d3d12 (each run fails if
+# it did not land on its runtime)
+add_custom_command(TARGET dx8_smoke POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:d3d8to9> $<TARGET_FILE_DIR:dx8_smoke>)
+add_dependencies(dx8_smoke d3d8to9)
 add_test(NAME dx8_smoke COMMAND dx8_smoke)
+add_test(NAME dx8_smoke_d3d12 COMMAND dx8_smoke -d3d12)
 
 if(RELEASE_DEBUG_LOGGING)
   target_compile_definitions(gameengine PRIVATE RELEASE_DEBUG_LOGGING)

@@ -226,7 +226,11 @@ static bool												_LargeTextureExtraReductionEnabled = false;
 int														WW3D::LastFrameMemoryAllocations;
 int														WW3D::LastFrameMemoryFrees;
 
-int														WW3D::TextureFilter = 0;
+// Nothing in the game ever calls Set_Texture_Filter, so this default IS the game's texture
+// filtering.  Retail shipped 0 = bilinear with point mip selection (a 2003 fill-rate
+// budget); any GPU of this century does anisotropic + trilinear for free, so that is the
+// default now (the level is taken from the device caps in TextureFilterClass::_Init_Filters).
+int														WW3D::TextureFilter = TextureFilterClass::TEXTURE_FILTER_ANISOTROPIC;
 
 bool														WW3D::Lite = false;
 

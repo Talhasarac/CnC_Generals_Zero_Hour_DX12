@@ -1,0 +1,120 @@
+--- a/source/d3d8to9.cpp
++++ b/source/d3d8to9.cpp
+@@ -5,6 +5,9 @@
+ 
+ #include "d3dx9.hpp"
+ #include "d3d8to9.hpp"
++#include <d3d9on12.h>
++#include <cstring>
++#include <fstream>
+ 
+ PFN_D3DXAssembleShader D3DXAssembleShader = nullptr;
+ PFN_D3DXDisassembleShader D3DXDisassembleShader = nullptr;
+@@ -149,7 +152,66 @@
+ 	LOG << "> Passing on to 'Direct3DCreate9':" << std::endl;
+ #endif
+ 
+-	IDirect3D9 *const d3d = Direct3DCreate9(D3D_SDK_VERSION);
++	// Local patch (CnC Generals ZH port): "-d3d12" on the process command line, or the
++	// environment variable D3D8TO9_D3D12, creates the Direct3D 9 object through Direct3D9On12
++	// so the whole Direct3D 8 renderer above runs on the Direct3D 12 runtime and driver.
++	// Opt-in, not default: the frames render correctly (the game's own back-buffer screenshot
++	// is pixel-correct) but on at least one Windows 11 machine the 9On12 windowed present
++	// shows a black window.  Needs Windows 10 1903+ (d3d9.dll exports Direct3DCreate9On12);
++	// anything else, or a failed 9On12 creation, falls back to the plain Direct3D 9 path below.
++	IDirect3D9 *d3d = nullptr;
++	{
++		// The UNICODE command line, not the ANSI one: the game's WinMain tokenizes lpCmdLine in
++		// place, and that IS the process's ANSI command-line buffer, so GetCommandLineA() is
++		// already cut short (".. generals.exe -win") by the time the renderer gets here.  The
++		// wide buffer is untouched.
++		const wchar_t *const cmdLine = GetCommandLineW();
++		const bool wantD3D12 = (cmdLine != nullptr && wcsstr(cmdLine, L"-d3d12") != nullptr) ||
++		                       GetEnvironmentVariableA("D3D8TO9_D3D12", nullptr, 0) > 0;
++		{
++			// always leave a trace of the decision next to the exe (one short file) - the
++			// process can be started in ways where neither switch reaches us, and without
++			// this there is no way to tell that from a 9On12 failure
++			std::ofstream trace("d3d8to9_d3d12.log", std::ios::trunc);
++			if (trace.is_open())
++			{
++				trace << "Direct3DCreate8: cmdline='";
++				for (const wchar_t *c = cmdLine; c != nullptr && *c != 0; ++c)
++					trace << static_cast<char>(*c < 128 ? *c : '?');
++				trace << "' env D3D8TO9_D3D12=" << GetEnvironmentVariableA("D3D8TO9_D3D12", nullptr, 0)
++				      << " -> " << (wantD3D12 ? "Direct3D 12 requested" : "Direct3D 9 (default)") << std::endl;
++			}
++		}
++		if (wantD3D12)
++		{
++			const HMODULE d3d9Module = LoadLibrary(TEXT("d3d9.dll"));
++			const PFN_Direct3DCreate9On12 create9On12 = d3d9Module != nullptr
++				? reinterpret_cast<PFN_Direct3DCreate9On12>(GetProcAddress(d3d9Module, "Direct3DCreate9On12"))
++				: nullptr;
++			if (create9On12 != nullptr)
++			{
++				D3D9ON12_ARGS args = {};
++				args.Enable9On12 = TRUE;
++				d3d = create9On12(D3D_SDK_VERSION, &args, 1);
++			}
++			// Say what happened - the game's own log cannot see in here and the fallback below
++			// is otherwise silent.  One line, next to the exe.
++			const char *const outcome = create9On12 == nullptr ? "Direct3DCreate9On12 not exported by this d3d9.dll (needs Windows 10 1903+), using Direct3D 9"
++			                          : d3d == nullptr        ? "Direct3DCreate9On12 failed, using Direct3D 9"
++			                                                  : "Direct3D 9On12 created, rendering on the Direct3D 12 runtime";
++			std::ofstream d3d12Log("d3d8to9_d3d12.log", std::ios::app);
++			if (d3d12Log.is_open())
++				d3d12Log << outcome << std::endl;
++#ifndef D3D8TO9NOLOG
++			LOG << "> Direct3D 12: " << outcome << std::endl;
++#endif
++		}
++	}
++
++	if (d3d == nullptr)
++	{
++		d3d = Direct3DCreate9(D3D_SDK_VERSION);
++	}
+ 
+ 	if (d3d == nullptr)
+ 	{
+--- a/source/d3d8to9_base.cpp
++++ b/source/d3d8to9_base.cpp
+@@ -4,6 +4,7 @@
+  */
+ 
+ #include "d3d8to9.hpp"
++#include <fstream>
+ 
+ static const D3DFORMAT AdapterFormats[] = {
+ 	D3DFMT_A8R8G8B8,
+@@ -182,7 +183,28 @@
+ 
+ 	IDirect3DDevice9 *DeviceInterface = nullptr;
+ 
+-	const HRESULT hr = ProxyInterface->CreateDevice(Adapter, DeviceType, hFocusWindow, BehaviorFlags, &PresentParams, &DeviceInterface);
++	// Local patch (CnC Generals ZH port): a WINDOWED device never goes on Direct3D 9On12.
++	// On a Windows 11 25H2 / GeForce RTX 4060 Ti machine 9On12 renders every frame correctly
++	// but its windowed present shows nothing (the window keeps its GDI background) once the
++	// back buffer is larger than about 640x480 - found by bisection with dx8_smoke -show:
++	// 640x481, 800x480, 640x600, 1024x240 are fine, 800x600 and up are blank, regardless of
++	// window style, swap effect, back buffer count or present interval; fullscreen is fine.
++	// So a windowed device is created from a plain Direct3D 9 object instead (the caps the
++	// app already queried came from 9On12, same adapter - close enough for a Direct3D 8 app).
++	IDirect3D9 *CreateFrom = ProxyInterface;
++	if (PresentParams.Windowed && GetModuleHandle(TEXT("d3d9on12.dll")) != nullptr)
++	{
++		static IDirect3D9 *PlainD3D9 = nullptr;	// kept for the process lifetime, like the 9On12 one
++		if (PlainD3D9 == nullptr)
++			PlainD3D9 = Direct3DCreate9(D3D_SDK_VERSION);
++		if (PlainD3D9 != nullptr)
++			CreateFrom = PlainD3D9;
++		std::ofstream d3d12Log("d3d8to9_d3d12.log", std::ios::app);
++		if (d3d12Log.is_open())
++			d3d12Log << "CreateDevice: windowed -> " << (CreateFrom == PlainD3D9 ? "plain Direct3D 9 (9On12 windowed present is blank above ~640x480)" : "9On12 (Direct3DCreate9 failed)") << std::endl;
++	}
++
++	const HRESULT hr = CreateFrom->CreateDevice(Adapter, DeviceType, hFocusWindow, BehaviorFlags, &PresentParams, &DeviceInterface);
+ 	if (FAILED(hr))
+ 		return hr;
+ 
