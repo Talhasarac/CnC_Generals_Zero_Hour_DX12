@@ -1527,20 +1527,9 @@ Bool AIUpdateInterface::processCollision(PhysicsBehavior *physics, Object *other
 				// If we are already pointing in the right direction, we may be stuck.
 				if (!otherMoving)
 				{
-					// Before giving up and repathing, ask an idle allied blocker to step aside
-					// (EA only did this for vehicles blocked by infantry).  Same guards as the
-					// 1.01 patch above: never disturb a busy unit or one using an ability.
-					if (getObject()->getRelationship(other)==ALLIES && aiOther->isIdle() &&
-							!other->testStatus(OBJECT_STATUS_IS_USING_ABILITY))
-					{
-						aiOther->aiMoveAwayFromUnit(getObject(), CMD_FROM_AI);
-						if (getNumFramesBlocked() < LOGICFRAMES_PER_SECOND)
-						{
-							// Give it a moment to clear; AIStates' 2 second rule still repaths us
-							// if it never does (immobile, held, or refused).
-							return FALSE;
-						}
-					}
+					// (asking the idle allied blocker to step aside was tried here and reverted:
+					// at a group's destination every arriving unit shoved the parked ones, which
+					// shoved others - the group milled about and repathed without end)
 					// Intense logging jba
 					// DEBUG_LOG(("Blocked&Stuck !otherMoving\n"));
 					m_isBlockedAndStuck = TRUE;
@@ -1590,21 +1579,9 @@ Bool AIUpdateInterface::processCollision(PhysicsBehavior *physics, Object *other
 		Real dx = getObject()->getPosition()->x - otherPos.x;
 		Real dy = getObject()->getPosition()->y - otherPos.y;
 		Real curDSqr = dx*dx+dy*dy;
-		// Two idle units count as stacked when their centers are within half of their
-		// combined pathfind footprints — the old fixed half-cell test never separated
-		// vehicles wider than a cell that ended up half overlapped.  For a pair of
-		// single-cell units this degenerates to exactly the old half-cell threshold,
-		// and it stays below the legal parked separation, so no jitter for units
-		// standing on properly allocated adjacent goal cells.
-		Int sepCells = 1;
-		Bool centerUnused;
-		Int radiusCells;
-		TheAI->pathfinder()->getRadiusAndCenter(getObject(), radiusCells, centerUnused);
-		sepCells += radiusCells;
-		TheAI->pathfinder()->getRadiusAndCenter(other, radiusCells, centerUnused);
-		sepCells += radiusCells;
-		Real minSep = 0.5f*PATHFIND_CELL_SIZE_F*sepCells;
-		if (!otherMoving && curDSqr < minSep*minSep)
+		// (a footprint-scaled threshold was tried here and reverted: tanks parked closer than
+		// it by the group's own formation kept being pulled apart and never came to rest)
+		if (!otherMoving && curDSqr < PATHFIND_CELL_SIZE_F*PATHFIND_CELL_SIZE_F*0.25f)
 		{
 			if (this->getCurrentStateID() == AI_BUSY) {
 				return false;

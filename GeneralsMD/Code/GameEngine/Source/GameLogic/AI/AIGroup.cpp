@@ -1624,7 +1624,7 @@ void AIGroup::groupMoveToPosition( const Coord3D *p_posIn, Bool addWaypoint, Com
 		isFormation = false;
 		if (!addWaypoint) {
 			Int dx = (max.x-min.x)/PATHFIND_CELL_SIZE_F;
-			Int dy = (max.y-min.y)/PATHFIND_CELL_SIZE_F;
+			Int dy = (max.x-min.x)/PATHFIND_CELL_SIZE_F;	// retail typo kept on purpose: fixing it gathers groups far more often, which players read as wrong paths
 			Int cells = (dx*dy);
 			if (cells<2000) {
 				groupTightenToPosition(pos, false, cmdSource);

@@ -1111,7 +1111,10 @@ Real Path::computeFlightDistToGoal( const Coord3D *pos, Coord3D& goalPos )
 //-----------------------------------------------------------------------------------
 
 enum { PATHFIND_CELLS_PER_FRAME=5000}; // Number of cells we will search pathfinding per frame.
-enum {CELL_INFOS_TO_ALLOCATE = 30000};
+// A* open+closed sets draw from this pool; running dry aborts the search (no path) after
+// burning the time.  Retail 30000 was sized for 2003 memory - a long detour around a
+// mountain on a large map can need more.  48 bytes each, so this is ~7 MB.
+enum {CELL_INFOS_TO_ALLOCATE = 150000};
 PathfindCellInfo *PathfindCellInfo::s_infoArray = NULL;
 PathfindCellInfo *PathfindCellInfo::s_firstFree = NULL;						
 /**
@@ -1684,7 +1687,11 @@ const Int COST_ORTHOGONAL = 10;
 const Int COST_DIAGONAL = 14;
 // ponytail: congestion knob, per other-unit path crossing a cell of our footprint. Rebuild to tune;
 // move into AIData INI if it needs per-map tweaking.
-const Int PATH_CONGESTION_COST = COST_ORTHOGONAL;
+// 0 = off (retail pathing).  In-game the lane spreading read as "wrong paths" and the extra search
+// as stutter even after the range/cap limits below, so it is off until it can be measured properly.
+const Int PATH_CONGESTION_COST = 0;
+const Int PATH_CONGESTION_RANGE = 30;			///< cells from the start within which other paths cost anything
+const Int PATH_CONGESTION_MAX_PATHS = 4;	///< the penalty stops growing past this many paths in a footprint
 const Real COST_TO_DISTANCE_FACTOR = 1.0f/10.0f;
 const Real COST_TO_DISTANCE_FACTOR_SQR = COST_TO_DISTANCE_FACTOR*COST_TO_DISTANCE_FACTOR;
 
@@ -6352,13 +6359,19 @@ Int Pathfinder::examineNeighboringCells(PathfindCell *parentCell, PathfindCell *
 			if (info.allyMoving && dx<10 && dy<10) {
 				newCostSoFar += 3*COST_DIAGONAL;
 			}
-			if (m_pathUsage) {
-				// Other units' live paths through our footprint: pay per path so we pick a parallel lane.
+			if (PATH_CONGESTION_COST > 0 && m_pathUsage && dx < PATH_CONGESTION_RANGE && dy < PATH_CONGESTION_RANGE) {
+				// Other units' live paths through our footprint: pay per path so we pick a parallel
+				// lane.  Only near the start (where lanes form) and capped: the heuristic does not
+				// know about this cost, so an uncapped penalty along a long path inflates the
+				// search toward a full flood - nine tanks sent across the map used to exhaust the
+				// cell pool (no path) and hitch the frame.
 				Int usage = 0;
 				Int above = radius + (centerInCell ? 1 : 0);
 				for (Int ux = newCellCoord.x-radius; ux < newCellCoord.x+above; ux++)
 					for (Int uy = newCellCoord.y-radius; uy < newCellCoord.y+above; uy++)
 						usage += getPathUsage(ux, uy);
+				if (usage > PATH_CONGESTION_MAX_PATHS)
+					usage = PATH_CONGESTION_MAX_PATHS;
 				newCostSoFar += usage * PATH_CONGESTION_COST;
 			}
 			if (newCell->getType() == PathfindCell::CELL_CLIFF && !newCell->getPinched() ) {
@@ -6376,9 +6389,10 @@ Int Pathfinder::examineNeighboringCells(PathfindCell *parentCell, PathfindCell *
 					newCostSoFar += 7*COST_DIAGONAL;
 				}
 			} else if (newCell->getPinched()) {
-				// Pinched = clear cell hugging an obstacle.  Charge by footprint so wide
-				// vehicles prefer open corridors while infantry threads the gap as before.
-				newCostSoFar += COST_ORTHOGONAL*(1+radius);
+				// (a footprint-scaled penalty here was tried and reverted: along cliff and building
+				// edges it inflated vehicle path costs the heuristic knows nothing about, so long
+				// searches ballooned, exhausted the cell pool and hitched - retail flat cost)
+				newCostSoFar += COST_ORTHOGONAL;
 			}
 			newCell->setBlockedByAlly(false);
 			if (info.allyFixedCount>0) {
@@ -6477,6 +6491,7 @@ Path *Pathfinder::findPath( Object *obj, const LocomotorSet& locomotorSet, const
 
 	m_zoneManager.clearPassableFlags();
 	Path *hPat = findHierarchicalPath(isHuman, locomotorSet, from, rawTo, false);
+	Bool hadCorridor = (hPat != NULL);
 	if (hPat) {
 		hPat->deleteInstance();
 	}	else {
@@ -6486,6 +6501,17 @@ Path *Pathfinder::findPath( Object *obj, const LocomotorSet& locomotorSet, const
 	Path *pat = internalFindPath(obj, locomotorSet, from, rawTo);
 	if (pat!=NULL) {
 		return pat;
+	}
+
+	// the block corridor the hierarchical search laid out can be too tight for this unit's
+	// footprint (or simply wrong); a failed corridor search is cheap, so fall back to the
+	// unrestricted search rather than report no path
+	if (hadCorridor) {
+		m_zoneManager.setAllPassable();
+		pat = internalFindPath(obj, locomotorSet, from, rawTo);
+		if (pat!=NULL) {
+			return pat;
+		}
 	}
 
 /* hierarchical build path code.
@@ -6549,6 +6575,11 @@ Path *Pathfinder::internalFindPath( Object *obj, const LocomotorSet& locomotorSe
 #if defined _DEBUG || defined _INTERNAL
 	Int startTimeMS = ::GetTickCount();
 #endif
+	// release-visible timing (DebugLogFile.txt) for searches that cost a visible frame: how
+	// much was the A* itself and how much the path build/optimize after it
+	__int64 fpFreq64 = 0, fpT0 = 0;
+	QueryPerformanceFrequency((LARGE_INTEGER *)&fpFreq64);
+	QueryPerformanceCounter((LARGE_INTEGER *)&fpT0);
 	Bool centerInCell = true;
 	Int radius = 0;
 	if (obj) {
@@ -6719,7 +6750,23 @@ Path *Pathfinder::internalFindPath( Object *obj, const LocomotorSet& locomotorSe
 
 			m_isTunneling = false;
 			// construct and return path
+			__int64 fpT1 = 0, fpT2 = 0;
+			QueryPerformanceCounter((LARGE_INTEGER *)&fpT1);
 			Path *path =  buildActualPath( obj, locomotorSet.getValidSurfaces(), from, goalCell, centerInCell, false );
+			QueryPerformanceCounter((LARGE_INTEGER *)&fpT2);
+			if (fpFreq64 > 0) {
+				Real searchMs = 1000.0f * (Real)(fpT1 - fpT0) / (Real)fpFreq64;
+				Real buildMs = 1000.0f * (Real)(fpT2 - fpT1) / (Real)fpFreq64;
+				if (searchMs + buildMs > 2.0f) {
+					Int nodes = 0;
+					if (path)
+						for (const PathNode *n = path->getFirstNode(); n; n = n->getNext())
+							nodes++;
+					DEBUG_LOG(("Pathfind frame %d '%s': %d cells, search %.1f ms, build+optimize %.1f ms, %d nodes, (%.0f,%.0f)->(%.0f,%.0f)\n",
+										 TheGameLogic->getFrame(), obj ? obj->getTemplate()->getName().str() : "?",
+										 cellCount, searchMs, buildMs, nodes, from->x, from->y, rawTo->x, rawTo->y));
+				}
+			}
 			parentCell->releaseInfo();
 			cleanOpenAndClosedLists();
 			return path;
@@ -6790,6 +6837,12 @@ Path *Pathfinder::internalFindPath( Object *obj, const LocomotorSet& locomotorSe
 #endif
 	}
 #endif
+	// release-visible trace (DebugLogFile.txt): a failed search is otherwise invisible outside
+	// debug builds, and "no path" reports need the cell count to tell a dry pool from a real
+	// dead end
+	DEBUG_LOG(("Pathfind FAILED frame %d unit '%s' from (%.0f,%.0f) to (%.0f,%.0f), %d cells\n",
+						 TheGameLogic->getFrame(), obj ? obj->getTemplate()->getName().str() : "?",
+						 from->x, from->y, to->x, to->y, cellCount));
 	m_isTunneling = false;
 	goalCell->releaseInfo();
 	cleanOpenAndClosedLists();
@@ -7435,27 +7488,47 @@ void Pathfinder::processHierarchicalCell( const ICoord2D &scanCell, const ICoord
 		return;
 	}
 	if (parentZone == m_zoneManager.getBlockZone(LOCOMOTORSURFACE_GROUND,
-		crusher, scanCell.x, scanCell.y, m_map)) { 
+		crusher, scanCell.x, scanCell.y, m_map)) {
 		PathfindCell *newCell = getCell(LAYER_GROUND, scanCell.x, scanCell.y);
+		if( newCell == NULL )
+			return;
+
+		//
+		// The shipped code returned here unless the cell ALREADY had an info record - which
+		// only a cell with a unit standing on it has - so the block-level search could never
+		// step out of a block and every long path fell back to a full-map A* (a goal 23 cells
+		// away across a ridge cost 55,000 cells).  Allocate the record as the rest of this
+		// function does; release it again on the early-outs below so the pool does not bleed.
+		//
+		Bool allocatedHere = FALSE;
 		if( !newCell->hasInfo() )
 		{
- 			return;
+			if( !newCell->allocateInfo(scanCell) )
+				return;
+			allocatedHere = TRUE;
 		}
 
-		if( newCell->getOpen() || newCell->getClosed() ) 
+		if( newCell->getOpen() || newCell->getClosed() )
 			return; // already looked at this one.
 
 		ICoord2D adjacentCell = scanCell;
 		//DEBUG_ASSERTCRASH(parentZone==newCell->getZone(), ("Different zones?"));
-		if (parentZone!=newCell->getZone()) return;
+		if (parentZone!=newCell->getZone()) {
+			if (allocatedHere) newCell->releaseInfo();
+			return;
+		}
 		adjacentCell.x += delta.x;
 		adjacentCell.y += delta.y;
 		if (adjacentCell.x<m_extent.lo.x || adjacentCell.x>m_extent.hi.x ||
 			adjacentCell.y<m_extent.lo.y || adjacentCell.y>m_extent.hi.y) {
+			if (allocatedHere) newCell->releaseInfo();
 			return;
 		}
-		PathfindCell *adjNewCell = getCell(LAYER_GROUND, adjacentCell.x, adjacentCell.y); 
-		if (adjNewCell->hasInfo() && (adjNewCell->getOpen() || adjNewCell->getClosed())) return; // already looked at this one.
+		PathfindCell *adjNewCell = getCell(LAYER_GROUND, adjacentCell.x, adjacentCell.y);
+		if (adjNewCell->hasInfo() && (adjNewCell->getOpen() || adjNewCell->getClosed())) {
+			if (allocatedHere) newCell->releaseInfo();
+			return; // already looked at this one.
+		}
 		zoneStorageType parentGlobalZone = m_zoneManager.getEffectiveZone(LOCOMOTORSURFACE_GROUND, crusher, parentZone);
 
 		/// @todo - somehow out of bounds or bogus newZone.
@@ -7463,6 +7536,7 @@ void Pathfinder::processHierarchicalCell( const ICoord2D &scanCell, const ICoord
 							crusher, adjacentCell.x, adjacentCell.y, m_map);
 		zoneStorageType newGlobalZone = m_zoneManager.getEffectiveZone(LOCOMOTORSURFACE_GROUND, crusher, newZone);
 		if (newGlobalZone != parentGlobalZone) {
+			if (allocatedHere) newCell->releaseInfo();
 			return; // can't step over. jba.
 		}
 		Int j;
@@ -7474,9 +7548,10 @@ void Pathfinder::processHierarchicalCell( const ICoord2D &scanCell, const ICoord
 			}
 		}
 		if (found) {
+			if (allocatedHere) newCell->releaseInfo();
 			return;
 		}
-		
+
 		newCell->allocateInfo(scanCell);
 		if (!newCell->getClosed() && !newCell->getOpen()) {
 			m_closedList = newCell->putOnClosedList(m_closedList);
@@ -8845,7 +8920,11 @@ Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet
 		m_zoneManager.setAllPassable(); // can't optimize.
 	}	else {
 		m_zoneManager.clearPassableFlags();
-		Path *hPat = findClosestHierarchicalPath(isHuman, locomotorSet, from, rawTo, false);
+		// The block corridor is used only by findPath (which falls back to a full search when
+		// the corridor fails).  Here a misleading corridor would make "closest" land on the wrong
+		// side of an obstacle with no way to tell, so this stays on the full map - which is what
+		// it always was: the shipped hierarchical search never succeeded (processHierarchicalCell).
+		Path *hPat = NULL;	// was findClosestHierarchicalPath(isHuman, locomotorSet, from, rawTo, false)
 		if (hPat) {
 			hPat->deleteInstance();
 			gotHierarchicalPath = true;
@@ -10725,7 +10804,9 @@ Path *Pathfinder::findAttackPath( const Object *obj, const LocomotorSet& locomot
 		isHuman = false; // computer gets to cheat.
 	}
 	m_zoneManager.clearPassableFlags();
-	Path *hPat = findClosestHierarchicalPath(isHuman, locomotorSet, from, victimPos, isCrusher);
+	// full map, as it always effectively was (see the note in findClosestPath): an attack path
+	// confined to a wrong corridor would fail outright and the unit would refuse to approach
+	Path *hPat = NULL;	// was findClosestHierarchicalPath(isHuman, locomotorSet, from, victimPos, isCrusher)
 	if (hPat) {
 		hPat->deleteInstance();
 	}	else {
