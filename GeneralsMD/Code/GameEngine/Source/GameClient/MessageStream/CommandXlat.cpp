@@ -2338,6 +2338,21 @@ GameMessage::Type CommandTranslator::evaluateContextCommand( Drawable *draw,
  * The Command Translator translates mouse events into object command messages
  * such as move_to, attack, etc.
  */
+//-------------------------------------------------------------------------------------------------
+/** SnapCameraRotateTo45: settle the camera heading on the nearest eighth when a rotate ends.
+	* Applies to the keyboard rotate as well as the middle-drag one, because MiddleMousePans takes
+	* the drag away and the snap would otherwise have nothing left to fire on. */
+//-------------------------------------------------------------------------------------------------
+static void snapCameraHeadingTo45( void )
+{
+	if( !TheGlobalData->m_snapCameraRotateTo45 || TheTacticalView == NULL )
+		return;
+
+	const Real step = PI / 4.0f;
+	Real a = TheTacticalView->getAngle();
+	TheTacticalView->setAngle( ((Real)REAL_TO_INT_FLOOR( a / step + (a >= 0.0f ? 0.5f : -0.5f) )) * step );
+}
+
 GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage *msg)
 {
 	GameMessage::Type t = msg->getType();
@@ -3272,6 +3287,7 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 		case GameMessage::MSG_META_END_CAMERA_ROTATE_LEFT:
 			DEBUG_ASSERTCRASH(TheInGameUI->isCameraRotatingLeft(), ("Clearing rotate camera left, but it's already clear!"));
 			TheInGameUI->setCameraRotateLeft( false );
+			snapCameraHeadingTo45();
 			break;
 		case GameMessage::MSG_META_BEGIN_CAMERA_ROTATE_RIGHT:
 			DEBUG_ASSERTCRASH(!TheInGameUI->isCameraRotatingRight(), ("Setting rotate camera right, but it's already set!"));
@@ -3280,6 +3296,7 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 		case GameMessage::MSG_META_END_CAMERA_ROTATE_RIGHT:
 			DEBUG_ASSERTCRASH(TheInGameUI->isCameraRotatingRight(), ("Clearing rotate camera right, but it's already clear!"));
 			TheInGameUI->setCameraRotateRight( false );
+			snapCameraHeadingTo45();
 			break;
 		case GameMessage::MSG_META_BEGIN_CAMERA_ZOOM_IN:
 			DEBUG_ASSERTCRASH(!TheInGameUI->isCameraZoomingIn(), ("Setting zoom camera in, but it's already set!"));

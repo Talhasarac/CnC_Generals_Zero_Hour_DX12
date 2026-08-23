@@ -992,16 +992,23 @@ GlobalData::GlobalData()
 	m_cameraAdjustSpeed = 0.1f;
 	m_enforceMaxCameraHeight = TRUE;
 	m_useGridHotKeys = FALSE;
-	m_edgeScrollInWindowedMode = FALSE;
-	m_snapBuildPlacementTo45 = FALSE;
-	m_snapCameraRotateTo45 = FALSE;
-	m_middleMousePans = FALSE;
-	m_zoomToCursor = FALSE;
-	m_showHudOverlay = FALSE;
-	m_showPlacementRangeRing = FALSE;
-	m_workersReturnToSupply = FALSE;
-	m_alwaysShowWaypointLines = FALSE;
-	m_detailedBuildTooltips = FALSE;
+
+	//
+	// The fork's own conveniences default ON. They were opt-in at first, which in practice meant
+	// nobody saw them: an Options.ini that predates them simply has no such key, so every one of
+	// them stayed off and the features looked like they had never been added. Each can still be
+	// turned off by name in Options.ini.
+	//
+	m_edgeScrollInWindowedMode = TRUE;
+	m_snapBuildPlacementTo45 = TRUE;
+	m_snapCameraRotateTo45 = TRUE;
+	m_middleMousePans = TRUE;
+	m_zoomToCursor = TRUE;
+	m_showHudOverlay = TRUE;
+	m_showPlacementRangeRing = TRUE;
+	m_workersReturnToSupply = TRUE;
+	m_alwaysShowWaypointLines = TRUE;
+	m_detailedBuildTooltips = TRUE;
 	
 	m_animateWindows = TRUE;
 	

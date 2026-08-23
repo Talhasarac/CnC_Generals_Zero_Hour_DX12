@@ -511,3 +511,37 @@ TEST(physics_forward_speed_is_the_projection_not_a_per_axis_norm)
 	Coord3D climb; climb.x = 0.0f; climb.y = 0.0f; climb.z = 12.0f;
 	CHECK_NEAR( PhysicsBehavior::calcForwardSpeed( climb, up ), 12.0f, 0.01f );
 }
+
+/* AIStates.cpp: an attack move leashes a human player's ground unit so a target
+   that backs away cannot walk it off the order.  Aircraft must be exempt: they
+   acquire out to weapon range, which is far beyond the leash, so they broke it on
+   the way in every time and disengaged before ever being in range to fire - which
+   also meant they never spent the ammunition that sends them home to reload. */
+extern Bool AIAttackMove_leashBroken( Bool isHumanPlayer, Bool isAirborne, Real dx, Real dy, Int leashCells );
+
+TEST(attack_move_leashes_ground_units_but_never_aircraft)
+{
+	/* PATHFIND_CELL_SIZE_F is 10 and ATTACK_MOVE_LEASH_CELLS is 12, so the leash
+	   is 120 world units for a human player's ground unit. */
+	const Real cell = 10.0f;
+	const Int LEASH = 12;		/* ATTACK_MOVE_LEASH_CELLS, which is protected on the state */
+
+	/* a ground unit: inside the leash it keeps fighting, past it the fight is off. */
+	CHECK( !AIAttackMove_leashBroken( true, false, 0.0f,       0.0f,       LEASH ) );
+	CHECK( !AIAttackMove_leashBroken( true, false, 11.0f*cell, 0.0f,       LEASH ) );
+	CHECK(  AIAttackMove_leashBroken( true, false, 13.0f*cell, 0.0f,       LEASH ) );
+	CHECK(  AIAttackMove_leashBroken( true, false, 0.0f,       13.0f*cell, LEASH ) );
+	/* measured as a radius, not per axis */
+	CHECK(  AIAttackMove_leashBroken( true, false, 10.0f*cell, 10.0f*cell, LEASH ) );
+
+	/* an aircraft is never leashed, however far the fight has taken it - this is
+	   the case that used to fire on the way in to every single target. */
+	CHECK( !AIAttackMove_leashBroken( true, true, 13.0f*cell,  0.0f, LEASH ) );
+	CHECK( !AIAttackMove_leashBroken( true, true, 100.0f*cell, 0.0f, LEASH ) );
+	CHECK( !AIAttackMove_leashBroken( true, true, 500.0f*cell, 500.0f*cell, LEASH ) );
+
+	/* the computer and scripts keep retail chase behaviour: never leashed here,
+	   airborne or not. */
+	CHECK( !AIAttackMove_leashBroken( false, false, 500.0f*cell, 0.0f, LEASH ) );
+	CHECK( !AIAttackMove_leashBroken( false, true,  500.0f*cell, 0.0f, LEASH ) );
+}

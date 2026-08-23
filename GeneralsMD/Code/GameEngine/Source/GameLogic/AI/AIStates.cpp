@@ -3730,8 +3730,37 @@ void AIAttackMoveToState::stopEngaging( void )
 
 //----------------------------------------------------------------------------------------------------------
 /**
- * True when the approach has pulled us further than ATTACK_MOVE_LEASH_CELLS from the spot where we
- * picked the victim.  Computer and script attack moves keep their retail chase behavior.
+ * The leash rule itself, with no Object involved so test_gameengine can link straight to it.
+ * Free function (not a member, not static) for that reason - the same trick as
+ * GameEngine_isLogicFrameDue.
+ *
+ * A human player's ground unit is pulled off its attack move once the fight has dragged it more
+ * than ATTACK_MOVE_LEASH_CELLS from where it picked the victim. Computer and script attack moves
+ * keep their retail chase behavior and are never leashed here.
+ *
+ * Aircraft are never leashed either. The leash exists to stop a ground unit being walked off its
+ * attack move by a target that backs away, and it is measured from where the target was acquired -
+ * but an aircraft acquires out to its weapon range, which is far longer than the leash is. It
+ * therefore broke the leash on the way in, every time, and disengaged before it was ever in range
+ * to fire; the requireProgressTowardGoal() that follows then flew it further down the path before
+ * it was allowed to try again. The net effect was an aircraft that picked target after target,
+ * never shot at any of them, and never spent the ammunition that would have sent it home.
+ * What bounds an aircraft is its ammunition, not distance.
+ */
+Bool AIAttackMove_leashBroken( Bool isHumanPlayer, Bool isAirborne, Real dx, Real dy, Int leashCells )
+{
+	if (!isHumanPlayer)
+		return FALSE;
+
+	if (isAirborne)
+		return FALSE;
+
+	return (dx*dx + dy*dy) > sqr(leashCells*PATHFIND_CELL_SIZE_F);
+}
+
+//----------------------------------------------------------------------------------------------------------
+/**
+ * True when the fight has pulled us off the attack move; see AIAttackMove_leashBroken above.
  */
 Bool AIAttackMoveToState::hasLeftTheLeash( void )
 {
@@ -3739,28 +3768,12 @@ Bool AIAttackMoveToState::hasLeftTheLeash( void )
 		return FALSE;
 
 	Object *owner = getMachineOwner();
-	if (owner->getControllingPlayer()->getPlayerType() != PLAYER_HUMAN)
-		return FALSE;
-
-	//
-	// Aircraft are not leashed. The leash keeps a ground unit from being walked off its attack move
-	// by a target that backs away, and it is measured from where the target was acquired - but an
-	// aircraft acquires out to its weapon range, which is far longer than the leash. It therefore
-	// broke the leash on the way in, every time, and disengaged before firing a shot; the
-	// requireProgressTowardGoal() that follows then flew it further down the path before it was
-	// allowed to try again. The net effect was an aircraft that picked target after target,
-	// never shot at any of them, and never ran its tanks dry enough to go home.
-	//
-	// What bounds an aircraft is its ammunition, not distance: it empties its load and JetAIUpdate
-	// takes it home to reload (and, since the attack move is a standing order, picks the order back
-	// up afterwards).
-	//
-	if (owner->isUsingAirborneLocomotor())
-		return FALSE;
-
-	Real dx = owner->getPosition()->x - m_engageOrigin.x;
-	Real dy = owner->getPosition()->y - m_engageOrigin.y;
-	return (dx*dx + dy*dy) > sqr(ATTACK_MOVE_LEASH_CELLS*PATHFIND_CELL_SIZE_F);
+	return AIAttackMove_leashBroken(
+						owner->getControllingPlayer()->getPlayerType() == PLAYER_HUMAN,
+						owner->isUsingAirborneLocomotor(),
+						owner->getPosition()->x - m_engageOrigin.x,
+						owner->getPosition()->y - m_engageOrigin.y,
+						ATTACK_MOVE_LEASH_CELLS );
 }
 
 //----------------------------------------------------------------------------------------------------------
