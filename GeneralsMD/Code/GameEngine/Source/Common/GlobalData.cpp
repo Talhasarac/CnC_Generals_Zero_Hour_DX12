@@ -1002,7 +1002,8 @@ GlobalData::GlobalData()
 	m_edgeScrollInWindowedMode = TRUE;
 	m_snapBuildPlacementTo45 = TRUE;
 	m_snapCameraRotateTo45 = TRUE;
-	m_middleMousePans = TRUE;
+	// middle-drag stays a rotate by default (it snaps to 45 degrees on release); pan is opt-in
+	m_middleMousePans = FALSE;
 	m_zoomToCursor = TRUE;
 	m_showHudOverlay = TRUE;
 	m_showPlacementRangeRing = TRUE;
