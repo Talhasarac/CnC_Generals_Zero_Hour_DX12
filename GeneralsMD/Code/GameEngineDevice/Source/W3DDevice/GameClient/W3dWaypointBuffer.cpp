@@ -188,7 +188,10 @@ void W3DWaypointBuffer::drawWaypoints(RenderInfoClass &rinfo)
 
 
 
-	if( TheInGameUI->isInWaypointMode() )
+	// AlwaysShowWaypointLines: retail only draws the queued path while the waypoint key is held,
+	// so you cannot see an order you already gave. With this on, any selected unit that still has
+	// a goal path left shows it.
+	if( TheInGameUI->isInWaypointMode() || TheGlobalData->m_alwaysShowWaypointLines )
 	{
 		//Create a default light environment with no lights and only full ambient.
 		//@todo: Fix later by copying default scene light environement from W3DScene.cpp.

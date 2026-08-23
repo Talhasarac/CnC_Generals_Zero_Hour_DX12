@@ -814,6 +814,24 @@ Bool OptionPreferences::getWorkersReturnToSupply(void)
 	return stricmp(it->second.str(), "yes") == 0;
 }
 
+Bool OptionPreferences::getAlwaysShowWaypointLines(void)
+{
+	OptionPreferences::const_iterator it = find("AlwaysShowWaypointLines");
+	if (it == end())
+		return TheGlobalData->m_alwaysShowWaypointLines;
+
+	return stricmp(it->second.str(), "yes") == 0;
+}
+
+Bool OptionPreferences::getDetailedBuildTooltips(void)
+{
+	OptionPreferences::const_iterator it = find("DetailedBuildTooltips");
+	if (it == end())
+		return TheGlobalData->m_detailedBuildTooltips;
+
+	return stricmp(it->second.str(), "yes") == 0;
+}
+
 Int OptionPreferences::getTextureReduction(void)
 {
 	OptionPreferences::const_iterator it = find("TextureReduction");

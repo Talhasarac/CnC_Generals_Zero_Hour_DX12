@@ -189,6 +189,8 @@ GlobalData* GlobalData::m_theOriginal = NULL;
 	{ "ShowHudOverlay",						INI::parseBool,				NULL,			offsetof( GlobalData, m_showHudOverlay ) },
 	{ "ShowPlacementRangeRing",		INI::parseBool,				NULL,			offsetof( GlobalData, m_showPlacementRangeRing ) },
 	{ "WorkersReturnToSupply",		INI::parseBool,				NULL,			offsetof( GlobalData, m_workersReturnToSupply ) },
+	{ "AlwaysShowWaypointLines",	INI::parseBool,				NULL,			offsetof( GlobalData, m_alwaysShowWaypointLines ) },
+	{ "DetailedBuildTooltips",		INI::parseBool,				NULL,			offsetof( GlobalData, m_detailedBuildTooltips ) },
 	{ "MinCameraHeight",						INI::parseReal,				NULL,			offsetof( GlobalData, m_minCameraHeight ) },
 	{ "TerrainHeightAtEdgeOfMap",					INI::parseReal,				NULL,			offsetof( GlobalData, m_terrainHeightAtEdgeOfMap ) },
 	{ "UnitDamagedThreshold",				INI::parseReal,				NULL,			offsetof( GlobalData, m_unitDamagedThresh ) },
@@ -998,6 +1000,8 @@ GlobalData::GlobalData()
 	m_showHudOverlay = FALSE;
 	m_showPlacementRangeRing = FALSE;
 	m_workersReturnToSupply = FALSE;
+	m_alwaysShowWaypointLines = FALSE;
+	m_detailedBuildTooltips = FALSE;
 	
 	m_animateWindows = TRUE;
 	

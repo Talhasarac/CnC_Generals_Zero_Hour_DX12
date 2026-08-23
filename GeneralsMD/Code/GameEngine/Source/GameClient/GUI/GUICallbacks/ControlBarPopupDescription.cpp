@@ -93,6 +93,7 @@
 #include "GameLogic/ScriptEngine.h"
 
 #include "GameNetwork/NetworkInterface.h"
+#include "GameLogic/Weapon.h"		// WeaponTemplate/WeaponBonus for the detailed build tooltip
 #ifdef _INTERNAL
 // for occasional debugging...
 //#pragma optimize("", off)
@@ -411,6 +412,46 @@ void ControlBar::populateBuildTooltipLayout( const CommandButton *commandButton,
 			if( costToBuild > 0 )
 			{
 				cost.format( TheGameText->fetch("TOOLTIP:Cost"), costToBuild );
+			}
+
+			//
+			// DetailedBuildTooltips: retail tells you the price and nothing about what you get.
+			// Append build time, health, and the best weapon's range and damage, all read off the
+			// template - there is no Object yet to ask.
+			//
+			if( TheGlobalData->m_detailedBuildTooltips )
+			{
+				UnicodeString stats;
+				Int buildSecs = thingTemplate->calcTimeToBuild( player ) / LOGICFRAMES_PER_SECOND;
+				stats.format( L"\nTime %ds", buildSecs );
+
+				// no bonuses: these are the template's own numbers, before veterancy or upgrades
+				WeaponBonus noBonus;
+				Real bestRange = 0.0f;
+				Real bestDamage = 0.0f;
+				const WeaponTemplateSet *wts = thingTemplate->findWeaponTemplateSet( WeaponSetFlags() );
+				if( wts )
+				{
+					for( Int ws = PRIMARY_WEAPON; ws < WEAPONSLOT_COUNT; ++ws )
+					{
+						const WeaponTemplate *wt = wts->getNth( (WeaponSlotType)ws );
+						if( wt == NULL )
+							continue;
+						if( wt->getUnmodifiedAttackRange() > bestRange )
+							bestRange = wt->getUnmodifiedAttackRange();
+						if( wt->getPrimaryDamage( noBonus ) > bestDamage )
+							bestDamage = wt->getPrimaryDamage( noBonus );
+					}
+				}
+
+				if( bestDamage > 0.0f )
+				{
+					UnicodeString weap;
+					weap.format( L"   Dmg %d   Range %d", REAL_TO_INT( bestDamage ), REAL_TO_INT( bestRange ) );
+					stats.concat( weap );
+				}
+
+				descrip.concat( stats );
 			}
 
 			// ask each prerequisite to give us a list of the non satisfied prerequisites

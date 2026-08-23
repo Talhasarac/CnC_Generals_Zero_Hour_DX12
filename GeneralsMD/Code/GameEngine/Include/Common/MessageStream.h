@@ -247,6 +247,9 @@ public:
 		MSG_META_SHORTCUT_SLOT06,   ///< press general's power shortcut bar slot 06
 		MSG_META_SHORTCUT_SLOT07,   ///< press general's power shortcut bar slot 07
 		MSG_META_SHORTCUT_SLOT08,   ///< press general's power shortcut bar slot 08
+		MSG_META_SHORTCUT_SLOT09,   ///< press general's power shortcut bar slot 09 (fork: the bar holds 11)
+		MSG_META_SHORTCUT_SLOT10,   ///< press general's power shortcut bar slot 10 (fork)
+		MSG_META_SHORTCUT_SLOT11,   ///< press general's power shortcut bar slot 11 (fork)
 		MSG_META_VIEW_COMMAND_CENTER,								///< center view on command center
 		MSG_META_VIEW_LAST_RADAR_EVENT,							///< center view on last radar event
 		MSG_META_SELECT_HERO,                       ///< selects player's hero character, if exists...

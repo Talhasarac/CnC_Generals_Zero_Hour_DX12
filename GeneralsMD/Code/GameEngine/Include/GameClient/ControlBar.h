@@ -836,7 +836,6 @@ protected:
 	void evaluateContextUI( void );
 
 	/// add the common commands of this drawable to the common command set
-	void addCommonCommands( Drawable *draw, Bool firstDrawable );
 
 	/// switch the interface context to the new mode and populate as needed
 	void switchToContext( ControlBarContext context, Drawable *draw );
@@ -858,7 +857,6 @@ protected:
 	void postProcessCommands( void );
 
 	// the following methods are for resetting data for vaious contexts
-	void resetCommonCommandData( void );	/// reset shared command data
 	void resetContainData( void );			/// reset container data we use to tie controls to objects IDs for containment
 	void resetBuildQueueData( void );			/// reset the build queue data we use to die queue entires to control
 	void resetBuildQueueButtons( void );	/// attach the queue button windows and wipe them to empty
@@ -875,7 +873,6 @@ protected:
 	void updateMultiSelectStrip( void );
 	void layoutMultiSelectTiles( Int count );		///< make sure count cells exist, laid out n x n over the right HUD
 	void cancelLastQueuedUnit( const ThingTemplate *thing );	///< right-click on a build button
-	void populateBuildQueue( Object *producer );
 	void populateStructureInventory( Object *building );
 	void populateBeacon( Object *beacon );
 	void populateUnderConstruction( Object *objectUnderConstruction );
@@ -961,7 +958,6 @@ protected:
 	GameWindow *m_specialPowerShortcutParent;
 
 	GameWindow *m_commandWindows[ MAX_COMMANDS_PER_SET ];			///< command window controls for easy access
-	const CommandButton *m_commonCommands[ MAX_COMMANDS_PER_SET ];	///< shared commands we will use for multi-selection
 
 	CommandButton *m_buildPageButton[ BUILD_PAGE_COUNT ];	///< the two menu buttons a paged builder opens on
 	CommandButton *m_buildPageBackButton;									///< takes a page back to the menu buttons

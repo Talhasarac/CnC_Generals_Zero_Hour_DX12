@@ -1032,11 +1032,6 @@ ControlBar::ControlBar( void )
 	m_animateDownWindow = NULL;
 	m_animTime = 0;
 
-	for( i = 0; i < MAX_COMMANDS_PER_SET; i++)
-	{
-		m_commonCommands[i] = 0;
-	}
-	
 	m_currContext = CB_CONTEXT_NONE;
 	m_defaultControlBarPosition.x = m_defaultControlBarPosition.y = 0;
 	m_genStarFlash = FALSE;
@@ -4142,7 +4137,11 @@ void ControlBar::drawSpecialPowerShortcutMultiplierText()
 		// the button's text: the key that presses it (SHORTCUT_SLOTnn, F1..), then how many
 		// of its superweapons are ready - a "1" is superfluous (Lorenzen)
 		UnicodeString text;
-		if( i < 8 )
+		// the bar holds MAX_SPECIAL_POWER_SHORTCUTS buttons, but only eight SHORTCUT_SLOT meta
+		// events existed, so slots 9-11 could never be labelled or bound. They have events now;
+		// whether they carry a key is up to CommandMap.ini, and getMetaKeyLabel returns empty
+		// for an unbound one.
+		if( i < MAX_SPECIAL_POWER_SHORTCUTS )
 			text = getMetaKeyLabel( (GameMessage::Type)(GameMessage::MSG_META_SHORTCUT_SLOT01 + i) );
 
 		const SpecialPowerTemplate *spTemplate = command->getSpecialPowerTemplate();

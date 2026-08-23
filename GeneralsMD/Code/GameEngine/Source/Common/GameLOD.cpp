@@ -373,6 +373,8 @@ void GameLODManager::init(void)
 	TheWritableGlobalData->m_showHudOverlay = optionPref.getShowHudOverlay();
 	TheWritableGlobalData->m_showPlacementRangeRing = optionPref.getShowPlacementRangeRing();
 	TheWritableGlobalData->m_workersReturnToSupply = optionPref.getWorkersReturnToSupply();
+	TheWritableGlobalData->m_alwaysShowWaypointLines = optionPref.getAlwaysShowWaypointLines();
+	TheWritableGlobalData->m_detailedBuildTooltips = optionPref.getDetailedBuildTooltips();
 
 	setStaticLODLevel(userSetDetail);
 }

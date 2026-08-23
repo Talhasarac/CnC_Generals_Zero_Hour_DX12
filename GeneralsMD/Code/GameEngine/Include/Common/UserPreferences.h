@@ -117,6 +117,8 @@ public:
 	Bool getShowHudOverlay(void);
 	Bool getShowPlacementRangeRing(void);
 	Bool getWorkersReturnToSupply(void);
+	Bool getAlwaysShowWaypointLines(void);
+	Bool getDetailedBuildTooltips(void);
 	Int	 getTextureReduction(void);
 	void getResolution(Int *xres, Int *yres);
 	Bool get3DShadowsEnabled(void);

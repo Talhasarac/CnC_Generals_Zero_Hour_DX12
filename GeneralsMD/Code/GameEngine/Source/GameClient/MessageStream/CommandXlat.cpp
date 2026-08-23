@@ -2638,6 +2638,9 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 		case GameMessage::MSG_META_SHORTCUT_SLOT06:
 		case GameMessage::MSG_META_SHORTCUT_SLOT07:
 		case GameMessage::MSG_META_SHORTCUT_SLOT08:
+		case GameMessage::MSG_META_SHORTCUT_SLOT09:
+		case GameMessage::MSG_META_SHORTCUT_SLOT10:
+		case GameMessage::MSG_META_SHORTCUT_SLOT11:
 		{
 			// the general's power shortcut bar, one key per visible button
 			TheControlBar->pressSpecialPowerShortcut( t - GameMessage::MSG_META_SHORTCUT_SLOT01 );
