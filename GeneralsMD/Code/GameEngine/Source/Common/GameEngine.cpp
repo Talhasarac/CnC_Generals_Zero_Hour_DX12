@@ -907,25 +907,11 @@ void GameEngine::execute( void )
 			}	// perf
 
 			{
-				// In a real game rendering runs uncapped - game speed stays constant because
-				// the logic tick is paced by wall clock inside update(). The menus/shell keep
-				// the original coupled cadence: their window animations step once per loop
-				// iteration and were tuned for m_maxFPS, and capping here also keeps the
-				// present queue short so the cursor stays responsive.
-				// Unconditional in menus - the window animations move a fixed step per loop
-				// iteration, so an uncapped menu makes them finish instantly after their
-				// wall-clock start delay ("wait, then pop") whatever m_useFpsLimit says.
-				Bool inMenus = !TheGameLogic->isInGame() || TheGameLogic->isInShellGame();
-				if (inMenus && m_maxFPS > 0)
-				{
-					DWORD limit = (DWORD)(1000.0f/m_maxFPS)-1;
-					DWORD now = timeGetTime();
-					while ((now - prevLoopTime) < limit)
-					{
-						::Sleep(1);
-						now = timeGetTime();
-					}
-				}
+				// Rendering runs uncapped everywhere now, menus included. Game speed stays
+				// constant because the logic tick is paced by wall clock inside update(), and the
+				// menus no longer need a capped loop either: AnimateWindowManager::update paces
+				// its own stepping off the wall clock, so the window animations keep the cadence
+				// they were tuned for however fast the loop runs.
 				prevLoopTime = timeGetTime();
 
 		#if defined(_DEBUG) || defined(_INTERNAL)

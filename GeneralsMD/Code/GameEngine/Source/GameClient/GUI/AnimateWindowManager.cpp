@@ -132,6 +132,8 @@ AnimateWindowManager::AnimateWindowManager( void )
 	m_winList.clear();
 	m_needsUpdate = FALSE;
 	m_reverse = FALSE;
+	m_lastStepMs = 0;
+	m_stepAccumMs = 0.0f;
 	m_winMustFinishList.clear();
 }
 AnimateWindowManager::~AnimateWindowManager( void )
@@ -166,6 +168,8 @@ void AnimateWindowManager::init( void )
 	clearWinList(m_winMustFinishList);
 	m_needsUpdate = FALSE;
 	m_reverse = FALSE;
+	m_lastStepMs = 0;
+	m_stepAccumMs = 0.0f;
 }
 
 void AnimateWindowManager::reset( void )
@@ -175,11 +179,35 @@ void AnimateWindowManager::reset( void )
 	clearWinList(m_winMustFinishList);
 	m_needsUpdate = FALSE;
 	m_reverse = FALSE;
+	m_lastStepMs = 0;
+	m_stepAccumMs = 0.0f;
 }
 
 void AnimateWindowManager::update( void )
 {
-	
+	//
+	// Every animation below advances a fixed step per call, and they were tuned back when the
+	// menus were held to a capped frame rate. Rendering is uncapped now, so pace the stepping off
+	// the wall clock at that same rate instead - otherwise a menu animation covers its whole
+	// travel in a handful of milliseconds and appears to snap into place.
+	//
+	const Real WINDOW_ANIM_STEPS_PER_SEC = 30.0f;
+	const Real msPerStep = 1000.0f / WINDOW_ANIM_STEPS_PER_SEC;
+
+	UnsignedInt nowMs = timeGetTime();
+	if (m_lastStepMs == 0)
+		m_lastStepMs = nowMs;
+
+	Real elapsedMs = (Real)(nowMs - m_lastStepMs);
+	m_lastStepMs = nowMs;
+	if (elapsedMs > msPerStep)
+		elapsedMs = msPerStep;		// never burst several steps after a stall
+
+	m_stepAccumMs += elapsedMs;
+	if (m_stepAccumMs < msPerStep)
+		return;
+	m_stepAccumMs -= msPerStep;
+
 	ProcessAnimateWindow *processAnim = NULL;
 
 	// if we need to update the windows that need to finish, update that list
