@@ -234,6 +234,7 @@ public:
 	WeaponSlotType getCurWeaponSlot() const { return m_curWeapon; }
 	Weapon* findWaypointFollowingCapableWeapon();
 	const Weapon* findAmmoPipShowingWeapon() const;
+	const Weapon* findReturnToBaseToReloadWeapon() const;	///< for the always-on aircraft ammo display
 	void weaponSetOnWeaponBonusChange(const Object *source);
 	UnsignedInt getMostPercentReadyToFireAnyWeapon() const;
 	inline UnsignedInt getNthCommandSourceMask( WeaponSlotType n ) const { return m_curWeaponTemplateSet ? m_curWeaponTemplateSet->getNthCommandSourceMask( n ) : NULL; } 

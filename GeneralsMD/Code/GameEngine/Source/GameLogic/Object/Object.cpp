@@ -1429,6 +1429,15 @@ Bool Object::getAmmoPipShowingInfo(Int& numTotal, Int& numFull) const
 {
 /// @todo srj -- may need to cache this inside weaponset.
 	const Weapon* w = m_weaponSet.findAmmoPipShowingWeapon();
+
+	//
+	// An aircraft that has to fly home to reload shows its load whether or not the weapon sets
+	// ShowsAmmoPips: knowing how many passes are left before it leaves is the whole point of
+	// watching it, and most of those weapons never set the flag.
+	//
+	if (w == NULL && isKindOf(KINDOF_AIRCRAFT))
+		w = m_weaponSet.findReturnToBaseToReloadWeapon();
+
 	if (w)
 	{
 		numTotal = w->getClipSize();

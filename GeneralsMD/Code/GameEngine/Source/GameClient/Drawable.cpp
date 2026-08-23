@@ -2886,9 +2886,16 @@ void Drawable::drawAmmo( const IRegion2D *healthBarRegion )
 {
 	const Object *obj = getObject();			
 
+	//
+	// Our own aircraft show their load all the time, not just while selected or under the cursor:
+	// how many passes a flight has left decides whether you commit it or let it go home, and you
+	// cannot be selecting it while you watch it fly.
+	//
+	const Bool alwaysShow = obj->isKindOf(KINDOF_AIRCRAFT);
+
 	if (!(
 				TheGlobalData->m_showObjectHealth && 
-				(isSelected() || (TheInGameUI && (TheInGameUI->getMousedOverDrawableID() == getID()))) &&
+				(alwaysShow || isSelected() || (TheInGameUI && (TheInGameUI->getMousedOverDrawableID() == getID()))) &&
 				obj->getControllingPlayer() == ThePlayerList->getLocalPlayer()
 			))
 		return;

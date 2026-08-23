@@ -1025,6 +1025,23 @@ const Weapon* WeaponSet::findAmmoPipShowingWeapon() const
 }
 
 //-------------------------------------------------------------------------------------------------
+/** The first weapon that has to return to base to reload, so an aircraft can show its remaining
+	* passes even when the weapon never sets ShowsAmmoPips. */
+//-------------------------------------------------------------------------------------------------
+const Weapon* WeaponSet::findReturnToBaseToReloadWeapon() const
+{
+	for( Int i = 0; i < WEAPONSLOT_COUNT;	i++ )
+	{
+		const Weapon *weapon = m_weapons[ i ];
+		if (weapon && weapon->getReloadType() == RETURN_TO_BASE_TO_RELOAD)
+		{
+			return weapon;
+		}
+	}
+	return NULL;
+}
+
+//-------------------------------------------------------------------------------------------------
 Weapon* WeaponSet::findWaypointFollowingCapableWeapon()
 {
 	for( Int i = WEAPONSLOT_COUNT - 1; i >= PRIMARY_WEAPON; i-- )
