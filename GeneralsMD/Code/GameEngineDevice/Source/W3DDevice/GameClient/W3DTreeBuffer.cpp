@@ -71,6 +71,7 @@ enum
 #include "GameLogic/Object.h"
 #include "GameLogic/PartitionManager.h"
 #include "GameClient/ClientRandomValue.h"
+#include "GameClient/GameClient.h"		// logic-frame gate for the sway phase
 #include "GameClient/FXList.h"
 #include "W3DDevice/GameClient/TerrainTex.h"
 #include "W3DDevice/GameClient/HeightMap.h"
@@ -1121,6 +1122,7 @@ W3DTreeBuffer::W3DTreeBuffer(void)
 	allocateTreeBuffers();
 	m_initialized = true;
 	m_curSwayVersion = -1;
+	m_lastSwayFrame = 0xffffffff;	// so the first drawTrees always steps
 
 	m_shadow = NULL;
 
@@ -1563,9 +1565,21 @@ void W3DTreeBuffer::drawTrees(CameraClass * camera, RefRenderObjListIterator *pD
 			updateSway(info);
 		}		
 	}
+
+	//
+	// m_curSwayStep is a per-LOGIC-frame increment, but drawTrees runs once per RENDER frame, so
+	// with rendering uncapped the trees swayed at (fps/30)x speed. Advance the phase only when
+	// the logic frame changed; the interpolation below still runs every render frame.
+	//
+	UnsignedInt swayNow = TheGameClient ? TheGameClient->getFrame() : 0;
+	Bool stepSway = !pause && (swayNow != m_lastSwayFrame);
+	if (stepSway) {
+		m_lastSwayFrame = swayNow;
+	}
+
 	Vector3 swayFactor[MAX_SWAY_TYPES];
 	for (i=0; i<MAX_SWAY_TYPES; i++) {
-		if (!pause) {
+		if (stepSway) {
 			m_curSwayOffset[i] += m_curSwayStep[i];
 			if (m_curSwayOffset[i] > NUM_SWAY_ENTRIES-1) {
 				m_curSwayOffset[i] -= NUM_SWAY_ENTRIES-1;

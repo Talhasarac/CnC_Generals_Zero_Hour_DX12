@@ -252,6 +252,7 @@ private:
 	Int			m_curSwayVersion;
 
 	Real		m_curSwayOffset[MAX_SWAY_TYPES];
+	UnsignedInt	m_lastSwayFrame;		///< last logic frame the sway was stepped on (drawTrees runs per render frame)
 	Real		m_curSwayStep[MAX_SWAY_TYPES];
 	Real		m_curSwayFactor[MAX_SWAY_TYPES];
 

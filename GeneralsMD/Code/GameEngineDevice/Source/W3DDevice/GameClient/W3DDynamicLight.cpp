@@ -28,6 +28,7 @@
 #include <stdlib.h>
 
 #include "W3DDevice/GameClient/W3DDynamicLight.h"
+#include "GameClient/GameClient.h"		// for the logic-frame gate in On_Frame_Update
 
 W3DDynamicLight::W3DDynamicLight(void):
 LightClass(LightClass::POINT)
@@ -35,6 +36,7 @@ LightClass(LightClass::POINT)
 
 	m_priorEnable = false;
 	m_enabled = true;
+	m_lastFadeFrame = 0xffffffff;	// so the first On_Frame_Update always steps
 
 }
 
@@ -47,6 +49,18 @@ void W3DDynamicLight::On_Frame_Update(void)
 	if (!m_enabled) {
 		return;
 	}
+
+	//
+	// m_curIncreaseFrameCount/m_curDecayFrameCount are LOGIC frame counts, but this is called
+	// once per RENDER frame from RTS3DScene::Customized_Render. With rendering uncapped that
+	// made muzzle flashes and explosion lights fade at (fps/30)x speed. Step once per logic frame.
+	//
+	UnsignedInt now = TheGameClient ? TheGameClient->getFrame() : 0;
+	if (now == m_lastFadeFrame) {
+		return;
+	}
+	m_lastFadeFrame = now;
+
 	Real factor = 1.0f;
 	if (m_curIncreaseFrameCount>0 && m_increaseFrameCount>0) {
 		// increasing 

@@ -63,6 +63,10 @@ protected:
 	Vector3 m_targetAmbient;
 	Vector3 m_targetDiffuse;
 
+	/// last client frame we stepped the fade counters on; these count LOGIC frames, and
+	/// On_Frame_Update is driven once per RENDER frame.
+	UnsignedInt m_lastFadeFrame;
+
 
 public:
 	W3DDynamicLight();
