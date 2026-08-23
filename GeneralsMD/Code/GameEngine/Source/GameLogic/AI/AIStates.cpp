@@ -3658,6 +3658,22 @@ void AIAttackMoveToState::onExit( StateExitType status )
  * from a standstill: the only movement allowed while it is engaged belongs to the attack machine's
  * own approach, which stops the moment the weapon is in range.
  */
+/**
+ * Rounds left across every weapon. Used to tell a firing pass from a failed approach: a unit that
+ * spent ammunition engaged for real, however briefly.
+ */
+static Int countRemainingAmmo( const Object *obj )
+{
+	Int total = 0;
+	for( Int i = 0; i < WEAPONSLOT_COUNT; i++ )
+	{
+		const Weapon *w = obj->getWeaponInWeaponSlot((WeaponSlotType)i);
+		if( w )
+			total += w->getRemainingAmmo();
+	}
+	return total;
+}
+
 void AIAttackMoveToState::startEngaging( Object *victim )
 {
 	Object *owner = getMachineOwner();
@@ -3678,6 +3694,7 @@ void AIAttackMoveToState::startEngaging( Object *victim )
 	m_engageOrigin = *owner->getPosition();
 	m_victimID = victim->getID();
 	m_engageStartFrame = TheGameLogic->getFrame();
+	m_ammoAtEngage = countRemainingAmmo( owner );
 	m_chaseWasAllowed = ai->isAllowedToChase();
 	m_isEngaging = TRUE;
 
@@ -3688,15 +3705,6 @@ void AIAttackMoveToState::startEngaging( Object *victim )
 	if (owner->getControllingPlayer()->getPlayerType() == PLAYER_HUMAN)
 		ai->setAllowedToChase(TRUE);
 
-	// TEMPORARY JETPROBE - remove once the aircraft attack move is confirmed in game
-	DEBUG_LOG(("JETPROBE %d engage: '%s' air=%d human=%d -> victim '%s' dist=%.0f\n",
-						 TheGameLogic->getFrame(),
-						 owner->getTemplate()->getName().str(),
-						 owner->isUsingAirborneLocomotor() ? 1 : 0,
-						 owner->getControllingPlayer()->getPlayerType() == PLAYER_HUMAN ? 1 : 0,
-						 victim->getTemplate()->getName().str(),
-						 (Real)sqrt(sqr(owner->getPosition()->x - victim->getPosition()->x) +
-												sqr(owner->getPosition()->y - victim->getPosition()->y))));
 
 	m_attackMoveMachine->setGoalObject(victim);
 	// Note that we picked up this command from the ai.  This is set *before* the state change so
@@ -3731,17 +3739,20 @@ void AIAttackMoveToState::stopEngaging( void )
 	UnsignedInt now = TheGameLogic->getFrame();
 	Object *victim = TheGameLogic->findObjectByID(m_victimID);
 
-	// TEMPORARY JETPROBE - remove once the aircraft attack move is confirmed in game
-	DEBUG_LOG(("JETPROBE %d disengage: '%s' air=%d after %d frames, victim %s, flew %.0f\n",
-						 now,
-						 owner->getTemplate()->getName().str(),
-						 owner->isUsingAirborneLocomotor() ? 1 : 0,
-						 now - m_engageStartFrame,
-						 victim ? (victim->isEffectivelyDead() ? "DEAD" : "alive") : "gone",
-						 (Real)sqrt(sqr(owner->getPosition()->x - m_engageOrigin.x) +
-												sqr(owner->getPosition()->y - m_engageOrigin.y))));
 
-	if (victim && !victim->isEffectivelyDead() && now - m_engageStartFrame < ATTACK_MOVE_DUD_ENGAGE_FRAMES)
+	//
+	// A fight that ended quickly with the victim still standing is normally one we could not touch
+	// - unreachable, unattackable, out of ammo - and we move on for a moment rather than pick the
+	// same target straight back up. But "quickly" is a ground unit's measure. An aircraft's whole
+	// firing pass takes a handful of frames and routinely leaves the target alive, so every
+	// successful pass was being read as a failure and charged a re-acquire delay, which is exactly
+	// backwards when what you want is the load spent as fast as possible.
+	//
+	// So ask whether we actually shot instead of how long we stood there.
+	//
+	Bool firedAtIt = countRemainingAmmo( owner ) < m_ammoAtEngage;
+	if (victim && !victim->isEffectivelyDead() && !firedAtIt &&
+			now - m_engageStartFrame < ATTACK_MOVE_DUD_ENGAGE_FRAMES)
 	{
 		// we could not touch it (unreachable, cannot attack it, out of ammo) - move on for a second.
 		m_frameToScanOn = now + ATTACK_MOVE_REACQUIRE_DELAY;
@@ -3845,9 +3856,6 @@ StateReturnType AIAttackMoveToState::update()
 	JetAIUpdate *jetAI = ai->getJetAIUpdate();
 	if( jetAI && jetAI->isOutOfSpecialReloadAmmo() )
 	{
-		// TEMPORARY JETPROBE - remove once the aircraft attack move is confirmed in game
-		DEBUG_LOG(("JETPROBE %d OUT OF AMMO: '%s' returning to reload\n", TheGameLogic->getFrame(),
-							 owner->getTemplate()->getName().str()));
 
 		//We need to return to base to reload!
 		return STATE_SUCCESS;
@@ -3857,10 +3865,6 @@ StateReturnType AIAttackMoveToState::update()
 	{
 		if (hasLeftTheLeash())
 		{
-			// TEMPORARY JETPROBE - remove once the aircraft attack move is confirmed in game
-			DEBUG_LOG(("JETPROBE %d LEASH BROKE for '%s' air=%d\n", TheGameLogic->getFrame(),
-								 owner->getTemplate()->getName().str(),
-								 owner->isUsingAirborneLocomotor() ? 1 : 0));
 
 			// the victim is walking us off the attack move - let it go and get back on the path.
 			m_attackMoveMachine->setState( AI_IDLE );

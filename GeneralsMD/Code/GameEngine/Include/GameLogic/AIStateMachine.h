@@ -589,6 +589,8 @@ public:
 #endif
 
 protected:
+	Int m_ammoAtEngage;			///< rounds we had when the fight started, to tell a firing pass from a failed approach
+
 	enum {ATTACK_RETRY_COUNT=5};
 	enum {ATTACK_CLOSE_ENOUGH_CELLS=8};
 	enum {ATTACK_MOVE_SCAN_RATE=10};						///< frames between target scans (the idle mood clock is seconds apart)
