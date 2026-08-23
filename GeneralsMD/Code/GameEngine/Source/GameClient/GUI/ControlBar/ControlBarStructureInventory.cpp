@@ -74,6 +74,12 @@ void ControlBar::populateButtonProc( Object *obj, void *userData )
 										 ("Too many objects inside '%s' for the inventory buttons to hold",
 											info->source->getTemplate()->getName().str()) );
 
+	// ...and actually stop. In release the assert is gone, so a container holding more than
+	// MAX_STRUCTURE_INVENTORY_BUTTONS occupants wrote past m_containData and repainted the
+	// STOP/EVACUATE buttons that sit right after the inventory slots.
+	if( info->buttonIndex >= MAX_STRUCTURE_INVENTORY_BUTTONS )
+		return;
+
 	// put object in inventory data
 	info->self->m_containData[ info->buttonIndex ].control = info->inventoryButtons[ info->buttonIndex ];
 	info->self->m_containData[ info->buttonIndex ].objectID = obj->getID();

@@ -1004,7 +1004,9 @@ void ControlBarSchemeManager::preloadAssets( TimeOfDay timeOfDay )
 
 		if (CBScheme->m_rightHUDImage)
 		{
-			TheDisplay->preloadTextureAssets(CBScheme->m_buttonQueueImage->getFilename());
+			// was preloading m_buttonQueueImage here (copy-paste), which also meant a NULL deref
+			// for a scheme that sets RightHUD but no button queue image.
+			TheDisplay->preloadTextureAssets(CBScheme->m_rightHUDImage->getFilename());
 		}
 
 		for (Int layer = 0; layer < MAX_CONTROL_BAR_SCHEME_IMAGE_LAYERS; ++layer)
@@ -1063,8 +1065,10 @@ void ControlBarSchemeManager::setControlBarScheme(AsciiString schemeName)
 	if(tempScheme)
 	{
 		// setup the multiplyer value
-		m_multiplyer.x = TheDisplay->getWidth() / tempScheme->m_ScreenCreationRes.x;
-		m_multiplyer.y = TheDisplay->getHeight() / tempScheme->m_ScreenCreationRes.y;
+		// (cast like the sibling below: this was an Int/Int divide, so any resolution that is not
+		// an exact multiple of the scheme's authoring resolution scaled by 1.0 or 0.)
+		m_multiplyer.x = TheDisplay->getWidth() / (Real)tempScheme->m_ScreenCreationRes.x;
+		m_multiplyer.y = TheDisplay->getHeight() / (Real)tempScheme->m_ScreenCreationRes.y;
 		m_currentScheme = tempScheme;
 	}
 	else

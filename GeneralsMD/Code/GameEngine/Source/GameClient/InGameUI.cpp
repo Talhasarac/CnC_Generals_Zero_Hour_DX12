@@ -1654,11 +1654,18 @@ void InGameUI::update( void )
 	// frame
 	//
 	UnsignedInt currLogicFrame = TheGameLogic->getFrame();
-	const int messageTimeout = m_messageDelayMS / LOGICFRAMES_PER_SECOND / 1000;
+	// ms -> logic frames. This used to divide by LOGICFRAMES_PER_SECOND instead of multiplying and
+	// then divide by 1000 again, so with the shipped MessageDelayMS (~5000) it was 5000/30 = 166,
+	// 166/1000 = 0 - every UI message started fading on the frame it was posted.
+	const int messageTimeout = m_messageDelayMS * LOGICFRAMES_PER_SECOND / 1000;
 	UnsignedByte r, g, b, a;
 	Int amount;
 	for( i = MAX_UI_MESSAGES - 1; i >= 0; i-- )
 	{
+		// removeMessageAtIndex NULLs displayString; without this empty slots counted as expired
+		// every frame and were re-cleared forever.
+		if( m_uiMessages[ i ].displayString == NULL )
+			continue;
 
 		if( currLogicFrame - m_uiMessages[ i ].timestamp > messageTimeout )
 		{
@@ -1692,6 +1699,12 @@ void InGameUI::update( void )
 		// if the timeis frozen by a script, then we still want the text to display
 		if(TheScriptEngine->isTimeFrozenScript())
 		{
+			// NOTE: these are LOGIC-frame counters decremented to fake time passing while the
+			// logic clock is frozen, but InGameUI::update runs once per RENDER frame - so with
+			// rendering uncapped they run down (fps/30)x too fast and cutscene subtitles expire
+			// early. Not gated on the logic frame here because the logic frame is exactly what is
+			// NOT advancing during a script freeze; the fix needs a wall-clock 30Hz source and an
+			// in-game cutscene to verify. See FINDINGS.md 7.2.
 			m_militarySubtitle->lifetime--;
 			m_militarySubtitle->blockBeginFrame--;
 			m_militarySubtitle->incrementOnFrame--;
@@ -1750,6 +1763,13 @@ void InGameUI::update( void )
 					else
 					{
 						// if we've exceeded the allocated number of display strings, this will force us to essentially truncate the remaining text
+						//
+						// roll the index back to the last real line. It used to be left at
+						// MAX_SUBTITLE_LINES, and displayStrings only has that many entries, so the
+						// draw loops (which run i <= currentDisplayString) read displayStrings[4]
+						// and removeMilitarySubtitle then freed that out-of-bounds pointer.
+						//
+						m_militarySubtitle->currentDisplayString = MAX_SUBTITLE_LINES - 1;
 						m_militarySubtitle->index = m_militarySubtitle->subtitle.getLength();
 						DEBUG_CRASH(("You're Only Allowed to use %d lines of subtitle text\n",MAX_SUBTITLE_LINES));
 					}
@@ -2026,8 +2046,11 @@ void InGameUI::message( AsciiString stringManagerLabel, ... )
 	va_list args;
   va_start( args, stringManagerLabel );
 	WideChar buf[ UnicodeString::MAX_FORMAT_BUF_LEN ];
+  // truncate rather than throw: an uncaught engine exception aborts with 0xC0000409 and no log
+  // at all, so an over-long chat or script message used to be a silent hard crash.
   if( _vsnwprintf(buf, sizeof( buf )/sizeof( WideChar ) - 1, stringManagerString.str(), args ) < 0 )
-			throw ERROR_OUT_OF_MEMORY;
+			DEBUG_LOG(("InGameUI::message - text truncated to %d characters\n", (Int)(sizeof( buf )/sizeof( WideChar ) - 1)));
+	buf[ sizeof( buf )/sizeof( WideChar ) - 1 ] = 0;
 	formattedMessage.set( buf );
   va_end(args);
 
@@ -2048,8 +2071,11 @@ void InGameUI::message( UnicodeString format, ... )
 	va_list args;
   va_start( args, format );
 	WideChar buf[ UnicodeString::MAX_FORMAT_BUF_LEN ];
+  // truncate rather than throw: an uncaught engine exception aborts with 0xC0000409 and no log
+  // at all, so an over-long chat or script message used to be a silent hard crash.
   if( _vsnwprintf(buf, sizeof( buf )/sizeof( WideChar ) - 1, format.str(), args ) < 0 )
-			throw ERROR_OUT_OF_MEMORY;
+			DEBUG_LOG(("InGameUI::message - text truncated to %d characters\n", (Int)(sizeof( buf )/sizeof( WideChar ) - 1)));
+	buf[ sizeof( buf )/sizeof( WideChar ) - 1 ] = 0;
 	formattedMessage.set( buf );
   va_end(args);
 
@@ -2070,8 +2096,11 @@ void InGameUI::messageColor( const RGBColor *rgbColor, UnicodeString format, ...
 	va_list args;
   va_start( args, format );
 	WideChar buf[ UnicodeString::MAX_FORMAT_BUF_LEN ];
+  // truncate rather than throw: an uncaught engine exception aborts with 0xC0000409 and no log
+  // at all, so an over-long chat or script message used to be a silent hard crash.
   if( _vsnwprintf(buf, sizeof( buf )/sizeof( WideChar ) - 1, format.str(), args ) < 0 )
-			throw ERROR_OUT_OF_MEMORY;
+			DEBUG_LOG(("InGameUI::message - text truncated to %d characters\n", (Int)(sizeof( buf )/sizeof( WideChar ) - 1)));
+	buf[ sizeof( buf )/sizeof( WideChar ) - 1 ] = 0;
 	formattedMessage.set( buf );
   va_end(args);
 

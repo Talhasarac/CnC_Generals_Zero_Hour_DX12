@@ -545,7 +545,9 @@ void ControlBar::populatePurchaseScience( Player* player )
 	}
 */
 	
-	win = TheWindowManager->winGetWindowFromId( m_contextParent[ CP_PURCHASE_SCIENCE ], TheNameKeyGenerator->nameToKey( "GeneralsExpPoints.wnd:ProgressBarExperience" ) );
+	// hash the name once, not on every render frame this panel is open
+	static const NameKeyType key_progressBarExperience = TheNameKeyGenerator->nameToKey( "GeneralsExpPoints.wnd:ProgressBarExperience" );
+	win = TheWindowManager->winGetWindowFromId( m_contextParent[ CP_PURCHASE_SCIENCE ], key_progressBarExperience );
 	if(win)
 	{
 		Int progress;
@@ -604,7 +606,9 @@ void ControlBar::updateContextPurchaseScience( void )
 {
 	GameWindow *win =NULL;
 	Player *player = ThePlayerList->getLocalPlayer();
-	win = TheWindowManager->winGetWindowFromId( m_contextParent[ CP_PURCHASE_SCIENCE ], TheNameKeyGenerator->nameToKey( "GeneralsExpPoints.wnd:ProgressBarExperience" ) );
+	// hash the name once, not on every render frame this panel is open
+	static const NameKeyType key_progressBarExperience = TheNameKeyGenerator->nameToKey( "GeneralsExpPoints.wnd:ProgressBarExperience" );
+	win = TheWindowManager->winGetWindowFromId( m_contextParent[ CP_PURCHASE_SCIENCE ], key_progressBarExperience );
 	if(win)
 	{
 		Int progress;
@@ -1588,7 +1592,8 @@ void ControlBar::update( void )
 
 
 
-	if( !m_buildToolTipLayout->isHidden())
+	// every other use of m_buildToolTipLayout is null-guarded; this one was not
+	if( m_buildToolTipLayout && !m_buildToolTipLayout->isHidden())
 	{
 		m_buildToolTipLayout->runUpdate();
 		m_showBuildToolTipLayout = FALSE;
@@ -1603,8 +1608,14 @@ void ControlBar::update( void )
 	// if we're an observer, don't do the complete update
 	if( m_isObserverCommandBar)
 	{
-		if((TheGameLogic->getFrame() % (LOGICFRAMES_PER_SECOND/2)) == 0)
+		// same per-render-frame retrigger as the flash above: once per logic frame is enough
+		static UnsignedInt s_lastObserverFrame = 0xffffffff;
+		const UnsignedInt observerNow = TheGameLogic->getFrame();
+		if( (observerNow % (LOGICFRAMES_PER_SECOND/2)) == 0 && observerNow != s_lastObserverFrame )
+		{
+			s_lastObserverFrame = observerNow;
 			populateObserverInfoWindow();
+		}
 
 		Drawable *drawToEvaluateFor = NULL;
 		Bool multiSelect = FALSE;
@@ -1628,6 +1639,17 @@ void ControlBar::update( void )
 	}
 		
 
+	//
+	// ControlBar::update runs once per RENDER frame, so a bare "getFrame() % 10 == 0" fires on
+	// every render frame that lands inside that one logic frame - the flash count then burned
+	// down several times per tick and the button stopped flashing early. Latch it to the frame.
+	//
+	static UnsignedInt s_lastFlashFrame = 0xffffffff;
+	const UnsignedInt flashNow = TheGameClient->getFrame();
+	const Bool flashTick = (flashNow % 10 == 0) && (flashNow != s_lastFlashFrame);
+	if( flashTick )
+		s_lastFlashFrame = flashNow;
+
 	// check flashing
 	if( m_flash )
 	{
@@ -1640,7 +1662,7 @@ void ControlBar::update( void )
 				const CommandButton *commandButton = (const CommandButton *)GadgetButtonGetData(button);
 				if( commandButton != NULL )
 				{
-					if( commandButton->getFlashCount() > 0 && TheGameClient->getFrame() % 10 == 0 )
+					if( commandButton->getFlashCount() > 0 && flashTick )
 					{
 						if( commandButton->getFlashCount() % 2 == 0 )
 						{

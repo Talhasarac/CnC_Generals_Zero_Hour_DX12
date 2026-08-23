@@ -126,6 +126,17 @@ void Keyboard::updateKeys( void )
 
 		}
 		while( m_keys[ index ].key == KEY_LOST );
+
+		//
+		// keep the terminator slot free. This loop had no bound at all against NUM_KEYS, so a
+		// burst of more than 256 events in one frame walked the write cursor off m_keys and
+		// straight into m_keyStatus, the very next member - silent key-state corruption.
+		//
+		if( index >= NUM_KEYS - 1 )
+		{
+			m_keys[ NUM_KEYS - 1 ].key = KEY_NONE;
+			break;
+		}
 	} 
 	while( m_keys[ index++ ].key != KEY_NONE );
 
@@ -227,11 +238,14 @@ Bool Keyboard::checkKeyRepeat( void )
 				m_keys[ index ].status = KeyboardIO::STATUS_UNUSED;
 
 				// Set End Flag
-				m_keys[ ++index ].key = KEY_NONE;
+				if( index + 1 < NUM_KEYS )
+					m_keys[ ++index ].key = KEY_NONE;
 			
-				// Set all keys as new to prevent multiple keys repeating
-				for( index = 0; index< NUM_KEYS; index++ )
-					m_keyStatus[ index ].sequence = m_inputFrame;
+				// Set all keys as new to prevent multiple keys repeating.
+				// (own counter: this loop used to reuse `index`, the live write cursor into
+				// m_keys, and only got away with it because of the break below.)
+				for( Int resetIndex = 0; resetIndex < NUM_KEYS; resetIndex++ )
+					m_keyStatus[ resetIndex ].sequence = m_inputFrame;
 
 				// Set repeated key so it will repeat again in two frames
 				m_keyStatus[ key ].sequence = m_inputFrame - (Keyboard::KEY_REPEAT_DELAY + 2);

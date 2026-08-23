@@ -100,9 +100,13 @@ GameMessageDisposition HotKeyTranslator::translateGameMessage(const GameMessage 
 		// the label hotkey is meant to be that click's equal. Ctrl and alt still block the hotkey.
 		if(newModState & ~SHIFT)
 			return disp;
-		WideChar key = TheKeyboard->getPrintableKey(msg->getArgument(0)->integer, 0);
+		// NUL-terminate it: UnicodeString::set() runs wcslen over what it is given, and this used
+		// to hand it a single un-terminated WideChar on the stack.
+		WideChar key[2];
+		key[0] = TheKeyboard->getPrintableKey(msg->getArgument(0)->integer, 0);
+		key[1] = 0;
 		UnicodeString uKey;
-		uKey.set(&key);
+		uKey.set(key);
 		AsciiString aKey;
 		aKey.translate(uKey);
 		if(TheHotKeyManager && TheHotKeyManager->executeHotKey(aKey))

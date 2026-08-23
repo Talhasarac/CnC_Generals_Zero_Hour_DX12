@@ -369,10 +369,14 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message,
             // Prevent moving/sizing and power loss in fullscreen mode
             switch( wParam )
             {
+                // a bare left Alt opens the system menu and its modal loop stalls the game, so
+                // swallow it in windowed mode too (Alt is also the waypoint modifier).
+                case SC_KEYMENU:
+                    return 1;
+
                 case SC_MOVE:
                 case SC_SIZE:
                 case SC_MAXIMIZE:
-                case SC_KEYMENU:
                 case SC_MONITORPOWER:
                     if( FALSE == ApplicationIsWindowed )
                         return 1;

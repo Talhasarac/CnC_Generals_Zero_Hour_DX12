@@ -370,8 +370,12 @@ GameMessageDisposition LookAtTranslator::translateGameMessage(const GameMessage 
 				for ( ;spin < 0; spin++ )
 					TheTacticalView->zoomOut();
 			}
+			break;	// without this the case fell into MSG_META_OPTIONS below and every wheel
+					// notch called stopScrolling(), killing zoom-while-panning and leaving
+					// m_isScrolling/m_scrollType torn.
 		}
-		
+
+
 		//-----------------------------------------------------------------------------
 		case GameMessage::MSG_META_OPTIONS:
 		{

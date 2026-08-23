@@ -720,6 +720,11 @@ Bool Radar::localPixelToRadar( const ICoord2D *pixel, ICoord2D *radar )
 	if( pixel == NULL || radar == NULL )
 		return FALSE;
 
+	// if we have no radar window can't do the conversion (m_radarWindow is NULL between maps and
+	// in the shell; the sibling screenPixelToWorld below has always checked this, this one did not)
+	if( m_radarWindow == NULL )
+		return FALSE;
+
 	// get window size of the radar
 	ICoord2D size;
 	m_radarWindow->winGetSize( &size.x, &size.y );
@@ -736,9 +741,11 @@ Bool Radar::localPixelToRadar( const ICoord2D *pixel, ICoord2D *radar )
 	Int scaledWidth = lr.x - ul.x;
 	Int scaledHeight = lr.y - ul.y;
 
-	// if the pixel is outsize of the adjusted radar area there are no logical coords
-	if( pixel->x < ul.x || pixel->x > lr.x ||
-			pixel->y < ul.y || pixel->y > lr.y )
+	// if the pixel is outsize of the adjusted radar area there are no logical coords.
+	// the upper bound is exclusive: at pixel->x == lr.x the conversion below yields exactly
+	// RADAR_CELL_WIDTH, one cell past the grid, and the caller maps it outside the map.
+	if( pixel->x < ul.x || pixel->x >= lr.x ||
+			pixel->y < ul.y || pixel->y >= lr.y )
 		return FALSE;
 
 	if( scaledWidth >= scaledHeight )

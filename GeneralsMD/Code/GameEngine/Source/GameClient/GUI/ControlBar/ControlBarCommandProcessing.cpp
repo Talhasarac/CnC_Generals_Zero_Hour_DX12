@@ -754,15 +754,20 @@ CBCommandStatus ControlBar::processCommandUI( GameWindow *control,
 		case GUI_COMMAND_EXIT_CONTAINER:
 		{
 			Int i;
-			ObjectID objID;
+			ObjectID objID = INVALID_ID;
 
 			//
 			// find the object ID that wants to exit by scanning through the transport data and looking
 			// for the matching control button
 			//
+			// (this used to run to the end of the array without breaking and without initializing
+			// objID, so a miss fed garbage to findObjectByID and then wrote one past m_containData)
 			for( i = 0; i < MAX_COMMANDS_PER_SET; i++ )
 				if( m_containData[ i ].control == control )
+				{
 					objID = m_containData[ i ].objectID;
+					break;
+				}
 
 			// get the actual object
 			Object *objWantingExit = TheGameLogic->findObjectByID( objID );
@@ -776,8 +781,11 @@ CBCommandStatus ControlBar::processCommandUI( GameWindow *control,
 				// cycle of the UI will repopulate any buttons as the contents of objects
 				// change so this is only an edge case that will be visually corrected next frame
 				//
-				m_containData[ i ].control = NULL;
-				m_containData[ i ].objectID = INVALID_ID;
+				if( i < MAX_COMMANDS_PER_SET )
+				{
+					m_containData[ i ].control = NULL;
+					m_containData[ i ].objectID = INVALID_ID;
+				}
 				break;  // exit case
 
 			}  // end if
