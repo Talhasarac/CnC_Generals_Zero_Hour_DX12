@@ -3688,6 +3688,16 @@ void AIAttackMoveToState::startEngaging( Object *victim )
 	if (owner->getControllingPlayer()->getPlayerType() == PLAYER_HUMAN)
 		ai->setAllowedToChase(TRUE);
 
+	// TEMPORARY JETPROBE - remove once the aircraft attack move is confirmed in game
+	DEBUG_LOG(("JETPROBE %d engage: '%s' air=%d human=%d -> victim '%s' dist=%.0f\n",
+						 TheGameLogic->getFrame(),
+						 owner->getTemplate()->getName().str(),
+						 owner->isUsingAirborneLocomotor() ? 1 : 0,
+						 owner->getControllingPlayer()->getPlayerType() == PLAYER_HUMAN ? 1 : 0,
+						 victim->getTemplate()->getName().str(),
+						 (Real)sqrt(sqr(owner->getPosition()->x - victim->getPosition()->x) +
+												sqr(owner->getPosition()->y - victim->getPosition()->y))));
+
 	m_attackMoveMachine->setGoalObject(victim);
 	// Note that we picked up this command from the ai.  This is set *before* the state change so
 	// that the approach and pursue states see the same command source on the frame they are entered
@@ -3720,6 +3730,17 @@ void AIAttackMoveToState::stopEngaging( void )
 
 	UnsignedInt now = TheGameLogic->getFrame();
 	Object *victim = TheGameLogic->findObjectByID(m_victimID);
+
+	// TEMPORARY JETPROBE - remove once the aircraft attack move is confirmed in game
+	DEBUG_LOG(("JETPROBE %d disengage: '%s' air=%d after %d frames, victim %s, flew %.0f\n",
+						 now,
+						 owner->getTemplate()->getName().str(),
+						 owner->isUsingAirborneLocomotor() ? 1 : 0,
+						 now - m_engageStartFrame,
+						 victim ? (victim->isEffectivelyDead() ? "DEAD" : "alive") : "gone",
+						 (Real)sqrt(sqr(owner->getPosition()->x - m_engageOrigin.x) +
+												sqr(owner->getPosition()->y - m_engageOrigin.y))));
+
 	if (victim && !victim->isEffectivelyDead() && now - m_engageStartFrame < ATTACK_MOVE_DUD_ENGAGE_FRAMES)
 	{
 		// we could not touch it (unreachable, cannot attack it, out of ammo) - move on for a second.
@@ -3824,6 +3845,10 @@ StateReturnType AIAttackMoveToState::update()
 	JetAIUpdate *jetAI = ai->getJetAIUpdate();
 	if( jetAI && jetAI->isOutOfSpecialReloadAmmo() )
 	{
+		// TEMPORARY JETPROBE - remove once the aircraft attack move is confirmed in game
+		DEBUG_LOG(("JETPROBE %d OUT OF AMMO: '%s' returning to reload\n", TheGameLogic->getFrame(),
+							 owner->getTemplate()->getName().str()));
+
 		//We need to return to base to reload!
 		return STATE_SUCCESS;
 	}
@@ -3832,6 +3857,11 @@ StateReturnType AIAttackMoveToState::update()
 	{
 		if (hasLeftTheLeash())
 		{
+			// TEMPORARY JETPROBE - remove once the aircraft attack move is confirmed in game
+			DEBUG_LOG(("JETPROBE %d LEASH BROKE for '%s' air=%d\n", TheGameLogic->getFrame(),
+								 owner->getTemplate()->getName().str(),
+								 owner->isUsingAirborneLocomotor() ? 1 : 0));
+
 			// the victim is walking us off the attack move - let it go and get back on the path.
 			m_attackMoveMachine->setState( AI_IDLE );
 			stopEngaging();

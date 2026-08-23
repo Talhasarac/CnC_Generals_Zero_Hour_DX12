@@ -1902,6 +1902,10 @@ UpdateSleepTime JetAIUpdate::update()
 			m_mostRecentCommand.reconstitute(parms);
 			setFlag(HAS_PENDING_COMMAND, false);
 
+			// TEMPORARY JETPROBE - remove once the aircraft attack move is confirmed in game
+			DEBUG_LOG(("JETPROBE %d RESUME after reload: '%s' cmd=%d\n", TheGameLogic->getFrame(),
+								 getObject()->getTemplate()->getName().str(), (Int)parms.m_cmd));
+
  			aiDoCommand(&parms);
 		}
 		else if (m_returnToBaseFrame != 0 && now >= m_returnToBaseFrame && getFlag(ALLOW_AIR_LOCO))
@@ -1927,6 +1931,10 @@ UpdateSleepTime JetAIUpdate::update()
 		if (getFlag(ALLOW_INTERRUPT_AND_RESUME_OF_CUR_STATE_FOR_RELOAD) && 
 						isOutOfSpecialReloadAmmo() && getFlag(ALLOW_AIR_LOCO))
 		{
+			// TEMPORARY JETPROBE - remove once the aircraft attack move is confirmed in game
+			DEBUG_LOG(("JETPROBE %d RETURN TO RELOAD: '%s', order stored for resume\n",
+								 TheGameLogic->getFrame(), getObject()->getTemplate()->getName().str()));
+
 			setFlag(USE_SPECIAL_RETURN_LOCO, true);
 			setFlag(HAS_PENDING_COMMAND, true);
 			setFlag(ALLOW_INTERRUPT_AND_RESUME_OF_CUR_STATE_FOR_RELOAD, false);
