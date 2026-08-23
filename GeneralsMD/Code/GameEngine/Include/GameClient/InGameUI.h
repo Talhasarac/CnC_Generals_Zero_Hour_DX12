@@ -752,6 +752,8 @@ protected:
 	SuperweaponMap							m_superweapons[MAX_PLAYER_COUNT];
 	void drawHudOverlay( void );					///< one-line fps / clock / income overlay (ShowHudOverlay)
 
+	Bool												m_placementRangeRingUp;	///< we put a radius cursor up for a pending structure, so we owe a clear
+
 	DisplayString *							m_hudDisplayString;			///< the ShowHudOverlay line (fps / clock / income)
 	UnsignedInt									m_hudLastSampleFrame;		///< client frame the fps sample was last refreshed on
 	Real												m_hudFps;								///< smoothed render rate

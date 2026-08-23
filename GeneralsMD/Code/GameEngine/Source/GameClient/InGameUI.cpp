@@ -1001,6 +1001,7 @@ InGameUI::InGameUI()
 	m_replayWindow = NULL;
 	m_messagesOn = TRUE;
 
+	m_placementRangeRingUp = FALSE;
 	m_hudDisplayString = NULL;
 	m_hudLastSampleFrame = 0;
 	m_hudFps = 0.0f;
@@ -1467,6 +1468,7 @@ void InGameUI::handleBuildPlacements( void )
 				}
 			}
 			setRadiusCursorForRadius( placeRange );
+			m_placementRangeRingUp = ( placeRange > 0.0f );
 		}
 
 		// update the angle of the icon to match any placement angle and pick the
@@ -3077,6 +3079,15 @@ void InGameUI::placeBuildAvailable( const ThingTemplate *build, Drawable *buildD
 	{
 		// if building something, no radius cursor, thankew
 		setRadiusCursorNone();
+		m_placementRangeRingUp = FALSE;
+	}
+	else if (m_placementRangeRingUp)
+	{
+		// placement is over - cancelled, or the structure went down. Take our own range ring with
+		// it; nothing else was going to, so it used to sit on the map until the next radius cursor
+		// happened to replace it.
+		setRadiusCursorNone();
+		m_placementRangeRingUp = FALSE;
 	}
 
 	//
