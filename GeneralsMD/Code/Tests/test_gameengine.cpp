@@ -28,9 +28,11 @@
 #include "Common/STLTypedefs.h"
 #include "Common/StackDump.h"
 #include "GameClient/Water.h"
+#include "GameLogic/Module/PhysicsUpdate.h"
 
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 
 //////////////////////////////////////////////////////////////////////////////
 // Boot scaffolding
@@ -468,4 +470,44 @@ TEST(logic_tick_is_wall_clock_paced_not_render_paced)
 
 	/* A non-positive fps never throttles (the -noFPSLimit style dev mode). */
 	CHECK( GameEngine_isLogicFrameDue( accum, 0.0f, 0 ) );
+}
+
+/* PhysicsUpdate.cpp: the forward speed a locomotor steers on is the projection
+   of the velocity onto the facing - a plain dot product. It used to be
+   sqrt((vx*dx)^2 + (vy*dy)^2), which is exact on the axes but reads only
+   sqrt(cos^4 + sin^4) = 0.707 of the true speed at 45 degrees. Since the
+   locomotors close speedDelta = goalSpeed - actualSpeed by accelerating, and
+   nothing else caps velocity, an under-read made diagonal units settle at
+   goalSpeed/0.707 - up to 1.41x their max speed.
+
+   The witness is heading independence: drive at a known speed along the
+   facing and the reported forward speed must be that speed at every heading. */
+TEST(physics_forward_speed_is_the_projection_not_a_per_axis_norm)
+{
+	const Real speed = 40.0f;
+
+	for( Int deg = 0; deg <= 360; deg += 5 )
+	{
+		Real a = (Real)(deg * PI / 180.0);
+		Coord3D dir; dir.x = (Real)cos(a); dir.y = (Real)sin(a); dir.z = 0.0f;
+		Coord3D vel; vel.x = dir.x * speed; vel.y = dir.y * speed; vel.z = 0.0f;
+
+		/* moving along the facing: full speed, whatever the heading. The old
+		   code returned 0.707*speed here at 45/135/225/315 degrees. */
+		CHECK_NEAR( PhysicsBehavior::calcForwardSpeed( vel, dir ), speed, 0.01f );
+
+		/* moving backwards along the facing: the same speed, negated. */
+		Coord3D back; back.x = -vel.x; back.y = -vel.y; back.z = 0.0f;
+		CHECK_NEAR( PhysicsBehavior::calcForwardSpeed( back, dir ), -speed, 0.01f );
+
+		/* moving straight across the facing contributes nothing. The old code
+		   returned a positive magnitude here for every off-axis heading. */
+		Coord3D side; side.x = -dir.y * speed; side.y = dir.x * speed; side.z = 0.0f;
+		CHECK_NEAR( PhysicsBehavior::calcForwardSpeed( side, dir ), 0.0f, 0.01f );
+	}
+
+	/* the 3d form is the same dot product, z included. */
+	Coord3D up; up.x = 0.0f; up.y = 0.0f; up.z = 1.0f;
+	Coord3D climb; climb.x = 0.0f; climb.y = 0.0f; climb.z = 12.0f;
+	CHECK_NEAR( PhysicsBehavior::calcForwardSpeed( climb, up ), 12.0f, 0.01f );
 }

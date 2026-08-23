@@ -1436,11 +1436,10 @@ void Locomotor::moveTowardsPositionWheels(Object* obj, PhysicsBehavior *physics,
 
 	if (getFlag(IS_BRAKING)) 
 	{
-		m_brakingFactor = slowDownDist/onPathDistToGoal;
-		m_brakingFactor *= m_brakingFactor;
-		if (m_brakingFactor>MAX_BRAKING_FACTOR) {
-			m_brakingFactor = MAX_BRAKING_FACTOR;
-		}	
+		// wheels deliberately brake at a flat factor, unlike treads: the ramped
+		// slowDownDist/onPathDistToGoal calculation that used to sit here was overwritten by this
+		// line on the very next statement, so it was dead. Behaviour unchanged; only the dead
+		// computation is gone.
 		m_brakingFactor = 1.0f;
 		if (slowDownDist>onPathDistToGoal) {
 			goalSpeed = actualSpeed-getBraking();

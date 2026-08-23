@@ -144,6 +144,16 @@ public:
 	Real getForwardSpeed2D() const;															///< compute speed along object's 2d direction vector
 	Real getForwardSpeed3D() const;															///< compute speed along object's 3d direction vector
 
+	/**
+		Signed speed of vel along the unit vector dir, i.e. the plain dot product. Exposed as a
+		static so it can be checked without building an Object; see test_gameengine's
+		physics_forward_speed_* witnesses. Pass zeroed z components for the 2d case.
+	*/
+	static Real calcForwardSpeed( const Coord3D& vel, const Coord3D& dir )
+	{
+		return vel.x * dir.x + vel.y * dir.y + vel.z * dir.z;
+	}
+
 	ObjectID getCurrentOverlap() const;					///< return object(s) being overlapped
 	ObjectID getPreviousOverlap() const;					///< return object(s) that were overlapped last frame
 	ObjectID getLastCollidee() const;					///< return object that was last collided with... can be quite old

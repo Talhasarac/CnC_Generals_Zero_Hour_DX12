@@ -45,6 +45,7 @@
 #include "GameLogic/TerrainLogic.h"
 #include "GameLogic/Weapon.h"
 #include "GameLogic/LogicRandomValue.h"
+#include "GameClient/Statistics.h"		// MuLaw/NormalizeToRange, for the bounce sound volume
 
 const Real DEFAULT_MASS = 1.0f;
 
@@ -964,20 +965,21 @@ Real PhysicsBehavior::getForwardSpeed2D() const
 {
 	const Coord3D *dir = getObject()->getUnitDirectionVector2D();
 
-	Real vx = m_vel.x * dir->x;
-	Real vy = m_vel.y * dir->y;
+	//
+	// The forward speed is the projection of the velocity onto the facing, i.e. the dot product.
+	// This used to return sqrt((vx*dx)^2 + (vy*dy)^2) instead, which is exact on the axes but
+	// only 0.707x the real speed at 45 degrees. The locomotors drive on
+	// speedDelta = goalSpeed - getForwardSpeed2D() and nothing else caps velocity (forward
+	// friction is suppressed while motive), so the loop settled at goalSpeed/0.707 and a
+	// diagonally moving unit ran up to 1.41x its max speed. applyFrictionalForces() a few
+	// hundred lines up always used the correct dot product.
+	//
+	Coord3D vel2D = m_vel;
+	vel2D.z = 0.0f;
+	Coord3D dir2D = *dir;
+	dir2D.z = 0.0f;
 
-	Real dot = vx + vy;
-
-	Real speedSquared = vx*vx + vy*vy;
-//	DEBUG_ASSERTCRASH( speedSquared != 0, ("zero speedSquared will overflow sqrtf()!") );// lorenzen... sanity check
-	
-	Real speed = (Real)sqrtf( speedSquared );
-
-	if (dot >= 0.0f)
-		return speed;
-
-	return -speed;
+	return calcForwardSpeed( vel2D, dir2D );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -989,18 +991,13 @@ Real PhysicsBehavior::getForwardSpeed3D() const
 {
 	Vector3 dir = getObject()->getTransformMatrix()->Get_X_Vector();
 
-	Real vx = m_vel.x * dir.X;
-	Real vy = m_vel.y * dir.Y;
-	Real vz = m_vel.z * dir.Z;
+	// same wrong-norm bug as getForwardSpeed2D above - see the comment there.
+	Coord3D dir3D;
+	dir3D.x = dir.X;
+	dir3D.y = dir.Y;
+	dir3D.z = dir.Z;
 
-	Real dot = vx + vy + vz;
-
-	Real speed = (Real)sqrtf( vx*vx + vy*vy + vz*vz );
-
-	if (dot >= 0.0f)
-		return speed;
-
-	return -speed;
+	return calcForwardSpeed( m_vel, dir3D );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1142,11 +1139,12 @@ void PhysicsBehavior::doBounceSound(const Coord3D& prevPos)
 		mass = 0;
 	}
 
-#ifdef FIX_AUDIO
+	// this was fenced behind FIX_AUDIO, which is never defined, so every bounce played at full
+	// volume no matter how light or slow the thing was. vel and mass are clamped to
+	// [0,NORMAL_*] above, so MuLaw stays in [-1,1] and the scale lands in [0.25,1] per term.
 	Real volAdjust = NormalizeToRange(MuLaw(vel, NORMAL_VEL_Z, 500), -1, 1, 0.25, 1.0);
 	volAdjust *= NormalizeToRange(MuLaw(mass, NORMAL_MASS, 500), -1, 1, 0.25, 1.0);
 	collisionSound.setVolume(volAdjust);
-#endif
 	collisionSound.setObjectID(getObject()->getID());
 	TheAudio->addAudioEvent(&collisionSound);
 }

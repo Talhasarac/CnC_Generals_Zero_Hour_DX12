@@ -375,7 +375,12 @@ void DumbProjectileBehavior::projectileFireAtObjectOrPosition( const Object *vic
 		Real minRange = detWeap->getMinimumAttackRange();
 		Real maxRange = detWeap->getUnmodifiedAttackRange();
 		Real range = sqrt(ThePartitionManager->getDistanceSquared( projectile, &victimPosToUse, FROM_CENTER_2D ) );
-		Real rangeRatio = (range - minRange) / (maxRange - minRange);
+		// guard the degenerate min==max range and clamp: a shot inside the minimum range gave a
+		// negative ratio and a speed below MinWeaponSpeed (possibly <= 0, which then made
+		// ceil(dist/speed) a negative or infinite segment count below).
+		Real rangeSpan = maxRange - minRange;
+		Real rangeRatio = (rangeSpan > 0.0f) ? ((range - minRange) / rangeSpan) : 1.0f;
+		rangeRatio = clamp( 0.0f, rangeRatio, 1.0f );
 		m_flightPathSpeed = (rangeRatio * (weaponSpeed - minWeaponSpeed)) + minWeaponSpeed;
 	}
 	else
@@ -649,9 +654,10 @@ UpdateSleepTime DumbProjectileBehavior::update()
 		  orientMtx.buildTransformMatrix(Vector3(flightStep.x, flightStep.y, flightStep.z), curDir);
 		  getObject()->setTransformMatrix(&orientMtx);
     }
-    else // oops! how do we orient the projectile on the zeroeth frame? This didn't matter until we started using the
+    else if ( m_flightPath.size() >= 2 ) // oops! how do we orient the projectile on the zeroeth frame? This didn't matter until we started using the
       //long, blurry projectile graphics which look badly oriented on step 0 of the flight path
       // so lets orient it the same as if it were on frame 1!
+      // (a point blank shot has a single path point, and this used to read m_flightPath[1] anyway)
     {
 		  Coord3D prevPos = m_flightPath[0];
 		  Coord3D curPos = m_flightPath[1];

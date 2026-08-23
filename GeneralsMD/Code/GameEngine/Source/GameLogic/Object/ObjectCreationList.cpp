@@ -1040,7 +1040,9 @@ protected:
 			PhysicsBehavior *objectPhysics = obj->getPhysics();
 			if( sourcePhysics && objectPhysics )
 			{
-				objectPhysics->applyForce( sourcePhysics->getVelocity() );
+				// this is a velocity, not a force: applyForce divides by mass, so heavy debris
+				// used to inherit almost none of its source's motion.
+				objectPhysics->addVelocityTo( sourcePhysics->getVelocity() );
 			}
 		}
 
@@ -1439,7 +1441,7 @@ protected:
 			if (TheGlobalData->m_preloadAssets)
 				debrisModelNamesGlobalHack.push_back(debrisName);
 			debrisNugget->m_names.push_back(AsciiString(debrisName));
-			debrisName = ini->getNextTokenOrNull();
+			// (the for-increment already advances; advancing here too dropped every second name)
 		}
 	}
 

@@ -438,7 +438,9 @@ void MissileAIUpdate::doKillSelfState()
 {
   const MissileAIUpdateModuleData *modData = getMissileAIUpdateModuleData();
 
-	if (m_stateTimestamp > TheGameLogic->getFrame() - modData->m_killSelfDelay ) 
+	// added, not subtracted: these are unsigned, so in the first killSelfDelay frames of a match
+	// getFrame() - m_killSelfDelay wrapped to ~4 billion and the missile self-killed immediately.
+	if (m_stateTimestamp + modData->m_killSelfDelay > TheGameLogic->getFrame() )
   {
 		// Hold in this state [modData->m_killSelfDelay] frames to let the contrail catch up. jba.
 		return;
