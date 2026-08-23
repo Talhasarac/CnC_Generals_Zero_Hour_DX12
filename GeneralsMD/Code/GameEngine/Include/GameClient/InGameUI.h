@@ -757,6 +757,7 @@ protected:
 	void updateIncomeEstimate( Player *player );	///< income per minute, shown beside the money
 
 	Bool												m_placementRangeRingUp;	///< we put a radius cursor up for a pending structure, so we owe a clear
+	Real												m_placementRingRadius;	///< the radius that ring was built at, so it is not rebuilt every frame
 
 	DisplayString *							m_hudDisplayString;			///< the ShowHudOverlay line (fps / clock / income)
 	UnsignedInt									m_hudLastSampleFrame;		///< client frame the fps sample was last refreshed on

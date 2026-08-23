@@ -59,6 +59,7 @@
 #include <texture.h>
 
 #include "Common/GlobalData.h"
+#include "GameLogic/AIPathfind.h"		// Path/PathNode, to draw a plain move order's route
 #include "Common/RandomValue.h"
 #include "Common/ThingFactory.h"
 #include "Common/ThingTemplate.h"
@@ -188,9 +189,16 @@ void W3DWaypointBuffer::drawWaypoints(RenderInfoClass &rinfo)
 
 
 
-	// AlwaysShowWaypointLines: retail only draws the queued path while the waypoint key is held,
-	// so you cannot see an order you already gave. With this on, any selected unit that still has
-	// a goal path left shows it.
+	//
+	// AlwaysShowWaypointLines: retail only draws a route while the waypoint key is held, so you
+	// cannot look at an order you already gave. With this on, a selected unit shows the route it
+	// is actually following - its queued waypoints if it has any, otherwise the path it computed
+	// for a plain move order, which is what you get from a single click.
+	//
+	// Note this block and the rally-point one below are NOT alternatives: rally points used to be
+	// drawn only when we were not in waypoint mode, so making this condition always true silently
+	// took every rally line away.
+	//
 	if( TheInGameUI->isInWaypointMode() || TheGlobalData->m_alwaysShowWaypointLines )
 	{
 		//Create a default light environment with no lights and only full ambient.
@@ -202,9 +210,16 @@ void W3DWaypointBuffer::drawWaypoints(RenderInfoClass &rinfo)
 		localRinfo.light_environment=&lightEnv;
 		Vector3 points[ MAX_DISPLAY_NODES + 1 ]; //Lines have nodes + 1 points.
 
+		//
+		// A whole army's worth of routes is a lot of line work for something nobody can read
+		// anyway, so only the first few selected units draw one.
+		//
+		const Int MAX_ROUTE_LINES = 8;
+		Int routeLines = 0;
+
 		const DrawableList *selected = TheInGameUI->getAllSelectedDrawables();
 		Drawable *draw;
-		for( DrawableListCIt it = selected->begin(); it != selected->end(); ++it )
+		for( DrawableListCIt it = selected->begin(); it != selected->end() && routeLines < MAX_ROUTE_LINES; ++it )
 		{
 			draw = *it;
 			Object *obj = draw->getObject();
@@ -214,8 +229,38 @@ void W3DWaypointBuffer::drawWaypoints(RenderInfoClass &rinfo)
 				AIUpdateInterface *ai = obj->getAI();
 				Int goalSize = ai ? ai->friend_getWaypointGoalPathSize() : 0;
 				Int gpIdx = ai ? ai->friend_getCurrentGoalPathIndex() : 0;
-				if( ai && gpIdx >= 0 && gpIdx < goalSize )
+
+				if( ai && !(gpIdx >= 0 && gpIdx < goalSize) && TheGlobalData->m_alwaysShowWaypointLines )
 				{
+					//
+					// No queued waypoints - this is a plain move order, which is what a single
+					// click gives you. Draw the route it actually computed instead, or there is
+					// nothing to see until you queue a second point.
+					//
+					const Path *path = ai->getPath();
+					const PathNode *node = path ? path->getFirstNode() : NULL;
+					if( node )
+					{
+						const Coord3D *pos = obj->getPosition();
+						points[ 0 ].Set( Vector3( pos->x, pos->y, pos->z ) );
+
+						for( ; node && numPoints < MAX_DISPLAY_NODES + 1; node = node->getNextOptimized() )
+						{
+							const Coord3D *np = node->getPosition();
+							points[ numPoints ].Set( Vector3( np->x, np->y, np->z ) );
+							numPoints++;
+						}
+
+						if( numPoints > 1 )
+						{
+							queueLine( numPoints, points );
+							++routeLines;
+						}
+					}
+				}
+				else if( ai && gpIdx >= 0 && gpIdx < goalSize )
+				{
+					++routeLines;
 					const Coord3D *pos = obj->getPosition();
 					points[ 0 ].Set( Vector3( pos->x, pos->y, pos->z ) );
 
@@ -243,7 +288,9 @@ void W3DWaypointBuffer::drawWaypoints(RenderInfoClass &rinfo)
 		}
 		renderQueuedLines( localRinfo );
 	}
-	else // maybe we want to draw rally points, then?
+	// Rally points, drawn whenever we are not actively laying down waypoints. This used to be the
+	// else of the block above, which is why turning that block on full time hid every rally line.
+	if( !TheInGameUI->isInWaypointMode() )
 	{
 		//Create a default light environment with no lights and only full ambient.
 		//@todo: Fix later by copying default scene light environement from W3DScene.cpp.

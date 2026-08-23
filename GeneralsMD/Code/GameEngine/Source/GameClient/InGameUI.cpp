@@ -1021,6 +1021,7 @@ InGameUI::InGameUI()
 	m_messagesOn = TRUE;
 
 	m_placementRangeRingUp = FALSE;
+	m_placementRingRadius = 0.0f;
 	m_hudDisplayString = NULL;
 	m_hudLastSampleFrame = 0;
 	m_hudLastSampleMs = 0;
@@ -1234,16 +1235,16 @@ void InGameUI::setRadiusCursorForRadius(Real radius)
 		return;
 	}
 
-	// re-create only when the size actually changed, otherwise the decal restarts every frame
-	static Real s_lastRadius = 0.0f;
-	if (m_curRcType == RADIUSCURSOR_GUARD_AREA && s_lastRadius == radius)
+	// re-create only when the size actually changed, otherwise the decal restarts every frame.
+	// (this used to hang off a function-level static, which outlived the decal it described.)
+	if (m_curRcType == RADIUSCURSOR_GUARD_AREA && !m_curRadiusCursor.isEmpty() && m_placementRingRadius == radius)
 		return;
 
 	m_curRadiusCursor.clear();
 	Coord3D pos = { 0, 0, 0 };	// handleRadiusCursor() puts it under the cursor
 	m_radiusCursors[RADIUSCURSOR_GUARD_AREA].createRadiusDecal(pos, radius, ThePlayerList->getLocalPlayer(), m_curRadiusCursor);
 	m_curRcType = RADIUSCURSOR_GUARD_AREA;
-	s_lastRadius = radius;
+	m_placementRingRadius = radius;
 
 	handleRadiusCursor();
 }
@@ -1478,13 +1479,18 @@ void InGameUI::handleBuildPlacements( void )
 		//
 		if( TheGlobalData->m_showPlacementRangeRing )
 		{
+			//
+			// Walk every weapon set the template has, not just the one an empty condition mask
+			// happens to select: a defence whose gun lives in a conditional set (an upgrade, a
+			// garrisoned variant) would otherwise report no range at all and draw no ring.
+			//
 			Real placeRange = 0.0f;
-			const WeaponTemplateSet *wts = m_pendingPlaceType->findWeaponTemplateSet( WeaponSetFlags() );
-			if( wts )
+			const WeaponTemplateSetVector& sets = m_pendingPlaceType->getWeaponTemplateSets();
+			for( WeaponTemplateSetVector::const_iterator si = sets.begin(); si != sets.end(); ++si )
 			{
 				for( Int ws = PRIMARY_WEAPON; ws < WEAPONSLOT_COUNT; ++ws )
 				{
-					const WeaponTemplate *wt = wts->getNth( (WeaponSlotType)ws );
+					const WeaponTemplate *wt = si->getNth( (WeaponSlotType)ws );
 					if( wt && wt->getUnmodifiedAttackRange() > placeRange )
 						placeRange = wt->getUnmodifiedAttackRange();
 				}
