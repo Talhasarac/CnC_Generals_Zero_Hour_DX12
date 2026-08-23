@@ -76,6 +76,7 @@ PoisonedBehavior::PoisonedBehavior( Thing *thing, const ModuleData* moduleData )
 	m_poisonOverallStopFrame = 0;
 	m_poisonDamageAmount = 0.0f;
 	m_deathType = DEATH_POISONED;
+	m_poisonSource = INVALID_ID;
 	setWakeFrame(getObject(), UPDATE_SLEEP_FOREVER);
 }
 
@@ -122,7 +123,10 @@ UpdateSleepTime PoisonedBehavior::update()
 		// If it is time to do damage, then do it and reset the damage timer
 		DamageInfo damage;
 		damage.in.m_amount = m_poisonDamageAmount;
-		damage.in.m_sourceID = INVALID_ID;
+		// credit the original poisoner. This used to be INVALID_ID, so a kill by the toxin's
+		// damage-over-time scored for nobody: no experience, no score, and the victim's "attacked
+		// by" reaction (and the TeamAttackedByType script condition) never fired.
+		damage.in.m_sourceID = m_poisonSource;
 		damage.in.m_damageType = DAMAGE_UNRESISTABLE; // Not poison, as that will infect us again
 		damage.in.m_damageFXOverride = DAMAGE_POISON; // but this will ensure that the right effect is played
 		damage.in.m_deathType = m_deathType;
@@ -173,6 +177,7 @@ void PoisonedBehavior::startPoisonedEffects( const DamageInfo *damageInfo )
 		m_poisonDamageFrame = now + d->m_poisonDamageIntervalData;
 
 	m_deathType = damageInfo->in.m_deathType;
+	m_poisonSource = damageInfo->in.m_sourceID;
 
 	Drawable *myDrawable = getObject()->getDrawable();
 	if( myDrawable )
@@ -188,6 +193,7 @@ void PoisonedBehavior::stopPoisonedEffects()
 	m_poisonDamageFrame = 0;
 	m_poisonOverallStopFrame = 0;
 	m_poisonDamageAmount = 0.0f;
+	m_poisonSource = INVALID_ID;
 
 	Drawable *myDrawable = getObject()->getDrawable();
 	if( myDrawable )
@@ -214,7 +220,7 @@ void PoisonedBehavior::xfer( Xfer *xfer )
 {
 
 	// version 
-	const XferVersion currentVersion = 2;
+	const XferVersion currentVersion = 3;
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
@@ -233,6 +239,11 @@ void PoisonedBehavior::xfer( Xfer *xfer )
 	if (version >= 2)
 	{
 		xfer->xferUser(&m_deathType, sizeof(m_deathType));
+	}
+
+	if (version >= 3)
+	{
+		xfer->xferObjectID( &m_poisonSource );
 	}
 
 }  // end xfer

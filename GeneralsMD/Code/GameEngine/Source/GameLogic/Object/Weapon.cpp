@@ -1875,7 +1875,10 @@ void Weapon::setClipPercentFull(Real percent, Bool allowReduction)
 	if (ammo > m_ammoInClip || (allowReduction && ammo < m_ammoInClip))
 	{
 		m_ammoInClip = ammo;
-		m_status = m_ammoInClip ? OUT_OF_AMMO : READY_TO_FIRE;
+		// this test used to be inverted: a full clip was marked OUT_OF_AMMO and an empty one
+		// READY_TO_FIRE. getStatus() recomputes from m_ammoInClip so it rarely showed in play,
+		// but m_status is xfer'd and feeds the net CRC.
+		m_status = m_ammoInClip ? READY_TO_FIRE : OUT_OF_AMMO;
 		//CRCDEBUG_LOG(("Weapon::setClipPercentFull() just set m_status to %d (ammo in clip is %d)\n", m_status, m_ammoInClip));
 		m_whenLastReloadStarted = TheGameLogic->getFrame();
 		m_whenWeCanFireAgain = m_whenLastReloadStarted;		
@@ -2046,9 +2049,10 @@ Bool Weapon::computeApproachTarget(const Object *source, const Object *target, c
 		{
 			// Don't do a 180 degree turn.
 			Real angle = atan2(-dir.y, -dir.x);
-			Real relAngle = source->getOrientation()- angle;
-			if (relAngle>2*PI) relAngle -= 2*PI;
-			if (relAngle<-2*PI) relAngle += 2*PI;
+			// both inputs are already in [-PI,PI], so the difference is in [-2PI,2PI] and the
+			// old >2PI / <-2PI clamps could never fire: two headings 0.3 rad apart around the
+			// +/-PI seam measured as ~6 rad and read as "facing away".
+			Real relAngle = stdAngleDiff( source->getOrientation(), angle );
 			if (fabs(relAngle)<PI/2) {
 				dir.x = -dir.x;
 				dir.y = -dir.y;
@@ -2549,7 +2553,9 @@ Bool Weapon::privateFireWeapon(
 				}
 
 				// it's a mine, but doesn't have LandMineInterface...
-				if( !found && victimObj->isKindOf( KINDOF_MINE ) || victimObj->isKindOf( KINDOF_BOOBY_TRAP ) || victimObj->isKindOf( KINDOF_DEMOTRAP ) )
+				// && binds tighter than ||, so the !found guard used to cover only the MINE arm and a
+				// booby/demo trap already disarmed above was destroyed a second time.
+				if( !found && ( victimObj->isKindOf( KINDOF_MINE ) || victimObj->isKindOf( KINDOF_BOOBY_TRAP ) || victimObj->isKindOf( KINDOF_DEMOTRAP ) ) )
 				{
 					VeterancyLevel v = sourceObj->getVeterancyLevel();
 					FXList::doFXPos(m_template->getFireFX(v), victimObj->getPosition(), victimObj->getTransformMatrix(), 0, victimObj->getPosition(), 0);

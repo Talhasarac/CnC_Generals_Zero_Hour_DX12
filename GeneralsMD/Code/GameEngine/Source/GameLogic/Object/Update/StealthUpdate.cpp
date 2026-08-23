@@ -304,7 +304,10 @@ Bool StealthUpdate::allowedToStealth( Object *stealthOwner ) const
 	if( flags & STEALTH_ONLY_WITH_BLACK_MARKET && m_nextBlackMarketCheckFrame < now )
 	{
 		//randomize timer a little incase we have a whole bunch on the same frame.
-		m_nextBlackMarketCheckFrame += data->m_blackMarketCheckFrames + GameLogicRandomValue( 0, 10 ); 
+		// set from now, don't accumulate: after the object slept for a while the timer was far
+		// behind the current frame, and advancing it one interval per call meant the full
+		// iterateObjects player scan below ran EVERY frame until it caught up.
+		m_nextBlackMarketCheckFrame = now + data->m_blackMarketCheckFrames + GameLogicRandomValue( 0, 10 ); 
 		
 		//If we can't find an active black market, then we can't stealth.
 		Bool blackMarket = FALSE;

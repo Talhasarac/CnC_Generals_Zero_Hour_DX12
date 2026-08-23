@@ -93,6 +93,7 @@ private:
 	UnsignedInt		m_poisonOverallStopFrame;
 	Real					m_poisonDamageAmount;
 	DeathType			m_deathType;
+	ObjectID			m_poisonSource;			///< who poisoned us, so the damage-over-time kill is credited
 
 };
 

@@ -96,9 +96,12 @@ void ExperienceTracker::setMinVeterancyLevel( VeterancyLevel newLevel )
 	{
 		VeterancyLevel oldLevel = m_currentLevel;
 		m_currentLevel = newLevel;
-		m_currentExperience = m_parent->getTemplate()->getExperienceRequired(m_currentLevel); //Minimum for this level
+		// m_parent was dereferenced on the line above the null check that followed it
 		if (m_parent)
+		{
+			m_currentExperience = m_parent->getTemplate()->getExperienceRequired(m_currentLevel); //Minimum for this level
 			m_parent->onVeterancyLevelChanged( oldLevel, newLevel );
+		}
 	}
 }
 
@@ -112,9 +115,12 @@ void ExperienceTracker::setVeterancyLevel( VeterancyLevel newLevel, Bool provide
 	{
 		VeterancyLevel oldLevel = m_currentLevel;
 		m_currentLevel = newLevel;
-		m_currentExperience = m_parent->getTemplate()->getExperienceRequired(m_currentLevel); //Minimum for this level
+		// same deref-before-null-check as setMinVeterancyLevel above
 		if (m_parent)
+		{
+			m_currentExperience = m_parent->getTemplate()->getExperienceRequired(m_currentLevel); //Minimum for this level
 			m_parent->onVeterancyLevelChanged( oldLevel, newLevel, provideFeedback );
+		}
 	}
 }
 

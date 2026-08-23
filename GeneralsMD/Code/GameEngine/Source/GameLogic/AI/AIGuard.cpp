@@ -502,7 +502,10 @@ void AIGuardOuterState::xfer( Xfer *xfer )
 /** Load post process */
 // ------------------------------------------------------------------------------------------------
 void AIGuardOuterState::loadPostProcess( void )
-{						 AIGuardOuterState
+{
+	// the stray class name that used to sit here turned the next line into a declaration
+	// (AIGuardOuterState onEnter();), so this whole function was a no-op and a guarding unit
+	// never rebuilt m_attackState after a load - it just dropped the chase.
 	onEnter();
 }  // end loadPostProcess
 

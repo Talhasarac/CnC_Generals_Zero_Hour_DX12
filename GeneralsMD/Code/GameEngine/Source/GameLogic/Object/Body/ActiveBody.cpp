@@ -400,10 +400,13 @@ void ActiveBody::attemptDamage( DamageInfo *damageInfo )
 				{
 
 					AIUpdateInterface *ai = obj->getAI();
+					const ContainedItemsList *riders = contain->getContainedItemsList();
 
-					if( ai->isMoving() )
+					// a rider-change vehicle whose rider is already gone has an empty list, and
+					// nothing guarantees an AI module here: both used to be dereferenced blind.
+					if( ai == NULL || riders == NULL || riders->empty() || ai->isMoving() )
 					{
-						//Bike is moving, so just blow it up instead.
+						//Bike is moving (or there is nobody left to remove), so just blow it up instead.
 						if (damager)
 							damager->scoreTheKill( obj );
 						obj->kill();
@@ -411,7 +414,7 @@ void ActiveBody::attemptDamage( DamageInfo *damageInfo )
 					else
 					{
 						//Removing the rider will scuttle the bike.
-						Object *rider = *(contain->getContainedItemsList()->begin());
+						Object *rider = *(riders->begin());
 						ai->aiEvacuateInstantly( TRUE, CMD_FROM_AI );
 
 						//Kill the rider.
@@ -461,18 +464,35 @@ void ActiveBody::attemptDamage( DamageInfo *damageInfo )
 				const ContainedItemsList* items = contain->getContainedItemsList();
 				if (items)
 				{
-					for( ContainedItemsList::const_iterator it = items->begin(); (it != items->end()) && (numKilled < killsToMake); it++ )
+					//
+					// Snapshot the victims by ID before killing any of them: kill() can run a death
+					// module that removes the rider (or a sibling) from this very std::list, which
+					// invalidated the iterator we were still holding. The old loop also read
+					// getControllingPlayer() off the object AFTER killing it.
+					//
+					std::vector<ObjectID> victims;
+					for( ContainedItemsList::const_iterator it = items->begin();
+							 (it != items->end()) && ((Int)victims.size() < killsToMake); ++it )
 					{
-						Object* thingToKill = *it;
-						if (!thingToKill->isEffectivelyDead() )
-						{
-							if (damager)
-								damager->scoreTheKill( thingToKill );
-							thingToKill->kill();
-							++numKilled;
-							thingToKill->getControllingPlayer()->getAcademyStats()->recordClearedGarrisonedBuilding();
-						}
-					} // next contained item
+						Object* candidate = *it;
+						if( candidate && !candidate->isEffectivelyDead() )
+							victims.push_back( candidate->getID() );
+					}
+
+					for( std::vector<ObjectID>::const_iterator vi = victims.begin(); vi != victims.end(); ++vi )
+					{
+						Object* thingToKill = TheGameLogic->findObjectByID( *vi );
+						if( thingToKill == NULL || thingToKill->isEffectivelyDead() )
+							continue;	// a previous kill took this one with it
+
+						Player* victimPlayer = thingToKill->getControllingPlayer();
+						if (damager)
+							damager->scoreTheKill( thingToKill );
+						thingToKill->kill();
+						++numKilled;
+						if( victimPlayer )
+							victimPlayer->getAcademyStats()->recordClearedGarrisonedBuilding();
+					}
 
 				} // if items
 			}	// if a garrisonable thing
@@ -832,15 +852,20 @@ void ActiveBody::attemptHealing( DamageInfo *damageInfo )
 		// do the damage simplistic damage ADDITION
 		internalChangeHealth( amount );
 
-		// record the actual damage done from this, and when it happened
+		// record the actual healing done from this, and when it happened.
+		// health goes UP here, so the clipped amount is current - prev; this was copied verbatim
+		// from the damage path and handed every caller a negative number.
 		damageInfo->out.m_actualDamageDealt = amount;
-		damageInfo->out.m_actualDamageClipped = m_prevHealth - m_currentHealth;
+		damageInfo->out.m_actualDamageClipped = m_currentHealth - m_prevHealth;
 
-		//then copy the whole DamageInfo struct for easy lookup 
-		//(object pointer loses scope as soon as atteptdamage's caller ends)
-		m_lastDamageInfo = *damageInfo;
-		m_lastDamageCleared = false;
-		m_lastDamageTimestamp = TheGameLogic->getFrame();
+		//
+		// Only the healing timestamp is stamped here. This used to overwrite m_lastDamageInfo and
+		// m_lastDamageTimestamp with the heal record as well, which lied to everything that means
+		// "was recently attacked, and by whom": AIGuard/AITNGuard nemesis acquisition,
+		// TunnelContain, AIPlayer's supply-source-attacked check and Drawable's recoil.
+		// AIGuardRetaliate was the only consumer that defended itself (it tests for
+		// DAMAGE_HEALING explicitly), which is what gave the intent away.
+		//
 		m_lastHealingTimestamp = TheGameLogic->getFrame();
 
 		// if our health has gone UP then do run the damage module callback

@@ -348,7 +348,7 @@ UpdateSleepTime MobNexusContain::update()
 				ContainedItemsList::const_iterator it;
 				it = items->begin();
 
-				while( *it )
+				while( it != items->end() )	// was while(*it), which dereferences end()
 				{
 					Object *object = *it;
 

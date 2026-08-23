@@ -642,9 +642,12 @@ CanAttackResult WeaponSet::getAbleToUseWeaponAgainstTarget( AbleToAttackType att
 	const Object *containedBy = source->getContainedBy();
 	Bool hasAWeaponInRange = FALSE;
 	Bool hasAWeapon				 = FALSE;
-	for (Int slot = 0; slot < WEAPONSLOT_COUNT - 1; ++slot)
+	for (Int slot = 0; slot < WEAPONSLOT_COUNT; ++slot)
 	{
-		Weapon *weaponToTestForRange = m_weapons[ m_curWeapon ];
+		// test the weapon in THIS slot: the loop used to read m_curWeapon every time (and stop one
+		// slot short), so an immobile source or a garrisoned soldier only ever had its current
+		// weapon range-checked and refused legitimate targets its other weapons could reach.
+		Weapon *weaponToTestForRange = m_weapons[ slot ];
 		if ( weaponToTestForRange )
 		{
 			hasAWeapon = TRUE;
@@ -926,9 +929,12 @@ Bool WeaponSet::chooseBestWeaponForTarget(const Object* obj, const Object* victi
 				break;
 			case PREFER_LONGEST_RANGE:
 				{
+					// >= like PREFER_MOST_DAMAGE above: the loop runs backwards precisely so that
+					// ties fall to the primary weapon (see the comment on the for). With a strict
+					// > the first slot examined - the LAST one - kept equal-range ties instead.
 					if( !weaponIsReady )
 					{
-						if (attackRange > longestRangeBackup)
+						if (attackRange >= longestRangeBackup)
 						{
 							longestRangeBackup = attackRange;
 							currentDecisionBackup = (WeaponSlotType)i;
@@ -937,7 +943,7 @@ Bool WeaponSet::chooseBestWeaponForTarget(const Object* obj, const Object* victi
 					}
 					else
 					{
-						if (attackRange > longestRange)
+						if (attackRange >= longestRange)
 						{
 							longestRange = attackRange;
 							currentDecision = (WeaponSlotType)i;
