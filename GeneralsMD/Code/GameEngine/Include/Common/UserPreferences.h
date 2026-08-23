@@ -111,6 +111,12 @@ public:
 	Bool getUseGridHotKeys(void);
 	Bool getEdgeScrollInWindowedMode(void);
 	Bool getSnapBuildPlacementTo45(void);
+	Bool getSnapCameraRotateTo45(void);
+	Bool getMiddleMousePans(void);
+	Bool getZoomToCursor(void);
+	Bool getShowHudOverlay(void);
+	Bool getShowPlacementRangeRing(void);
+	Bool getWorkersReturnToSupply(void);
 	Int	 getTextureReduction(void);
 	void getResolution(Int *xres, Int *yres);
 	Bool get3DShadowsEnabled(void);

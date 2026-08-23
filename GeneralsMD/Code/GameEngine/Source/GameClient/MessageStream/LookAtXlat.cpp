@@ -249,11 +249,23 @@ GameMessageDisposition LookAtTranslator::translateGameMessage(const GameMessage 
 		{
 			m_lastMouseMoveFrame = TheGameLogic->getFrame();
 
-			m_isRotating = true;
 			m_anchor = msg->getArgument( 0 )->pixel;
 			m_originalAnchor = msg->getArgument( 0 )->pixel;
 			m_currentPos = msg->getArgument( 0 )->pixel;
 			m_timestamp = TheGameClient->getFrame();
+
+			// MiddleMousePans in Options.ini swaps the middle-drag from rotate to pan; the
+			// click-to-reset below still works either way.
+			if( TheGlobalData->m_middleMousePans )
+			{
+				m_isRotating = false;
+				if (!TheInGameUI->isSelecting() && !m_isScrolling)
+					setScrolling(SCROLL_MMB);
+			}
+			else
+			{
+				m_isRotating = true;
+			}
 			break;
 		}
 
@@ -265,7 +277,10 @@ GameMessageDisposition LookAtTranslator::translateGameMessage(const GameMessage 
 			const UnsignedInt CLICK_DURATION = 5;
 			const UnsignedInt PIXEL_OFFSET = 5;
 
+			Bool wasRotating = m_isRotating;
 			m_isRotating = false;
+			if (m_scrollType == SCROLL_MMB)
+				stopScrolling();
 			Int dx = m_currentPos.x-m_originalAnchor.x;
 			if (dx<0) dx = -dx;
 			Int dy = m_currentPos.y-m_originalAnchor.y;
@@ -275,6 +290,14 @@ GameMessageDisposition LookAtTranslator::translateGameMessage(const GameMessage 
 			{
 				TheTacticalView->setAngleAndPitchToDefault();
 				TheTacticalView->setZoomToDefault();
+			}
+			else if (wasRotating && TheGlobalData->m_snapCameraRotateTo45)
+			{
+				// SnapCameraRotateTo45: let go of a free rotate and the heading clicks to the
+				// nearest eighth, so the map lines up with the screen again.
+				const Real step = PI / 4.0f;
+				Real a = TheTacticalView->getAngle();
+				TheTacticalView->setAngle( ((Real)REAL_TO_INT_FLOOR( a / step + (a >= 0.0f ? 0.5f : -0.5f) )) * step );
 			}
 
 			break;
@@ -362,6 +385,18 @@ GameMessageDisposition LookAtTranslator::translateGameMessage(const GameMessage 
 
 			Int spin = msg->getArgument( 1 )->integer;
 
+			//
+			// ZoomToCursor: remember the world point under the cursor, zoom, then shift the camera
+			// by however far that point moved, so it stays put. Doing it by measurement rather
+			// than by projection maths means it stays correct whatever the pitch and FOV are.
+			//
+			const Bool zoomToCursor = TheGlobalData->m_zoomToCursor && TheInGameUI->getInputEnabled();
+			ICoord2D cursor = msg->getArgument( 0 )->pixel;
+			Coord3D worldBefore;
+			worldBefore.zero();
+			if (zoomToCursor)
+				TheTacticalView->screenToTerrain( &cursor, &worldBefore );
+
 			if (spin > 0)
 			{
 				for ( ; spin > 0; spin--)
@@ -371,6 +406,19 @@ GameMessageDisposition LookAtTranslator::translateGameMessage(const GameMessage 
 			{
 				for ( ;spin < 0; spin++ )
 					TheTacticalView->zoomOut();
+			}
+
+			if (zoomToCursor)
+			{
+				Coord3D worldAfter;
+				worldAfter.zero();
+				TheTacticalView->screenToTerrain( &cursor, &worldAfter );
+
+				Coord2D shift;
+				shift.x = worldBefore.x - worldAfter.x;
+				shift.y = worldBefore.y - worldAfter.y;
+				if (shift.x != 0.0f || shift.y != 0.0f)
+					TheTacticalView->scrollBy( &shift );
 			}
 			break;	// without this the case fell into MSG_META_OPTIONS below and every wheel
 					// notch called stopScrolling(), killing zoom-while-panning and leaving
@@ -405,6 +453,15 @@ GameMessageDisposition LookAtTranslator::translateGameMessage(const GameMessage 
 			{
 				switch (m_scrollType)
 				{
+				case SCROLL_MMB:
+					{
+						// straight drag-the-world pan: no anchor chasing and no keyboard minimum,
+						// so the map follows the cursor one-to-one.
+						offset.x = -TheGlobalData->m_horizontalScrollSpeedFactor * (m_currentPos.x - m_anchor.x);
+						offset.y = -TheGlobalData->m_verticalScrollSpeedFactor * (m_currentPos.y - m_anchor.y);
+						m_anchor = m_currentPos;
+					}
+					break;
 				case SCROLL_RMB:
 					{
 						if (TheInGameUI->shouldMoveRMBScrollAnchor())

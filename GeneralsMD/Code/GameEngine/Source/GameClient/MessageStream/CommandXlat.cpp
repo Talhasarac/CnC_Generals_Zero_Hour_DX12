@@ -3203,6 +3203,50 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 			break;
 
 		//
+		// Pause and game speed. Both are local-only: they change how fast THIS machine steps its
+		// logic, so they are refused outright in a network game where every peer has to agree.
+		// Replays and single player are fair game.
+		//
+		case GameMessage::MSG_META_TOGGLE_PAUSE:
+		{
+			if( TheGameLogic && !TheGameLogic->isInMultiplayerGame() )
+			{
+				Bool paused = !TheGameLogic->isGamePaused();
+				TheGameLogic->setGamePaused( paused );
+				TheInGameUI->message( paused ? "GUI:GamePaused" : "GUI:GameResumed" );
+			}
+			disp = DESTROY_MESSAGE;
+			break;
+		}
+
+		case GameMessage::MSG_META_GAME_SPEED_UP:
+		case GameMessage::MSG_META_GAME_SPEED_DOWN:
+		case GameMessage::MSG_META_GAME_SPEED_RESET:
+		{
+			if( TheGameEngine && TheGameLogic && !TheGameLogic->isInMultiplayerGame() )
+			{
+				const Int MIN_LOGIC_FPS = 5;
+				const Int MAX_LOGIC_FPS = 200;
+				Int fps = TheGameEngine->getFramesPerSecondLimit();
+
+				if( t == GameMessage::MSG_META_GAME_SPEED_RESET )
+					fps = DEFAULT_MAX_FPS;
+				else if( t == GameMessage::MSG_META_GAME_SPEED_UP )
+					fps += 5;
+				else
+					fps -= 5;
+
+				if( fps < MIN_LOGIC_FPS ) fps = MIN_LOGIC_FPS;
+				if( fps > MAX_LOGIC_FPS ) fps = MAX_LOGIC_FPS;
+
+				TheGameEngine->setFramesPerSecondLimit( fps );
+				TheInGameUI->message( UnicodeString( L"Game speed: %d" ), fps );
+			}
+			disp = DESTROY_MESSAGE;
+			break;
+		}
+
+		//
 		// Hold position: every selected unit guards the spot it is standing on and does not
 		// pursue. The location has to be resolved per unit on the logic side, so this carries
 		// only the guard mode - see MSG_DO_HOLD_POSITION in GameLogicDispatch.

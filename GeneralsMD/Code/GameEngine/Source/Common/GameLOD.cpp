@@ -367,6 +367,12 @@ void GameLODManager::init(void)
 	TheWritableGlobalData->m_useGridHotKeys = optionPref.getUseGridHotKeys();
 	TheWritableGlobalData->m_edgeScrollInWindowedMode = optionPref.getEdgeScrollInWindowedMode();
 	TheWritableGlobalData->m_snapBuildPlacementTo45 = optionPref.getSnapBuildPlacementTo45();
+	TheWritableGlobalData->m_snapCameraRotateTo45 = optionPref.getSnapCameraRotateTo45();
+	TheWritableGlobalData->m_middleMousePans = optionPref.getMiddleMousePans();
+	TheWritableGlobalData->m_zoomToCursor = optionPref.getZoomToCursor();
+	TheWritableGlobalData->m_showHudOverlay = optionPref.getShowHudOverlay();
+	TheWritableGlobalData->m_showPlacementRangeRing = optionPref.getShowPlacementRangeRing();
+	TheWritableGlobalData->m_workersReturnToSupply = optionPref.getWorkersReturnToSupply();
 
 	setStaticLODLevel(userSetDetail);
 }

@@ -760,6 +760,60 @@ Bool OptionPreferences::getSnapBuildPlacementTo45(void)
 	return stricmp(it->second.str(), "yes") == 0;
 }
 
+Bool OptionPreferences::getSnapCameraRotateTo45(void)
+{
+	OptionPreferences::const_iterator it = find("SnapCameraRotateTo45");
+	if (it == end())
+		return TheGlobalData->m_snapCameraRotateTo45;
+
+	return stricmp(it->second.str(), "yes") == 0;
+}
+
+Bool OptionPreferences::getMiddleMousePans(void)
+{
+	OptionPreferences::const_iterator it = find("MiddleMousePans");
+	if (it == end())
+		return TheGlobalData->m_middleMousePans;
+
+	return stricmp(it->second.str(), "yes") == 0;
+}
+
+Bool OptionPreferences::getZoomToCursor(void)
+{
+	OptionPreferences::const_iterator it = find("ZoomToCursor");
+	if (it == end())
+		return TheGlobalData->m_zoomToCursor;
+
+	return stricmp(it->second.str(), "yes") == 0;
+}
+
+Bool OptionPreferences::getShowHudOverlay(void)
+{
+	OptionPreferences::const_iterator it = find("ShowHudOverlay");
+	if (it == end())
+		return TheGlobalData->m_showHudOverlay;
+
+	return stricmp(it->second.str(), "yes") == 0;
+}
+
+Bool OptionPreferences::getShowPlacementRangeRing(void)
+{
+	OptionPreferences::const_iterator it = find("ShowPlacementRangeRing");
+	if (it == end())
+		return TheGlobalData->m_showPlacementRangeRing;
+
+	return stricmp(it->second.str(), "yes") == 0;
+}
+
+Bool OptionPreferences::getWorkersReturnToSupply(void)
+{
+	OptionPreferences::const_iterator it = find("WorkersReturnToSupply");
+	if (it == end())
+		return TheGlobalData->m_workersReturnToSupply;
+
+	return stricmp(it->second.str(), "yes") == 0;
+}
+
 Int OptionPreferences::getTextureReduction(void)
 {
 	OptionPreferences::const_iterator it = find("TextureReduction");

@@ -326,6 +326,12 @@ public:
 	Bool m_useGridHotKeys;				///< command bar keys come from the slot grid, not the '&' letter in each button's label
 	Bool m_edgeScrollInWindowedMode;	///< allow screen-edge scrolling while running in a window
 	Bool m_snapBuildPlacementTo45;		///< quantize the drag-to-rotate build placement angle to 45 degrees
+	Bool m_snapCameraRotateTo45;		///< quantize the camera heading to 45 degrees when a middle-drag rotate ends
+	Bool m_middleMousePans;				///< middle-button drag pans the camera instead of rotating it
+	Bool m_zoomToCursor;				///< the mouse wheel zooms toward whatever the cursor is over
+	Bool m_showHudOverlay;				///< draw the fps / elapsed time / income line in the corner
+	Bool m_showPlacementRangeRing;		///< while placing a structure, ring its weapon range
+	Bool m_workersReturnToSupply;		///< a worker that finishes a build job goes back to the dock it left
 	Bool m_buildMapCache;
 	AsciiString m_initialFile;				///< If this is specified, load a specific map/replay from the command-line
 	AsciiString m_pendingFile;				///< If this is specified, use this map at the next game start

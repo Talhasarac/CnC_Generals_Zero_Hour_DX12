@@ -242,6 +242,7 @@ protected:
 // Supply Truck data
 	Int m_numberBoxes;
 	ObjectID									m_preferredDock;			///< Instead of searching, try this one first
+	ObjectID									m_dockBeforeBuilding;	///< the dock we left to go build, so we can go back (WorkersReturnToSupply)
 	Bool m_forcePending; // To prevent a function from doing a setState, forceWanting will latch into here until serviced.
 	Bool m_isRebuild;	// is our current construction task a rebuild?
 	Bool m_forcedBusyPending;	// A supply truck can't tell the difference between Idle since

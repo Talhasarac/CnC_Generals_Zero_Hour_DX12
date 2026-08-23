@@ -183,6 +183,12 @@ GlobalData* GlobalData::m_theOriginal = NULL;
 	{ "UseGridHotKeys",						INI::parseBool,				NULL,			offsetof( GlobalData, m_useGridHotKeys ) },
 	{ "EdgeScrollInWindowedMode",	INI::parseBool,				NULL,			offsetof( GlobalData, m_edgeScrollInWindowedMode ) },
 	{ "SnapBuildPlacementTo45",		INI::parseBool,				NULL,			offsetof( GlobalData, m_snapBuildPlacementTo45 ) },
+	{ "SnapCameraRotateTo45",			INI::parseBool,				NULL,			offsetof( GlobalData, m_snapCameraRotateTo45 ) },
+	{ "MiddleMousePans",					INI::parseBool,				NULL,			offsetof( GlobalData, m_middleMousePans ) },
+	{ "ZoomToCursor",							INI::parseBool,				NULL,			offsetof( GlobalData, m_zoomToCursor ) },
+	{ "ShowHudOverlay",						INI::parseBool,				NULL,			offsetof( GlobalData, m_showHudOverlay ) },
+	{ "ShowPlacementRangeRing",		INI::parseBool,				NULL,			offsetof( GlobalData, m_showPlacementRangeRing ) },
+	{ "WorkersReturnToSupply",		INI::parseBool,				NULL,			offsetof( GlobalData, m_workersReturnToSupply ) },
 	{ "MinCameraHeight",						INI::parseReal,				NULL,			offsetof( GlobalData, m_minCameraHeight ) },
 	{ "TerrainHeightAtEdgeOfMap",					INI::parseReal,				NULL,			offsetof( GlobalData, m_terrainHeightAtEdgeOfMap ) },
 	{ "UnitDamagedThreshold",				INI::parseReal,				NULL,			offsetof( GlobalData, m_unitDamagedThresh ) },
@@ -986,6 +992,12 @@ GlobalData::GlobalData()
 	m_useGridHotKeys = FALSE;
 	m_edgeScrollInWindowedMode = FALSE;
 	m_snapBuildPlacementTo45 = FALSE;
+	m_snapCameraRotateTo45 = FALSE;
+	m_middleMousePans = FALSE;
+	m_zoomToCursor = FALSE;
+	m_showHudOverlay = FALSE;
+	m_showPlacementRangeRing = FALSE;
+	m_workersReturnToSupply = FALSE;
 	
 	m_animateWindows = TRUE;
 	

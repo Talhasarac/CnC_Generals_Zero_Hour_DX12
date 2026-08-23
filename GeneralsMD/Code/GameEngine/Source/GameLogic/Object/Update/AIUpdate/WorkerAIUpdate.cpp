@@ -114,6 +114,9 @@ WorkerAIUpdate::WorkerAIUpdate( Thing *thing, const ModuleData* moduleData ) :
 	
 	m_supplyTruckStateMachine = NULL;
 	m_numberBoxes = 0;
+	// deliberately not xfer'd: it is a convenience, and a worker loaded mid-build simply does not
+	// auto-return rather than forcing a save-format bump.
+	m_dockBeforeBuilding = INVALID_ID;
 	m_forcePending = FALSE;
 	m_forcedBusyPending = FALSE;
 
@@ -626,6 +629,10 @@ void WorkerAIUpdate::newTask( DozerTask task, Object* target )
 	if( target == NULL )
 		return;
 
+	// remember where we were gathering before the job, so we can go back to it afterwards
+	// (WorkersReturnToSupply); the dozer brain still gets a clean slate either way.
+	if( m_preferredDock != INVALID_ID )
+		m_dockBeforeBuilding = m_preferredDock;
 	m_preferredDock = INVALID_ID; // If we are dozing, we don't want any supply truck stuff going on. jba.
 
 	//
@@ -827,6 +834,21 @@ void WorkerAIUpdate::internalTaskCompleteOrCancelled( DozerTask task )
 
 			// the builder is no longer actively building something
 			getObject()->clearModelConditionState( MODELCONDITION_ACTIVELY_CONSTRUCTING );
+
+			//
+			// WorkersReturnToSupply: a worker pulled off a supply run to put up a building used to
+			// just stand there when it finished. Send it back to the dock it came from, if that
+			// dock is still standing.
+			//
+			if( TheGlobalData->m_workersReturnToSupply && m_dockBeforeBuilding != INVALID_ID )
+			{
+				if( TheGameLogic->findObjectByID( m_dockBeforeBuilding ) != NULL )
+				{
+					m_preferredDock = m_dockBeforeBuilding;
+					setForceWantingState( TRUE );
+				}
+				m_dockBeforeBuilding = INVALID_ID;
+			}
 
 			// And the thing we were working on is no longer being actively built
 

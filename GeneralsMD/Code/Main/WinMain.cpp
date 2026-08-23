@@ -78,6 +78,7 @@
 HINSTANCE ApplicationHInstance = NULL;  ///< our application instance
 HWND ApplicationHWnd = NULL;  ///< our application window handle
 Bool ApplicationIsWindowed = false;
+Bool ApplicationIsBorderless = false;		///< -borderless: windowed, but with no caption or frame
 Win32Mouse *TheWin32Mouse= NULL;  ///< for the WndProc() only
 DWORD TheMessageTime = 0;	///< For getting the time that a message was posted from Windows.
 
@@ -699,8 +700,10 @@ static Bool initializeAppWindows( HINSTANCE hInstance, Int nCmdShow, Bool runWin
 
    // Create our main window
 	windowStyle =  WS_POPUP|WS_VISIBLE;
-	if (runWindowed) 
+	if (runWindowed && !ApplicationIsBorderless)
 		windowStyle |= WS_DLGFRAME | WS_CAPTION | WS_SYSMENU;
+	else if (runWindowed)
+		windowStyle |= WS_SYSMENU;	// borderless: keep the system menu for alt+F4, drop the frame
 	else
 		windowStyle |= WS_EX_TOPMOST | WS_SYSMENU;
 
@@ -942,6 +945,14 @@ Int APIENTRY WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance,
 			//added a preparse step for this flag because it affects window creation style
 			if (stricmp(token,"-win")==0)
 				ApplicationIsWindowed=true;
+			// same reason: -borderless drops the caption and frame, and implies -win. Parsed here
+			// rather than from Options.ini because the window exists long before the engine's
+			// preferences do.
+			if (stricmp(token,"-borderless")==0)
+			{
+				ApplicationIsWindowed=true;
+				ApplicationIsBorderless=true;
+			}
 			token = nextParam(NULL, "\" ");	   
 		}
 

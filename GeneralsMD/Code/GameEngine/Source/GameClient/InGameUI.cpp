@@ -1001,6 +1001,13 @@ InGameUI::InGameUI()
 	m_replayWindow = NULL;
 	m_messagesOn = TRUE;
 
+	m_hudDisplayString = NULL;
+	m_hudLastSampleFrame = 0;
+	m_hudFps = 0.0f;
+	m_hudLastMoney = -1;
+	m_hudLastMoneyFrame = 0;
+	m_hudIncomePerMin = 0;
+
 	m_superweaponPosition.x = 0.7f;
 	m_superweaponPosition.y = 0.7f;
 	m_superweaponFlashDuration = 1.0f;
@@ -1192,6 +1199,32 @@ void InGameUI::init( void )
 }  // end init
 
 //-------------------------------------------------------------------------------------------------
+//-------------------------------------------------------------------------------------------------
+//-------------------------------------------------------------------------------------------------
+/** Ring a radius we already know, rather than one derived from a selected object. */
+//-------------------------------------------------------------------------------------------------
+void InGameUI::setRadiusCursorForRadius(Real radius)
+{
+	if (radius <= 0.0f)
+	{
+		setRadiusCursorNone();
+		return;
+	}
+
+	// re-create only when the size actually changed, otherwise the decal restarts every frame
+	static Real s_lastRadius = 0.0f;
+	if (m_curRcType == RADIUSCURSOR_GUARD_AREA && s_lastRadius == radius)
+		return;
+
+	m_curRadiusCursor.clear();
+	Coord3D pos = { 0, 0, 0 };	// handleRadiusCursor() puts it under the cursor
+	m_radiusCursors[RADIUSCURSOR_GUARD_AREA].createRadiusDecal(pos, radius, ThePlayerList->getLocalPlayer(), m_curRadiusCursor);
+	m_curRcType = RADIUSCURSOR_GUARD_AREA;
+	s_lastRadius = radius;
+
+	handleRadiusCursor();
+}
+
 //-------------------------------------------------------------------------------------------------
 void InGameUI::setRadiusCursor(RadiusCursorType cursorType, const SpecialPowerTemplate* specPowTempl, WeaponSlotType weaponSlot)
 {
@@ -1413,6 +1446,28 @@ void InGameUI::handleBuildPlacements( void )
 		ICoord2D loc;
 		Coord3D world;
 		Real angle = m_placeIcon[ 0 ]->getOrientation();
+
+		//
+		// ShowPlacementRangeRing: ring the structure's own weapon range while it is being placed,
+		// so a defense can be sited against what it actually covers. The radius comes off the
+		// template - there is no Object yet - and the ring rides the cursor like any other radius
+		// decal.
+		//
+		if( TheGlobalData->m_showPlacementRangeRing )
+		{
+			Real placeRange = 0.0f;
+			const WeaponTemplateSet *wts = m_pendingPlaceType->findWeaponTemplateSet( WeaponSetFlags() );
+			if( wts )
+			{
+				for( Int ws = PRIMARY_WEAPON; ws < WEAPONSLOT_COUNT; ++ws )
+				{
+					const WeaponTemplate *wt = wts->getNth( (WeaponSlotType)ws );
+					if( wt && wt->getUnmodifiedAttackRange() > placeRange )
+						placeRange = wt->getUnmodifiedAttackRange();
+				}
+			}
+			setRadiusCursorForRadius( placeRange );
+		}
 
 		// update the angle of the icon to match any placement angle and pick the
 		// location the icon will be at (anchored is the start, otherwise it's the mouse)
@@ -3486,6 +3541,8 @@ void InGameUI::disregardDrawable( Drawable *draw )
 //-------------------------------------------------------------------------------------------------
 void InGameUI::postDraw( void )
 {
+	drawHudOverlay();
+
 
 	// render our display strings for the messages if on
 	if( m_messagesOn )
@@ -5140,6 +5197,88 @@ void InGameUI::updateFloatingText( void )
 //-------------------------------------------------------------------------------------------------
 /** Itterates through and draws each floating text */
 //-------------------------------------------------------------------------------------------------
+//-------------------------------------------------------------------------------------------------
+/** A one-line heads-up overlay: render rate, elapsed game time and the local player's income.
+	* Off unless ShowHudOverlay is set in Options.ini.  Retail only ever showed the frame rate, and
+	* only behind -displayDebug together with a screenful of engine internals. */
+//-------------------------------------------------------------------------------------------------
+void InGameUI::drawHudOverlay( void )
+{
+	if( !TheGlobalData->m_showHudOverlay )
+		return;
+
+	if( TheGameLogic == NULL || TheGameLogic->getFrame() == 0 )
+		return;
+
+	Player *player = ThePlayerList ? ThePlayerList->getLocalPlayer() : NULL;
+	if( player == NULL )
+		return;
+
+	//
+	// Render rate, sampled over half a second of wall clock so the number is readable. This counts
+	// client frames, which is the render rate - the logic rate is fixed by the game speed.
+	//
+	const UnsignedInt clientFrame = TheGameClient->getFrame();
+	static UnsignedInt s_lastMs = 0;
+	static UnsignedInt s_lastClientFrame = 0;
+	UnsignedInt nowMs = timeGetTime();
+	if( s_lastMs == 0 )
+	{
+		s_lastMs = nowMs;
+		s_lastClientFrame = clientFrame;
+	}
+	else if( nowMs - s_lastMs >= 500 )
+	{
+		m_hudFps = (clientFrame - s_lastClientFrame) * 1000.0f / (Real)(nowMs - s_lastMs);
+		s_lastMs = nowMs;
+		s_lastClientFrame = clientFrame;
+	}
+
+	//
+	// Income, as cash per minute over the last ten seconds. Deliberately a delta of the balance
+	// rather than a tap into the deposit paths: it counts everything, including crates and refunds,
+	// which is what the player actually wants to compare against a build.
+	//
+	const UnsignedInt logicFrame = TheGameLogic->getFrame();
+	const UnsignedInt SAMPLE_FRAMES = 10 * LOGICFRAMES_PER_SECOND;
+	Int money = player->getMoney()->countMoney();
+	if( m_hudLastMoney < 0 )
+	{
+		m_hudLastMoney = money;
+		m_hudLastMoneyFrame = logicFrame;
+	}
+	else if( logicFrame >= m_hudLastMoneyFrame + SAMPLE_FRAMES )
+	{
+		Int delta = money - m_hudLastMoney;
+		if( delta < 0 )
+			delta = 0;	// spending is not negative income
+		m_hudIncomePerMin = delta * 6;	// ten seconds -> a minute
+		m_hudLastMoney = money;
+		m_hudLastMoneyFrame = logicFrame;
+	}
+
+	UnsignedInt totalSecs = logicFrame / LOGICFRAMES_PER_SECOND;
+
+	UnicodeString text;
+	text.format( L"%d:%02d:%02d   %d fps   %d/min",
+							 totalSecs / 3600, (totalSecs / 60) % 60, totalSecs % 60,
+							 REAL_TO_INT( m_hudFps ), m_hudIncomePerMin );
+
+	if( m_hudDisplayString == NULL )
+	{
+		m_hudDisplayString = TheDisplayStringManager->newDisplayString();
+		m_hudDisplayString->setFont( TheFontLibrary->getFont( m_superweaponNormalFont,
+																		TheGlobalLanguageData->adjustFontSize( m_superweaponNormalPointSize ),
+																		m_superweaponNormalBold ) );
+	}
+	m_hudDisplayString->setText( text );
+
+	// top right, clear of the radar and of the superweapon timers
+	Int x = TheDisplay->getWidth() - m_hudDisplayString->getWidth() - 12;
+	Int y = 4;
+	m_hudDisplayString->draw( x, y, GameMakeColor( 255, 255, 255, 255 ), GameMakeColor( 0, 0, 0, 255 ) );
+}
+
 void InGameUI::drawFloatingText( void )
 {
 	FloatingTextData *ftd;

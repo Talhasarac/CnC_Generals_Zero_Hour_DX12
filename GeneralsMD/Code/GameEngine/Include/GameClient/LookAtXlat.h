@@ -55,7 +55,8 @@ private:
 		SCROLL_NONE = 0,
 		SCROLL_RMB,
 		SCROLL_KEY,
-		SCROLL_SCREENEDGE
+		SCROLL_SCREENEDGE,
+		SCROLL_MMB				// middle-button drag pan (MiddleMousePans in Options.ini)
 	};
 	ICoord2D m_anchor;
 	ICoord2D m_originalAnchor;

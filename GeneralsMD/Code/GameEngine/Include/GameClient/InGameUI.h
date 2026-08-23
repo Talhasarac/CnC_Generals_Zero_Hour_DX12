@@ -457,6 +457,9 @@ public:  // ********************************************************************
 
 	virtual void setRadiusCursor(RadiusCursorType r, const SpecialPowerTemplate* sp, WeaponSlotType wslot);
 	virtual void setRadiusCursorNone() { setRadiusCursor(RADIUSCURSOR_NONE, NULL, PRIMARY_WEAPON); }
+	/// ring an explicit radius with the guard-area decal; used while placing a defensive structure,
+	/// where there is no Object yet to read a weapon range off.
+	virtual void setRadiusCursorForRadius(Real radius);
 
 	virtual void setInputEnabled( Bool enable );										///< Set the input enabled or disabled
 	virtual Bool getInputEnabled( void ) { return m_inputEnabled; }	///< Get the current input status
@@ -747,6 +750,15 @@ protected:
 																						index 0, and increasing to older ones */
 	// superweapon timer data
 	SuperweaponMap							m_superweapons[MAX_PLAYER_COUNT];
+	void drawHudOverlay( void );					///< one-line fps / clock / income overlay (ShowHudOverlay)
+
+	DisplayString *							m_hudDisplayString;			///< the ShowHudOverlay line (fps / clock / income)
+	UnsignedInt									m_hudLastSampleFrame;		///< client frame the fps sample was last refreshed on
+	Real												m_hudFps;								///< smoothed render rate
+	Int													m_hudLastMoney;					///< player money at the last income sample
+	UnsignedInt									m_hudLastMoneyFrame;		///< logic frame of that sample
+	Int													m_hudIncomePerMin;			///< most recent income estimate, cash per minute
+
 	Coord2D											m_superweaponPosition;
 	Real												m_superweaponFlashDuration;
 	
