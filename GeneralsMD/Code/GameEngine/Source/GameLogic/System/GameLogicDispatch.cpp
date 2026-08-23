@@ -555,7 +555,10 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 		{
 			Object *obj = TheGameLogic->findObjectByID( msg->getArgument( 0 )->objectID );
 			Coord3D dest = msg->getArgument( 1 )->location;
-			if (obj)
+			// sanity, the player must control the object. The object id comes straight off the
+			// message, and every sibling case here (MSG_CANCEL_UNIT_CREATE, MSG_DOZER_CANCEL_CONSTRUCT)
+			// checks it - without it a doctored client could set rally points on enemy factories.
+			if (obj && obj->getControllingPlayer() == thisPlayer)
 			{
 				doSetRallyPoint( obj, dest );
 			}
@@ -1495,6 +1498,18 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 
 			if( place == NULL || constructorObject == NULL )
 				break;  //These are not crashes, as the object may have died before this message came in
+
+			// sanity, the player must control the builder
+			if( constructorObject->getControllingPlayer() != thisPlayer )
+				break;
+
+			//
+			// Re-check prerequisites and money on the logic side. This used to go straight to
+			// buildObjectNow, whose Money::withdraw clamps to the balance - so a client that
+			// skipped the UI's own check could put up structures it had not paid for.
+			//
+			if( TheBuildAssistant->canMakeUnit( constructorObject, place ) != CANMAKE_OK )
+				break;
 
 			if( msg->getType() == GameMessage::MSG_DOZER_CONSTRUCT )
 			{

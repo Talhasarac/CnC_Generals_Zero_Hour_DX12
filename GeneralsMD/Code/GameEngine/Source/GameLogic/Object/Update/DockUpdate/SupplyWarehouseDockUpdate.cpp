@@ -112,7 +112,10 @@ Bool SupplyWarehouseDockUpdate::action( Object* docker, Object *drone )
 	
 	--m_boxesStored;// so the docker sees that I am shy by one box (or empty) from within his gainOneBox()
 
-	SupplyTruckAIInterface *ai = docker->getAIUpdateInterface()->getSupplyTruckAIInterface();
+	// getAIUpdateInterface() can be NULL here and was dereferenced blind (the sibling
+	// SupplyCenterDockUpdate does check). The ai==NULL path below already puts the box back.
+	AIUpdateInterface *dockerAI = docker->getAIUpdateInterface();
+	SupplyTruckAIInterface *ai = dockerAI ? dockerAI->getSupplyTruckAIInterface() : NULL;
 	if( ai && ai->gainOneBox( m_boxesStored ) )
 	{
 		if( m_boxesStored == 0 && getSupplyWarehouseDockUpdateModuleData()->m_deleteWhenEmpty )

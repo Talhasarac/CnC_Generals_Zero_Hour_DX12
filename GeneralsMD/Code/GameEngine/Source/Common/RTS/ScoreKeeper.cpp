@@ -209,11 +209,19 @@ void ScoreKeeper::removeObjectBuilt( const Object *o)
 
 	if (removeFromCount)
 	{
-		Int existingCount = 0;
+		//
+		// Floor everything at zero. removeObjectBuilt is also reached for objects this player
+		// never built (a structure captured and then lost), which used to insert a -1 entry into
+		// the map and push the totals negative in the score screen.
+		//
+		if (m_totalBuildingsBuilt < 0)
+			m_totalBuildingsBuilt = 0;
+		if (m_totalUnitsBuilt < 0)
+			m_totalUnitsBuilt = 0;
+
 		ObjectCountMapIt it = m_objectsBuilt.find(o->getTemplate());
-		if (it != m_objectsBuilt.end())
-			existingCount = it->second;
-		m_objectsBuilt[o->getTemplate()] = existingCount - 1;
+		if (it != m_objectsBuilt.end() && it->second > 0)
+			it->second = it->second - 1;
 	}
 }
 

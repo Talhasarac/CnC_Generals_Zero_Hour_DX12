@@ -169,7 +169,9 @@ UpdateSleepTime AutoDepositUpdate::update( void )
 		if( modData->m_isActualMoney )
 		{
 			getObject()->getControllingPlayer()->getMoney()->deposit( moneyAmount );
-			getObject()->getControllingPlayer()->getScoreKeeper()->addMoneyEarned( modData->m_depositAmount);
+			// score what we actually deposited: this used to score m_depositAmount only, so the
+			// upgraded supply boost never reached the end-game income total.
+			getObject()->getControllingPlayer()->getScoreKeeper()->addMoneyEarned( moneyAmount );
 		}
 		
 		Bool displayMoney = moneyAmount > 0 ? TRUE : FALSE;

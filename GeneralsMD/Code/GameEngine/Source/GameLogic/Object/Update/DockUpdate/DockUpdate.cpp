@@ -416,14 +416,32 @@ void DockUpdate::setDockCrippled( Bool setting )
 
 UpdateSleepTime DockUpdate::update()
 {
+	//
+	// Reap dockers that died on us. cancelDock()/onExit() are only ever called by the docker's own
+	// AI states, so a docker killed while it held the dock (or an approach slot) left its ID here
+	// forever and this dock never granted entry to anyone again - the classic "supply center stops
+	// accepting trucks" stall.
+	//
+	if( m_activeDocker != INVALID_ID && TheGameLogic->findObjectByID( m_activeDocker ) == NULL )
+		m_activeDocker = INVALID_ID;
+
 	if( m_activeDocker == INVALID_ID  &&  !m_dockCrippled )
 	{
 		// if setDockCrippled has been called, I will never give enterance permission.
 		for( Int positionIndex = 0; positionIndex < m_approachPositionReached.size(); ++positionIndex )
 		{
+			ObjectID ownerID = m_approachPositionOwners[positionIndex];
+			if( ownerID != INVALID_ID && TheGameLogic->findObjectByID( ownerID ) == NULL )
+			{
+				// the unit queued in this slot is gone; free it instead of blocking the queue
+				m_approachPositionOwners[positionIndex] = INVALID_ID;
+				m_approachPositionReached[positionIndex] = FALSE;
+				continue;
+			}
+
 			if( m_approachPositionReached[positionIndex] )
 			{
-				m_activeDocker = m_approachPositionOwners[positionIndex];
+				m_activeDocker = ownerID;
 				return UPDATE_SLEEP_NONE;
 			}
 		}

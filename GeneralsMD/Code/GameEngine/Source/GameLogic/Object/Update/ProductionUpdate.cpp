@@ -340,9 +340,15 @@ void ProductionUpdate::cancelUpgrade( const UpgradeTemplate *upgrade )
 	// get the player
 	Player *player = getObject()->getControllingPlayer();
 
-	// sanity, you can't cancel it if the player isn't actually building one
+	//
+	// You can't refund it if the player isn't actually building one - but the queue entry still
+	// has to go. Returning here without removing it is what made cancelAndRefundAllProduction
+	// spin: the same head entry was retried 100 times and then abandoned, so selling or losing a
+	// research building neither refunded the upgrade nor cleared it from the queue.
+	//
+	Bool refundIt = TRUE;
 	if( upgrade->getUpgradeType() == UPGRADE_TYPE_PLAYER && player->hasUpgradeInProduction( upgrade ) == FALSE )
-		return;
+		refundIt = FALSE;
 
 	//
 	// find the production entry for this upgrade in the queue here, there can only be one
@@ -363,8 +369,11 @@ void ProductionUpdate::cancelUpgrade( const UpgradeTemplate *upgrade )
 		return;
 
 	// refund money back to the player
-	Money *money = player->getMoney();
-	money->deposit( production->m_upgradeToResearch->calcCostToBuild( player ) );
+	if( refundIt )
+	{
+		Money *money = player->getMoney();
+		money->deposit( production->m_upgradeToResearch->calcCostToBuild( player ) );
+	}
 
 	// remove this production from the queue
 	removeFromProductionQueue( production );
@@ -473,8 +482,11 @@ void ProductionUpdate::cancelUnitCreate( ProductionID productionID )
 	for( production = m_productionQueue; production; production = production->m_next )
 	{
 
-		// are we at the one we want get rid of it
-		if( production->m_productionID == productionID )
+		// are we at the one we want get rid of it.
+		// The type test matters: m_objectToProduce and m_upgradeToResearch share a union, and an
+		// upgrade entry carries PRODUCTIONID_INVALID - so a cancel arriving with that id used to
+		// match an upgrade here and hand an UpgradeTemplate* to ThingTemplate::calcCostToBuild.
+		if( production->m_type == PRODUCTION_UNIT && production->m_productionID == productionID )
 		{
 
 			// give the player the cost of the object back
@@ -1143,25 +1155,33 @@ void ProductionUpdate::onDie( const DamageInfo *damageInfo )
 // ------------------------------------------------------------------------------------------------
 void ProductionUpdate::cancelAndRefundAllProduction( void )
 {
-	// Empirically, in release the code can loop forever.  So we limit to 100 passes. jba. [8/31/2003]
-	const Int productionLimit = 100;// With luck, we never queue up 100 units. [8/31/2003]
-	Int i;
-	for (i=0; i<productionLimit; i++) 
+	//
+	// The old loop ran a fixed 100 passes whether or not the queue was empty, because
+	// cancelUpgrade could return without removing its entry (fixed above) and the head would
+	// then never change. Now: stop as soon as the queue is empty, and if an entry somehow
+	// survives its own cancel, stop rather than spin.
+	//
+	const Int productionLimit = 100;// a sanity backstop, not the termination condition
+	for( Int i = 0; i < productionLimit && m_productionQueue; i++ )
 	{
-		// iterate through our production queue
-		if( m_productionQueue )
+		ProductionEntry *head = m_productionQueue;
+
+		if( head->getProductionType() == PRODUCTION_UNIT )
+			cancelUnitCreate( head->getProductionID() );
+		else if( head->getProductionType() == PRODUCTION_UPGRADE )
+			cancelUpgrade( head->getProductionUpgrade() );
+		else
 		{
-			if( m_productionQueue->getProductionType() == PRODUCTION_UNIT )
-				cancelUnitCreate( m_productionQueue->getProductionID() );
-			else if( m_productionQueue->getProductionType() == PRODUCTION_UPGRADE )
-				cancelUpgrade( m_productionQueue->getProductionUpgrade() );
-			else
-			{
-				// unknown production type
-				DEBUG_CRASH(( "ProductionUpdate::cancelAndRefundAllProduction - Unknown production type '%d'\n", m_productionQueue->getProductionType() ));
-				return;
-			}  // end else
-		}  // end if
+			// unknown production type
+			DEBUG_CRASH(( "ProductionUpdate::cancelAndRefundAllProduction - Unknown production type '%d'\n", head->getProductionType() ));
+			return;
+		}  // end else
+
+		if( m_productionQueue == head )
+		{
+			DEBUG_CRASH(( "ProductionUpdate::cancelAndRefundAllProduction - head entry would not cancel\n" ));
+			return;
+		}
 	}
 }  // end cancelAndRefundAllProduction
 

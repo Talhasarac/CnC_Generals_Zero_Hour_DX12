@@ -108,7 +108,13 @@ Bool RepairDockUpdate::action( Object *docker, Object *drone )
 	// to this docked object each frame so that it is fully healed after the correct amount
 	// of time has passed
 	//
-	if( m_lastRepair == 0 )
+	//
+	// keyed on the docker, not on "is the slot empty": m_lastRepair is only reset when a docker
+	// reaches full health, so one that died or was ordered away mid-repair left its rate behind
+	// and the NEXT docker healed at the previous unit's rate - an almost-dead heavy tank followed
+	// by a lightly damaged one repaired it nearly instantly.
+	//
+	if( m_lastRepair != docker->getID() )
 	{
 
 		// save ID of this docker as the last docker

@@ -3141,6 +3141,10 @@ void Player::removeUpgrade( const UpgradeTemplate *upgradeTemplate )
 		TheControlBar->markUIDirty();
 	}
 
+		// it is off the list and nothing else holds it: free it. This was missing, so every
+		// cancelled upgrade leaked one pool object for the rest of the game.
+		upgrade->deleteInstance();
+
 	}  // end if
 
 }  // end removeUpgrade
