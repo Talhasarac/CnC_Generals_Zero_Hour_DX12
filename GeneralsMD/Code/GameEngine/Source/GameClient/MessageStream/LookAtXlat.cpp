@@ -298,7 +298,9 @@ GameMessageDisposition LookAtTranslator::translateGameMessage(const GameMessage 
 				break;
 			}
 
-			if (!TheGlobalData->m_windowed)
+			// retail disables edge scrolling entirely in a window; EdgeScrollInWindowedMode in
+			// Options.ini turns it back on for people who play windowed or borderless.
+			if (!TheGlobalData->m_windowed || TheGlobalData->m_edgeScrollInWindowedMode)
 			{
 				if (m_isScrolling)
 				{

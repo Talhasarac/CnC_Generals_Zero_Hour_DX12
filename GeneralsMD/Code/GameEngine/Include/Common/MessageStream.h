@@ -288,6 +288,7 @@ public:
 		MSG_META_TAKE_SCREENSHOT,										///< take screenshot
 		MSG_META_ALL_CHEER,													///< Yay! :)
 		MSG_META_TOGGLE_ATTACKMOVE,									///< enter attack-move mode
+		MSG_META_HOLD_POSITION,											///< hold position: guard in place, no pursuit (fork)
 		
 		MSG_META_BEGIN_CAMERA_ROTATE_LEFT,
 		MSG_META_END_CAMERA_ROTATE_LEFT,
@@ -623,6 +624,7 @@ public:
 		MSG_LOGIC_CRC,															///< CRC from the logic passed around in a network game :)
 		MSG_SET_MINE_CLEARING_DETAIL,								///< CRC from the logic passed around in a network game :)
 		MSG_ENABLE_RETALIATION_MODE,								///< Turn retaliation mode on or off for the specified player.
+		MSG_DO_HOLD_POSITION,												///< Every selected unit guards the spot it is standing on (fork)
 
 		MSG_BEGIN_DEBUG_NETWORK_MESSAGES = 1900,		///< network messages that exist only in debug/internal builds. all grouped separately.
 

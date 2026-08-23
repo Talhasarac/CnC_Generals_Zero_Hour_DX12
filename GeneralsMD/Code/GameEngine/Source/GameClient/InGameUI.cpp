@@ -1440,6 +1440,14 @@ void InGameUI::handleBuildPlacements( void )
 				v.y = worldEnd.y - worldStart.y;
 				angle = v.toAngle();
 
+				// optional 45 degree snap (SnapBuildPlacementTo45 in Options.ini) - lines walls and
+				// defenses up with the base instead of leaving them at whatever the drag produced.
+				if( TheGlobalData->m_snapBuildPlacementTo45 )
+				{
+					const Real step = PI / 4.0f;
+					angle = ((Real)REAL_TO_INT_FLOOR( angle / step + (angle >= 0.0f ? 0.5f : -0.5f) )) * step;
+				}
+
 			}  // end if
 
 		}  // end if

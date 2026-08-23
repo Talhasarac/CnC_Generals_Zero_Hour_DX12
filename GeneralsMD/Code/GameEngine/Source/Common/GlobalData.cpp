@@ -181,6 +181,8 @@ GlobalData* GlobalData::m_theOriginal = NULL;
 	{ "CameraHeight",								INI::parseReal,				NULL,			offsetof( GlobalData, m_cameraHeight ) },
 	{ "MaxCameraHeight",						INI::parseReal,				NULL,			offsetof( GlobalData, m_maxCameraHeight ) },
 	{ "UseGridHotKeys",						INI::parseBool,				NULL,			offsetof( GlobalData, m_useGridHotKeys ) },
+	{ "EdgeScrollInWindowedMode",	INI::parseBool,				NULL,			offsetof( GlobalData, m_edgeScrollInWindowedMode ) },
+	{ "SnapBuildPlacementTo45",		INI::parseBool,				NULL,			offsetof( GlobalData, m_snapBuildPlacementTo45 ) },
 	{ "MinCameraHeight",						INI::parseReal,				NULL,			offsetof( GlobalData, m_minCameraHeight ) },
 	{ "TerrainHeightAtEdgeOfMap",					INI::parseReal,				NULL,			offsetof( GlobalData, m_terrainHeightAtEdgeOfMap ) },
 	{ "UnitDamagedThreshold",				INI::parseReal,				NULL,			offsetof( GlobalData, m_unitDamagedThresh ) },
@@ -982,6 +984,8 @@ GlobalData::GlobalData()
 	m_cameraAdjustSpeed = 0.1f;
 	m_enforceMaxCameraHeight = TRUE;
 	m_useGridHotKeys = FALSE;
+	m_edgeScrollInWindowedMode = FALSE;
+	m_snapBuildPlacementTo45 = FALSE;
 	
 	m_animateWindows = TRUE;
 	

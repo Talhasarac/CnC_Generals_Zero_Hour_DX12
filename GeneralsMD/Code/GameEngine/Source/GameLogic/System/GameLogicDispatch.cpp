@@ -897,6 +897,33 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 		}
 
 		//---------------------------------------------------------------------------------------------
+		//
+		// Hold position (fork). MSG_DO_GUARD_POSITION guards ONE point with the whole group, which
+		// makes everyone walk to it; hold position means each unit guards where it already stands,
+		// so the position is resolved here, per member.
+		//
+		case GameMessage::MSG_DO_HOLD_POSITION:
+		{
+			GuardMode gm = (GuardMode)msg->getArgument( 0 )->integer;
+			if (currentlySelectedGroup)
+			{
+				const VecObjectID& ids = currentlySelectedGroup->getAllIDs();
+				for (VecObjectID::const_iterator it = ids.begin(); it != ids.end(); ++it)
+				{
+					Object *obj = TheGameLogic->findObjectByID( *it );
+					if (!obj || obj->getControllingPlayer() != thisPlayer)
+						continue;
+
+					AIUpdateInterface *ai = obj->getAIUpdateInterface();
+					if (ai)
+						ai->aiGuardPosition( obj->getPosition(), gm, CMD_FROM_PLAYER );
+				}
+			}
+
+			break;
+		}
+
+		//---------------------------------------------------------------------------------------------
 		case GameMessage::MSG_DO_GUARD_OBJECT:
 		{
 			Object* obj = TheGameLogic->findObjectByID( msg->getArgument( 0 )->objectID );

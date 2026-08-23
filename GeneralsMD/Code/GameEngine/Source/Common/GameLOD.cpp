@@ -365,6 +365,8 @@ void GameLODManager::init(void)
 
 	// Grid command-bar keys are an input scheme, not a detail level either.
 	TheWritableGlobalData->m_useGridHotKeys = optionPref.getUseGridHotKeys();
+	TheWritableGlobalData->m_edgeScrollInWindowedMode = optionPref.getEdgeScrollInWindowedMode();
+	TheWritableGlobalData->m_snapBuildPlacementTo45 = optionPref.getSnapBuildPlacementTo45();
 
 	setStaticLODLevel(userSetDetail);
 }

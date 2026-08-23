@@ -736,6 +736,30 @@ Bool OptionPreferences::getUseGridHotKeys(void)
 	return stricmp(it->second.str(), "yes") == 0;
 }
 
+Bool OptionPreferences::getEdgeScrollInWindowedMode(void)
+{
+	// Another power-user Options.ini key.  Retail refuses to edge-scroll in a window because the
+	// cursor can legitimately sit on the border while you reach for something else; on a second
+	// monitor (or borderless) that is exactly the behaviour you want back.
+	OptionPreferences::const_iterator it = find("EdgeScrollInWindowedMode");
+	if (it == end())
+		return TheGlobalData->m_edgeScrollInWindowedMode;
+
+	return stricmp(it->second.str(), "yes") == 0;
+}
+
+Bool OptionPreferences::getSnapBuildPlacementTo45(void)
+{
+	// Power-user Options.ini key.  Drag-to-rotate placement is free-angle in retail; with this on
+	// it clicks to the eight 45 degree headings, which is what you want for walls and for lining
+	// defenses up with a base.
+	OptionPreferences::const_iterator it = find("SnapBuildPlacementTo45");
+	if (it == end())
+		return TheGlobalData->m_snapBuildPlacementTo45;
+
+	return stricmp(it->second.str(), "yes") == 0;
+}
+
 Int OptionPreferences::getTextureReduction(void)
 {
 	OptionPreferences::const_iterator it = find("TextureReduction");

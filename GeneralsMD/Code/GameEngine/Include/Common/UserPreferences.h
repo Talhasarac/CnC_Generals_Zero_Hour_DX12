@@ -109,6 +109,8 @@ public:
  	Real getGammaValue(void);
 	Real getMaxCameraHeight(void);
 	Bool getUseGridHotKeys(void);
+	Bool getEdgeScrollInWindowedMode(void);
+	Bool getSnapBuildPlacementTo45(void);
 	Int	 getTextureReduction(void);
 	void getResolution(Int *xres, Int *yres);
 	Bool get3DShadowsEnabled(void);

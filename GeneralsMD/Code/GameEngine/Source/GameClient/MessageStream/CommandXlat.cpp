@@ -3202,6 +3202,22 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 			TheInGameUI->toggleAttackMoveToMode( );
 			break;
 
+		//
+		// Hold position: every selected unit guards the spot it is standing on and does not
+		// pursue. The location has to be resolved per unit on the logic side, so this carries
+		// only the guard mode - see MSG_DO_HOLD_POSITION in GameLogicDispatch.
+		//
+		case GameMessage::MSG_META_HOLD_POSITION:
+		{
+			if( TheInGameUI->getSelectCount() > 0 )
+			{
+				GameMessage *holdMsg = TheMessageStream->appendMessage( GameMessage::MSG_DO_HOLD_POSITION );
+				holdMsg->appendIntegerArgument( GUARDMODE_GUARD_WITHOUT_PURSUIT );
+				disp = DESTROY_MESSAGE;
+			}
+			break;
+		}
+
 		case GameMessage::MSG_META_BEGIN_CAMERA_ROTATE_LEFT:
 			DEBUG_ASSERTCRASH(!TheInGameUI->isCameraRotatingLeft(), ("Setting rotate camera left, but it's already set!"));
 			TheInGameUI->setCameraRotateLeft( true );
