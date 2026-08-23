@@ -299,6 +299,13 @@ Bool SpecialPowerModule::isReady() const
 
 	if ( obj && modData )
 	{
+		// The constructor only starts the recharge for an object that is already built, so a
+		// superweapon still going up has m_availableOnFrame == 0 and used to report itself ready
+		// for the whole build: the button drew as available with no clock, and the structure
+		// snapped out of its ready pose the moment construction finished and the timer started.
+		if ( obj->getStatusBits().test( OBJECT_STATUS_UNDER_CONSTRUCTION ) )
+			return FALSE;
+
 		Player *player = getObject()->getControllingPlayer();
 		if ( player )
 		{

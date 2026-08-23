@@ -1329,6 +1329,11 @@ CommandAvailability ControlBar::getCommandAvailability( const CommandButton *com
 				// forgot to put it in the object
 				DEBUG_CRASH(( "Object %s does not contain special power module (%s) to execute.  Did you forget to add it to the object INI?\n",
 											obj->getTemplate()->getName().str(), command->getSpecialPowerTemplate()->getName().str() ));
+
+				// ...and in a release build that assert is nothing, so control used to fall out of
+				// this chain and report the button as available - a power the object cannot even
+				// perform was drawn ready to fire. There is nothing behind it, so hide it.
+				return COMMAND_HIDDEN;
 			} 
 			else if( mod->isReady() == FALSE )
 			{
