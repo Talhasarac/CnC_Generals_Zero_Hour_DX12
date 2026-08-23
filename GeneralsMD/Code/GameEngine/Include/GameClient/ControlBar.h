@@ -407,6 +407,9 @@ private:
 /** Command sets are collections of configurable command buttons.  They are used in the
 	* command context sensitive window in the battle user interface */
 //-------------------------------------------------------------------------------------------------
+// how many units a shift-click on a build button queues at once, and a shift-right-click cancels
+enum { SHIFT_BUILD_QUEUE_COUNT = 5 };
+
 enum { MAX_COMMANDS_PER_SET = 18 };  // user interface max is 14 (but internally it's 18 for script only buttons!)
 enum { MAX_RIGHT_HUD_UPGRADE_CAMEOS = 5};
 enum { MAX_MULTI_SELECT_GROUPS = 36 };	///< unit types a multi-selection tells apart (6x6 grid, Tab focus)
@@ -872,7 +875,7 @@ protected:
 	void setMultiSelectFocus( Int index );
 	void updateMultiSelectStrip( void );
 	void layoutMultiSelectTiles( Int count );		///< make sure count cells exist, laid out n x n over the right HUD
-	void cancelLastQueuedUnit( const ThingTemplate *thing );	///< right-click on a build button
+	Bool cancelLastQueuedUnit( const ThingTemplate *thing );	///< returns FALSE when there was nothing left to cancel	///< right-click on a build button
 	void populateStructureInventory( Object *building );
 	void populateBeacon( Object *beacon );
 	void populateUnderConstruction( Object *objectUnderConstruction );

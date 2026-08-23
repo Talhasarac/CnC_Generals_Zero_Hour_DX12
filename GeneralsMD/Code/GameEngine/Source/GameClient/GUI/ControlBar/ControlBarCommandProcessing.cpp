@@ -57,8 +57,6 @@
 #include "GameLogic/Object.h"
 #include "GameLogic/Module/ProductionUpdate.h"
 
-// how many units a shift-click on a build button queues at once
-static const Int SHIFT_BUILD_QUEUE_COUNT = 5;
 
 #ifdef _INTERNAL
 // for occasional debugging...

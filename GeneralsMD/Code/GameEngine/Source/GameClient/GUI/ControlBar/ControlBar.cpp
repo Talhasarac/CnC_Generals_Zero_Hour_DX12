@@ -2335,7 +2335,10 @@ CBCommandStatus ControlBar::processContextSensitiveButtonClick( GameWindow *butt
 		const CommandButton *command = (const CommandButton *)GadgetButtonGetData( button );
 		if( command && command->getCommandType() == GUI_COMMAND_UNIT_BUILD )
 		{
-			cancelLastQueuedUnit( command->getThingTemplate() );
+			// holding shift takes a whole batch back out, mirroring the shift-click that queued one
+			Int wanted = (TheKeyboard && TheKeyboard->isShift()) ? SHIFT_BUILD_QUEUE_COUNT : 1;
+			while( wanted-- > 0 && cancelLastQueuedUnit( command->getThingTemplate() ) )
+				;
 			return CBC_COMMAND_USED;
 		}
 	}
@@ -2348,27 +2351,56 @@ CBCommandStatus ControlBar::processContextSensitiveButtonClick( GameWindow *butt
 //-------------------------------------------------------------------------------------------------
 /** Cancel the last queued production of 'thing' on the representative producer */
 //-------------------------------------------------------------------------------------------------
-void ControlBar::cancelLastQueuedUnit( const ThingTemplate *thing )
+Bool ControlBar::cancelLastQueuedUnit( const ThingTemplate *thing )
 {
-	Object *producer = m_currentSelectedDrawable ? m_currentSelectedDrawable->getObject() : NULL;
-	ProductionUpdateInterface *pu = producer ? producer->getProductionUpdateInterface() : NULL;
-	if( pu == NULL || thing == NULL )
-		return;
-	if( producer->getControllingPlayer() != ThePlayerList->getLocalPlayer() )
-		return;
+	if( thing == NULL )
+		return FALSE;
 
+	//
+	// Look across every selected producer, not just the representative one. A shift-click spreads
+	// a batch over all the selected factories, so cancelling only ever on the representative left
+	// the units queued on the others unreachable from the bar.
+	//
+	Object *producer = NULL;
+	ProductionUpdateInterface *pu = NULL;
 	ProductionID last = PRODUCTIONID_INVALID;
-	for( const ProductionEntry *p = pu->firstProduction(); p; p = pu->nextProduction( p ) )
-		if( p->getProductionType() == PRODUCTION_UNIT && p->getProductionObject() == thing )
-			last = p->getProductionID();
-	if( last == PRODUCTIONID_INVALID )
-		return;
+
+	const DrawableList *selected = TheInGameUI->getAllSelectedDrawables();
+	for( DrawableListCIt it = selected->begin(); it != selected->end(); ++it )
+	{
+		Object *candidate = (*it)->getObject();
+		if( candidate == NULL || candidate->getControllingPlayer() != ThePlayerList->getLocalPlayer() )
+			continue;
+
+		ProductionUpdateInterface *cpu = candidate->getProductionUpdateInterface();
+		if( cpu == NULL )
+			continue;
+
+		ProductionID candidateLast = PRODUCTIONID_INVALID;
+		for( const ProductionEntry *p = cpu->firstProduction(); p; p = cpu->nextProduction( p ) )
+			if( p->getProductionType() == PRODUCTION_UNIT && p->getProductionObject() == thing )
+				candidateLast = p->getProductionID();
+
+		if( candidateLast == PRODUCTIONID_INVALID )
+			continue;
+
+		// prefer the one the bar is actually showing, otherwise take the first that has any
+		producer = candidate;
+		pu = cpu;
+		last = candidateLast;
+		if( m_currentSelectedDrawable && candidate == m_currentSelectedDrawable->getObject() )
+			break;
+	}
+
+	if( pu == NULL || last == PRODUCTIONID_INVALID )
+		return FALSE;
 
 	// the producer travels with the message: in a multi-selection the logic cannot tell
 	// which selected object the queue belongs to otherwise
 	GameMessage *msg = TheMessageStream->appendMessage( GameMessage::MSG_CANCEL_UNIT_CREATE );
 	msg->appendIntegerArgument( last );
 	msg->appendObjectIDArgument( producer->getID() );
+	return TRUE;
 
 }  // end cancelLastQueuedUnit
 

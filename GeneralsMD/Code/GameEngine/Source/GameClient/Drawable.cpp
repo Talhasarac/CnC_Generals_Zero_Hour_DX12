@@ -54,6 +54,7 @@
 #include "GameLogic/Object.h"
 #include "GameLogic/Module/OCLUpdate.h"
 #include "GameLogic/Module/SpecialPowerModule.h"
+#include "Common/SpecialPower.h"
 		// countdown text over a building
 #include "GameLogic/Locomotor.h"
 #include "GameLogic/Module/AIUpdate.h"
@@ -383,8 +384,6 @@ Drawable::Drawable( const ThingTemplate *thingTemplate, DrawableStatus statusBit
 	m_expirationDate = 0;  // 0 == never expires
 
 	m_lastConstructDisplayed = -1.0f;
-	m_lastChargeDisplayed = -1;
-	m_chargeDisplayString = NULL;
 	
 	//Added By Sadullah Nader
 	//Fix for the building percent
@@ -544,10 +543,6 @@ Drawable::~Drawable()
 	if( m_constructDisplayString )
 		TheDisplayStringManager->freeDisplayString( m_constructDisplayString );
 	m_constructDisplayString = NULL;
-
-	if( m_chargeDisplayString )
-		TheDisplayStringManager->freeDisplayString( m_chargeDisplayString );
-	m_chargeDisplayString = NULL;
 
 	if ( m_captionDisplayString )
 		TheDisplayStringManager->freeDisplayString( m_captionDisplayString );
@@ -2789,7 +2784,6 @@ void Drawable::drawIconUI( void )
 
 		drawCaption( healthBarRegion );
 		drawConstructPercent( healthBarRegion );
-		drawChargeCountdown( healthBarRegion );
 
 		//All Icons Below only draw on ALIVE things, so  bail here -------------------------
 		if( obj->isEffectivelyDead() || obj->isKindOf( KINDOF_IGNORED_IN_GUI )) // object explicitly wants nothing to do with these icons, so...
@@ -3773,91 +3767,6 @@ void Drawable::drawConstructPercent( const IRegion2D *healthBarRegion )
 
 }  // end drawConstructPercent
 
-//-------------------------------------------------------------------------------------------------
-/** Seconds left until this building's next payout, or until its special power comes up, written
-	* over the building itself. The control bar counts these down too, but only for whatever is
-	* selected, and the superweapon list in the corner never says which building on the map it
-	* belongs to. */
-//-------------------------------------------------------------------------------------------------
-void Drawable::drawChargeCountdown( const IRegion2D *healthBarRegion )
-{
-	Object *obj = getObject();
-
-	Int secondsLeft = -1;
-
-	if( obj != NULL &&
-			obj->isLocallyControlled() &&
-			!obj->getStatusBits().test( OBJECT_STATUS_UNDER_CONSTRUCTION ) &&
-			!obj->getStatusBits().test( OBJECT_STATUS_SOLD ) )
-	{
-		const UnsignedInt now = TheGameLogic->getFrame();
-
-		// a charging special power - the superweapons, and the powers a building holds
-		for( BehaviorModule** m = obj->getBehaviorModules(); *m; ++m )
-		{
-			SpecialPowerModuleInterface* sp = (*m)->getSpecialPower();
-			if( sp == NULL || sp->isReady() )
-				continue;
-
-			UnsignedInt ready = sp->getReadyFrame();
-			if( ready > now )
-			{
-				Int secs = (ready - now) / LOGICFRAMES_PER_SECOND;
-				if( secondsLeft < 0 || secs < secondsLeft )
-					secondsLeft = secs;
-			}
-		}
-
-		// ...and a timed payout, which is what the supply drop zone runs on
-		if( secondsLeft < 0 )
-		{
-			static const NameKeyType key_OCLUpdate = NAMEKEY( "OCLUpdate" );
-			OCLUpdate *ocl = (OCLUpdate*)obj->findUpdateModule( key_OCLUpdate );
-			if( ocl != NULL )
-				secondsLeft = ocl->getRemainingFrames() / LOGICFRAMES_PER_SECOND;
-		}
-	}
-
-	if( secondsLeft < 0 )
-	{
-		if( m_chargeDisplayString )
-		{
-			TheDisplayStringManager->freeDisplayString( m_chargeDisplayString );
-			m_chargeDisplayString = NULL;
-			m_lastChargeDisplayed = -1;
-		}
-		return;
-	}
-
-	if( m_chargeDisplayString == NULL )
-	{
-		m_chargeDisplayString = TheDisplayStringManager->newDisplayString();
-		m_chargeDisplayString->setFont(TheFontLibrary->getFont(TheInGameUI->getDrawableCaptionFontName(),
-										TheGlobalLanguageData->adjustFontSize(TheInGameUI->getDrawableCaptionPointSize()),
-										TheInGameUI->isDrawableCaptionBold() ));
-	}
-
-	if( m_lastChargeDisplayed != secondsLeft )
-	{
-		UnicodeString buffer;
-		buffer.format( L"%ds", secondsLeft );
-		m_chargeDisplayString->setText( buffer );
-		m_lastChargeDisplayed = secondsLeft;
-	}
-
-	ICoord2D screen;
-	Coord3D pos;
-	getDrawableGeometryInfo().getCenterPosition( *getPosition(), pos );
-	TheTacticalView->worldToScreen( &pos, &screen );
-	if( screen.x < 1 )
-		return;
-
-	Color color = GameMakeColor( 255, 220, 120, 255 );
-	Color dropColor = GameMakeColor( 0, 0, 0, 255 );
-	screen.x -= (m_chargeDisplayString->getWidth() / 2);
-	m_chargeDisplayString->draw( screen.x, screen.y, color, dropColor );
-
-}  // end drawChargeCountdown
 
 //-------------------------------------------------------------------------------------------------
 /** Draw caption */
@@ -4079,6 +3988,64 @@ void Drawable::drawHealthBar(const IRegion2D* healthBarRegion)
 		if( isSelected() )
 			TheDisplay->drawFillRect( healthBarRegion->lo.x, healthBarRegion->lo.y - 2, healthBoxWidth + 1, 1,
 																GameMakeColor( 255, 255, 255, 255 ) );
+
+		//
+		// A superweapon charging, or a building on a timed payout (the supply drop zone), gets the
+		// same yellow bar the production queue uses. Only powers that carry a public timer count -
+		// that is the flag the superweapon list in the corner goes by - so the command centre's
+		// general's powers do not put a permanent bar on the main base.
+		//
+		if( obj->isLocallyControlled() &&
+				!obj->getStatusBits().test( OBJECT_STATUS_UNDER_CONSTRUCTION ) &&
+				!obj->getStatusBits().test( OBJECT_STATUS_SOLD ) )
+		{
+			const UnsignedInt now = TheGameLogic->getFrame();
+			Real chargePct = -1.0f;
+
+			for( BehaviorModule** m = obj->getBehaviorModules(); *m; ++m )
+			{
+				SpecialPowerModuleInterface* sp = (*m)->getSpecialPower();
+				if( sp == NULL )
+					continue;
+				const SpecialPowerTemplate *tmpl = sp->getSpecialPowerTemplate();
+				if( tmpl == NULL || !tmpl->hasPublicTimer() )
+					continue;
+
+				Real full = INT_TO_REAL( tmpl->getReloadTime() );
+				if( full <= 0.0f )
+					continue;
+
+				UnsignedInt ready = sp->getReadyFrame();
+				Real left = (ready > now) ? INT_TO_REAL( ready - now ) : 0.0f;
+				Real pct = 100.0f * (1.0f - left / full);
+				if( pct < 0.0f ) pct = 0.0f;
+				if( pct > 100.0f ) pct = 100.0f;
+				if( chargePct < 0.0f || pct < chargePct )
+					chargePct = pct;
+			}
+
+			if( chargePct < 0.0f )
+			{
+				static const NameKeyType key_OCLUpdate = NAMEKEY( "OCLUpdate" );
+				OCLUpdate *ocl = (OCLUpdate*)obj->findUpdateModule( key_OCLUpdate );
+				if( ocl != NULL )
+				{
+					chargePct = ocl->getCountdownPercent() * 100.0f;
+					if( chargePct < 0.0f ) chargePct = 0.0f;
+					if( chargePct > 100.0f ) chargePct = 100.0f;
+				}
+			}
+
+			if( chargePct >= 0.0f )
+			{
+				Int chargeY = healthBarRegion->lo.y - 3 - healthBoxHeight;
+				TheDisplay->drawOpenRect( healthBarRegion->lo.x, chargeY, healthBoxWidth, healthBoxHeight,
+																	healthBoxOutlineSize, GameMakeColor( 128, 128, 0, 255 ) );
+				TheDisplay->drawFillRect( healthBarRegion->lo.x + 1, chargeY + 1,
+																	(healthBoxWidth - 2) * chargePct * 0.01f, healthBoxHeight - 2,
+																	GameMakeColor( 255, 255, 0, 255 ) );
+			}
+		}
 
 		// own producers show a yellow production-progress bar above the (selection) line, with seconds left at its top-left
 		ProductionUpdateInterface *pu = obj->isLocallyControlled() ? obj->getProductionUpdateInterface() : NULL;
