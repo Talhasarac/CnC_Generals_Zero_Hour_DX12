@@ -241,10 +241,13 @@ Bool	File::print ( const Char *format, ...)
 
 	va_list args;
 	va_start( args, format );     /* Initialize variable arguments. */
-	len = vsprintf( buffer, format, args );
+	// bounded: this was a vsprintf, so the length test below only ran AFTER the overflow had
+	// already happened. _vsnprintf returns negative when it truncates.
+	len = _vsnprintf( buffer, sizeof(buffer), format, args );
 	va_end( args );
+	buffer[sizeof(buffer) - 1] = 0;
 
-	if ( len >= sizeof(buffer) )
+	if ( len < 0 || len >= sizeof(buffer) )
 	{
 		// Big Problem
 		assert( FALSE );

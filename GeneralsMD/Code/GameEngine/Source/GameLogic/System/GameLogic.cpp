@@ -2399,8 +2399,13 @@ void GameLogic::loadMapINI( AsciiString mapName )
 	char filename[_MAX_PATH];
 	char fullFledgeFilename[_MAX_PATH];
 
+	//
+	// bounded copies: mapName arrives from the lobby, the network or a replay file, and an
+	// over-long path used to run straight off the end of these _MAX_PATH buffers.
+	//
 	memset(filename, 0, _MAX_PATH);
-	strcpy(filename, mapName.str());
+	strncpy(filename, mapName.str(), _MAX_PATH - 1);
+	filename[_MAX_PATH - 1] = 0;
 
 	//
 	// if map name begins with a "SAVE_DIRECTORY\", then the map refers to a map
@@ -2409,7 +2414,10 @@ void GameLogic::loadMapINI( AsciiString mapName )
 	// for that map from it's original location
 	//
 	if (TheGameState->isInSaveDirectory(filename))
-		strcpy( filename, TheGameState->getSaveGameInfo()->pristineMapName.str() );
+	{
+		strncpy( filename, TheGameState->getSaveGameInfo()->pristineMapName.str(), _MAX_PATH - 1 );
+		filename[_MAX_PATH - 1] = 0;
+	}
 
 	// sanity
 	int length = strlen(filename);
@@ -2425,14 +2433,14 @@ void GameLogic::loadMapINI( AsciiString mapName )
 	*extension = 0;
 
 
-	sprintf(fullFledgeFilename, "%s\\map.ini", filename);
+	_snprintf(fullFledgeFilename, _MAX_PATH, "%s\\map.ini", filename); fullFledgeFilename[_MAX_PATH-1] = 0;
 	if (TheFileSystem->doesFileExist(fullFledgeFilename)) {
 		DEBUG_LOG(("Loading map.ini\n"));
 		INI ini;
 		ini.load( AsciiString(fullFledgeFilename), INI_LOAD_CREATE_OVERRIDES, NULL );
 	}
 
-	sprintf(fullFledgeFilename, "%s\\solo.ini", filename);
+	_snprintf(fullFledgeFilename, _MAX_PATH, "%s\\solo.ini", filename); fullFledgeFilename[_MAX_PATH-1] = 0;
 	if (TheFileSystem->doesFileExist(fullFledgeFilename)) {
 		DEBUG_LOG(("Loading solo.ini\n"));
 		INI ini;
@@ -2442,7 +2450,7 @@ void GameLogic::loadMapINI( AsciiString mapName )
 	// No error here. There could've just *not* been a map.ini file.
 
 	// now look for a string file
-	sprintf(fullFledgeFilename, "%s\\map.str", filename);
+	_snprintf(fullFledgeFilename, _MAX_PATH, "%s\\map.str", filename); fullFledgeFilename[_MAX_PATH-1] = 0;
 
 	if (TheFileSystem->doesFileExist(fullFledgeFilename)) {
 		TheGameText->initMapStringFile(fullFledgeFilename);
@@ -2452,7 +2460,7 @@ void GameLogic::loadMapINI( AsciiString mapName )
 	if (TheDisplay)
 	{
 		const char* ASSET_USAGE_FILE_NAME = "AssetUsage.txt";
-		sprintf(fullFledgeFilename, "%s\\%s", filename, ASSET_USAGE_FILE_NAME);
+		_snprintf(fullFledgeFilename, _MAX_PATH, "%s\\%s", filename, ASSET_USAGE_FILE_NAME); fullFledgeFilename[_MAX_PATH-1] = 0;
 		// note: call this EVEN IF THE FILE IN QUESTION DOES NOT EXIST.
 		TheDisplay->doSmartAssetPurgeAndPreload(fullFledgeFilename);
 	}

@@ -96,7 +96,9 @@ static UnsignedInt calcCRC( AsciiString dirName, AsciiString fname )
 	char	tempBuf[_MAX_PATH];
 	char	filenameBuf[_MAX_PATH];
 	int length = 0;
-	strcpy(tempBuf, fname.str());
+	// bounded: fname comes from a directory scan / the map cache and can be longer than _MAX_PATH
+	strncpy(tempBuf, fname.str(), _MAX_PATH - 1);
+	tempBuf[_MAX_PATH - 1] = 0;
 	length = strlen( tempBuf );
 	if( length >= 4 )
 	{
@@ -242,7 +244,9 @@ static Bool loadMap( AsciiString filename )
 	AsciiString asciiFile;
 	int length = 0;
 
-	strcpy(tempBuf, filename.str());
+	// bounded, see above
+	strncpy(tempBuf, filename.str(), _MAX_PATH - 1);
+	tempBuf[_MAX_PATH - 1] = 0;
 
 	length = strlen( tempBuf );
 	if( length >= 4 )
@@ -609,7 +613,9 @@ Bool MapCache::loadUserMaps()
 				{
 					if (TheFileSystem->getFileInfo(tempfilename, &fileInfo)) {
 						char funk[_MAX_PATH];
-						strcpy(funk, tempfilename.str());
+						// bounded, see above
+						strncpy(funk, tempfilename.str(), _MAX_PATH - 1);
+						funk[_MAX_PATH - 1] = 0;
 						char *filenameptr = funk;
 						char *tempchar = funk;
 						while (*tempchar != 0) {
