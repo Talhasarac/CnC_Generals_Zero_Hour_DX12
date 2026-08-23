@@ -906,8 +906,8 @@ m_teamSeconds(0),
 m_resourcesWealthy(0), 
 m_resourcesPoor(0), 
 m_forceIdleFramesCount(1),
-m_structuresWealthyMod(0),
-m_teamPoorMod(0),
+m_structuresWealthyMod(1.0f),	// divisor: never default to 0
+m_teamPoorMod(1.0f),			// divisor: never default to 0
 m_teamResourcesToBuild(0),
 m_guardInnerModifierAI(0),
 m_guardOuterModifierAI(0),
@@ -939,8 +939,8 @@ m_rebuildDelaySeconds(10),
 //Initialization(s) inserted
 m_distanceRequiresGroup(0.0f),
 m_sideBuildLists(NULL),
-m_structuresPoorMod(0.0f),
-m_teamWealthyMod(0.0f),
+m_structuresPoorMod(1.0f),		// divisor: never default to 0
+m_teamWealthyMod(1.0f),			// divisor: never default to 0
 m_aiDozerBoredRadiusModifier(2.0),
 m_aiCrushesInfantry(true), 
 m_maxRetaliateDistance(210.0f), 

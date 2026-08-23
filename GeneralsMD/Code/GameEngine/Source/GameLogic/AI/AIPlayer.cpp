@@ -495,7 +495,7 @@ Object *AIPlayer::buildStructureNow(const ThingTemplate *bldgPlan, BuildListInfo
 			Coord3D rallyPoint;
 			Bool gotOffset = false;
 			if (fabs(info->getRallyOffset()->x) > 1.0f || fabs(info->getRallyOffset()->y)>1.0f) {
-				gotOffset;
+				gotOffset = true;	// was a bare statement, so RallyPointOffset was never applied
 			}
 			if (!exitInterface->getNaturalRallyPoint(rallyPoint)) {
 				rallyPoint = *info->getLocation();
@@ -675,7 +675,7 @@ Object *AIPlayer::buildStructureWithDozer(const ThingTemplate *bldgPlan, BuildLi
 			Coord3D rallyPoint;
 			Bool gotOffset = false;
 			if (fabs(info->getRallyOffset()->x) > 1.0f || fabs(info->getRallyOffset()->y)>1.0f) {
-				gotOffset;
+				gotOffset = true;	// was a bare statement, so RallyPointOffset was never applied
 			}
 			if (!exitInterface->getNaturalRallyPoint(rallyPoint)) {
 				rallyPoint = *info->getLocation();
@@ -908,13 +908,18 @@ void AIPlayer::guardSupplyCenter( Team *team, Int minSupplies )
 		Coord3D location = *warehouse->getPosition();
 		// It's probably a defensive move - position towards the enemy.
 		Region2D bounds;
-		Int enemyNdx = TheScriptEngine->getSkirmishEnemyPlayer()->getPlayerIndex();
-		getPlayerStructureBounds(&bounds, enemyNdx);
+		// getSkirmishEnemyPlayer() can be NULL (no resolvable human enemy, e.g. an all-AI game);
+		// every caller in ScriptActions checks it, these two did not.
+		Player *skirmishEnemy = TheScriptEngine->getSkirmishEnemyPlayer();
 		Coord3D offset;
 		offset.zero();
-		offset.x = location.x - (bounds.lo.x+bounds.hi.x)*0.5f;
-		offset.y = location.y - (bounds.lo.y+bounds.hi.y)*0.5f;
-		offset.normalize();
+		if (skirmishEnemy)
+		{
+			getPlayerStructureBounds(&bounds, skirmishEnemy->getPlayerIndex());
+			offset.x = location.x - (bounds.lo.x+bounds.hi.x)*0.5f;
+			offset.y = location.y - (bounds.lo.y+bounds.hi.y)*0.5f;
+			offset.normalize();
+		}
 		Real radius = warehouse->getGeometryInfo().getBoundingCircleRadius()*0.8f;
 
 		location.x -= offset.x*radius;
@@ -929,7 +934,10 @@ void AIPlayer::guardSupplyCenter( Team *team, Int minSupplies )
 //-------------------------------------------------------------------------------------------------
 Bool AIPlayer::isSupplySourceAttacked( void )
 {
-	const Int SCAN_RATE = 10; // don't scan more often than every 10 seconds.
+	// don't scan more often than every 10 seconds. This was a bare 10 used as a FRAME count, so
+	// the throttle was a third of a second and, worse, the "have I been attacked recently" test
+	// below only saw damage that landed in the last 10 frames.
+	const Int SCAN_RATE = 10 * LOGICFRAMES_PER_SECOND;
 	UnsignedInt curFrame = TheGameLogic->getFrame();
 	if (curFrame==0) {
 		m_supplySourceAttackCheckFrame = curFrame+SCAN_RATE;
@@ -1048,7 +1056,10 @@ Bool AIPlayer::isLocationSafe(const Coord3D *pos, const ThingTemplate *tthing )
 void AIPlayer::onUnitProduced( Object *factory, Object *unit )
 {
 	Bool found = false;
-	Bool supplyTruck;
+	// this was uninitialised and is only assigned for units that actually have a SupplyTruck AI
+	// (USA/China dozers do not), so stack garbage decided whether m_repairDozer got bound - and
+	// that made an AI game non-deterministic.
+	Bool supplyTruck = false;
 
 	// factory could be NULL at the start of the game.
 	if (factory == NULL) {
@@ -1254,7 +1265,7 @@ Bool AIPlayer::computeSuperweaponTarget(const SpecialPowerTemplate *power, Coord
 		for( y = 0; y < yCount; y++ ) 
 		{
 			pos.x = bestPos.x + (x-5)*(weaponRadius/10);
-			pos.y = bestPos.y + (x-5)*(weaponRadius/10);
+			pos.y = bestPos.y + (y-5)*(weaponRadius/10);	// was (x-5): only the diagonal was scanned
 			pos.z = 0;
 			Int curCash = getPlayerSuperweaponValue( &pos, playerNdx, weaponRadius, targetMilitaryUnits );
 			if ( curCash > cash) 
@@ -1418,7 +1429,11 @@ Object *AIPlayer::findFactory(const ThingTemplate *thing, Bool busyOK)
 		if( factory )
 		{
 			if (factory->getControllingPlayer() != m_player) {
+				// captured. Stamp the timestamp too, exactly as processBaseBuilding does - without
+				// it the RebuildDelay gate below is skipped and the AI keeps trying to rebuild on
+				// top of the enemy-owned building, every structure cycle.
 				info->setObjectID(INVALID_ID);
+				info->setObjectTimestamp(TheGameLogic->getFrame()+1);
 				continue;
 			}
 			// ignore buildings that are under construction.
@@ -1851,7 +1866,9 @@ void AIPlayer::buildBySupplies(Int minimumCash, const AsciiString& thingName)
 {
 	Object *bestSupplyWarehouse = findSupplyCenter(minimumCash);
 	const ThingTemplate* tTemplate = TheThingFactory->findTemplate(thingName);
-	if (!tTemplate->isKindOf(KINDOF_CASH_GENERATOR)) {
+	// tTemplate was dereferenced here and only null-checked a few lines further down, so a bad
+	// building name in the "Build supply center" script action faulted.
+	if (tTemplate && !tTemplate->isKindOf(KINDOF_CASH_GENERATOR)) {
 		// Build by the current warehouse.
 		Object *curWarehouse = TheGameLogic->findObjectByID(m_curWarehouseID);
 		if (curWarehouse) {
@@ -1872,11 +1889,14 @@ void AIPlayer::buildBySupplies(Int minimumCash, const AsciiString& thingName)
 		if (!tTemplate->isKindOf(KINDOF_CASH_GENERATOR)) {
 			// It's probably a defensive structure - build towards the enemy.
 			Region2D bounds;
-			Int enemyNdx = TheScriptEngine->getSkirmishEnemyPlayer()->getPlayerIndex();
-			getPlayerStructureBounds(&bounds, enemyNdx);
-			offset.x = location.x - (bounds.lo.x+bounds.hi.x)*0.5f;
-			offset.y = location.y - (bounds.lo.y+bounds.hi.y)*0.5f;
-			offset.normalize();
+			Player *skirmishEnemy = TheScriptEngine->getSkirmishEnemyPlayer();	// can be NULL
+			if (skirmishEnemy)
+			{
+				getPlayerStructureBounds(&bounds, skirmishEnemy->getPlayerIndex());
+				offset.x = location.x - (bounds.lo.x+bounds.hi.x)*0.5f;
+				offset.y = location.y - (bounds.lo.y+bounds.hi.y)*0.5f;
+				offset.normalize();
+			}
 			radius = bestSupplyWarehouse->getGeometryInfo().getBoundingCircleRadius();
 		}
 		location.x -= offset.x*radius;
@@ -3806,19 +3826,26 @@ void AIPlayer::getPlayerStructureBounds( Region2D *bounds, Int playerNdx, Bool c
 				Object *pObj = iter.cur();
 				if (!pObj) 
 					continue;
-				if( pObj->isKindOf(KINDOF_STRUCTURE) ) 
+				const Bool isStructure = pObj->isKindOf(KINDOF_STRUCTURE);
+
+				if( isStructure && conservative && pObj->isKindOf( KINDOF_CONSERVATIVE_BUILDING ) )
 				{
-					if( conservative && pObj->isKindOf( KINDOF_CONSERVATIVE_BUILDING ) )
-					{
-						//Kris - Aug 14, 2003
-						//Conservative buildings (captured tech buildings, sneak attack buildings are rejected).
-						//This was added so base boundaries aren't potentially most of the map. Because sneak
-						//attack uses an inverse cost calculation by avoiding defended areas, we need to keep
-						//things close to the enemy base.
-						continue;
-					}
-					
+					//Kris - Aug 14, 2003
+					//Conservative buildings (captured tech buildings, sneak attack buildings are rejected).
+					//This was added so base boundaries aren't potentially most of the map. Because sneak
+					//attack uses an inverse cost calculation by avoiding defended areas, we need to keep
+					//things close to the enemy base.
+					continue;
+				}
+
+				{
 					Coord3D pos = *pObj->getPosition();
+
+					//
+					// objBounds spans EVERY object, so it can stand in for a player who owns no
+					// structures. It used to be updated only inside the structure test, which made
+					// it a copy of the structure bounds and left the fallback below meaningless.
+					//
 					if (firstObject) {
 						objBounds.lo.x = objBounds.hi.x = pos.x;
 						objBounds.lo.y = objBounds.hi.y = pos.y;
@@ -3831,6 +3858,10 @@ void AIPlayer::getPlayerStructureBounds( Region2D *bounds, Int playerNdx, Bool c
 						if (objBounds.hi.x<pos.x) objBounds.hi.x = pos.x;
 						if (objBounds.hi.y<pos.y) objBounds.hi.y = pos.y;
 					}
+
+					if (!isStructure)
+						continue;
+
 					if (firstStructure) 
 					{
 						bounds->lo.x = bounds->hi.x = pos.x;
@@ -3848,8 +3879,12 @@ void AIPlayer::getPlayerStructureBounds( Region2D *bounds, Int playerNdx, Bool c
 			}
 		}
 	}
-	if (!firstStructure) {
+	if (firstStructure && !firstObject) {
 		// Player had no structures, so use unit bounds.
+		// (the test used to be !firstStructure - i.e. it only "fell back" when structures HAD been
+		// found, which was a no-op, and a structureless player was left with the (0,0,0,0) bounds
+		// this function starts with. acquireEnemy, findSupplyCenter and guardSupplyCenter all then
+		// aimed at the map corner.)
 		*bounds = objBounds;
 	}
 }

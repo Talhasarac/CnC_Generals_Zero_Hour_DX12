@@ -227,7 +227,11 @@ void AISkirmishPlayer::processBaseBuilding( void )
 				}
 				continue;
 			}
-			if (TheBuildAssistant->canMakeUnit(dozer, bldgPlan)!=CANMAKE_OK) {
+			// this used to test bldgPlan, which is still NULL for anything but a priority build at
+			// this point - and canMakeUnit(dozer, NULL) is CANMAKE_NO_PREREQ, so every
+			// AutomaticallyBuild entry hit the continue below and the AI only ever built what its
+			// scripts marked priority (plus the forced power plant).
+			if (TheBuildAssistant->canMakeUnit(dozer, curPlan)!=CANMAKE_OK) {
 				if (info->isBuildable()) {
 					AsciiString bldgName = info->getTemplateName();
 					bldgName.concat(" - Dozer unable to build - money or technology missing.");
@@ -677,7 +681,10 @@ void AISkirmishPlayer::buildAIBaseDefenseStructure(const AsciiString &thingName,
 			}
 		}
 
-		if (angle > PI/3) break;
+		// fabs: the right-hand angles walk NEGATIVE (they are decremented above), so a bare
+		// "angle > PI/3" only ever bounded the left side and right-side defenses wrapped past
+		// the intended +/-60 degree arc.
+		if (fabs(angle) > PI/3) break;
 		Real s = sin(angle);
 		Real c = cos(angle);
 
@@ -1024,43 +1031,49 @@ void AISkirmishPlayer::adjustBuildList(BuildListInfo *list)
 		gridIndex+=3;
 	}
 
-	Real angle = 0;
+	Real baseRotation = 0;
 	if (TheAI->getAiData()->m_rotateSkirmishBases) {
 		switch (gridIndex) {
-			case 0 : angle = 0; break;
-			case 1 : angle = PI/4; break;// 45 degrees.
-			case 2 : angle = PI/2; break; // 90 degrees;
-			case 3 : angle = -PI/4; break; // -45 degrees.
-			case 4 : angle = 0; break;
-			case 5 : angle = 3*PI/4; break; // 135 degrees.
-			case 6 : angle = -PI/2; break; // -90 degrees;
-			case 7 : angle = -3*PI/4; break; // -135 degrees.
-			case 8 : angle = PI; break; // 180 degrees.
+			case 0 : baseRotation = 0; break;
+			case 1 : baseRotation = PI/4; break;// 45 degrees.
+			case 2 : baseRotation = PI/2; break; // 90 degrees;
+			case 3 : baseRotation = -PI/4; break; // -45 degrees.
+			case 4 : baseRotation = 0; break;
+			case 5 : baseRotation = 3*PI/4; break; // 135 degrees.
+			case 6 : baseRotation = -PI/2; break; // -90 degrees;
+			case 7 : baseRotation = -3*PI/4; break; // -135 degrees.
+			case 8 : baseRotation = PI; break; // 180 degrees.
 		}
 	}
-	
-	angle += 3*PI/4;
+
+	// the 3*PI/4 is a fixed offset between the build list's authoring frame and the world, so it
+	// belongs to the position transform only - baseRotation alone is what the buildings turn by.
+	Real angle = baseRotation + 3*PI/4;
 
 	Real s = sin(angle);
 	Real c = cos(angle);
 
-	cur = list;
-	while (cur) {
-		const ThingTemplate *tTemplate = TheThingFactory->findTemplate(list->getTemplateName());
-		if (tTemplate && tTemplate->isKindOf(KINDOF_COMMANDCENTER)) {
-			foundInBuildList = true;
+	// every entry moves with the base, not just the command center. This loop used to carry a
+	// condition copy-pasted from the search loop above that tested list->getTemplateName() - the
+	// list HEAD - so it was loop-invariant: if the first entry happened to be the command center
+	// every entry was transformed, otherwise none was and the base stayed at the INI's absolute
+	// coordinates. It also fed setAngle its own angle, so RotateSkirmishBases turned the layout
+	// but left every building facing its authored direction.
+	if (foundInBuildList) {
+		cur = list;
+		while (cur) {
 			Coord3D curPos = *cur->getLocation();
 			// Transform to new coords.
 			curPos.x -= buildPos.x;
-			curPos.y -= buildPos.y;	 
+			curPos.y -= buildPos.y;
 			Real newX = curPos.x*c - curPos.y*s;
 			Real newY = curPos.y*c + curPos.x*s;
 			curPos.x = newX + startPos.x;
 			curPos.y = newY + startPos.y;
-			cur->setLocation(curPos);	 
-			cur->setAngle(cur->getAngle());
+			cur->setLocation(curPos);
+			cur->setAngle(cur->getAngle() + baseRotation);
+			cur = cur->getNext();
 		}
-		cur = cur->getNext();
 	}
 
 }
