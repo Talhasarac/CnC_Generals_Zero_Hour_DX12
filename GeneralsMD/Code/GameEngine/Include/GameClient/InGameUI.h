@@ -199,6 +199,7 @@ public:
 	const SpecialPowerTemplate*	getSpecialPowerTemplate() const { return m_powerTemplate; }
 	void setFont(const AsciiString& superweaponNormalFont, Int superweaponNormalPointSize, Bool superweaponNormalBold);
 	void setText(const UnicodeString& name, const UnicodeString& time);
+	void drawBackdrop(Int x, Int y);				///< plate behind the name and time, so they stay readable over terrain
 	void drawName(Int x, Int y, Color color, Color dropColor);
 	void drawTime(Int x, Int y, Color color, Color dropColor);
 	Real getHeight() const;

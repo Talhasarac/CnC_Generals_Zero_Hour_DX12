@@ -323,6 +323,25 @@ void SuperweaponInfo::setText(const UnicodeString& name, const UnicodeString& ti
 }
 
 // ------------------------------------------------------------------------------------------------
+/** The countdowns sit straight on the battlefield, where light terrain swallows them. Put a
+	* translucent plate under the whole line - the name is right-aligned to x, the time starts at
+	* it - before either half is drawn. */
+// ------------------------------------------------------------------------------------------------
+void SuperweaponInfo::drawBackdrop(Int x, Int y)
+{
+	if( m_nameDisplayString == NULL || m_timeDisplayString == NULL )
+		return;
+
+	Int nameW = m_nameDisplayString->getWidth();
+	Int timeW = m_timeDisplayString->getWidth();
+	Int h = (Int)getHeight();
+
+	const Int pad = 3;
+	TheDisplay->drawFillRect( x - nameW - pad, y - 1, nameW + timeW + pad*2, h + 2,
+														GameMakeColor( 0, 0, 0, 130 ) );
+}
+
+// ------------------------------------------------------------------------------------------------
 void SuperweaponInfo::drawName(Int x, Int y, Color color, Color dropColor)
 {
 	if (color == 0)
@@ -1141,6 +1160,8 @@ void InGameUI::init( void )
 		if (TheGlobalLanguageData->m_superweaponCountdownNormalFont.name.isNotEmpty())
 		{	m_superweaponNormalFont = TheGlobalLanguageData->m_superweaponCountdownNormalFont.name;
 			m_superweaponNormalPointSize = TheGlobalLanguageData->m_superweaponCountdownNormalFont.size;
+			// these are overlay text on the battlefield, not panel text - take them down a notch
+			m_superweaponNormalPointSize = max( 8, (m_superweaponNormalPointSize * 4) / 5 );
 			m_superweaponNormalBold = TheGlobalLanguageData->m_superweaponCountdownNormalFont.bold;
 		}
 
@@ -3792,6 +3813,8 @@ void InGameUI::postDraw( void )
                     time.format(L"%d:%2.2d", min, sec);
                     info->setText(name, time);
                   }
+
+                  info->drawBackdrop( startX, startY );
 
                   if (isReady)
 								  {
