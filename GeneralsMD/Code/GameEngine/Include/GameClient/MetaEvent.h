@@ -154,6 +154,8 @@ enum MappableKeyType
 	MK_INS					= KEY_INS,
 	MK_DEL					= KEY_DEL,
 	MK_KPSLASH			= KEY_KPSLASH,
+	MK_KPPLUS				= KEY_KPPLUS,
+	MK_KPMINUS			= KEY_KPMINUS,
 	MK_NONE					= KEY_NONE
 
 };	
@@ -223,6 +225,8 @@ static const LookupListRec KeyNames[] =
 	{ "KEY_KP8", MK_KP8 },
 	{ "KEY_KP9", MK_KP9 },
 	{ "KEY_KP0", MK_KP0 },
+	{ "KEY_KPPLUS", MK_KPPLUS },
+	{ "KEY_KPMINUS", MK_KPMINUS },
 	{ "KEY_MINUS", MK_MINUS },
 	{ "KEY_EQUAL", MK_EQUAL },
 	{ "KEY_LBRACKET", MK_LBRACKET },
