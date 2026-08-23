@@ -387,13 +387,17 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message,
 
 			case WM_QUERYENDSESSION:
 			{
-				TheMessageStream->appendMessage(GameMessage::MSG_META_DEMO_INSTANT_QUIT);
+				// guarded like the focus handlers below: these messages can arrive before the
+				// engine is up and, more often, while it is tearing down - a close or end-session
+				// that lands after TheMessageStream is gone used to fault right here.
+				if (TheMessageStream)
+					TheMessageStream->appendMessage(GameMessage::MSG_META_DEMO_INSTANT_QUIT);
 				return 0;	//don't allow Windows to shutdown while game is running.
 			}
 
 			// ------------------------------------------------------------------------
 			case WM_CLOSE:
-			if (!TheGameEngine->getQuitting())
+			if (TheGameEngine && !TheGameEngine->getQuitting() && TheMessageStream)
 			{
 				//user is exiting without using the menus
 

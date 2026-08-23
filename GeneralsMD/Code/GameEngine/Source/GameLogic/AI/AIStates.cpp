@@ -3663,8 +3663,17 @@ void AIAttackMoveToState::startEngaging( Object *victim )
 	Object *owner = getMachineOwner();
 	AIUpdateInterface *ai = owner->getAI();
 
-	ai->friend_endingMove();
-	ai->destroyPath();		// drop the attack move path; it is rebuilt when the fight is over
+	//
+	// A ground unit fights from a standstill, so the move ends here and the attack machine's own
+	// approach owns the locomotor from now on. An aircraft has no standstill to fight from: it has
+	// to keep flying, and the attack machine computes its own path on entry anyway, so telling it
+	// the move is over just leaves it drifting for a frame.
+	//
+	if (!owner->isUsingAirborneLocomotor())
+	{
+		ai->friend_endingMove();
+		ai->destroyPath();		// drop the attack move path; it is rebuilt when the fight is over
+	}
 
 	m_engageOrigin = *owner->getPosition();
 	m_victimID = victim->getID();
@@ -3731,6 +3740,22 @@ Bool AIAttackMoveToState::hasLeftTheLeash( void )
 
 	Object *owner = getMachineOwner();
 	if (owner->getControllingPlayer()->getPlayerType() != PLAYER_HUMAN)
+		return FALSE;
+
+	//
+	// Aircraft are not leashed. The leash keeps a ground unit from being walked off its attack move
+	// by a target that backs away, and it is measured from where the target was acquired - but an
+	// aircraft acquires out to its weapon range, which is far longer than the leash. It therefore
+	// broke the leash on the way in, every time, and disengaged before firing a shot; the
+	// requireProgressTowardGoal() that follows then flew it further down the path before it was
+	// allowed to try again. The net effect was an aircraft that picked target after target,
+	// never shot at any of them, and never ran its tanks dry enough to go home.
+	//
+	// What bounds an aircraft is its ammunition, not distance: it empties its load and JetAIUpdate
+	// takes it home to reload (and, since the attack move is a standing order, picks the order back
+	// up afterwards).
+	//
+	if (owner->isUsingAirborneLocomotor())
 		return FALSE;
 
 	Real dx = owner->getPosition()->x - m_engageOrigin.x;
