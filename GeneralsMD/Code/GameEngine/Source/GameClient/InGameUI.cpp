@@ -1004,6 +1004,7 @@ InGameUI::InGameUI()
 	m_placementRangeRingUp = FALSE;
 	m_hudDisplayString = NULL;
 	m_hudLastSampleFrame = 0;
+	m_hudLastSampleMs = 0;
 	m_hudFps = 0.0f;
 	m_hudLastMoney = -1;
 	m_hudLastMoneyFrame = 0;
@@ -1905,14 +1906,26 @@ void InGameUI::update( void )
 	if( moneyPlayer)
 	{
 		Int currentMoney = moneyPlayer->getMoney()->countMoney();
-		if( lastMoney != currentMoney )
+
+		// income per minute, shown in brackets beside the balance it should be compared against
+		updateIncomeEstimate( moneyPlayer );
+		static Int lastIncome = -1;
+
+		if( lastMoney != currentMoney || lastIncome != m_hudIncomePerMin )
 		{
 			UnicodeString buffer;
 
 			buffer.format( TheGameText->fetch( "GUI:ControlBarMoneyDisplay" ), currentMoney );
+			if( m_hudIncomePerMin > 0 )
+			{
+				UnicodeString rate;
+				rate.format( L" (%d/min)", m_hudIncomePerMin );
+				buffer.concat( rate );
+			}
 			GadgetStaticTextSetText( moneyWin, buffer );
 			lastMoney = currentMoney;
-			
+			lastIncome = m_hudIncomePerMin;
+
 		}  // end if
 		moneyWin->winHide(FALSE);
 		powerWin->winHide(FALSE);
@@ -5213,16 +5226,53 @@ void InGameUI::updateFloatingText( void )
 	* Off unless ShowHudOverlay is set in Options.ini.  Retail only ever showed the frame rate, and
 	* only behind -displayDebug together with a screenful of engine internals. */
 //-------------------------------------------------------------------------------------------------
+//-------------------------------------------------------------------------------------------------
+/** Income per minute for the local player, as the change in the balance over the last sampling
+	* window. Deliberately a delta of the balance rather than a tap into the deposit paths: it
+	* counts crates and refunds too, which is what you actually want to compare a build against. */
+//-------------------------------------------------------------------------------------------------
+void InGameUI::updateIncomeEstimate( Player *player )
+{
+	if( player == NULL || TheGameLogic == NULL )
+		return;
+
+	const UnsignedInt SAMPLE_FRAMES = 10 * LOGICFRAMES_PER_SECOND;
+	const UnsignedInt logicFrame = TheGameLogic->getFrame();
+	Int money = player->getMoney()->countMoney();
+
+	if( m_hudLastMoney < 0 )
+	{
+		m_hudLastMoney = money;
+		m_hudLastMoneyFrame = logicFrame;
+		return;
+	}
+
+	if( logicFrame >= m_hudLastMoneyFrame + SAMPLE_FRAMES )
+	{
+		Int delta = money - m_hudLastMoney;
+		if( delta < 0 )
+			delta = 0;			// spending is not negative income
+		m_hudIncomePerMin = delta * (60 * LOGICFRAMES_PER_SECOND) / (Int)SAMPLE_FRAMES;
+		m_hudLastMoney = money;
+		m_hudLastMoneyFrame = logicFrame;
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
+/** A small heads-up line in the top right: elapsed game time and the render rate, on a plate so it
+	* stays readable over terrain. Income is not here - it lives next to the money, where it is
+	* being compared to something. Off unless ShowHudOverlay is set in Options.ini. */
+//-------------------------------------------------------------------------------------------------
 void InGameUI::drawHudOverlay( void )
 {
 	if( !TheGlobalData->m_showHudOverlay )
 		return;
 
-	if( TheGameLogic == NULL || TheGameLogic->getFrame() == 0 )
+	// only once a real game is under way - not in the shell, and not on the menu's background map
+	if( TheGameLogic == NULL || !TheGameLogic->isInGame() || TheGameLogic->isInShellGame() )
 		return;
 
-	Player *player = ThePlayerList ? ThePlayerList->getLocalPlayer() : NULL;
-	if( player == NULL )
+	if( TheGameLogic->getFrame() == 0 )
 		return;
 
 	//
@@ -5230,64 +5280,48 @@ void InGameUI::drawHudOverlay( void )
 	// client frames, which is the render rate - the logic rate is fixed by the game speed.
 	//
 	const UnsignedInt clientFrame = TheGameClient->getFrame();
-	static UnsignedInt s_lastMs = 0;
-	static UnsignedInt s_lastClientFrame = 0;
 	UnsignedInt nowMs = timeGetTime();
-	if( s_lastMs == 0 )
+	if( m_hudLastSampleFrame == 0 )
 	{
-		s_lastMs = nowMs;
-		s_lastClientFrame = clientFrame;
+		m_hudLastSampleMs = nowMs;
+		m_hudLastSampleFrame = clientFrame;
 	}
-	else if( nowMs - s_lastMs >= 500 )
+	else if( nowMs - m_hudLastSampleMs >= 500 )
 	{
-		m_hudFps = (clientFrame - s_lastClientFrame) * 1000.0f / (Real)(nowMs - s_lastMs);
-		s_lastMs = nowMs;
-		s_lastClientFrame = clientFrame;
-	}
-
-	//
-	// Income, as cash per minute over the last ten seconds. Deliberately a delta of the balance
-	// rather than a tap into the deposit paths: it counts everything, including crates and refunds,
-	// which is what the player actually wants to compare against a build.
-	//
-	const UnsignedInt logicFrame = TheGameLogic->getFrame();
-	const UnsignedInt SAMPLE_FRAMES = 10 * LOGICFRAMES_PER_SECOND;
-	Int money = player->getMoney()->countMoney();
-	if( m_hudLastMoney < 0 )
-	{
-		m_hudLastMoney = money;
-		m_hudLastMoneyFrame = logicFrame;
-	}
-	else if( logicFrame >= m_hudLastMoneyFrame + SAMPLE_FRAMES )
-	{
-		Int delta = money - m_hudLastMoney;
-		if( delta < 0 )
-			delta = 0;	// spending is not negative income
-		m_hudIncomePerMin = delta * 6;	// ten seconds -> a minute
-		m_hudLastMoney = money;
-		m_hudLastMoneyFrame = logicFrame;
+		m_hudFps = (clientFrame - m_hudLastSampleFrame) * 1000.0f / (Real)(nowMs - m_hudLastSampleMs);
+		m_hudLastSampleMs = nowMs;
+		m_hudLastSampleFrame = clientFrame;
 	}
 
-	UnsignedInt totalSecs = logicFrame / LOGICFRAMES_PER_SECOND;
+	UnsignedInt totalSecs = TheGameLogic->getFrame() / LOGICFRAMES_PER_SECOND;
 
 	UnicodeString text;
-	text.format( L"%d:%02d:%02d   %d fps   %d/min",
+	text.format( L"%d:%02d:%02d   %d fps",
 							 totalSecs / 3600, (totalSecs / 60) % 60, totalSecs % 60,
-							 REAL_TO_INT( m_hudFps ), m_hudIncomePerMin );
+							 REAL_TO_INT( m_hudFps ) );
 
 	if( m_hudDisplayString == NULL )
 	{
 		m_hudDisplayString = TheDisplayStringManager->newDisplayString();
 		m_hudDisplayString->setFont( TheFontLibrary->getFont( m_superweaponNormalFont,
-																		TheGlobalLanguageData->adjustFontSize( m_superweaponNormalPointSize ),
-																		m_superweaponNormalBold ) );
+										TheGlobalLanguageData->adjustFontSize( HUD_OVERLAY_POINT_SIZE ),
+										FALSE ) );
 	}
 	m_hudDisplayString->setText( text );
 
-	// top right, clear of the radar and of the superweapon timers
-	Int x = TheDisplay->getWidth() - m_hudDisplayString->getWidth() - 12;
-	Int y = 4;
-	m_hudDisplayString->draw( x, y, GameMakeColor( 255, 255, 255, 255 ), GameMakeColor( 0, 0, 0, 255 ) );
+	Int textWidth = 0, textHeight = 0;
+	m_hudDisplayString->getSize( &textWidth, &textHeight );
+
+	// top right, clear of the radar and the superweapon timers
+	const Int pad = 4;
+	Int x = TheDisplay->getWidth() - textWidth - pad - 8;
+	Int y = 3;
+
+	// a plate behind it, so it stays legible over bright terrain
+	TheDisplay->drawFillRect( x - pad, y - 1, textWidth + pad*2, textHeight + 2,
+														GameMakeColor( 0, 0, 0, 140 ) );
+
+	m_hudDisplayString->draw( x, y, GameMakeColor( 235, 235, 235, 255 ), GameMakeColor( 0, 0, 0, 255 ) );
 }
 
 void InGameUI::drawFloatingText( void )

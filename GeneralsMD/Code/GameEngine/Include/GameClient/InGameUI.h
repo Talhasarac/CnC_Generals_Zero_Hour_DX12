@@ -750,12 +750,16 @@ protected:
 																						index 0, and increasing to older ones */
 	// superweapon timer data
 	SuperweaponMap							m_superweapons[MAX_PLAYER_COUNT];
-	void drawHudOverlay( void );					///< one-line fps / clock / income overlay (ShowHudOverlay)
+	enum { HUD_OVERLAY_POINT_SIZE = 9 };	///< small: this sits over the battlefield, not in a panel
+
+	void drawHudOverlay( void );					///< the small elapsed-time / fps plate (ShowHudOverlay)
+	void updateIncomeEstimate( Player *player );	///< income per minute, shown beside the money
 
 	Bool												m_placementRangeRingUp;	///< we put a radius cursor up for a pending structure, so we owe a clear
 
 	DisplayString *							m_hudDisplayString;			///< the ShowHudOverlay line (fps / clock / income)
 	UnsignedInt									m_hudLastSampleFrame;		///< client frame the fps sample was last refreshed on
+	UnsignedInt									m_hudLastSampleMs;			///< wall clock of that sample
 	Real												m_hudFps;								///< smoothed render rate
 	Int													m_hudLastMoney;					///< player money at the last income sample
 	UnsignedInt									m_hudLastMoneyFrame;		///< logic frame of that sample
