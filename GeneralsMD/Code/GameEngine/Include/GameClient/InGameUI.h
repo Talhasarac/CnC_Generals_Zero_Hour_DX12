@@ -754,12 +754,15 @@ protected:
 	enum { HUD_OVERLAY_POINT_SIZE = 9 };	///< small: this sits over the battlefield, not in a panel
 
 	void drawHudOverlay( void );					///< the small elapsed-time / fps plate (ShowHudOverlay)
+	void drawIncomeRate( void );					///< income per minute, drawn beside the money window
 	void updateIncomeEstimate( Player *player );	///< income per minute, shown beside the money
 
 	Bool												m_placementRangeRingUp;	///< we put a radius cursor up for a pending structure, so we owe a clear
 	Real												m_placementRingRadius;	///< the radius that ring was built at, so it is not rebuilt every frame
 
 	DisplayString *							m_hudDisplayString;			///< the ShowHudOverlay line (fps / clock / income)
+	DisplayString *							m_incomeDisplayString;	///< the "(+N/min)" drawn beside the money
+	Int													m_lastIncomeDisplayed;	///< so that string is only rebuilt when the rate changes
 	UnsignedInt									m_hudLastSampleFrame;		///< client frame the fps sample was last refreshed on
 	UnsignedInt									m_hudLastSampleMs;			///< wall clock of that sample
 	Real												m_hudFps;								///< smoothed render rate

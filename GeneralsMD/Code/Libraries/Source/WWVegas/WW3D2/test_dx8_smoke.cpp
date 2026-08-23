@@ -34,7 +34,9 @@ int main(int argc, char **argv)
 		if (strcmp(argv[i], "-bb2") == 0) bb2 = true;	// BackBufferCount = 2
 	}
 	int bbW = big ? 1280 : 640, bbH = big ? 768 : 480, posX = 100, posY = 100;
+	int msaa = 0;	// "-msaa N": multisampled back buffer, plus the render-to-texture pairing it forces
 	for (int i = 1; i + 1 < argc; i++) {	// "-w N -h N": back buffer size, "-x N -y N": window position
+		if (strcmp(argv[i], "-msaa") == 0) msaa = atoi(argv[i + 1]);
 		if (strcmp(argv[i], "-w") == 0) bbW = atoi(argv[i + 1]);
 		if (strcmp(argv[i], "-h") == 0) bbH = atoi(argv[i + 1]);
 		if (strcmp(argv[i], "-x") == 0) posX = atoi(argv[i + 1]);
@@ -83,6 +85,31 @@ int main(int argc, char **argv)
 	if (flip) pp.SwapEffect = D3DSWAPEFFECT_FLIP;
 	if (bb2) pp.BackBufferCount = 2;
 
+	// "-msaa N": the highest level up to N that the device reports for BOTH the back buffer
+	// and the depth/stencil format, exactly as dx8wrapper.cpp picks it.  A multisampled back
+	// buffer cannot be lockable, so the pixel readback below is skipped in that mode.
+	D3DMULTISAMPLE_TYPE msType = D3DMULTISAMPLE_NONE;
+	if (msaa >= 2) {
+		for (int s = msaa > 16 ? 16 : msaa; s >= 2; --s) {
+			D3DMULTISAMPLE_TYPE type = (D3DMULTISAMPLE_TYPE)s;
+			if (d3d->CheckDeviceMultiSampleType(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL,
+					pp.BackBufferFormat, TRUE, type) != D3D_OK) continue;
+			if (d3d->CheckDeviceMultiSampleType(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL,
+					pp.AutoDepthStencilFormat, TRUE, type) != D3D_OK) continue;
+			msType = type;
+			break;
+		}
+		printf("msaa: %dx requested, %dx supported\n", msaa, (int)msType);
+		if (msType == D3DMULTISAMPLE_NONE) {
+			printf("FAIL: no multisample level up to %dx is supported\n", msaa);
+			d3d->Release(); DestroyWindow(hwnd);
+			return 1;
+		}
+		pp.MultiSampleType = msType;
+		pp.SwapEffect = D3DSWAPEFFECT_DISCARD;	// the only swap effect D3D allows with multisampling
+		pp.Flags = 0;
+	}
+
 	IDirect3DDevice8 * dev = NULL;
 	HRESULT hr = d3d->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, hwnd,
 	                               D3DCREATE_MIXED_VERTEXPROCESSING, &pp, &dev);
@@ -96,7 +123,7 @@ int main(int argc, char **argv)
 
 	// read the cleared back buffer back: proves the runtime really rendered, not just created
 	// (a D3D12 path that only returned a device but painted nothing would pass otherwise)
-	{
+	if (msType == D3DMULTISAMPLE_NONE) {
 		IDirect3DSurface8 * bb = NULL;
 		if (dev->GetBackBuffer(0, D3DBACKBUFFER_TYPE_MONO, &bb) == D3D_OK && bb) {
 			D3DLOCKED_RECT lr;
@@ -116,6 +143,59 @@ int main(int argc, char **argv)
 			bb->Release();
 		}
 	}
+	// With a multisampled back buffer the auto depth/stencil is multisampled too, and Direct3D
+	// requires the depth buffer to match the render target - so the plain render-target textures
+	// every screen filter and the water reflection bind need a non-multisampled depth buffer of
+	// their own.  That is DX8Wrapper::_Get_Non_MultiSampled_Depth_Buffer; this is its pairing,
+	// cleared green and read back to prove the target really was drawn into.
+	if (msType != D3DMULTISAMPLE_NONE) {
+		IDirect3DTexture8 * rtt = NULL;
+		IDirect3DSurface8 * rttSurf = NULL, * rttZ = NULL, * bb = NULL, * autoZ = NULL, * copy = NULL;
+		if (FAILED(dev->CreateTexture(256, 256, 1, D3DUSAGE_RENDERTARGET, pp.BackBufferFormat,
+				D3DPOOL_DEFAULT, &rtt))
+			|| FAILED(rtt->GetSurfaceLevel(0, &rttSurf))
+			|| FAILED(dev->CreateDepthStencilSurface(256, 256, pp.AutoDepthStencilFormat,
+				D3DMULTISAMPLE_NONE, &rttZ))
+			|| FAILED(dev->GetBackBuffer(0, D3DBACKBUFFER_TYPE_MONO, &bb))
+			|| FAILED(dev->GetDepthStencilSurface(&autoZ))
+			|| FAILED(dev->CreateImageSurface(256, 256, pp.BackBufferFormat, &copy))) {
+			printf("FAIL: could not build the render-to-texture surfaces\n");
+			dev->Release(); d3d->Release(); DestroyWindow(hwnd);
+			return 1;
+		}
+		// For the record: the retail runtime does NOT reject the mismatch at bind time (the debug
+		// runtime and the D3D9 docs do), which is why this is reported rather than asserted.
+		printf("rtt: multisampled z with a plain target hr=0x%08lx (0 = the runtime allows it)\n",
+			(unsigned long)dev->SetRenderTarget(rttSurf, autoZ));
+		HRESULT good = dev->SetRenderTarget(rttSurf, rttZ);
+		HRESULT cleared = dev->Clear(0, NULL, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER,
+			D3DCOLOR_XRGB(0, 255, 0), 1.0f, 0);
+		HRESULT copied = dev->CopyRects(rttSurf, NULL, 0, copy, NULL);
+		HRESULT back = dev->SetRenderTarget(bb, autoZ);
+		printf("rtt: matched z hr=0x%08lx, clear hr=0x%08lx, copy hr=0x%08lx, restore hr=0x%08lx\n",
+			(unsigned long)good, (unsigned long)cleared, (unsigned long)copied, (unsigned long)back);
+		if (FAILED(good) || FAILED(cleared) || FAILED(copied) || FAILED(back)) {
+			printf("FAIL: render-to-texture with a matching non-multisampled depth buffer failed\n");
+			dev->Release(); d3d->Release(); DestroyWindow(hwnd);
+			return 1;
+		}
+		D3DLOCKED_RECT lr;
+		bool green = false;
+		if (SUCCEEDED(copy->LockRect(&lr, NULL, D3DLOCK_READONLY))) {
+			const unsigned char * px = (const unsigned char *)lr.pBits + 10 * lr.Pitch + 10 * 4;
+			printf("render texture pixel (b,g,r) = (%u,%u,%u)\n", px[0], px[1], px[2]);
+			green = px[1] > 200 && px[0] < 32 && px[2] < 32;
+			copy->UnlockRect();
+		}
+		if (!green) {
+			printf("FAIL: the render texture does not hold the clear colour (0,255,0)\n");
+			dev->Release(); d3d->Release(); DestroyWindow(hwnd);
+			return 1;
+		}
+		copy->Release(); autoZ->Release(); bb->Release(); rttZ->Release();
+		rttSurf->Release(); rtt->Release();
+	}
+
 	HRESULT phr = dev->Present(NULL, NULL, NULL, NULL);
 	printf("Present hr=0x%08lx\n", (unsigned long)phr);
 	if (show) {

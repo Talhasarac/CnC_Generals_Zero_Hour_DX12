@@ -193,6 +193,41 @@ static unsigned				last_frame_draw_calls									= 0;
 static D3DDISPLAYMODE DesktopMode;
 
 static D3DPRESENT_PARAMETERS								_PresentParameters;
+
+// Multisampling (anti-aliasing) is opt-in and off by default, which is exactly what retail did.
+// "-msaa" on the command line asks for 4x, "-msaa N" for N (2..16); the highest level the device
+// actually reports for BOTH the back buffer and the depth/stencil format is the one used, so an
+// unsupported request quietly degrades instead of failing device creation.  The command line is
+// read here rather than plumbed through GlobalData because WW3D2 has no view of it - and it must
+// be the WIDE one: WinMain tokenizes the ANSI command line in place, so GetCommandLineA() is
+// already truncated by the time the device is created.
+static unsigned Get_Requested_MultiSample_Level(void)
+{
+	static int requested = -1;
+	if (requested >= 0) return (unsigned)requested;
+	requested = 0;
+	for (const wchar_t * p = ::GetCommandLineW(); p != NULL && *p != L'\0'; ++p) {
+		if ((*p != L'-' && *p != L'/') || ::_wcsnicmp(p + 1, L"msaa", 4) != 0) continue;
+		p += 5;
+		while (*p == L' ' || *p == L'=' || *p == L':') ++p;
+		int n = 0;
+		while (*p >= L'0' && *p <= L'9') { n = n * 10 + (int)(*p - L'0'); ++p; }
+		requested = n ? n : 4;	// a bare "-msaa" means 4x
+		break;
+	}
+	if (requested < 2) requested = 0;	// 0 and 1 both mean "no multisampling"
+	if (requested > 16) requested = 16;
+	return (unsigned)requested;
+}
+
+// Non-multisampled depth/stencil for render-to-texture.  A multisampled back buffer gets a
+// multisampled auto depth/stencil, and Direct3D requires the depth buffer to match the render
+// target - so the plain render target textures the screen filters and the water reflection draw
+// into need a non-multisampled one of their own.  (The retail runtime does not reject the
+// mismatch at bind time; the debug runtime and the docs do.  dx8_smoke_msaa records both.)
+// NULL means "not multisampling, keep the depth buffer you already have".
+static IDirect3DSurface8 * _RTTDepthBuffer = NULL;
+
 static DynamicVectorClass<StringClass>					_RenderDeviceNameTable;
 static DynamicVectorClass<StringClass>					_RenderDeviceShortNameTable;
 static DynamicVectorClass<RenderDeviceDescClass>	_RenderDeviceDescriptionTable;
@@ -638,6 +673,9 @@ bool DX8Wrapper::Reset_Device(bool reload_assets)
 		DX8TextureManagerClass::Release_Textures();
 		SHD_SHUTDOWN_SHADERS;
 
+		// D3DPOOL_DEFAULT: must be gone before Reset(), and the back buffer may change size
+		if (_RTTDepthBuffer) { _RTTDepthBuffer->Release(); _RTTDepthBuffer = NULL; }
+
 		// Reset frame count to reflect the flipping chain being reset by Reset()
 		FrameCount = 0;
 
@@ -673,6 +711,8 @@ bool DX8Wrapper::Reset_Device(bool reload_assets)
 void DX8Wrapper::Release_Device(void)
 {
 	if (D3DDevice) {
+
+		if (_RTTDepthBuffer) { _RTTDepthBuffer->Release(); _RTTDepthBuffer = NULL; }
 
 		for (int a=0;a<MAX_TEXTURE_STAGES;++a)
 		{	//release references to any textures that were used in last rendering call
@@ -1052,6 +1092,28 @@ bool DX8Wrapper::Set_Render_Device(int dev, int width, int height, int bits, int
 		}
 		else {
 			_PresentParameters.AutoDepthStencilFormat=D3DFMT_D16;
+		}
+	}
+
+	/*
+	** Pick the multisampling level now that both formats are known.  D3D only allows
+	** multisampling with SWAPEFFECT_DISCARD, which is what we use unconditionally.
+	*/
+	_PresentParameters.MultiSampleType = D3DMULTISAMPLE_NONE;
+	{
+		unsigned wanted = Get_Requested_MultiSample_Level();
+		for (unsigned samples = wanted; samples >= 2; --samples) {
+			D3DMULTISAMPLE_TYPE type = (D3DMULTISAMPLE_TYPE)samples;
+			if (FAILED(D3DInterface->CheckDeviceMultiSampleType(CurRenderDevice,D3DDEVTYPE_HAL,
+					_PresentParameters.BackBufferFormat,_PresentParameters.Windowed,type))) continue;
+			if (FAILED(D3DInterface->CheckDeviceMultiSampleType(CurRenderDevice,D3DDEVTYPE_HAL,
+					_PresentParameters.AutoDepthStencilFormat,_PresentParameters.Windowed,type))) continue;
+			_PresentParameters.MultiSampleType = type;
+			break;
+		}
+		if (wanted) {
+			WWDEBUG_SAY(("Multisampling: %ux requested, %ux in use\n",
+				wanted,(unsigned)_PresentParameters.MultiSampleType));
 		}
 	}
 
@@ -3347,6 +3409,32 @@ void DX8Wrapper::Set_Render_Target_With_Z
 	IsRenderToTexture = true;
 }
 
+//**********************************************************************************************
+//! Depth/stencil surface to pair with a non-multisampled render target
+/*! Returns NULL when the back buffer is not multisampled - callers then keep whatever depth
+**  buffer they already have, which is what every one of them did before multisampling existed.
+**  Created lazily at back buffer size, which covers every render target this game binds.
+*/
+// Samples per pixel actually in use: 0 when not multisampling.  The exe logs this, so a
+// player can tell whether "-msaa N" was honoured or quietly degraded.
+unsigned DX8Wrapper::Get_MultiSample_Level(void)
+{
+	return (unsigned)_PresentParameters.MultiSampleType;
+}
+
+IDirect3DSurface8 * DX8Wrapper::_Get_Non_MultiSampled_Depth_Buffer(void)
+{
+	if (_PresentParameters.MultiSampleType == D3DMULTISAMPLE_NONE) return NULL;
+	if (_RTTDepthBuffer == NULL && D3DDevice != NULL) {
+		if (FAILED(D3DDevice->CreateDepthStencilSurface(
+				_PresentParameters.BackBufferWidth,_PresentParameters.BackBufferHeight,
+				_PresentParameters.AutoDepthStencilFormat,D3DMULTISAMPLE_NONE,&_RTTDepthBuffer))) {
+			_RTTDepthBuffer = NULL;
+		}
+	}
+	return _RTTDepthBuffer;
+}
+
 void
 DX8Wrapper::Set_Render_Target(IDirect3DSwapChain8 *swap_chain)
 {
@@ -3476,7 +3564,10 @@ DX8Wrapper::Set_Render_Target(IDirect3DSurface8 *render_target, bool use_default
 			//
 			if (use_default_depth_buffer) 
 			{
-				DX8CALL(SetRenderTarget (CurrentRenderTarget, DefaultDepthBuffer));
+				//	The default depth buffer is multisampled when the back buffer is; this
+				//	target is not, so it needs the plain one instead.
+				IDirect3DSurface8 * z = _Get_Non_MultiSampled_Depth_Buffer();
+				DX8CALL(SetRenderTarget (CurrentRenderTarget, z ? z : DefaultDepthBuffer));
 			}
 			else 
 			{

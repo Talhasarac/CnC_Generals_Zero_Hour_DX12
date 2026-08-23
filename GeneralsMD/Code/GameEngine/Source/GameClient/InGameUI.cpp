@@ -1023,6 +1023,8 @@ InGameUI::InGameUI()
 	m_placementRangeRingUp = FALSE;
 	m_placementRingRadius = 0.0f;
 	m_hudDisplayString = NULL;
+	m_incomeDisplayString = NULL;
+	m_lastIncomeDisplayed = -1;
 	m_hudLastSampleFrame = 0;
 	m_hudLastSampleMs = 0;
 	m_hudFps = 0.0f;
@@ -1934,24 +1936,17 @@ void InGameUI::update( void )
 	{
 		Int currentMoney = moneyPlayer->getMoney()->countMoney();
 
-		// income per minute, shown in brackets beside the balance it should be compared against
+		// income per minute is drawn beside this window by drawIncomeRate(), not put inside it -
+		// the money gadget wraps at its own width and a second line looked broken
 		updateIncomeEstimate( moneyPlayer );
-		static Int lastIncome = -1;
 
-		if( lastMoney != currentMoney || lastIncome != m_hudIncomePerMin )
+		if( lastMoney != currentMoney )
 		{
 			UnicodeString buffer;
 
 			buffer.format( TheGameText->fetch( "GUI:ControlBarMoneyDisplay" ), currentMoney );
-			if( m_hudIncomePerMin > 0 )
-			{
-				UnicodeString rate;
-				rate.format( L" (%d/min)", m_hudIncomePerMin );
-				buffer.concat( rate );
-			}
 			GadgetStaticTextSetText( moneyWin, buffer );
 			lastMoney = currentMoney;
-			lastIncome = m_hudIncomePerMin;
 
 		}  // end if
 		moneyWin->winHide(FALSE);
@@ -2680,7 +2675,14 @@ void InGameUI::createCommandHint( const GameMessage *msg )
 //#endif
 
 
-	setRadiusCursorNone();
+	//
+	// While a structure is on the cursor, handleBuildPlacements owns the radius cursor - it is the
+	// range ring for the thing being placed. Wiping it here (this runs on every mouse hint) is what
+	// made that ring flicker or never appear at all.
+	//
+	if( m_pendingPlaceType == NULL )
+		setRadiusCursorNone();
+
   if ( TheGlobalData->m_doubleClickAttackMove )
   {
     if ( --m_duringDoubleClickAttackMoveGuardHintTimer > 0 )
@@ -3593,6 +3595,7 @@ void InGameUI::disregardDrawable( Drawable *draw )
 void InGameUI::postDraw( void )
 {
 	drawHudOverlay();
+	drawIncomeRate();
 
 
 	// render our display strings for the messages if on
@@ -5291,6 +5294,49 @@ void InGameUI::updateIncomeEstimate( Player *player )
 /** A small heads-up line in the top right: elapsed game time and the render rate, on a plate so it
 	* stays readable over terrain. Income is not here - it lives next to the money, where it is
 	* being compared to something. Off unless ShowHudOverlay is set in Options.ini. */
+//-------------------------------------------------------------------------------------------------
+void InGameUI::drawIncomeRate( void )
+{
+	if( !TheGlobalData->m_showHudOverlay || m_hudIncomePerMin <= 0 )
+		return;
+
+	if( TheGameLogic == NULL || !TheGameLogic->isInGame() || TheGameLogic->isInShellGame() )
+		return;
+
+	static NameKeyType moneyWindowKey = TheNameKeyGenerator->nameToKey( "ControlBar.wnd:MoneyDisplay" );
+	GameWindow *moneyWin = TheWindowManager->winGetWindowFromId( NULL, moneyWindowKey );
+	if( moneyWin == NULL || moneyWin->winIsHidden() )
+		return;
+
+	if( m_incomeDisplayString == NULL )
+	{
+		m_incomeDisplayString = TheDisplayStringManager->newDisplayString();
+		m_incomeDisplayString->setFont( TheFontLibrary->getFont( m_superweaponNormalFont,
+										TheGlobalLanguageData->adjustFontSize( HUD_OVERLAY_POINT_SIZE ),
+										FALSE ) );
+	}
+
+	if( m_lastIncomeDisplayed != m_hudIncomePerMin )
+	{
+		UnicodeString buffer;
+		buffer.format( L"(+%d/min)", m_hudIncomePerMin );
+		m_incomeDisplayString->setText( buffer );
+		m_lastIncomeDisplayed = m_hudIncomePerMin;
+	}
+
+	ICoord2D pos, size;
+	moneyWin->winGetScreenPosition( &pos.x, &pos.y );
+	moneyWin->winGetSize( &size.x, &size.y );
+
+	Int textHeight = 0;
+	m_incomeDisplayString->getSize( NULL, &textHeight );
+
+	// tucked under the balance rather than after it: the money window runs to the panel edge
+	m_incomeDisplayString->draw( pos.x + 4, pos.y + size.y - 2,
+															 GameMakeColor( 180, 235, 180, 255 ),
+															 GameMakeColor( 0, 0, 0, 255 ) );
+}
+
 //-------------------------------------------------------------------------------------------------
 void InGameUI::drawHudOverlay( void )
 {

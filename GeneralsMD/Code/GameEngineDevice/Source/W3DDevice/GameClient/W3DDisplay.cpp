@@ -793,6 +793,9 @@ void W3DDisplay::init( void )
 						                                                        : "Direct3D 12 (d3d8to9 -> Direct3D 9On12)")
 						 : GetModuleHandleA("d3d9.dll")  ? "Direct3D 9 (d3d8to9)"
 						                                 : "Direct3D 8 (system d3d8.dll)"));
+	// multisampling is opt-in with "-msaa" / "-msaa N" and silently degrades to whatever the
+	// device supports, so log what was actually granted
+	DEBUG_LOG(("W3DDisplay::init - multisampling: %ux\n", DX8Wrapper::Get_MultiSample_Level()));
 
 	//Check if level was never set and default to setting most suitable for system.
 	if (TheGameLODManager->getStaticLODLevel() == STATIC_GAME_LOD_UNKNOWN)

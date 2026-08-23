@@ -526,6 +526,9 @@ add_custom_command(TARGET dx8_smoke POST_BUILD
 add_dependencies(dx8_smoke d3d8to9)
 add_test(NAME dx8_smoke COMMAND dx8_smoke)
 add_test(NAME dx8_smoke_d3d12 COMMAND dx8_smoke -d3d12)
+# "-msaa": a multisampled back buffer, and the plain render target + non-multisampled depth
+# buffer pairing that DX8Wrapper::_Get_Non_MultiSampled_Depth_Buffer hands the screen filters.
+add_test(NAME dx8_smoke_msaa COMMAND dx8_smoke -msaa 4)
 
 if(RELEASE_DEBUG_LOGGING)
   target_compile_definitions(gameengine PRIVATE RELEASE_DEBUG_LOGGING)

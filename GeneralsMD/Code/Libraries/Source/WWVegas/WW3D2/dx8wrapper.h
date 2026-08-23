@@ -490,6 +490,10 @@ public:
 	static void					Set_Render_Target (IDirect3DSurface8* render_target, IDirect3DSurface8* dpeth_buffer);
 
 	static void					Set_Render_Target (IDirect3DSwapChain8 *swap_chain);
+	// Samples per pixel in use, 0 if not multisampling ("-msaa N" on the command line).
+	static unsigned				Get_MultiSample_Level (void);
+	// Depth/stencil to use with a non-multisampled render target; NULL if not multisampling.
+	static IDirect3DSurface8 *	_Get_Non_MultiSampled_Depth_Buffer (void);
 	static bool					Is_Render_To_Texture(void) { return IsRenderToTexture; }
 
 	// for depth map support KJM V

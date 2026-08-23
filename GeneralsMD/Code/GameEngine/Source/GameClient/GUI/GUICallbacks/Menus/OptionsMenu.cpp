@@ -814,15 +814,6 @@ Bool OptionPreferences::getWorkersReturnToSupply(void)
 	return stricmp(it->second.str(), "yes") == 0;
 }
 
-Bool OptionPreferences::getAlwaysShowWaypointLines(void)
-{
-	OptionPreferences::const_iterator it = find("AlwaysShowWaypointLines");
-	if (it == end())
-		return TheGlobalData->m_alwaysShowWaypointLines;
-
-	return stricmp(it->second.str(), "yes") == 0;
-}
-
 Bool OptionPreferences::getDetailedBuildTooltips(void)
 {
 	OptionPreferences::const_iterator it = find("DetailedBuildTooltips");

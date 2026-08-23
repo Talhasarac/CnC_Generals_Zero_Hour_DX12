@@ -332,7 +332,6 @@ public:
 	Bool m_showHudOverlay;				///< draw the fps / elapsed time / income line in the corner
 	Bool m_showPlacementRangeRing;		///< while placing a structure, ring its weapon range
 	Bool m_workersReturnToSupply;		///< a worker that finishes a build job goes back to the dock it left
-	Bool m_alwaysShowWaypointLines;		///< draw a selected unit's queued waypoint path without holding the waypoint key
 	Bool m_detailedBuildTooltips;		///< put build time, weapon range and damage in the build tooltip
 	Bool m_buildMapCache;
 	AsciiString m_initialFile;				///< If this is specified, load a specific map/replay from the command-line

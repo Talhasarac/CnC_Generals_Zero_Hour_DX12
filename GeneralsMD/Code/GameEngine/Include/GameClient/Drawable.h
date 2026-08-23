@@ -702,6 +702,8 @@ private:
 	ModelConditionFlags	m_conditionState;				///< The Drawables current behavior state
 	Real								m_lastConstructDisplayed;						///< last construct percent used to make the string
 	DisplayString*			m_constructDisplayString;  ///< string to display construction % complete
+	Int									m_lastChargeDisplayed;							///< last countdown second drawn, so the string is not rebuilt every frame
+	DisplayString*			m_chargeDisplayString;			///< seconds left on a special power or an OCL payout
 	DisplayString*			m_captionDisplayString;		///< string to display caption
 	DisplayString*			m_groupNumber;						///< string to display the group number of this drawable
 
@@ -742,6 +744,7 @@ public:
 private:
 	// "icon" drawing methods **************
 	void drawConstructPercent( const IRegion2D *healthBarRegion );  ///< display % construction complete
+	void drawChargeCountdown( const IRegion2D *healthBarRegion );   ///< seconds left on a special power or an OCL payout
 	void drawCaption( const IRegion2D *healthBarRegion );						///< draw caption
 	void drawAmmo( const IRegion2D *healthBarRegion );							///< draw icons
 	void drawContained( const IRegion2D *healthBarRegion );					///< draw icons

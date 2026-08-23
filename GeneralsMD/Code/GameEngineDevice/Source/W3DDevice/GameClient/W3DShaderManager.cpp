@@ -2843,7 +2843,12 @@ void W3DShaderManager::startRenderToTexture(void)
 	DEBUG_ASSERTCRASH(!m_renderingToTexture, ("Already rendering to texture - cannot nest calls."));
 
 	if (m_renderingToTexture || m_newRenderSurface==NULL || m_oldDepthSurface==NULL) return;
-	HRESULT hr = DX8Wrapper::_Get_D3D_Device8()->SetRenderTarget(m_newRenderSurface,m_oldDepthSurface);
+	//m_oldDepthSurface is the back buffer's depth surface, which is multisampled when the back
+	//buffer is; D3D wants the depth buffer to match the render target, and ours is a plain
+	//texture.  Ask the wrapper for a matching one (NULL = not multisampling, nothing to do).
+	IDirect3DSurface8 *depthSurface = DX8Wrapper::_Get_Non_MultiSampled_Depth_Buffer();
+	if (depthSurface == NULL) depthSurface = m_oldDepthSurface;
+	HRESULT hr = DX8Wrapper::_Get_D3D_Device8()->SetRenderTarget(m_newRenderSurface,depthSurface);
 	DEBUG_ASSERTCRASH(hr==S_OK, ("Set target failed unexpectedly."));
 	if (hr != S_OK)
 		return;

@@ -1222,23 +1222,27 @@ void WaterRenderObjClass::update( void )
 	if( TheGameLogic )
 		currLogicFrame = TheGameLogic->getFrame();
 
-	m_riverVOrigin += 0.002f;
-	m_riverXOffset += (Real)(0.0125*33/5000);
-	m_riverYOffset += (Real)(2*0.0125*33/5000);
-	if (m_riverXOffset > 1) m_riverXOffset -= 1;
-	if (m_riverYOffset > 1) m_riverYOffset -= 1;
-	if (m_riverXOffset < -1) m_riverXOffset += 1;
-	if (m_riverYOffset < -1) m_riverYOffset += 1;
- 	m_iBumpFrame++;
-	if (m_iBumpFrame >= NUM_BUMP_FRAMES) {
-		m_iBumpFrame = 0;
-	}
-
-
-
 	// we only process some things if the logic frame has changed
 	if( lastLogicFrame != currLogicFrame )
 	{
+		//
+		// The river scroll and the bump frame used to advance on every call, which is once per
+		// RENDER frame - fine when the loop was capped, wrong now that it is not: the water tore
+		// along at whatever the frame rate happened to be. They belong on the logic clock with
+		// the rest of this function.
+		//
+		m_riverVOrigin += 0.002f;
+		m_riverXOffset += (Real)(0.0125*33/5000);
+		m_riverYOffset += (Real)(2*0.0125*33/5000);
+		if (m_riverXOffset > 1) m_riverXOffset -= 1;
+		if (m_riverYOffset > 1) m_riverYOffset -= 1;
+		if (m_riverXOffset < -1) m_riverXOffset += 1;
+		if (m_riverYOffset < -1) m_riverYOffset += 1;
+		m_iBumpFrame++;
+		if (m_iBumpFrame >= NUM_BUMP_FRAMES) {
+			m_iBumpFrame = 0;
+		}
+
 
 		// for vertex animated water we need to update the vector field
 		if( m_doWaterGrid && m_meshInMotion == TRUE )
