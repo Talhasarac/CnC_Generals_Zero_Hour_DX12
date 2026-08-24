@@ -237,13 +237,18 @@ sparks are too small and too short-lived to earn it, and fire and glows are stil
 shade. It is one soft patch per plume rather than a shadow for every puff, so a battlefield full of
 smoke costs no more than a battlefield with one fire.
 
-Then the trees. If you had shadows set to the good kind rather than the cheap kind, the trees
-dropped nothing at all, so a forest sat on clean ground next to buildings with long shadows behind
-them. Trees are drawn in one batch to keep a forest cheap, which is why they have never had a
-shadow with a shape - what they get is one soft pool under the trunk, and it is now drawn whichever
-shadow setting you are on. Leaning that pool away from the sun was tried and put back: a round
-smudge sitting a tree's width to one side does not read as that tree's shadow, it reads as a stain
-on the ground.
+Then the trees — and it turned out to be bigger than the trees. The game has two kinds of shadow:
+the sculpted kind that has the shape of the thing casting it, and the soft dark pool that trees,
+bushes, fences and scenery get. **The soft pool has never once been drawn in this build.** Not
+faintly, not in the wrong place: the game was painting it onto the ground in a way that could not
+darken a single pixel, so a forest sat on clean bright sand next to tanks with shadows underneath
+them. The blob is now blended onto the ground the way its own artwork describes it — the same
+picture, the same darkness EA chose, actually visible.
+
+So every tree on the map has a shadow now. So does every palm, every bush and every piece of
+scenery that only ever had the soft kind, whichever shadow setting you play on. Leaning that pool
+away from the sun was tried and put back: a round smudge sitting a tree's width to one side does
+not read as that tree's shadow, it reads as a stain on the ground.
 
 And the scenery nobody gave a shadow to at all: fences, walls of tyres, rubbish piles, low
 shrubs, the props that dress a map. They stood on the terrain with nothing under them, which is
@@ -340,6 +345,12 @@ having a shadow built from his pose, frame by frame. What is still missing is a 
 has stood in front of a skirmish full of soldiers to judge how they look, or measured what they cost
 in frames. If they turn out to be ugly or expensive, `UseShadowVolumesForSkins = No` turns them off
 and this entry gets rewritten.
+
+**The missing tree shadows were found with screenshots, not with reasoning.** Three separate
+explanations for them looked convincing on paper and were all wrong. What settled it was painting
+the shadows bright red for one build and looking: red under some trees and not others said the
+drawing worked and the colour did not. Every state the graphics card was actually using was then
+read back out of it mid-frame rather than assumed from the source.
 
 **Zoom toward the cursor has been fixed twice and eyeballed once.** The first fix measured a camera
 that had not moved; the second found the camera being pushed in the wrong units. The second one is

@@ -118,6 +118,11 @@ int nShadowDecalIndicesInBuf=0;	//model vetices in vertex buffer
 int nShadowDecalStartBatchIndex=0;
 int	nShadowDecalPolysInBatch=0;
 int	nShadowDecalVertsInBatch=0;
+//A SHADOW_DECAL is alpha blended onto the terrain (see flushDecals), so its vertex colour is the
+//shadow itself - black at this alpha, faded by the texture's own alpha channel.  160 lands on the
+//darkness the multiplicative blob was asking for: shadow.dds is 45% grey at its centre with an
+//alpha of about 0.85 there, and 1 - 0.85*160/255 is the same 45%.
+#define DECAL_SHADOW_ALPHA 160
 int SHADOW_DECAL_VERTEX_SIZE=32768;
 int SHADOW_DECAL_INDEX_SIZE=65536;
 
@@ -703,7 +708,14 @@ void W3DProjectedShadowManager::flushDecals(W3DShadowTexture *texture, ShadowTyp
 	switch (type)
 	{
 		case SHADOW_DECAL:
-			DX8Wrapper::Set_Shader(ShaderClass::_PresetMultiplicativeShader);
+			//The blob used to be multiplied onto the ground (dest * texture).  That is right on
+			//paper and lands on nothing here: with the correct blend, the correct texture and the
+			//correct states - all read back off the device - a blob decal never changed a pixel,
+			//so no tree, prop or unit blob shadow in this port was ever visible.  Alpha blending
+			//the same texture does show, so the blob is now drawn the way its own alpha channel
+			//describes it: the shadow colour, faded by the texture (DECAL_SHADOW_ALPHA, set on the
+			//decal's diffuse where it is created).
+			DX8Wrapper::Set_Shader(ShaderClass::_PresetAlphaShader);
 			break;
 		case SHADOW_ALPHA_DECAL:
 			DX8Wrapper::Set_Shader(ShaderClass::_PresetAlphaShader);
@@ -1885,6 +1897,10 @@ W3DProjectedShadow* W3DProjectedShadowManager::addShadow(RenderObjClass *robj, S
 
 	shadow->m_flags	= allowSunDirection;
 
+	//Alpha blended, so the plain white a decal is born with would draw a white blob.
+	if (shadowType == SHADOW_DECAL)
+		shadow->m_diffuse = (Int)(DECAL_SHADOW_ALPHA << 24);
+
 	shadow->init();
 
 	// add to our shadow list through the shadow next links, insert next to other shadows using same texture
@@ -2019,6 +2035,10 @@ W3DProjectedShadow* W3DProjectedShadowManager::createDecalShadow(Shadow::ShadowT
 	shadow->m_decalOffsetV= decalOffsetY;
 
 	shadow->m_flags	= 0;
+
+	//Alpha blended, so the plain white a decal is born with would draw a white blob.
+	if (shadowType == SHADOW_DECAL)
+		shadow->m_diffuse = (Int)(DECAL_SHADOW_ALPHA << 24);
 
 	shadow->init();
 
