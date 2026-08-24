@@ -255,7 +255,7 @@ public:
 		MSG_META_SELECT_HERO,                       ///< selects player's hero character, if exists...
 		MSG_META_SELECT_ALL,                        ///< selects all units across screen
 		MSG_META_SELECT_ALL_AIRCRAFT,								///< selects all air units just like select all
-		MSG_META_SELECT_ALL_MILITARY,         ///< selects armed units (KINDOF_CAN_ATTACK), screen first then map (Ctrl+Q/W/Z/X/C)
+		MSG_META_SELECT_ALL_MILITARY,         ///< selects foot soldiers (KINDOF_INFANTRY), screen first then map (Ctrl+Q)
 		MSG_META_SELECT_ALL_VEHICLES,         ///< selects ground vehicles (no dozers / harvesters), screen first then map (Ctrl+Q/W/Z/X/C)
 		MSG_META_SELECT_ALL_BARRACKS,         ///< selects barracks, screen first then map (Ctrl+Q/W/Z/X/C)
 		MSG_META_SELECT_ALL_WARFACTORIES,     ///< selects war factories, screen first then map (Ctrl+Q/W/Z/X/C)

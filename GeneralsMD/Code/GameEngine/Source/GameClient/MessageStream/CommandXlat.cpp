@@ -2980,7 +2980,17 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 					if( t == GameMessage::MSG_META_SELECT_ALL_AIRCRAFT )
 						requiredKindofs.set(KINDOF_AIRCRAFT);
 					else if( t == GameMessage::MSG_META_SELECT_ALL_MILITARY )
-						requiredKindofs.set(KINDOF_CAN_ATTACK);	// armed units of any kind; plain SELECT_ALL takes the unarmed ones too
+					{
+						//
+						// Q W E under the left hand is infantry / vehicles / aircraft - one key per
+						// arm, so each one narrows the selection to something you can give a single
+						// order to. This used to be KINDOF_CAN_ATTACK, which is every armed unit
+						// there is: it swept up the tanks and the aircraft the other two keys are
+						// for and left no way to grab the foot soldiers on their own. Ctrl+A is
+						// still there for everything at once.
+						//
+						requiredKindofs.set(KINDOF_INFANTRY);
+					}
 					else if( t == GameMessage::MSG_META_SELECT_ALL_VEHICLES )
 					{
 						requiredKindofs.set(KINDOF_VEHICLE);

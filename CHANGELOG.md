@@ -101,6 +101,11 @@ decoyed, the reservation lapses within half a second and your units open up agai
 The practical effect is that a group kills more things per volley. Same units, same weapons, fewer
 rounds spent on the dead.
 
+**Ctrl+Q takes your infantry.** The three keys under your left hand are one per arm — Q infantry,
+W vehicles, E aircraft — but Q was grabbing every armed thing you own, tanks and jets included, so
+there was no way to pull just the foot soldiers out of a mixed army. Press it twice for the whole
+map. Ctrl+A is still everything at once.
+
 ## Your whole base, on one strip
 
 The original showed you one factory at a time and made you click through the rest.
