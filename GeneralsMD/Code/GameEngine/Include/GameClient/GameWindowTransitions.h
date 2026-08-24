@@ -648,6 +648,8 @@ private:
 	TransitionWindowList m_transitionWindowList;
 	Int m_directionMultiplier;
 	Int m_currentFrame; ///< maintain how long we've spent on this transition;
+	UnsignedInt m_lastStepMs;		///< wall clock of the last step - the frame counter is not a clock
+	Real m_stepAccumMs;					///< milliseconds banked toward the next step
 	AsciiString m_name;
 };
 

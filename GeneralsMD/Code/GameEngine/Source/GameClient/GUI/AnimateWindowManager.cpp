@@ -54,6 +54,7 @@
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
 
 #include "GameClient/AnimateWindowManager.h"
+#include "GameClient/UiAnimClock.h"
 #include "GameClient/GameWindow.h"
 #include "GameClient/Display.h"
 #include "GameClient/ProcessAnimateWindow.h"
@@ -183,6 +184,28 @@ void AnimateWindowManager::reset( void )
 	m_stepAccumMs = 0.0f;
 }
 
+//-----------------------------------------------------------------------------
+Bool GameClient_isUiAnimStepDue( UnsignedInt &lastMs, Real &accumMs, UnsignedInt nowMs,
+																 Real stepsPerSec )
+{
+	const Real msPerStep = 1000.0f / stepsPerSec;
+
+	if (lastMs == 0)
+		lastMs = nowMs;
+
+	Real elapsedMs = (Real)(nowMs - lastMs);
+	lastMs = nowMs;
+	if (elapsedMs > msPerStep)
+		elapsedMs = msPerStep;		// never burst several steps after a stall
+
+	accumMs += elapsedMs;
+	if (accumMs < msPerStep)
+		return FALSE;
+
+	accumMs -= msPerStep;
+	return TRUE;
+}
+
 void AnimateWindowManager::update( void )
 {
 	//
@@ -191,22 +214,9 @@ void AnimateWindowManager::update( void )
 	// the wall clock at that same rate instead - otherwise a menu animation covers its whole
 	// travel in a handful of milliseconds and appears to snap into place.
 	//
-	const Real WINDOW_ANIM_STEPS_PER_SEC = 30.0f;
-	const Real msPerStep = 1000.0f / WINDOW_ANIM_STEPS_PER_SEC;
-
-	UnsignedInt nowMs = timeGetTime();
-	if (m_lastStepMs == 0)
-		m_lastStepMs = nowMs;
-
-	Real elapsedMs = (Real)(nowMs - m_lastStepMs);
-	m_lastStepMs = nowMs;
-	if (elapsedMs > msPerStep)
-		elapsedMs = msPerStep;		// never burst several steps after a stall
-
-	m_stepAccumMs += elapsedMs;
-	if (m_stepAccumMs < msPerStep)
+	if (!GameClient_isUiAnimStepDue(m_lastStepMs, m_stepAccumMs, timeGetTime(),
+																	UI_ANIM_STEPS_PER_SEC))
 		return;
-	m_stepAccumMs -= msPerStep;
 
 	ProcessAnimateWindow *processAnim = NULL;
 

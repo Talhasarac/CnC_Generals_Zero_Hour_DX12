@@ -1827,11 +1827,26 @@ AGAIN:
 		}
 	}
 
-	if (!freezeTime) 
+	if (!freezeTime)
 	{
-		/// @todo Decouple framerate from timestep
-		// for now, use constant time steps to avoid animations running independent of framerate
-		syncTime += TheW3DFrameLengthInMsec;
+		//
+		// This is W3D's clock: every skeletal animation, texture flipbook and W3D-driven effect
+		// reads its time from it. EA advanced it a constant TheW3DFrameLengthInMsec per rendered
+		// frame - the @todo below - which is only the right answer while the renderer is pinned to
+		// 30fps. It is not any more, so advance it by the real time that has actually passed and
+		// the animations keep their authored speed at whatever frame rate the machine manages.
+		//
+		static UnsignedInt prevSyncMs = 0;
+		const UnsignedInt nowSyncMs = timeGetTime();
+		if (prevSyncMs == 0)
+			prevSyncMs = nowSyncMs;
+
+		UnsignedInt deltaMs = nowSyncMs - prevSyncMs;
+		prevSyncMs = nowSyncMs;
+		if (deltaMs > TheW3DFrameLengthInMsec * 4)
+			deltaMs = TheW3DFrameLengthInMsec * 4;	// a level load must not fast-forward everything
+
+		syncTime += deltaMs;
 		// allow W3D to update its internals
 		//	WW3D::Sync( GetTickCount() );
 	}
@@ -1839,7 +1854,7 @@ AGAIN:
 
 	// Fast & Frozen time limits the time to 33 fps.
 	Int minTime = 30;
-	static Int prevTime = timeGetTime(), now;	
+	static Int prevTime = timeGetTime(), now;
 
 	now=timeGetTime();
 	if (TheTacticalView->getTimeMultiplier()>1) 
@@ -1864,8 +1879,15 @@ AGAIN:
 			if(TheGlobalData->m_loadScreenRender != TRUE)
 			{
 			
-				// limit the framerate
-				while(TheGlobalData->m_useFpsLimit && (now - prevTime) < minTime-1)
+				//
+				// The frame rate is no longer capped: this used to hold every frame to 33fps
+				// whenever m_useFpsLimit was set, which is any game started from the menus, and
+				// everything that rode on the render rate has been put on a clock of its own
+				// instead. The scripted-camera loop below is the exception - it advances the
+				// camera one step per iteration and has no clock, so a cinematic pan would run
+				// through in a few milliseconds. That one still gets paced.
+				//
+				while(loopForCameraMovement && (now - prevTime) < minTime-1)
 				{
 					::Sleep(1);	// was a pure spin; this loop can run for whole camera pans
 					now = timeGetTime();

@@ -1019,7 +1019,14 @@ bool DX8Wrapper::Set_Render_Device(int dev, int width, int height, int bits, int
 	_PresentParameters.EnableAutoDepthStencil = TRUE;				// Driver will attempt to match Z-buffer depth
 	_PresentParameters.Flags=0;											// We're not going to lock the backbuffer
 	
-	_PresentParameters.FullScreen_PresentationInterval = D3DPRESENT_INTERVAL_DEFAULT;
+	//
+	// D3DPRESENT_INTERVAL_DEFAULT is vsync, so fullscreen used to be pinned to the monitor's
+	// refresh however fast the machine could draw. The frame rate is deliberately uncapped now -
+	// everything that used to ride on the render rate keeps its own clock instead - so present
+	// as soon as the frame is ready. (Windowed presents are unaffected: this field only applies
+	// fullscreen, and the desktop compositor paces a windowed present regardless.)
+	//
+	_PresentParameters.FullScreen_PresentationInterval = D3DPRESENT_INTERVAL_IMMEDIATE;
 	_PresentParameters.FullScreen_RefreshRateInHz = D3DPRESENT_RATE_DEFAULT;
 
 	/*

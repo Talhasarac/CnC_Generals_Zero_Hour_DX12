@@ -60,6 +60,7 @@
 #include "GameClient/GameWindowTransitions.h"
 #include "GameClient/GameWindow.h"
 #include "GameClient/GameWindowManager.h"
+#include "GameClient/UiAnimClock.h"
 //-----------------------------------------------------------------------------
 // DEFINES ////////////////////////////////////////////////////////////////////
 //-----------------------------------------------------------------------------
@@ -233,6 +234,8 @@ TransitionGroup::TransitionGroup( void )
 {
 	m_currentFrame = 0;
 	m_fireOnce = FALSE;
+	m_lastStepMs = 0;
+	m_stepAccumMs = 0.0f;
 }
 
 TransitionGroup::~TransitionGroup( void )
@@ -251,6 +254,8 @@ void TransitionGroup::init( void )
 {
 	m_currentFrame = 0;
 	m_directionMultiplier = 1;
+	m_lastStepMs = 0;
+	m_stepAccumMs = 0.0f;
 	TransitionWindowList::iterator it = m_transitionWindowList.begin();
 	while (it != m_transitionWindowList.end())
 	{
@@ -263,6 +268,15 @@ void TransitionGroup::init( void )
 
 void TransitionGroup::update( void )
 {
+	//
+	// One frame of transition per call was right when the frame rate was capped; rendering is
+	// uncapped now, so a whole menu transition would otherwise play out in a few milliseconds.
+	// Step off the wall clock at the rate the .ini frame counts were authored against instead.
+	//
+	if (!GameClient_isUiAnimStepDue(m_lastStepMs, m_stepAccumMs, timeGetTime(),
+																	UI_ANIM_STEPS_PER_SEC))
+		return;
+
 	m_currentFrame += m_directionMultiplier; // we go forward or backwards depending.
 	TransitionWindowList::iterator it = m_transitionWindowList.begin();
 	while (it != m_transitionWindowList.end())

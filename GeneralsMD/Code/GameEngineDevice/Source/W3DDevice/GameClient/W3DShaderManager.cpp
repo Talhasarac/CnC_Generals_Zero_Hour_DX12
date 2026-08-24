@@ -67,6 +67,7 @@
 #include "GameClient/CommandXlat.h"
 #include "GameClient/display.h"
 #include "GameClient/Water.h"
+#include "GameClient/UiAnimClock.h"
 #include "GameLogic/GameLogic.h"
 #include "common/GlobalData.h"
 #include "common/GameLOD.h"
@@ -83,6 +84,19 @@
 
 // Turn this on to turn off pixel shaders. jba[4/3/2003]
 #define do_not_DISABLE_PIXEL_SHADERS 1
+
+//
+// The screen filters below count their fade in render frames - m_fadeFrames comes from a script
+// that was written against a 30fps cap, and the renderer is not capped any more, so a fade that
+// should take a second is over in a few milliseconds. Exactly one filter fades at a time, so one
+// shared wall clock gate paces all of them.
+//
+static Bool fadeStepDue( void )
+{
+	static UnsignedInt lastMs = 0;
+	static Real accumMs = 0.0f;
+	return GameClient_isUiAnimStepDue( lastMs, accumMs, timeGetTime(), UI_ANIM_STEPS_PER_SEC );
+}
 
 /** Interface definition for custom shaders we define in our app.  These shaders can perform more complex
 	operations than those allowed in the WW3D2 shader system.
@@ -387,7 +401,7 @@ Int ScreenBWFilter::set(enum FilterModes mode)
 
 		if (m_fadeDirection > 0)
 		{	//turning effect on
-			m_curFadeFrame++;
+			if (fadeStepDue()) m_curFadeFrame++;
 			Int fade = m_curFadeFrame;
 
 			if (fade<m_fadeFrames)
@@ -404,7 +418,7 @@ Int ScreenBWFilter::set(enum FilterModes mode)
 		else
 		if (m_fadeDirection < 0)
 		{	//turning effect off
-			m_curFadeFrame++;
+			if (fadeStepDue()) m_curFadeFrame++;
 			Int fade = m_curFadeFrame;
 			if (fade<m_fadeFrames)
 			{
@@ -609,7 +623,7 @@ Int ScreenBWFilterDOT3::set(enum FilterModes mode)
 
 		if (m_fadeDirection > 0)
 		{	//turning effect on
-			m_curFadeFrame++;
+			if (fadeStepDue()) m_curFadeFrame++;
 			Int fade = m_curFadeFrame;
 
 			if (fade<m_fadeFrames)
@@ -626,7 +640,7 @@ Int ScreenBWFilterDOT3::set(enum FilterModes mode)
 		else
 		if (m_fadeDirection < 0)
 		{	//turning effect off
-			m_curFadeFrame++;
+			if (fadeStepDue()) m_curFadeFrame++;
 			Int fade = m_curFadeFrame;
 			if (fade<m_fadeFrames)
 			{
@@ -716,7 +730,7 @@ Bool ScreenCrossFadeFilter::updateFadeLevel(void)
 {
 	if (m_fadeDirection > 0)
 	{	//turning effect on
-		m_curFadeFrame++;
+		if (fadeStepDue()) m_curFadeFrame++;
 		Int fade = m_curFadeFrame;
 
 		if (fade<m_fadeFrames)
@@ -738,7 +752,7 @@ Bool ScreenCrossFadeFilter::updateFadeLevel(void)
 		if (fade<m_fadeFrames)
 		{
 			m_curFadeValue = 1.0f - (Real)fade/(Real)m_fadeFrames;
-			m_curFadeFrame++;
+			if (fadeStepDue()) m_curFadeFrame++;
 		}
 		else
 		{	m_curFadeValue = 0.0f;

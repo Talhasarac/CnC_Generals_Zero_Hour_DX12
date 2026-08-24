@@ -62,6 +62,7 @@
 #include "GameClient/Image.h"
 #include "GameClient/GameWindowManager.h"
 #include "GameClient/GadgetPushButton.h"
+#include "GameClient/UiAnimClock.h"
 #ifdef _INTERNAL
 // for occasional debugging...
 //#pragma optimize("", off)
@@ -1085,7 +1086,19 @@ void ControlBarSchemeManager::setControlBarScheme(AsciiString schemeName)
 //-----------------------------------------------------------------------------
 void ControlBarSchemeManager::update( void )
 {
-	if(m_currentScheme)	
+	//
+	// The scheme animations count .ini-authored frames, one per call, and this is called once per
+	// rendered frame. With the frame rate uncapped that runs them several times too fast, so pace
+	// them off the wall clock at the rate they were authored against. State is a static rather than
+	// a member because there is exactly one scheme manager and nothing restarts this animation.
+	//
+	static UnsignedInt lastStepMs = 0;
+	static Real stepAccumMs = 0.0f;
+
+	if (!GameClient_isUiAnimStepDue(lastStepMs, stepAccumMs, timeGetTime(), UI_ANIM_STEPS_PER_SEC))
+		return;
+
+	if(m_currentScheme)
 		m_currentScheme->update();
 }
 

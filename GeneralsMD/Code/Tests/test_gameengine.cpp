@@ -30,6 +30,7 @@
 #include "GameClient/Water.h"
 #include "GameLogic/Module/PhysicsUpdate.h"
 #include "GameClient/ParticleSys.h"
+#include "GameClient/ControlBar.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -473,6 +474,70 @@ TEST(logic_tick_is_wall_clock_paced_not_render_paced)
 	CHECK( GameEngine_isLogicFrameDue( accum, 0.0f, 0 ) );
 }
 
+/* AnimateWindowManager.cpp: the same argument one layer up. The menu animations
+   count fixed steps and were authored against a capped frame rate, so with the
+   renderer uncapped they have to be paced off the wall clock too or a whole
+   menu transition plays out in a handful of milliseconds. Unlike the logic
+   pacer this one owns the clock reading, so it takes 'now' rather than an
+   elapsed time - a caller can hand it timeGetTime() and nothing else.
+
+   Declared here rather than by including AnimateWindowManager.h: that header
+   does not parse outside the engine's own PreRTS.h include order. */
+extern Bool GameClient_isUiAnimStepDue( UnsignedInt &lastMs, Real &accumMs,
+																				UnsignedInt nowMs, Real stepsPerSec );
+
+TEST(ui_anim_steps_at_a_fixed_rate_however_fast_the_renderer_is)
+{
+	/* must match UI_ANIM_STEPS_PER_SEC in GameClient/UiAnimClock.h */
+	const Real UI_ANIM_STEPS_PER_SEC = 30.0f;
+
+	/* 3 seconds of a 300fps renderer at 30 steps/sec is 90 steps, not 900. */
+	UnsignedInt last = 0;
+	Real accum = 0.0f;
+	Int due = 0;
+	UnsignedInt now = 100000;		/* an arbitrary non-zero clock origin */
+	for( Int i = 0; i < 900; ++i )
+	{
+		now += 3;		/* timeGetTime has 1ms resolution, so ~333fps */
+		if( GameClient_isUiAnimStepDue( last, accum, now, UI_ANIM_STEPS_PER_SEC ) )
+			++due;
+	}
+	CHECK( due >= 79 && due <= 81 );		/* 2700ms at 33.3ms/step */
+
+	/* The very first call must not fire: with lastMs seeded to now there is no
+	   elapsed time yet, so a freshly started animation holds its first frame
+	   for a full step instead of jumping two frames on the frame it starts. */
+	last = 0;
+	accum = 0.0f;
+	CHECK_EQ( GameClient_isUiAnimStepDue( last, accum, 500000, UI_ANIM_STEPS_PER_SEC ), FALSE );
+
+	/* A renderer slower than the step rate steps once per call and never banks a
+	   burst - a level load must not fast-forward the transition it returns to. */
+	last = 0;
+	accum = 0.0f;
+	now = 200000;
+	GameClient_isUiAnimStepDue( last, accum, now, UI_ANIM_STEPS_PER_SEC );	/* seed */
+	for( Int i = 0; i < 20; ++i )
+	{
+		now += 5000;		/* five seconds of stall = 150 steps, if it banked them */
+		CHECK( GameClient_isUiAnimStepDue( last, accum, now, UI_ANIM_STEPS_PER_SEC ) );
+	}
+
+	/* And the rate really is the rate: half the step period never fires twice. */
+	last = 0;
+	accum = 0.0f;
+	now = 300000;
+	GameClient_isUiAnimStepDue( last, accum, now, UI_ANIM_STEPS_PER_SEC );
+	due = 0;
+	for( Int i = 0; i < 60; ++i )
+	{
+		now += 16;		/* ~60fps against a 33.3ms step */
+		if( GameClient_isUiAnimStepDue( last, accum, now, UI_ANIM_STEPS_PER_SEC ) )
+			++due;
+	}
+	CHECK( due >= 28 && due <= 30 );		/* 960ms of it */
+}
+
 /* PhysicsUpdate.cpp: the forward speed a locomotor steers on is the projection
    of the velocity onto the facing - a plain dot product. It used to be
    sqrt((vx*dx)^2 + (vy*dy)^2), which is exact on the axes but reads only
@@ -654,4 +719,158 @@ TEST(income_is_zero_not_negative_when_nothing_comes_in)
 	// cumulative earnings never fall, so a dry spell reads as a real zero
 	const Int samples[4] = { 7000, 7000, 7000, 7000 };
 	CHECK_EQ(computeIncomePerMinute(samples, 4, 4, 2), 0);
+}
+
+//////////////////////////////////////////////////////////////////////////////
+// Control bar three-panel layout
+//////////////////////////////////////////////////////////////////////////////
+/*
+ * ControlBarComputePanelLayout is the geometry half of ControlBar::layoutPanels:
+ * screen size in, uniform scale and the three panel rectangles out.  It is split
+ * out precisely so it can be driven at resolutions this machine cannot display -
+ * the bar is laid out once at startup and there is no way to eyeball 1280x1024
+ * without owning that monitor.
+ *
+ * The panels' authored rectangles were carved out of one continuous strip and add
+ * up to 810 of the 800 design units.  The first cut of this layout scaled by
+ * min(w/800, h/600), which on 16:9 is the height and leaves width to spare, but at
+ * 4:3 and squarer is the width - so 810 units of panel went into 800 units of
+ * screen, both seams overlapped, and the gaps the whole design is built around
+ * closed to nothing.  Hence panels_keep_a_real_gap_on_square_screens below.
+ */
+
+static const Int theTestResolutions[][2] =
+{
+	{  800, 600 },		// 4:3, the resolution the .wnd is authored at
+	{ 1024, 768 },		// 4:3
+	{ 1280, 960 },		// 4:3
+	{ 1280, 1024 },		// 5:4, squarer than the design
+	{ 1600, 1200 },		// 4:3
+	{ 1280, 720 },		// 16:9
+	{ 1920, 1080 },		// 16:9
+	{ 2560, 1080 },		// 21:9
+};
+static const Int theTestResolutionCount = sizeof(theTestResolutions) / sizeof(theTestResolutions[0]);
+
+TEST(controlbar_panels_keep_a_real_gap_on_square_screens)
+{
+	/* The regression.  Every seam has to show world through it, at every aspect -
+	   this is what failed at 4:3 and 5:4 when the scale was bounded by width alone. */
+	for (Int i = 0; i < theTestResolutionCount; ++i)
+	{
+		IRegion2D panel[ControlBar::CB_PANEL_COUNT];
+		Real scale = 0.0f;
+		ControlBarComputePanelLayout(theTestResolutions[i][0], theTestResolutions[i][1], panel, &scale);
+
+		CHECK(panel[ControlBar::CB_PANEL_CENTER].lo.x - panel[ControlBar::CB_PANEL_LEFT].hi.x >= 16);
+		CHECK(panel[ControlBar::CB_PANEL_RIGHT].lo.x - panel[ControlBar::CB_PANEL_CENTER].hi.x >= 16);
+	}
+}
+
+TEST(controlbar_panels_stay_on_screen_and_hug_their_edges)
+{
+	for (Int i = 0; i < theTestResolutionCount; ++i)
+	{
+		const Int w = theTestResolutions[i][0], h = theTestResolutions[i][1];
+		IRegion2D panel[ControlBar::CB_PANEL_COUNT];
+		Real scale = 0.0f;
+		ControlBarComputePanelLayout(w, h, panel, &scale);
+
+		// left panel pinned to the left edge, right panel to the right, all of it on screen
+		CHECK_EQ(panel[ControlBar::CB_PANEL_LEFT].lo.x, 0);
+		CHECK_EQ(panel[ControlBar::CB_PANEL_RIGHT].hi.x, w);
+
+		for (Int p = 0; p < ControlBar::CB_PANEL_COUNT; ++p)
+		{
+			CHECK(panel[p].lo.x >= 0);
+			CHECK(panel[p].hi.x <= w);
+			CHECK(panel[p].lo.y >= 0);
+			CHECK_EQ(panel[p].hi.y, h);		// every panel sits on the bottom edge
+			CHECK(panel[p].width() > 0);
+			CHECK(panel[p].height() > 0);
+		}
+	}
+}
+
+TEST(controlbar_panels_are_never_stretched)
+{
+	/* One uniform scale is the point of the whole exercise: a panel's shape must not
+	   depend on the aspect of the screen it is drawn on, or the cameos inside it come
+	   out as rectangles.  Compare each panel's width:height against the authored one. */
+	static const Real designRatio[ControlBar::CB_PANEL_COUNT] =
+	{
+		186.0f / 179.0f,		// left   - design rect 0,421 .. 186,600
+		438.0f / 168.0f,		// center - design rect 186,432 .. 624,600
+		186.0f / 172.0f,		// right  - design rect 614,428 .. 800,600
+	};
+
+	for (Int i = 0; i < theTestResolutionCount; ++i)
+	{
+		IRegion2D panel[ControlBar::CB_PANEL_COUNT];
+		Real scale = 0.0f;
+		ControlBarComputePanelLayout(theTestResolutions[i][0], theTestResolutions[i][1], panel, &scale);
+
+		for (Int p = 0; p < ControlBar::CB_PANEL_COUNT; ++p)
+		{
+			const Real ratio = (Real)panel[p].width() / (Real)panel[p].height();
+			CHECK_NEAR(ratio, designRatio[p], 0.03f);		// slack for the floor/ceil rounding
+		}
+	}
+}
+
+TEST(controlbar_scale_is_bounded_by_height_on_a_wide_screen)
+{
+	/* 16:9 has width to spare, so the height is what runs out first and the bar is
+	   drawn at exactly h/600 - the same size it would be on a 4:3 screen of that
+	   height, which is what keeps it from growing as monitors get wider. */
+	IRegion2D panel[ControlBar::CB_PANEL_COUNT];
+	Real scale = 0.0f;
+	ControlBarComputePanelLayout(1920, 1080, panel, &scale);
+	CHECK_NEAR(scale, 1080.0f / 600.0f, 0.001f);
+}
+
+TEST(controlbar_scale_is_bounded_by_the_gap_on_a_square_screen)
+{
+	/* 5:4: neither the width nor the height bound leaves room between the panels, so
+	   the gap bound is the one that has to win.  w/800 = 1.6 and h/600 = 1.7067 both
+	   lose to (w/2 - 24) / 405. */
+	IRegion2D panel[ControlBar::CB_PANEL_COUNT];
+	Real scale = 0.0f;
+	ControlBarComputePanelLayout(1280, 1024, panel, &scale);
+	CHECK(scale < 1280.0f / 800.0f);
+	CHECK_NEAR(scale, (1280.0f * 0.5f - 24.0f) / 405.0f, 0.001f);
+}
+
+/*
+ * BaseType.h's fast_float_ceil does not ceil an integer.  It adds 0.99999994 and
+ * truncates, but 0.99999994 is only a sixteenth of a float ULP once the value is past
+ * 1.0, so the sum rounds up to the next whole float before the truncate ever runs:
+ * ceil(600) is 601, ceil(1080) is 1081, and so on for every positive whole number.
+ * Fractions - what it is normally handed - come out right, which is why this has
+ * survived.  Every REAL_TO_INT_CEIL in the codebase inherits it.
+ *
+ * Pinned rather than fixed: the sum is in a header every translation unit includes and
+ * a correcting compare would cost the branch the whole routine exists to avoid, so the
+ * blast radius of changing it is the entire game.  ControlBarComputePanelLayout works
+ * around it locally by flooring and pinning the edges that have to be exact - a screen
+ * height that ceils to one past the bottom of the screen is where this turned up.
+ */
+TEST(realtointceil_DEFECT_overshoots_every_whole_number)
+{
+	CHECK_EQ(REAL_TO_INT_CEIL(1.0f), 2);
+	CHECK_EQ(REAL_TO_INT_CEIL(600.0f), 601);
+	CHECK_EQ(REAL_TO_INT_CEIL(768.0f), 769);
+	CHECK_EQ(REAL_TO_INT_CEIL(1080.0f), 1081);
+	CHECK_EQ(REAL_TO_INT_CEIL(1920.0f), 1921);
+
+	// zero is the one whole number it gets right - 0.99999994 truncates back to it
+	CHECK_EQ(REAL_TO_INT_CEIL(0.0f), 0);
+
+	// genuine fractions round up correctly, which is what callers normally feed it
+	CHECK_EQ(REAL_TO_INT_CEIL(600.5f), 601);
+	CHECK_EQ(REAL_TO_INT_CEIL(1080.25f), 1081);
+
+	// negatives skip the addition entirely and truncate, which really is ceil
+	CHECK_EQ(REAL_TO_INT_CEIL(-600.0f), -600);
+	CHECK_EQ(REAL_TO_INT_CEIL(-600.5f), -600);
 }

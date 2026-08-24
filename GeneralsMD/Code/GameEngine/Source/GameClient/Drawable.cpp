@@ -2641,13 +2641,39 @@ void Drawable::setStealthLook(StealthLookType look)
 //-------------------------------------------------------------------------------------------------
 void Drawable::draw( View *view )
 {
+	//
+	// The fade below is a fixed fraction per rendered frame, and the renderer is not capped any
+	// more: at a few hundred fps the stealth shimmer is gone the instant it appears. The fade is
+	// exponential, so the frame-rate-independent form is the scalar raised to the number of 30fps
+	// steps that actually elapsed. Worked out once per client frame - draw() runs once per
+	// drawable, and every drawable in a frame must fade by the same amount.
+	//
+	static UnsignedInt fadeFrame = ~0;
+	static UnsignedInt fadeLastMs = 0;
+	static Real fadeScalar = MATERIAL_PASS_OPACITY_FADE_SCALAR;
+
+	if ( fadeFrame != TheGameClient->getFrame() )
+	{
+		fadeFrame = TheGameClient->getFrame();
+
+		const UnsignedInt nowMs = timeGetTime();
+		if ( fadeLastMs == 0 )
+			fadeLastMs = nowMs;
+
+		Real steps = (Real)( nowMs - fadeLastMs ) * 0.001f * 30.0f;
+		fadeLastMs = nowMs;
+		if ( steps > 4.0f )
+			steps = 4.0f;		// a level load must not fade everything out at once
+
+		fadeScalar = powf( MATERIAL_PASS_OPACITY_FADE_SCALAR, steps );
+	}
 
   if ( testTintStatus( TINT_STATUS_FRENZY ) == FALSE )
   {
     if ( getObject() && getObject()->isEffectivelyDead() )
 		  m_secondMaterialPassOpacity = 0.0f;//dead folks don't stealth anyway
 	  else if ( m_secondMaterialPassOpacity > VERY_TRANSPARENT_MATERIAL_PASS_OPACITY )// keep fading any add'l material unless something has set it to zero
-		  m_secondMaterialPassOpacity *= MATERIAL_PASS_OPACITY_FADE_SCALAR;
+		  m_secondMaterialPassOpacity *= fadeScalar;
 	  else
 		  m_secondMaterialPassOpacity = 0.0f;
   }
