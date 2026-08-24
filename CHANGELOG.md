@@ -285,8 +285,13 @@ looks right to you.
   were handing back registers they had quietly destroyed. On a 2003 compiler it happened to be
   harmless. On a modern one it took the whole game down — and the crash pointed at a completely
   innocent part of the engine.
-- **It crashed every single time you quit.** Quitting is now instant, instead of hanging for three
-  seconds and then faulting twice on the way out.
+- **It crashed every single time you quit** — and it took two goes to kill. The first cause was
+  fixed, the freeze stayed, and the reason turned out to be older and further down: on the way out
+  the game throws away the list of players before it throws away their armies, so every unit still
+  standing was handed back to a commander who no longer existed. It faulted twice on every exit,
+  and each fault stopped to write itself up out of an eighty-megabyte symbol file. That is the
+  several seconds you sat looking at a frozen window. Quitting takes about half a second now, from
+  the main menu or out of a live match, and the log it leaves behind is clean.
 - **A long chat message or an unusual map name could kill the process outright.**
 - The window used to go grey and *Not Responding* during the scripted camera moves on the menu.
 - Half a dozen rarer crashes in combat — poison clouds, mine clearing, killing a garrisoned building,

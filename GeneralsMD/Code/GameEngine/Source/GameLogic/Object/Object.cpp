@@ -834,7 +834,7 @@ void Object::setTeam( Team *team )
 {
 	// In order to prevent spawning useful units for a player after he dies, we
 	// just assign objects to the neutral player if we try to misbehave.
-	if (team && !team->getControllingPlayer()->isPlayerActive())
+	if (team && team->getControllingPlayer() && !team->getControllingPlayer()->isPlayerActive())
 		team = ThePlayerList->getNeutralPlayer()->getDefaultTeam();
 
 	setTemporaryTeam(team);
@@ -865,7 +865,8 @@ void Object::setOrRestoreTeam( Team* team, Bool restoring )
 		if (m_team->isInList_TeamMemberList(this))
 		{
 			m_team->removeFrom_TeamMemberList(this);
-			m_team->getControllingPlayer()->becomingTeamMember(this, false);
+			if (m_team->getControllingPlayer())
+				m_team->getControllingPlayer()->becomingTeamMember(this, false);
 		}
 	}
 		
@@ -878,7 +879,8 @@ void Object::setOrRestoreTeam( Team* team, Bool restoring )
 		if (!m_team->isInList_TeamMemberList(this))
 		{
 			m_team->prependTo_TeamMemberList(this);
-			m_team->getControllingPlayer()->becomingTeamMember(this, true);
+			if (m_team->getControllingPlayer())
+				m_team->getControllingPlayer()->becomingTeamMember(this, true);
 		}
 		
 		// now, adjust the attitude of the unit to its new team.
@@ -923,8 +925,8 @@ void Object::setOrRestoreTeam( Team* team, Bool restoring )
 	}
 
 	// Tell TheInGameUI that the object has changed hands
-	Int oldPlayerIndex = (oldTeam)?(oldTeam->getControllingPlayer()->getPlayerIndex()):-1;
-	Int newPlayerIndex = (m_team)?(m_team->getControllingPlayer()->getPlayerIndex()):-1;
+	Int oldPlayerIndex = (oldTeam && oldTeam->getControllingPlayer())?(oldTeam->getControllingPlayer()->getPlayerIndex()):-1;
+	Int newPlayerIndex = (m_team && m_team->getControllingPlayer())?(m_team->getControllingPlayer()->getPlayerIndex()):-1;
 	if (oldPlayerIndex != newPlayerIndex)
 		TheInGameUI->objectChangedTeam(this, oldPlayerIndex, newPlayerIndex);
 }

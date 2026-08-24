@@ -207,6 +207,16 @@ GameEngine::~GameEngine()
 
 	TheGameResultsQueue->endThreads();
 
+	// Tear the game world down while every subsystem can still see every other one.
+	// shutdownAll deletes in reverse registration order, which kills ThePlayerList and
+	// TheRadar before TheTeamFactory and TheGameLogic - and Player::~Player NULLs the
+	// owning player of each team prototype on its way out, so TeamFactory's own teardown
+	// then walked dead pointers and faulted twice on every exit.  Each fault cost a full
+	// dbghelp symbolization of an 80MB pdb: that was the several-second stall on quit.
+	// resetAll() is the same call made between games, and PlayerList::reset() clears the
+	// teams before the players, so afterwards shutdownAll has an empty world to free.
+	TheSubsystemList->resetAll();
+
 	TheSubsystemList->shutdownAll();
 	delete TheSubsystemList;
 	TheSubsystemList = NULL;
