@@ -818,7 +818,24 @@ public:
 
 	Bool hasAnyShortcutSelection() const;
 
+	//
+	// The bar is laid out as three independently anchored panels instead of one stretched strip.
+	// layoutPanels() re-places every window in ControlBar.wnd at a single uniform scale and
+	// records where the three plates landed; the plates themselves are drawn from getPanelRect().
+	//
+	enum ControlBarPanel
+	{
+		CB_PANEL_LEFT = 0,		///< radar, hard against the left edge
+		CB_PANEL_CENTER,			///< money, power and the command grid, centred
+		CB_PANEL_RIGHT,				///< selection portrait and upgrades, hard against the right edge
+
+		CB_PANEL_COUNT
+	};
+	const IRegion2D *getPanelRect( Int which ) const { return &m_panelRect[ which ]; }
+
 protected:
+	void layoutPanels( void );		///< re-anchor the three panels at one uniform scale
+
 	void updateRadarAttackGlow ( void );
 	
 	void setDefaultControlBarConfig( void );
@@ -879,6 +896,7 @@ protected:
 	void updateMultiSelectStrip( void );
 	void layoutMultiSelectTiles( Int count );		///< make sure count cells exist, laid out n x n over the right HUD
 	Bool cancelLastQueuedUnit( const ThingTemplate *thing );	///< returns FALSE when there was nothing left to cancel	///< right-click on a build button
+	Bool cancelQueuedUpgrade( const UpgradeTemplate *upgrade );	///< right-click on an upgrade button
 	void populateStructureInventory( Object *building );
 	void populateBeacon( Object *beacon );
 	void populateUnderConstruction( Object *objectUnderConstruction );
@@ -924,6 +942,8 @@ protected:
 
 	ICoord2D m_defaultControlBarPosition;				///< Stored the original position of the control bar on the screen
 	ControlBarStages m_currentControlBarStage;
+
+	IRegion2D m_panelRect[ CB_PANEL_COUNT ];		///< screen rect of each panel, filled by layoutPanels()
 
 	Bool m_UIDirty;																///< the context UI must be re-evaluated
 

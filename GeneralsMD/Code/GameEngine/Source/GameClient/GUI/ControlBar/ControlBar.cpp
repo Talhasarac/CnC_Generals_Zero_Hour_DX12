@@ -1044,6 +1044,9 @@ ControlBar::ControlBar( void )
 	m_commandBarBorderColor = GameMakeColor(0,0,0,100);
 	for( i = 0; i < NUM_CONTEXT_PARENTS; i++ )
 		m_contextParent[ i ] = NULL;
+	// an empty panel is a panel with no plate, which is what the builder tool wants
+	for( i = 0; i < CB_PANEL_COUNT; i++ )
+		m_panelRect[ i ].lo.x = m_panelRect[ i ].lo.y = m_panelRect[ i ].hi.x = m_panelRect[ i ].hi.y = 0;
 	for( i = 0; i < MAX_COMMANDS_PER_SET; i++ )
 	{
 		m_commandWindows[ i ] = NULL;
@@ -1204,6 +1207,196 @@ ControlBar::~ControlBar( void )
 void ControlBarPopupDescriptionUpdateFunc( WindowLayout *layout, void *param );
 
 //-------------------------------------------------------------------------------------------------
+// Three-panel control bar layout -----------------------------------------------------------------
+//-------------------------------------------------------------------------------------------------
+//
+// ControlBar.wnd is authored at 800x600 and GameWindowManagerScript stretches every coordinate by
+// the display size over that, separately in x and y. On a 16:9 screen that is a 1.33x horizontal
+// smear: square cameos come out as rectangles and one strip eats the whole bottom of the screen.
+// layoutPanels throws the stretch away. It recovers each window's authored rectangle, then puts it
+// back at ONE uniform scale inside one of three panels - radar hard left, command grid centred,
+// selection hard right. Nothing is distorted and the world shows through the two gaps.
+//
+
+static const Real CONTROL_BAR_DESIGN_W = 800.0f;
+static const Real CONTROL_BAR_DESIGN_H = 600.0f;
+static const Real CONTROL_BAR_DESIGN_TOP = 416.0f;		///< where ControlBarParent starts
+
+/// the authored 800x600 rectangle of each panel
+static const IRegion2D thePanelDesignRect[ ControlBar::CB_PANEL_COUNT ] =
+{
+	{ {   0, 421 }, { 186, 600 } },		// CB_PANEL_LEFT   - radar
+	{ { 186, 432 }, { 624, 600 } },		// CB_PANEL_CENTER - money, power, command grid
+	{ { 614, 428 }, { 800, 600 } },		// CB_PANEL_RIGHT  - selection portrait and upgrades
+};
+
+/// where each panel is pinned: the fraction of the screen its anchor lands on...
+static const Real thePanelAnchorFraction[ ControlBar::CB_PANEL_COUNT ] = { 0.0f, 0.5f, 1.0f };
+/// ...and which authored x that anchor is, so left pins its left edge and right pins its right
+static const Real thePanelAnchorDesignX[ ControlBar::CB_PANEL_COUNT ] = { 0.0f, 405.0f, 800.0f };
+
+//-------------------------------------------------------------------------------------------------
+/** Which panel a direct child of ControlBarParent belongs to. Everything not named here rides in
+	* the middle, which is where the .wnd already puts the money, power and command windows. */
+//-------------------------------------------------------------------------------------------------
+static Int panelForWindowName( const char *shortName )
+{
+	static const char *leftNames[] =
+	{
+		"LeftHUD", "WinUAttack", "BackgroundMarker", "ForegroundMarker", "OnTopDraw",
+		// the worker/beacon/comm/options toolbar sits immediately right of the radar in the .wnd
+		// (x 192-222, LeftHUD ends at 174) - it reads as part of the left cluster, not the centre
+		"ButtonIdleWorker", "ButtonPlaceBeacon", "PopupCommunicator", "ButtonOptions", NULL
+	};
+	static const char *rightNames[] =
+	{
+		"RightHUD", "GeneralsExp", "ExpBarForeground", "ButtonGeneral",
+		"ButtonSmall", "ButtonMedium", "ButtonLarge", NULL
+	};
+
+	for( const char **n = leftNames; *n; n++ )
+		if( strcmp( shortName, *n ) == 0 )
+			return ControlBar::CB_PANEL_LEFT;
+
+	for( const char **n = rightNames; *n; n++ )
+		if( strcmp( shortName, *n ) == 0 )
+			return ControlBar::CB_PANEL_RIGHT;
+
+	return ControlBar::CB_PANEL_CENTER;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Squeeze a window's descendants by the same factors their ancestor was squeezed by, so a subtree
+	* keeps its shape. 'shiftX' additionally slides the direct children, which is what a container
+	* whose own origin moved needs to keep its contents where they were. */
+//-------------------------------------------------------------------------------------------------
+static void rescaleSubtree( GameWindow *win, Real scaleX, Real scaleY, Int shiftX )
+{
+	for( GameWindow *child = win->winGetChild(); child; child = child->winGetNext() )
+	{
+		ICoord2D pos, size;
+		child->winGetPosition( &pos.x, &pos.y );
+		child->winGetSize( &size.x, &size.y );
+
+		child->winSetPosition( REAL_TO_INT_FLOOR( pos.x * scaleX ) + shiftX,
+													 REAL_TO_INT_FLOOR( pos.y * scaleY ) );
+		child->winSetSize( REAL_TO_INT_CEIL( size.x * scaleX ),
+											 REAL_TO_INT_CEIL( size.y * scaleY ) );
+
+		rescaleSubtree( child, scaleX, scaleY, 0 );
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Re-anchor the control bar as three panels at one uniform scale. */
+//-------------------------------------------------------------------------------------------------
+void ControlBar::layoutPanels( void )
+{
+	GameWindow *parent = m_contextParent[ CP_MASTER ];
+	if( parent == NULL || TheDisplay == NULL )
+		return;
+
+	const Real dispW = (Real)TheDisplay->getWidth();
+	const Real dispH = (Real)TheDisplay->getHeight();
+
+	// what the .wnd loader already multiplied every coordinate by, so we can divide it back out
+	const Real loadScaleX = dispW / CONTROL_BAR_DESIGN_W;
+	const Real loadScaleY = dispH / CONTROL_BAR_DESIGN_H;
+
+	//
+	// One scale for both axes, the smaller of the two so the three panels always fit side by side.
+	// At 4:3 that is exactly the old scale and the panels still meet; at anything wider they shrink
+	// together and leave the middle of the screen bottom open instead of stretching to fill it.
+	//
+	const Real s = loadScaleX < loadScaleY ? loadScaleX : loadScaleY;
+
+	// where each panel lands on screen - the plates are drawn from this
+	Int p;
+	for( p = 0; p < CB_PANEL_COUNT; p++ )
+	{
+		const Real originX = dispW * thePanelAnchorFraction[ p ] - thePanelAnchorDesignX[ p ] * s;
+
+		m_panelRect[ p ].lo.x = REAL_TO_INT_FLOOR( originX + thePanelDesignRect[ p ].lo.x * s );
+		m_panelRect[ p ].hi.x = REAL_TO_INT_CEIL ( originX + thePanelDesignRect[ p ].hi.x * s );
+		m_panelRect[ p ].lo.y = REAL_TO_INT_FLOOR(
+			dispH - ( CONTROL_BAR_DESIGN_H - thePanelDesignRect[ p ].lo.y ) * s );
+		m_panelRect[ p ].hi.y = REAL_TO_INT_CEIL( dispH );
+	}
+
+	// the children's positions are relative to the frame, so grab where it is before moving it
+	ICoord2D barOrigin;
+	parent->winGetScreenPosition( &barOrigin.x, &barOrigin.y );
+
+	// the frame itself stays full width - it draws nothing and passes input through
+	const Int parentTop =
+		REAL_TO_INT_FLOOR( dispH - ( CONTROL_BAR_DESIGN_H - CONTROL_BAR_DESIGN_TOP ) * s );
+	parent->winSetPosition( 0, parentTop );
+	parent->winSetSize( REAL_TO_INT_CEIL( dispW ), REAL_TO_INT_CEIL( dispH ) - parentTop );
+
+	const Real shrinkX = s / loadScaleX;
+	const Real shrinkY = s / loadScaleY;
+
+	for( GameWindow *child = parent->winGetChild(); child; child = child->winGetNext() )
+	{
+		ICoord2D rel, size;
+		child->winGetPosition( &rel.x, &rel.y );
+		child->winGetSize( &size.x, &size.y );
+
+		// recover the authored 800x600 rectangle the loader stretched
+		const Real designX = ( barOrigin.x + rel.x ) / loadScaleX;
+		const Real designY = ( barOrigin.y + rel.y ) / loadScaleY;
+		const Real designW = size.x / loadScaleX;
+		const Real designH = size.y / loadScaleY;
+
+		AsciiString name = child->winGetInstanceData()->m_decoratedNameString;
+		const char *colon = strchr( name.str(), ':' );
+		const char *shortName = colon ? colon + 1 : name.str();
+
+		p = panelForWindowName( shortName );
+		const Real originX = dispW * thePanelAnchorFraction[ p ] - thePanelAnchorDesignX[ p ] * s;
+
+		Int newX, newY, newW, newH, shiftChildren = 0;
+
+		//
+		// The unnamed children are the GameWinBlockInput panes: their only job is to keep clicks on
+		// the bar out of the world, so they become exactly their panel. If they kept their authored
+		// width the widest of them would still cover the gaps we just opened up.
+		//
+		if( shortName[ 0 ] == 0 )
+		{
+			newX = m_panelRect[ p ].lo.x;
+			newY = m_panelRect[ p ].lo.y;
+			newW = m_panelRect[ p ].width();
+			newH = m_panelRect[ p ].height();
+		}
+		else
+		{
+			newX = REAL_TO_INT_FLOOR( originX + designX * s );
+			newY = REAL_TO_INT_FLOOR( dispH - ( CONTROL_BAR_DESIGN_H - designY ) * s );
+			newW = REAL_TO_INT_CEIL( designW * s );
+			newH = REAL_TO_INT_CEIL( designH * s );
+
+			//
+			// CenterBackground is authored full width but blocks input as well as holding the command
+			// windows, so left alone it would swallow clicks over the whole bottom of the screen.
+			// Pull it in to the centre panel and slide its contents back by as much as it moved.
+			//
+			if( strcmp( shortName, "CenterBackground" ) == 0 )
+			{
+				shiftChildren = newX - m_panelRect[ p ].lo.x;
+				newX = m_panelRect[ p ].lo.x;
+				newW = m_panelRect[ p ].width();
+			}
+		}
+
+		child->winSetPosition( newX, newY - parentTop );
+		child->winSetSize( newW, newH );
+		rescaleSubtree( child, shrinkX, shrinkY, shiftChildren );
+	}
+
+}  // end layoutPanels
+
+//-------------------------------------------------------------------------------------------------
 /** Initialzie the control bar, this is our interface to the context sinsitive GUI */
 //-------------------------------------------------------------------------------------------------
 void ControlBar::init( void )
@@ -1239,6 +1432,10 @@ void ControlBar::init( void )
 		NameKeyType id;
 		id = TheNameKeyGenerator->nameToKey( "ControlBar.wnd:ControlBarParent" );
 		m_contextParent[ CP_MASTER ] = TheWindowManager->winGetWindowFromId( NULL, id );
+
+		// re-anchor the bar as three uniformly scaled panels before anything reads a position off it
+		layoutPanels();
+
 	m_contextParent[ CP_MASTER ]->winGetPosition(&m_defaultControlBarPosition.x, &m_defaultControlBarPosition.y);
 		
 		m_scienceLayout = TheWindowManager->winCreateLayout("GeneralsExpPoints.wnd");
@@ -1285,6 +1482,17 @@ void ControlBar::init( void )
 				m_commandWindows[ i ]->winGetPosition(&commandPos.x, &commandPos.y);
 				m_commandWindows[ i ]->winGetSize(&commandSize.x, &commandSize.y);
 				m_commandWindows[ i ]->winSetStatus( WIN_STATUS_USE_OVERLAY_STATES );
+
+				//
+				// A push button drops every right-button event unless it is marked to want them, and
+				// ControlBar.wnd marks none of these. Without this, right-clicking a build button
+				// never reached processContextSensitiveButtonClick and nothing could be taken back
+				// out of a queue from the bar. Note the status word lives twice - GameWindow keeps
+				// its own copy and winSetStatus only touches that one, while GadgetPushButtonInput
+				// reads the instance data's copy - so both have to be set.
+				//
+				m_commandWindows[ i ]->winSetStatus( WIN_STATUS_RIGHT_CLICK );
+				BitSet( m_commandWindows[ i ]->winGetInstanceData()->m_status, WIN_STATUS_RIGHT_CLICK );
 			}
 
 	// removed from multiplayer branch
@@ -2328,12 +2536,18 @@ CBCommandStatus ControlBar::processContextSensitiveButtonClick( GameWindow *butt
 																																GadgetGameMessage gadgetMessage )
 {
 
-	// right-click on a unit build button takes the last one of that unit back out of the
-	// queue (the build queue panel no longer sits in the right HUD to click on)
+	//
+	// The right button only ever takes things back out of a queue - the build queue panel no
+	// longer sits in the right HUD to click on. It never runs the command: firing a build or a
+	// special power off the right button would make every mis-click on the bar expensive.
+	//
 	if( gadgetMessage == GBM_SELECTED_RIGHT )
 	{
 		const CommandButton *command = (const CommandButton *)GadgetButtonGetData( button );
-		if( command && command->getCommandType() == GUI_COMMAND_UNIT_BUILD )
+		if( command == NULL )
+			return CBC_COMMAND_NOT_USED;
+
+		if( command->getCommandType() == GUI_COMMAND_UNIT_BUILD )
 		{
 			// holding shift takes a whole batch back out, mirroring the shift-click that queued one
 			Int wanted = (TheKeyboard && TheKeyboard->isShift()) ? SHIFT_BUILD_QUEUE_COUNT : 1;
@@ -2341,12 +2555,52 @@ CBCommandStatus ControlBar::processContextSensitiveButtonClick( GameWindow *butt
 				;
 			return CBC_COMMAND_USED;
 		}
+
+		if( command->getCommandType() == GUI_COMMAND_PLAYER_UPGRADE ||
+				command->getCommandType() == GUI_COMMAND_OBJECT_UPGRADE )
+		{
+			cancelQueuedUpgrade( command->getUpgradeTemplate() );
+			return CBC_COMMAND_USED;
+		}
+
+		return CBC_COMMAND_NOT_USED;
 	}
 
 	// call command processing method
 	return processCommandUI( button, gadgetMessage );
 
 }  // end processContextSensitiveButtonClick
+
+//-------------------------------------------------------------------------------------------------
+/** Take 'upgrade' back out of the queue of whichever selected object is researching it. An upgrade
+	* is only ever queued once per building, so unlike a unit there is no "last one" to pick. */
+//-------------------------------------------------------------------------------------------------
+Bool ControlBar::cancelQueuedUpgrade( const UpgradeTemplate *upgrade )
+{
+	if( upgrade == NULL )
+		return FALSE;
+
+	const DrawableList *selected = TheInGameUI->getAllSelectedDrawables();
+	for( DrawableListCIt it = selected->begin(); it != selected->end(); ++it )
+	{
+		Object *candidate = (*it)->getObject();
+		if( candidate == NULL || candidate->getControllingPlayer() != ThePlayerList->getLocalPlayer() )
+			continue;
+
+		ProductionUpdateInterface *pu = candidate->getProductionUpdateInterface();
+		if( pu == NULL || pu->isUpgradeInQueue( upgrade ) == FALSE )
+			continue;
+
+		// the producer travels with the message, as it does for a cancelled unit
+		GameMessage *msg = TheMessageStream->appendMessage( GameMessage::MSG_CANCEL_UPGRADE );
+		msg->appendIntegerArgument( upgrade->getUpgradeNameKey() );
+		msg->appendObjectIDArgument( candidate->getID() );
+		return TRUE;
+	}
+
+	return FALSE;
+
+}  // end cancelQueuedUpgrade
 
 //-------------------------------------------------------------------------------------------------
 /** Cancel the last queued production of 'thing' on the representative producer */
