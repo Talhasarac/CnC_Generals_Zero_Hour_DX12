@@ -29,6 +29,7 @@
 #include "Common/StackDump.h"
 #include "GameClient/Water.h"
 #include "GameLogic/Module/PhysicsUpdate.h"
+#include "GameClient/ParticleSys.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -544,4 +545,76 @@ TEST(attack_move_leashes_ground_units_but_never_aircraft)
 	   airborne or not. */
 	CHECK( !AIAttackMove_leashBroken( false, false, 500.0f*cell, 0.0f, LEASH ) );
 	CHECK( !AIAttackMove_leashBroken( false, true,  500.0f*cell, 0.0f, LEASH ) );
+}
+
+//////////////////////////////////////////////////////////////////////////////
+// Particle ground collision
+//
+// particleGroundBounce is the whole of the terrain collision added to
+// Particle::update.  It touches no subsystem, so it can be driven directly.
+//////////////////////////////////////////////////////////////////////////////
+
+static Coord3D partCoord(Real x, Real y, Real z) { Coord3D c; c.set(x, y, z); return c; }
+
+TEST(particle_above_the_ground_is_left_alone)
+{
+	Coord3D pos = partCoord(0.0f, 0.0f, 10.0f);
+	Coord3D vel = partCoord(1.0f, 0.0f, -2.0f);
+	const Coord3D up = partCoord(0.0f, 0.0f, 1.0f);
+
+	CHECK(!particleGroundBounce(&pos, &vel, 5.0f, &up, 0.5f, 0.5f));
+	CHECK_NEAR(pos.z, 10.0f, 1e-5f);
+	CHECK_NEAR(vel.z, -2.0f, 1e-5f);
+}
+
+TEST(particle_bounces_off_flat_ground_and_keeps_the_restitution)
+{
+	Coord3D pos = partCoord(0.0f, 0.0f, 4.0f);
+	Coord3D vel = partCoord(3.0f, 0.0f, -10.0f);
+	const Coord3D up = partCoord(0.0f, 0.0f, 1.0f);
+
+	CHECK(particleGroundBounce(&pos, &vel, 5.0f, &up, 0.5f, 0.8f));
+	CHECK_NEAR(pos.z, 5.0f, 1e-5f);
+	CHECK_NEAR(vel.z, 5.0f, 1e-5f);
+	CHECK_NEAR(vel.x, 2.4f, 1e-5f);
+	CHECK_NEAR(vel.y, 0.0f, 1e-5f);
+}
+
+TEST(particle_with_zero_bounce_stops_dead_and_slides)
+{
+	Coord3D pos = partCoord(0.0f, 0.0f, -1.0f);
+	Coord3D vel = partCoord(4.0f, 0.0f, -6.0f);
+	const Coord3D up = partCoord(0.0f, 0.0f, 1.0f);
+
+	CHECK(particleGroundBounce(&pos, &vel, 0.0f, &up, 0.0f, 0.5f));
+	CHECK_NEAR(vel.z, 0.0f, 1e-5f);
+	CHECK_NEAR(vel.x, 2.0f, 1e-5f);
+}
+
+TEST(particle_on_a_slope_is_deflected_downhill_not_straight_up)
+{
+	// A 45 degree face whose normal leans towards +x, so downhill is +x.  Dropped straight
+	// down onto it, the particle must carry on down the slope - not stop, and not be thrown
+	// back up the way a flat Z flip would throw it.
+	const Real k = 0.70710678f;
+	Coord3D pos = partCoord(0.0f, 0.0f, -1.0f);
+	Coord3D vel = partCoord(0.0f, 0.0f, -10.0f);
+	const Coord3D slope = partCoord(k, 0.0f, k);
+
+	CHECK(particleGroundBounce(&pos, &vel, 0.0f, &slope, 0.0f, 1.0f));
+	CHECK_NEAR(vel.x, 5.0f, 1e-4f);		// pushed downhill
+	CHECK_NEAR(vel.z, -5.0f, 1e-4f);	// and still going down, at the slope's angle
+}
+
+TEST(particle_already_leaving_the_surface_is_only_lifted_clear)
+{
+	// the resting case: gravity has just dragged it a hair under, but it is moving away
+	Coord3D pos = partCoord(0.0f, 0.0f, -0.01f);
+	Coord3D vel = partCoord(1.0f, 0.0f, 2.0f);
+	const Coord3D up = partCoord(0.0f, 0.0f, 1.0f);
+
+	CHECK(particleGroundBounce(&pos, &vel, 0.0f, &up, 0.5f, 0.5f));
+	CHECK_NEAR(pos.z, 0.0f, 1e-5f);
+	CHECK_NEAR(vel.z, 2.0f, 1e-5f);
+	CHECK_NEAR(vel.x, 1.0f, 1e-5f);
 }
