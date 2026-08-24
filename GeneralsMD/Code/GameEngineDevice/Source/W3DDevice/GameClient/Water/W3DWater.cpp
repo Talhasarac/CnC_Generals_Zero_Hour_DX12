@@ -376,6 +376,8 @@ WaterRenderObjClass::WaterRenderObjClass(void)
 	m_waterSparklesTexture=0;
 	m_riverXOffset=0;
 	m_riverYOffset=0;
+	m_iBumpFrame=0;
+	m_bumpFrameAccum=0.0f;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -992,6 +994,7 @@ Int WaterRenderObjClass::init(Real waterLevel, Real dx, Real dy, SceneClass *par
 {
 
 	m_iBumpFrame=0;
+	m_bumpFrameAccum=0.0f;
 	m_fBumpScale=SEA_BUMP_SCALE;
 
 	m_dx=dx;
@@ -1231,16 +1234,30 @@ void WaterRenderObjClass::update( void )
 		// along at whatever the frame rate happened to be. They belong on the logic clock with
 		// the rest of this function.
 		//
-		m_riverVOrigin += 0.002f;
-		m_riverXOffset += (Real)(0.0125*33/5000);
-		m_riverYOffset += (Real)(2*0.0125*33/5000);
+		// EA's step sizes were authored per render frame and read as a boil rather than a swell,
+		// most visibly on the shell map behind the main menu. WATER_ANIM_SPEED scales the whole
+		// animation - scroll and bump cycle alike - so the surface keeps its shape and only its
+		// tempo changes. 1.0f restores the shipped rate.
+		//
+		const Real WATER_ANIM_SPEED = 0.35f;
+
+		m_riverVOrigin += 0.002f * WATER_ANIM_SPEED;
+		m_riverXOffset += (Real)(0.0125*33/5000) * WATER_ANIM_SPEED;
+		m_riverYOffset += (Real)(2*0.0125*33/5000) * WATER_ANIM_SPEED;
 		if (m_riverXOffset > 1) m_riverXOffset -= 1;
 		if (m_riverYOffset > 1) m_riverYOffset -= 1;
 		if (m_riverXOffset < -1) m_riverXOffset += 1;
 		if (m_riverYOffset < -1) m_riverYOffset += 1;
-		m_iBumpFrame++;
-		if (m_iBumpFrame >= NUM_BUMP_FRAMES) {
-			m_iBumpFrame = 0;
+
+		// the bump texture is a flipbook, so it can only be slowed by holding each frame longer
+		m_bumpFrameAccum += WATER_ANIM_SPEED;
+		while (m_bumpFrameAccum >= 1.0f)
+		{
+			m_bumpFrameAccum -= 1.0f;
+			m_iBumpFrame++;
+			if (m_iBumpFrame >= NUM_BUMP_FRAMES) {
+				m_iBumpFrame = 0;
+			}
 		}
 
 

@@ -170,6 +170,7 @@ protected:
 	LPDIRECT3DTEXTURE8 m_pBumpTexture[NUM_BUMP_FRAMES]; ///<animation frames
 	LPDIRECT3DTEXTURE8 m_pBumpTexture2[NUM_BUMP_FRAMES]; ///<animation frames
 	Int					m_iBumpFrame;	///<current animation frame
+	Real				m_bumpFrameAccum;	///<fractional carry, so the flipbook can run slower than one frame per tick
 	Real				m_fBumpScale;	///<scales bump map uv perturbation
 	TextureClass * m_pReflectionTexture;	///<render target for reflection
 	RenderObjClass	*m_skyBox;		///<box around level
