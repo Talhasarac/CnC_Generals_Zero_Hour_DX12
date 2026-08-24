@@ -245,23 +245,17 @@ darken a single pixel, so a forest sat on clean bright sand next to tanks with s
 them. The blob is now blended onto the ground the way its own artwork describes it — the same
 picture, the same darkness EA chose, actually visible.
 
-So every tree on the map has a shadow now — and not just a pool. A tree was the last thing out
-there whose shadow was a circle while everything else threw its own shape. It threw a circle for
-three reasons, all of them the game's own: the trees ask for the cheap kind by name; the shadow
-builder refuses any part of a model marked see-through, and a tree's *trunk* is marked see-through
-along with its leaves, so the whole tree was refused; and leaves are flat sheets, which cannot cast
-a solid shadow no matter what you do with them.
+So every tree on the map has a shadow now — every one of them, not most: 27 of the game's 128 tree
+types never said whether they should cast at all and silently got nothing. They cast now, and so do
+the bushes and the palms.
 
-Trees are now handled the way the soldiers were: they get a real shadow built from the model, and
-the see-through rule is only lifted when it would otherwise leave the tree with nothing at all — a
-helicopter's rotor still does not throw a solid disc. What comes out is the trunk, stretched across
-the ground in the sun's direction, with the soft pool kept underneath for the crown the leaves
-cannot cast. Palms on a beach now lie their trunks across the sand.
+It is the soft pool rather than the tree's own outline, and that is where it stays. Giving trees a
+sculpted shadow like the tanks have was tried and put back: the models are flat sheets of leaves,
+and the sculpted kind needs something solid to work from. A palm managed to throw its trunk and
+nothing else; a leafy tree threw nothing; and forcing the leaves through laid the tree's shadow
+across its own branches. The pool under the tree is the honest answer for foliage, and it is the
+one EA drew the artwork for.
 
-Every tree, too, not most of them: 27 of the game's 128 tree types never said whether they should
-cast at all, and silently got nothing. They cast now. So do the bushes, the palms and the scenery.
-`ShadowsForProps = No` in `GameData.ini` puts every bit of this back the way it was if a map full
-of trees costs you frames.
 And the scenery nobody gave a shadow to at all: fences, walls of tyres, rubbish piles, low
 shrubs, the props that dress a map. They stood on the terrain with nothing under them, which is
 the one thing the eye picks out instantly. Anything that cannot move and had no shadow now casts
@@ -342,7 +336,8 @@ question. The aircraft attack-move fix came from a log line, not an argument.
 looked past the edge of the maps and went back. Four separate pathfinding experiments were tried in
 game, made things worse, and were reverted. A three-panel command bar that fixed the widescreen
 stretch was tried and reverted too — the game's own bar is the one people want to see. Tree shadows
-that leaned away from the sun went the same way, on the evidence of before-and-after screenshots.
+that leaned away from the sun went the same way, on the evidence of before-and-after screenshots,
+and so did sculpted shadows for trees - the leaves ended up shadowing their own branches.
 All of it is
 recorded so nobody re-tries it in two years.
 

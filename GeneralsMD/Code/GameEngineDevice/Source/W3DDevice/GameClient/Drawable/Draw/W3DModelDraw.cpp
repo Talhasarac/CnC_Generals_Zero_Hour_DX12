@@ -1728,7 +1728,6 @@ W3DModelDraw::W3DModelDraw(Thing *thing, const ModuleData* moduleData) : DrawMod
 	m_hexColor = 0;
 	m_renderObject = NULL;
 	m_shadow = NULL;
-	m_shadowBlob = NULL;
 	m_shadowEnabled = TRUE;
 	m_terrainDecal = NULL;
 	m_trackRenderObject = NULL;
@@ -1829,8 +1828,6 @@ void W3DModelDraw::setHidden(Bool hidden)
 
 	if (m_shadow)
 		m_shadow->enableShadowRender(!hidden);
-	if (m_shadowBlob)
-		m_shadowBlob->enableShadowRender(!hidden);
 
 	m_shadowEnabled = hidden;
 
@@ -1851,9 +1848,6 @@ void W3DModelDraw::releaseShadows(void)	///< frees all shadow resources used by 
 	if (m_shadow)
 		m_shadow->release();
 	m_shadow = NULL;
-	if (m_shadowBlob)
-		m_shadowBlob->release();
-	m_shadowBlob = NULL;
 }
 
 /** Does this model contain any skinned (bone-deformed) geometry?  Infantry and other animated
@@ -1903,24 +1897,6 @@ never a volume; a zero decal size makes addShadow take the size from the model's
 Returns FALSE when this drawable gets no shadow at all. */
 static Bool fillShadowInfoFromTemplate(const ThingTemplate *tmplate, Shadow::ShadowTypeInfo *shadowInfo, Bool allowPropVolume = TRUE)
 {
-	//A prop the art gave a blob - a palm, a bush, a rock - cast a round pool instead of its own
-	//shape.  It never moves, so a volume is built once and then costs nothing to keep.  Same
-	//allowPropVolume retry as below: a model with no usable shadow geometry drops back to the blob.
-	if (tmplate->getShadowType() == SHADOW_DECAL && allowPropVolume &&
-			TheGlobalData->m_shadowsForProps && TheGlobalData->m_useShadowVolumes &&
-			tmplate->isKindOf(KINDOF_IMMOBILE) && !tmplate->isKindOf(KINDOF_PROJECTILE))
-	{
-		shadowInfo->m_ShadowName[0]	= 0;
-		shadowInfo->allowUpdates		= FALSE;
-		shadowInfo->allowWorldAlign	= TRUE;
-		shadowInfo->m_type					= SHADOW_VOLUME;
-		shadowInfo->m_sizeX					= 0.0f;
-		shadowInfo->m_sizeY					= 0.0f;
-		shadowInfo->m_offsetX				= 0.0f;
-		shadowInfo->m_offsetY				= 0.0f;
-		return TRUE;
-	}
-
 	if (tmplate->getShadowType() == SHADOW_NONE)
 	{
 		//a prop the art gave no shadow at all - a fence, a rubbish pile, a shrub - gets a real volume
@@ -1982,7 +1958,7 @@ void W3DModelDraw::allocateShadows(void)
 		Bool promotedToVolume = tmplate->getShadowType() != SHADOW_NONE &&
 														promoteSkinShadowToVolume(m_renderObject, &shadowInfo);
 		//a prop we handed a volume the template never asked for falls back the same way
-		if (tmplate->getShadowType() != SHADOW_VOLUME && shadowInfo.m_type == SHADOW_VOLUME)
+		if (tmplate->getShadowType() == SHADOW_NONE && shadowInfo.m_type == SHADOW_VOLUME)
 			promotedToVolume = TRUE;
 
   		m_shadow = TheW3DShadowManager->addShadow(m_renderObject, &shadowInfo);
@@ -1993,17 +1969,6 @@ void W3DModelDraw::allocateShadows(void)
 			m_shadow = TheW3DShadowManager->addShadow(m_renderObject, &shadowInfo);
 		}
 
-
-		//A tree's leaves are open planes: they contribute nothing to a stencil volume, so what the
-		//volume gives is the trunk alone.  Keep the blob under the crown as well - together they are
-		//a trunk laid across the ground and a pool of shade under the branches.
-		if (m_shadowBlob == NULL && m_shadow && shadowInfo.m_type == SHADOW_VOLUME &&
-				tmplate->getShadowType() == SHADOW_DECAL)
-		{
-			Shadow::ShadowTypeInfo blobInfo;
-			if (fillShadowInfoFromTemplate(tmplate, &blobInfo, FALSE))
-				m_shadowBlob = TheW3DShadowManager->addShadow(m_renderObject, &blobInfo);
-		}
 		if (m_shadow)
 		{	m_shadow->enableShadowInvisible(m_fullyObscuredByShroud);
 			if (m_renderObject->Is_Hidden() || !m_shadowEnabled)
@@ -2017,8 +1982,6 @@ void W3DModelDraw::setShadowsEnabled(Bool enable)
 {
 	if (m_shadow)
 		m_shadow->enableShadowRender(enable);
-	if (m_shadowBlob)
-		m_shadowBlob->enableShadowRender(enable);
 	m_shadowEnabled = enable;
 }
 
@@ -2082,8 +2045,6 @@ void W3DModelDraw::setFullyObscuredByShroud(Bool fullyObscured)
 
 		if (m_shadow)
 			m_shadow->enableShadowInvisible(m_fullyObscuredByShroud);
-		if (m_shadowBlob)
-			m_shadowBlob->enableShadowInvisible(m_fullyObscuredByShroud);
 		if (m_terrainDecal)
 			m_terrainDecal->enableShadowInvisible(m_fullyObscuredByShroud);
 
@@ -2933,9 +2894,6 @@ void W3DModelDraw::nukeCurrentRender(Matrix3D* xform)
 	if (m_shadow)
 		m_shadow->release();
 	m_shadow = NULL;
-	if (m_shadowBlob)
-		m_shadowBlob->release();
-	m_shadowBlob = NULL;
 
 	if(m_terrainDecal)
 		m_terrainDecal->release();
@@ -3214,7 +3172,7 @@ void W3DModelDraw::setModelState(const ModelConditionInfo* newState)
 			Bool promotedToVolume = tmplate->getShadowType() != SHADOW_NONE &&
 															promoteSkinShadowToVolume(m_renderObject, &shadowInfo);
 			//a prop we handed a volume the template never asked for falls back the same way
-			if (tmplate->getShadowType() != SHADOW_VOLUME && shadowInfo.m_type == SHADOW_VOLUME)
+			if (tmplate->getShadowType() == SHADOW_NONE && shadowInfo.m_type == SHADOW_VOLUME)
 				promotedToVolume = TRUE;
 
   			m_shadow = TheW3DShadowManager->addShadow(m_renderObject, &shadowInfo, draw);
@@ -3225,17 +3183,6 @@ void W3DModelDraw::setModelState(const ModelConditionInfo* newState)
 				m_shadow = TheW3DShadowManager->addShadow(m_renderObject, &shadowInfo, draw);
 			}
 
-
-			//A tree's leaves are open planes: they contribute nothing to a stencil volume, so what the
-			//volume gives is the trunk alone.  Keep the blob under the crown as well - together they are
-			//a trunk laid across the ground and a pool of shade under the branches.
-			if (m_shadowBlob == NULL && m_shadow && shadowInfo.m_type == SHADOW_VOLUME &&
-					tmplate->getShadowType() == SHADOW_DECAL)
-			{
-				Shadow::ShadowTypeInfo blobInfo;
-				if (fillShadowInfoFromTemplate(tmplate, &blobInfo, FALSE))
-					m_shadowBlob = TheW3DShadowManager->addShadow(m_renderObject, &blobInfo, draw);
-			}
 			if (m_shadow)
 			{	m_shadow->enableShadowInvisible(m_fullyObscuredByShroud);
 				m_shadow->enableShadowRender(m_shadowEnabled);
@@ -3304,8 +3251,6 @@ void W3DModelDraw::setModelState(const ModelConditionInfo* newState)
 				m_renderObject->Set_Hidden(TRUE);
 				if (m_shadow)
 					m_shadow->enableShadowRender(FALSE);
-				if (m_shadowBlob)
-					m_shadowBlob->enableShadowRender(FALSE);
 				m_shadowEnabled = FALSE;
 			}
 			

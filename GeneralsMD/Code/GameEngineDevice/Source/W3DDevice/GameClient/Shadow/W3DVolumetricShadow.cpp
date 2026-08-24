@@ -655,16 +655,6 @@ Int W3DShadowGeometry::initFromHLOD(RenderObjClass *robj)
 
 	m_numTotalsVerts=0;
 
-	//Two passes.  The first is EA's: a transparent mesh is not a shadow caster, because its
-	//silhouette is the quad it is painted on rather than the thing painted on it - a rotor disc
-	//would throw a solid disc.  The second pass runs only when that left the model with nothing
-	//at all, which is every tree and bush in the game: their trunk is flagged transparent along
-	//with their leaves, so the choice there is not 'a good shadow or a bad one' but 'the model's
-	//own shadow or none'.  Open leaf planes still contribute nothing to a stencil volume, so what
-	//comes out is the solid part - the trunk.
-	for (Int pass = 0; pass < 2 && m_meshCount == 0; pass++)
-	{
-	const Bool allowTransparent = (pass == 1);
 	for (i = 0; i < hlod->Get_Lod_Model_Count(top); i++)
 	{
 		if (hlod->Peek_Lod_Model(top,i) && hlod->Peek_Lod_Model(top,i)->Class_ID() == RenderObjClass::CLASSID_MESH)
@@ -677,7 +667,7 @@ Int W3DShadowGeometry::initFromHLOD(RenderObjClass *robj)
 //			if (!geomMesh->m_mesh->Peek_Model()->Get_Flag(MeshGeometryClass::CAST_SHADOW))
 //				continue; // CNC3 (gth) Only cast shadows from meshes with the shadow flag ENABLED!
 
-			if (!allowTransparent && (geomMesh->m_mesh->Is_Alpha() || geomMesh->m_mesh->Is_Translucent()) && !geomMesh->m_mesh->Peek_Model()->Get_Flag(MeshGeometryClass::CAST_SHADOW))
+			if ((geomMesh->m_mesh->Is_Alpha() || geomMesh->m_mesh->Is_Translucent()) && !geomMesh->m_mesh->Peek_Model()->Get_Flag(MeshGeometryClass::CAST_SHADOW))
 				continue; //transparent meshes that don't have forced shadows will not cast volumetric shadows
 			// CNC3 (gth) skin meshes should never cast a volumetric shadow
 			if (geomMesh->m_mesh->Peek_Model()->Get_Flag(MeshGeometryClass::SKIN)) 
@@ -885,7 +875,6 @@ Int W3DShadowGeometry::initFromHLOD(RenderObjClass *robj)
 			m_meshCount++;
 		}
 	}
-	}
 
 //	for (i = 0; i < AdditionalModels.Count(); i++) {
 //		res |= AdditionalModels[i].Model->Cast_Ray(raytest);
@@ -907,9 +896,8 @@ Int W3DShadowGeometry::initFromMesh(RenderObjClass *robj)
 
 	geomMesh->m_mesh = (MeshClass *)robj;
 	geomMesh->m_meshRobjIndex = -1;	//robj is the mesh so no index needed.
-	//A lone transparent mesh is the whole model, so refusing it is refusing the object any shadow
-	//at all - see the two passes in initFromHLOD.  It is taken, and its open planes simply do not
-	//contribute to the volume.
+	if (((geomMesh->m_mesh->Is_Alpha() || geomMesh->m_mesh->Is_Translucent()) && !geomMesh->m_mesh->Peek_Model()->Get_Flag(MeshGeometryClass::CAST_SHADOW)))
+		return FALSE; //transparent meshes that don't have forced shadows will not cast volumetric shadows
 
 	MeshModelClass *mm = geomMesh->m_mesh->Peek_Model();
 	geomMesh->m_numVerts=mm->Get_Vertex_Count();
