@@ -340,6 +340,8 @@ public:
 	Bool m_showPlacementRangeRing;		///< while placing a structure, ring its weapon range
 	Bool m_workersReturnToSupply;		///< a worker that finishes a build job goes back to the dock it left
 	Bool m_detailedBuildTooltips;		///< put build time, weapon range and damage in the build tooltip
+	Int m_bloomIntensity;				///< bloom strength in percent, 0 = off
+	Int m_bloomThreshold;				///< brightness in percent below which nothing blooms
 	Bool m_buildMapCache;
 	AsciiString m_initialFile;				///< If this is specified, load a specific map/replay from the command-line
 	AsciiString m_pendingFile;				///< If this is specified, use this map at the next game start

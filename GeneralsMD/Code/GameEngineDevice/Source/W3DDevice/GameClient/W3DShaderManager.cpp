@@ -142,6 +142,7 @@ class ScreenDefaultFilter : public W3DFilterInterface
 {
 public:
 	virtual Int init(void);			///<perform any one time initialization and validation
+	virtual Int shutdown(void);		///<release the bloom render targets
 	virtual Bool preRender(Bool &skipRender, CustomScenePassModes &scenePassMode); ///< Set up at start of render.  Only applies to screen filter shaders.
 	virtual Bool postRender(enum FilterModes mode, Coord2D &scrollDelta,Bool &doExtraRender); ///< Called after render.  Only applies to screen filter shaders.
 	virtual Bool setup(enum FilterModes mode){return true;} ///< Called when the filter is started, one time before the first prerender.
@@ -160,6 +161,172 @@ W3DFilterInterface *ScreenDefaultFilterList[]=
 	&screenDefaultFilter,
 	NULL
 };
+
+/*=========  Bloom	=============================================================*/
+/// Retail had no bloom and every texture in the game is LDR, so this is opt-in and tunable
+/// rather than a fixed look: "Bloom" in Options.ini is the strength in percent (0, off, unless
+/// it is set) and "BloomThreshold" the brightness, in percent, below which nothing glows.
+/// It rides on ScreenDefaultFilter, which already renders the scene into a full-screen texture
+/// on the frames the smudge effects need one, so the only new work is a quarter-size bright
+/// pass, two 4-tap blur passes and one additive composite.  All fixed function on purpose - no
+/// pixel shader, so it does not depend on LoadAndCreateD3DShader (which refuses outright on any
+/// card the chipset table reads as older than a GeForce3).
+
+#define BLOOM_DOWNSAMPLE 4		///< bright pass and blur run at 1/4 of the screen in each axis
+
+static IDirect3DTexture8 *s_bloomTexture[2];	///< ping-pong render targets for the blur passes
+static IDirect3DSurface8 *s_bloomSurface[2];
+static Int s_bloomWidth, s_bloomHeight;
+
+/** Bloom strength in percent - Options.ini's "Bloom" - 0 when it was never set.  Read every
+	frame rather than cached, so editing the key and reloading the options takes effect. */
+static Int bloomIntensity(void)
+{
+	if (TheGlobalData == NULL) return 0;
+	Int intensity = TheGlobalData->m_bloomIntensity;
+	if (intensity < 0) return 0;
+	if (intensity > 100) return 100;	//the composite is a single additive draw, so 100% is all there is
+	return intensity;
+}
+
+/** Brightness below which nothing blooms, as a 0..255 channel value - Options.ini's
+	"BloomThreshold", which is in percent. */
+static Int bloomThreshold(void)
+{
+	const Int threshold = (TheGlobalData != NULL ? TheGlobalData->m_bloomThreshold : 65) * 255 / 100;
+	if (threshold < 0) return 0;
+	if (threshold > 255) return 255;
+	return threshold;
+}
+
+static void releaseBloomTargets(void)
+{
+	for (Int i = 0; i < 2; i++)
+	{
+		if (s_bloomSurface[i]) { s_bloomSurface[i]->Release(); s_bloomSurface[i] = NULL; }
+		if (s_bloomTexture[i]) { s_bloomTexture[i]->Release(); s_bloomTexture[i] = NULL; }
+	}
+}
+
+/** Allocates the two quarter-size render targets, in the format of the scene texture they will
+	be downsampling.  Lazily, because these live in D3DPOOL_DEFAULT and do not survive a device
+	reset - shutdown() drops them and the next frame builds them again. */
+static Bool createBloomTargets(IDirect3DTexture8 *sceneTexture)
+{
+	if (s_bloomTexture[0] && s_bloomTexture[1]) return TRUE;
+
+	D3DSURFACE_DESC desc;
+	if (FAILED(sceneTexture->GetLevelDesc(0, &desc))) return FALSE;
+	s_bloomWidth  = desc.Width  / BLOOM_DOWNSAMPLE;
+	s_bloomHeight = desc.Height / BLOOM_DOWNSAMPLE;
+	if (s_bloomWidth < 1 || s_bloomHeight < 1) return FALSE;
+
+	LPDIRECT3DDEVICE8 pDev = DX8Wrapper::_Get_D3D_Device8();
+	for (Int i = 0; i < 2; i++)
+	{
+		if (FAILED(pDev->CreateTexture(s_bloomWidth, s_bloomHeight, 1, D3DUSAGE_RENDERTARGET,
+																	 desc.Format, D3DPOOL_DEFAULT, &s_bloomTexture[i]))
+				|| FAILED(s_bloomTexture[i]->GetSurfaceLevel(0, &s_bloomSurface[i])))
+		{
+			releaseBloomTargets();
+			DEBUG_LOG(("Bloom: could not create %dx%d render targets - disabled\n", s_bloomWidth, s_bloomHeight));
+			return FALSE;
+		}
+	}
+	DEBUG_LOG(("Bloom: %dx%d, intensity %d%%, threshold %d/255\n",
+						 s_bloomWidth, s_bloomHeight, bloomIntensity(), bloomThreshold()));
+	return TRUE;
+}
+
+/** One screen-aligned quad covering the given rectangle of the current render target, sampling
+	[u0,v0]..[u1,v1] of whatever texture is in stage 0, modulated by colour. */
+static void drawBloomQuad(Real x, Real y, Real w, Real h,
+													Real u0, Real v0, Real u1, Real v1, DWORD color)
+{
+	struct _TRANS_LIT_TEX_VERTEX {
+		D3DXVECTOR4 p;
+		DWORD color;
+		Real u, v;
+	} v[4];
+
+	//bottom right, top right, bottom left, top left - a strip, the same winding the other
+	//filters draw their viewport quad with
+	v[0].p = D3DXVECTOR4(x + w - 0.5f, y + h - 0.5f, 0.0f, 1.0f);	v[0].u = u1;	v[0].v = v1;
+	v[1].p = D3DXVECTOR4(x + w - 0.5f, y     - 0.5f, 0.0f, 1.0f);	v[1].u = u1;	v[1].v = v0;
+	v[2].p = D3DXVECTOR4(x     - 0.5f, y + h - 0.5f, 0.0f, 1.0f);	v[2].u = u0;	v[2].v = v1;
+	v[3].p = D3DXVECTOR4(x     - 0.5f, y     - 0.5f, 0.0f, 1.0f);	v[3].u = u0;	v[3].v = v0;
+	for (Int i = 0; i < 4; i++) v[i].color = color;
+
+	LPDIRECT3DDEVICE8 pDev = DX8Wrapper::_Get_D3D_Device8();
+	pDev->SetVertexShader(D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1);
+	pDev->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, v, sizeof(_TRANS_LIT_TEX_VERTEX));
+}
+
+/** Bright pass, blur, additive composite.  Called with the back buffer as the render target and
+	the finished scene already blitted onto it; sceneTexture is that same scene and
+	[u0,v0]..[u1,v1] is the part of it the viewport occupies.  Every state here is set straight
+	on the device, like the rest of the filters do - ScreenDefaultFilter::reset() invalidates the
+	wrapper's whole state cache afterwards, so nothing needs putting back by hand. */
+static void renderBloom(IDirect3DTexture8 *sceneTexture, Real x, Real y, Real w, Real h,
+												Real u0, Real v0, Real u1, Real v1)
+{
+	if (!createBloomTargets(sceneTexture)) return;
+
+	LPDIRECT3DDEVICE8 pDev = DX8Wrapper::_Get_D3D_Device8();
+	IDirect3DSurface8 *oldTarget = NULL, *oldDepth = NULL;
+	if (FAILED(pDev->GetRenderTarget(&oldTarget)) || oldTarget == NULL) return;
+	pDev->GetDepthStencilSurface(&oldDepth);	//can legitimately be NULL
+
+	//Bright pass.  Anything darker than the threshold subtracts away to black and what survives
+	//is how far above it the pixel was - a soft knee rather than a hard cut, which is what stops
+	//sunlit sand from popping in and out of the effect as the camera moves.
+	const Int t = bloomThreshold();
+	pDev->SetRenderTarget(s_bloomSurface[0], NULL);	//no depth buffer: none of this is depth tested
+	pDev->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
+	pDev->SetRenderState(D3DRS_TEXTUREFACTOR, D3DCOLOR_ARGB(255, t, t, t));
+	pDev->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_SUBTRACT);
+	pDev->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
+	pDev->SetTextureStageState(0, D3DTSS_COLORARG2, D3DTA_TFACTOR);
+	pDev->SetTexture(0, sceneTexture);
+	drawBloomQuad(0.0f, 0.0f, (Real)s_bloomWidth, (Real)s_bloomHeight, u0, v0, u1, v1, 0xffffffff);
+
+	//Blur: two 4-tap box passes ping-ponging between the targets, the second one twice as wide.
+	//Each tap is a quarter weight carried in the diffuse colour, the first writing and the other
+	//three adding, so the four average out.
+	pDev->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_MODULATE);
+	pDev->SetTextureStageState(0, D3DTSS_COLORARG2, D3DTA_DIFFUSE);
+	pDev->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_ONE);
+	pDev->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_ONE);
+	for (Int pass = 0; pass < 2; pass++)
+	{
+		const Int src = pass & 1;
+		const Int dst = (pass + 1) & 1;
+		const Real ox = (pass ? 3.5f : 1.5f) / (Real)s_bloomWidth;
+		const Real oy = (pass ? 3.5f : 1.5f) / (Real)s_bloomHeight;
+		pDev->SetRenderTarget(s_bloomSurface[dst], NULL);
+		pDev->SetTexture(0, s_bloomTexture[src]);
+		for (Int tap = 0; tap < 4; tap++)
+		{
+			const Real sx = (tap & 1) ? ox : -ox;
+			const Real sy = (tap & 2) ? oy : -oy;
+			pDev->SetRenderState(D3DRS_ALPHABLENDENABLE, tap != 0);
+			drawBloomQuad(0.0f, 0.0f, (Real)s_bloomWidth, (Real)s_bloomHeight,
+										sx, sy, 1.0f + sx, 1.0f + sy, 0x40404040);
+		}
+	}
+
+	//Composite: add the blurred highlights back over the scene.
+	const Int i = bloomIntensity() * 255 / 100;
+	pDev->SetRenderTarget(oldTarget, oldDepth);
+	pDev->SetTexture(0, s_bloomTexture[0]);	//the second blur pass wrote target 0
+	pDev->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
+	drawBloomQuad(x, y, w, h, 0.0f, 0.0f, 1.0f, 1.0f, D3DCOLOR_ARGB(255, i, i, i));
+
+	pDev->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
+	pDev->SetTexture(0, NULL);
+	oldTarget->Release();
+	if (oldDepth) oldDepth->Release();
+}
 
 Int ScreenDefaultFilter::init(void)
 {
@@ -194,8 +361,9 @@ Int ScreenDefaultFilter::init(void)
 
 Bool ScreenDefaultFilter::preRender(Bool &skipRender, CustomScenePassModes &scenePassMode)
 {
-	//Right now this filter is only used for smudges, so don't bother if none are present.
-	if (TheSmudgeManager)
+	//Right now this filter is only used for smudges, so don't bother if none are present -
+	//unless bloom is on, which needs the scene in a texture on every frame.
+	if (TheSmudgeManager && bloomIntensity() == 0)
 	{	if (((W3DSmudgeManager *)TheSmudgeManager)->getSmudgeCountLastFrame() == 0)
 			return FALSE;
 	}
@@ -249,8 +417,19 @@ Bool ScreenDefaultFilter::postRender(enum FilterModes mode, Coord2D &scrollDelta
 
 	pDev->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, v, sizeof(_TRANS_LIT_TEX_VERTEX));
 
+	//v[3] is the top left corner of the viewport inside the scene texture, v[0] the bottom right
+	if (bloomIntensity() > 0)
+		renderBloom(tex, (Real)xpos, (Real)ypos, (Real)width, (Real)height,
+								v[3].u, v[3].v, v[0].u, v[0].v);
+
 	reset();
 	return true;
+}
+
+Int ScreenDefaultFilter::shutdown(void)
+{
+	releaseBloomTargets();	//D3DPOOL_DEFAULT, so these do not survive a device reset
+	return TRUE;
 }
 
 Int ScreenDefaultFilter::set(enum FilterModes mode)

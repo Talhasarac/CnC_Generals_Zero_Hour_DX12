@@ -119,6 +119,8 @@ public:
 	Bool getShowPlacementRangeRing(void);
 	Bool getWorkersReturnToSupply(void);
 	Bool getDetailedBuildTooltips(void);
+	Int	 getBloomIntensity(void);
+	Int	 getBloomThreshold(void);
 	Int	 getTextureReduction(void);
 	void getResolution(Int *xres, Int *yres);
 	Bool get3DShadowsEnabled(void);

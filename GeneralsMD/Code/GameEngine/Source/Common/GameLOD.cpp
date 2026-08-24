@@ -376,6 +376,10 @@ void GameLODManager::init(void)
 	TheWritableGlobalData->m_workersReturnToSupply = optionPref.getWorkersReturnToSupply();
 	TheWritableGlobalData->m_detailedBuildTooltips = optionPref.getDetailedBuildTooltips();
 
+	// Bloom is a look, not a detail level - it is honored at every preset, like the zoom ceiling.
+	TheWritableGlobalData->m_bloomIntensity = optionPref.getBloomIntensity();
+	TheWritableGlobalData->m_bloomThreshold = optionPref.getBloomThreshold();
+
 	setStaticLODLevel(userSetDetail);
 }
 

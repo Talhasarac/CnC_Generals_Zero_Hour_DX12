@@ -265,6 +265,20 @@ to keep: the thing never moves, so its shadow is worked out once.
 All of it is switchable the same way: `ShadowsForProjectiles = No`, `ShadowsForParticles = No`
 and `ShadowsForProps = No` in `GameData.ini`.
 
+## Bright things can glow
+
+Put `Bloom = 60` in your `Options.ini` and the sun off a windscreen, a muzzle flash, a burning
+building and the glare on water bleed a little light into the air around them, the way a camera
+does. Nothing else changes — the effect only touches what is already bright, and everything below
+the line stays exactly as it was.
+
+It is off until you put that line in, and you get the two dials that matter. `Bloom = 40` for a
+hint of it, `Bloom = 100` for the full thing. `BloomThreshold = 80` raises the bar so only the
+genuinely blinding things glow; lower it and more of the picture joins in. This game's artwork was
+painted in 2003 for a screen with no glow at all, so there is no setting that is right for
+everyone — 100 with a low threshold visibly washes out a beach. Start at 40 and walk it up until it
+looks right to you.
+
 ## It does not crash
 
 - **It used to crash at the main menu.** Two blocks of hand-written assembly, untouched since 2003,

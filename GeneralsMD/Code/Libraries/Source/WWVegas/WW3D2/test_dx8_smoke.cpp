@@ -196,6 +196,83 @@ int main(int argc, char **argv)
 		rttSurf->Release(); rtt->Release();
 	}
 
+	// The bloom bright pass (W3DShaderManager.cpp's renderBloom) is fixed function on purpose,
+	// and it leans on two things no caps bit here guarantees through d3d8to9: D3DTOP_SUBTRACT
+	// against D3DTA_TFACTOR, and binding a render target with a NULL depth surface.  Run exactly
+	// that: a flat 200/255 source texture minus a 166/255 threshold must come back as 34.
+	{
+		IDirect3DTexture8 * src = NULL, * dst = NULL;
+		IDirect3DSurface8 * dstSurf = NULL, * bb = NULL, * autoZ = NULL, * copySurf = NULL;
+		D3DLOCKED_RECT lr;
+		bool built = SUCCEEDED(dev->CreateTexture(4, 4, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &src))
+			&& SUCCEEDED(dev->CreateTexture(16, 16, 1, D3DUSAGE_RENDERTARGET, pp.BackBufferFormat,
+					D3DPOOL_DEFAULT, &dst))
+			&& SUCCEEDED(dst->GetSurfaceLevel(0, &dstSurf))
+			&& SUCCEEDED(dev->GetBackBuffer(0, D3DBACKBUFFER_TYPE_MONO, &bb))
+			&& SUCCEEDED(dev->CreateImageSurface(16, 16, pp.BackBufferFormat, &copySurf))
+			&& SUCCEEDED(src->LockRect(0, &lr, NULL, 0));
+		if (!built) {
+			printf("FAIL: could not build the bloom bright pass surfaces\n");
+			dev->Release(); d3d->Release(); DestroyWindow(hwnd);
+			return 1;
+		}
+		dev->GetDepthStencilSurface(&autoZ);	// may be NULL, that is fine
+		for (int y = 0; y < 4; y++) {
+			unsigned long * row = (unsigned long *)((unsigned char *)lr.pBits + y * lr.Pitch);
+			for (int x = 0; x < 4; x++) row[x] = 0xffc8c8c8;	// opaque 200,200,200
+		}
+		src->UnlockRect(0);
+
+		struct QuadVertex { float x, y, z, rhw; unsigned long color; float u, v; };
+		const QuadVertex quad[4] = {
+			{ 15.5f, 15.5f, 0.0f, 1.0f, 0xffffffff, 1.0f, 1.0f },
+			{ 15.5f, -0.5f, 0.0f, 1.0f, 0xffffffff, 1.0f, 0.0f },
+			{ -0.5f, 15.5f, 0.0f, 1.0f, 0xffffffff, 0.0f, 1.0f },
+			{ -0.5f, -0.5f, 0.0f, 1.0f, 0xffffffff, 0.0f, 0.0f },
+		};
+		HRESULT bound = dev->SetRenderTarget(dstSurf, NULL);	// NULL depth: nothing here is depth tested
+		dev->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
+		dev->SetRenderState(D3DRS_ZENABLE, D3DZB_FALSE);
+		dev->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
+		dev->SetRenderState(D3DRS_LIGHTING, FALSE);
+		dev->SetRenderState(D3DRS_TEXTUREFACTOR, D3DCOLOR_ARGB(255, 166, 166, 166));
+		dev->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_SUBTRACT);
+		dev->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
+		dev->SetTextureStageState(0, D3DTSS_COLORARG2, D3DTA_TFACTOR);
+		dev->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_SELECTARG1);
+		dev->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_TEXTURE);
+		dev->SetTextureStageState(0, D3DTSS_MINFILTER, D3DTEXF_POINT);
+		dev->SetTextureStageState(0, D3DTSS_MAGFILTER, D3DTEXF_POINT);
+		dev->SetTexture(0, src);
+		dev->SetVertexShader(D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1);
+		HRESULT begun = dev->BeginScene();
+		HRESULT drawn = dev->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, quad, sizeof(QuadVertex));
+		dev->EndScene();
+		HRESULT copied = dev->CopyRects(dstSurf, NULL, 0, copySurf, NULL);
+		HRESULT restored = dev->SetRenderTarget(bb, autoZ);
+		dev->SetTexture(0, NULL);
+		dev->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_MODULATE);
+		dev->SetTextureStageState(0, D3DTSS_COLORARG2, D3DTA_DIFFUSE);
+		printf("bloom: bind(null z) hr=0x%08lx, begin hr=0x%08lx, draw hr=0x%08lx, copy hr=0x%08lx, restore hr=0x%08lx\n",
+			(unsigned long)bound, (unsigned long)begun, (unsigned long)drawn,
+			(unsigned long)copied, (unsigned long)restored);
+		int got = -1;
+		if (SUCCEEDED(copySurf->LockRect(&lr, NULL, D3DLOCK_READONLY))) {
+			const unsigned char * px = (const unsigned char *)lr.pBits + 8 * lr.Pitch + 8 * 4;
+			printf("bloom: 200 - 166 -> (b,g,r) = (%u,%u,%u), want 34\n", px[0], px[1], px[2]);
+			if (px[0] == px[1] && px[1] == px[2]) got = px[0];
+			copySurf->UnlockRect();
+		}
+		copySurf->Release();
+		if (autoZ) autoZ->Release();
+		bb->Release(); dstSurf->Release(); dst->Release(); src->Release();
+		if (FAILED(bound) || FAILED(drawn) || FAILED(copied) || FAILED(restored) || got < 30 || got > 38) {
+			printf("FAIL: the bloom bright pass (D3DTOP_SUBTRACT of D3DTA_TFACTOR into a render target with no depth buffer) did not work\n");
+			dev->Release(); d3d->Release(); DestroyWindow(hwnd);
+			return 1;
+		}
+	}
+
 	HRESULT phr = dev->Present(NULL, NULL, NULL, NULL);
 	printf("Present hr=0x%08lx\n", (unsigned long)phr);
 	if (show) {

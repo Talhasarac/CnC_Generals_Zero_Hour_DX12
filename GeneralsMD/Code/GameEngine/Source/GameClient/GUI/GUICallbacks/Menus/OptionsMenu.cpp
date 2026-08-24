@@ -836,6 +836,35 @@ Bool OptionPreferences::getDetailedBuildTooltips(void)
 	return stricmp(it->second.str(), "yes") == 0;
 }
 
+Int OptionPreferences::getBloomIntensity(void)
+{
+	// Not written by the options menu - a power-user Options.ini key.  Percent, 0 = off, which is
+	// what the GameData.ini default is: the game's artwork has no HDR range in it, so how much
+	// glow looks right is a matter of taste rather than something to pick on the player's behalf.
+	OptionPreferences::const_iterator it = find("Bloom");
+	if (it == end())
+		return TheGlobalData->m_bloomIntensity;
+
+	const Int intensity = atoi(it->second.str());
+	if (intensity < 0) return 0;
+	if (intensity > 100) return 100;
+	return intensity;
+}
+
+Int OptionPreferences::getBloomThreshold(void)
+{
+	// Percent: the brightness below which nothing blooms at all.  Lower it and more of the picture
+	// joins in; raise it and only the genuinely blinding things glow.
+	OptionPreferences::const_iterator it = find("BloomThreshold");
+	if (it == end())
+		return TheGlobalData->m_bloomThreshold;
+
+	const Int threshold = atoi(it->second.str());
+	if (threshold < 0) return 0;
+	if (threshold > 100) return 100;
+	return threshold;
+}
+
 Int OptionPreferences::getTextureReduction(void)
 {
 	OptionPreferences::const_iterator it = find("TextureReduction");
