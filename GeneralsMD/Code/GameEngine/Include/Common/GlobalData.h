@@ -128,6 +128,7 @@ public:
 	Bool m_useShadowVolumesForSkins;	// "UseShadowVolumesForSkins": also cast volume shadows off skinned meshes
 	Bool m_useShadowDecals;
 	Bool m_shadowsForProjectiles;	// "ShadowsForProjectiles": missiles and bombs that have no shadow of their own get a decal one
+	Bool m_shadowsForProps;				// "ShadowsForProps": fences, rubbish, shrubs - scenery the art gave no shadow at all
 	Bool m_shadowsForParticles;		// "ShadowsForParticles": big alpha-blended particle clouds drop a soft blob on the ground
 	Bool m_particleGroundBounce;	// "-particlebounce": terrain collision on for every particle system
 	Int  m_textureReductionFactor;	//how much to cut texture resolution: 2 is half, 3 is quarter, etc.

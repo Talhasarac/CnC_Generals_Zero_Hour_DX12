@@ -100,6 +100,7 @@ GlobalData* GlobalData::m_theOriginal = NULL;
 	{ "UseShadowVolumesForSkins",		INI::parseBool,				NULL,			offsetof( GlobalData, m_useShadowVolumesForSkins ) },
 	{ "UseShadowDecals",						INI::parseBool,				NULL,			offsetof( GlobalData, m_useShadowDecals ) },
 	{ "ShadowsForProjectiles",						INI::parseBool,				NULL,			offsetof( GlobalData, m_shadowsForProjectiles ) },
+	{ "ShadowsForProps",									INI::parseBool,				NULL,			offsetof( GlobalData, m_shadowsForProps ) },
 	{ "ShadowsForParticles",						INI::parseBool,				NULL,			offsetof( GlobalData, m_shadowsForParticles ) },
 	{ "TextureReductionFactor",			INI::parseInt,				NULL,			offsetof( GlobalData, m_textureReductionFactor ) },
 	{ "UseBehindBuildingMarker",		INI::parseBool,				NULL,			offsetof( GlobalData, m_enableBehindBuildingMarkers ) },
@@ -646,6 +647,7 @@ GlobalData::GlobalData()
 	m_useShadowVolumesForSkins = TRUE;	//on by default: the shipped INI has no entry for it
 	m_useShadowDecals = FALSE;
 	m_shadowsForProjectiles = TRUE;	//on by default: the shipped INI has no entry for it
+	m_shadowsForProps = TRUE;				//likewise: scenery with no shadow of its own gets one
 	m_shadowsForParticles = TRUE;	//on by default: the shipped INI has no entry for it
 	m_textureReductionFactor = -1;
 	m_enableBehindBuildingMarkers = TRUE;

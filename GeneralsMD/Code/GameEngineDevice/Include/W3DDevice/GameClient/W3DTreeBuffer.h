@@ -137,6 +137,7 @@ typedef struct {
 	Bool				m_halfTile; ///< Tiles are 64x64 pixels, half tile supports a 32x32 bit texture.  Have to adjust the uv values.
 	Vector3			m_offset;
 	Real				m_shadowSize; ///< Shadow radius.
+	Real				m_shadowHeight; ///< Model height, so the blob can be stretched away from the sun.
 	Bool				m_doShadow; ///< Draw shadow.
 
 } TTreeType;

@@ -228,8 +228,22 @@ sparks are too small and too short-lived to earn it, and fire and glows are stil
 shade. It is one soft patch per plume rather than a shadow for every puff, so a battlefield full of
 smoke costs no more than a battlefield with one fire.
 
-Both are switchable the same way: `ShadowsForProjectiles = No` and `ShadowsForParticles = No` in
-`GameData.ini`.
+Then the trees. Every one of them dropped the same round grey blob, the same size in every
+direction, no matter where the sun was or how tall the tree was — and if you had shadows set to
+the good kind rather than the cheap kind, the trees dropped nothing at all, so a forest sat on
+clean ground next to buildings with long shadows behind them. A tree's shadow now leans away from
+the sun and stretches by the tree's own height, the way everything else on the map does, and it
+is drawn whichever shadow setting you are on. At noon it is a pool under the trunk; late in the
+day the whole treeline lies across the ground in front of you.
+
+And the scenery nobody gave a shadow to at all: fences, walls of tyres, rubbish piles, low
+shrubs, the props that dress a map. They stood on the terrain with nothing under them, which is
+the one thing the eye picks out instantly. Anything that cannot move and had no shadow now casts
+a real one with its own shape — a fence throws a line of posts across the road. It costs nothing
+to keep: the thing never moves, so its shadow is worked out once.
+
+All of it is switchable the same way: `ShadowsForProjectiles = No`, `ShadowsForParticles = No`
+and `ShadowsForProps = No` in `GameData.ini`.
 
 ## It does not crash
 
