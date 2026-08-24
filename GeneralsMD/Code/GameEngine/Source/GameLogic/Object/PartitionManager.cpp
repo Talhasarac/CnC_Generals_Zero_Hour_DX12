@@ -65,6 +65,7 @@
 
 #include "GameLogic/AIPathfind.h"
 #include "GameLogic/GameLogic.h"
+#include "GameLogic/IncomingDamage.h"
 #include "GameLogic/Object.h"
 #include "GameLogic/Module/AIUpdate.h"
 #include "GameLogic/Module/BodyModule.h"
@@ -5372,6 +5373,16 @@ Bool PartitionFilterPossibleToAttack::allow(Object *objOther)
 	// disable this assert for INTERNAL builds (srj)
 	DEBUG_ASSERTCRASH(m_obj && m_obj->isAbleToAttack(), ("if the object is unable to attack at all, you should filter that out ahead of time!"));
 #endif
+	//
+	// Someone else's shots are already in the air and already add up to more than this thing has
+	// left, so acquiring it would spend a volley on a corpse.  Skipping it here is what spreads a
+	// group's fire over several targets instead of piling all of it onto the nearest one.  This
+	// filter is only ever used to acquire a target on the unit's own initiative - guarding, attack
+	// moving, idle scanning - so an explicit attack order is never touched by it.
+	//
+	if (IncomingDamageTracker::isAlreadyDoomed(objOther))
+		return FALSE;
+
 	CanAttackResult result = m_obj->getAbleToAttackSpecificObject( m_attackType, objOther, m_commandSource );
 	if( result == ATTACKRESULT_POSSIBLE || result == ATTACKRESULT_POSSIBLE_AFTER_MOVING )
 	{

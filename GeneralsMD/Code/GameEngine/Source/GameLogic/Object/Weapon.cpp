@@ -57,6 +57,7 @@
 #include "GameLogic/Damage.h"
 #include "GameLogic/ExperienceTracker.h"
 #include "GameLogic/GameLogic.h"
+#include "GameLogic/IncomingDamage.h"
 #include "GameLogic/AIPathfind.h"
 #include "GameLogic/Module/BehaviorModule.h"
 #include "GameLogic/Module/BodyModule.h"
@@ -1085,6 +1086,15 @@ UnsignedInt WeaponTemplate::fireWeaponTemplate
 				when = TheGameLogic->getFrame() + delayInWholeFrames;
 				//DEBUG_LOG(("WeaponTemplate::fireWeaponTemplate: firing weapon in %d frames (= %d)!\n", delayInWholeFrames,when));
 				TheWeaponStore->setDelayedDamage(this, damagePos, when, sourceID, damageID, bonus);
+
+				// This damage is already spoken for: book it so nothing else spends a shot on a target
+				// that is dead as soon as this lands.
+				if (damageID != INVALID_ID && victimObj != NULL)
+				{
+					IncomingDamageTracker::bookShot(damageID, sourceID,
+						estimateWeaponTemplateDamage(sourceObj, victimObj, NULL, bonus),
+						TheGameLogic->getFrame(), when);
+				}
 			}
 
 			//-extraLogging 
@@ -1138,6 +1148,19 @@ UnsignedInt WeaponTemplate::fireWeaponTemplate
 		}
 
 		firingWeapon->newProjectileFired( sourceObj, projectile, victimObj, victimPos );//The actual logic weapon needs to know this was created. 
+
+		// Book the projectile's damage against its victim for the length of its flight, so the rest of
+		// the squad can see that this target is already accounted for. The flight time is only an
+		// estimate - a guided projectile flies on its own locomotor - and the booking lapses on its own.
+		if (inflictDamage && victimObj != NULL && victimID != INVALID_ID)
+		{
+			const Real flightFrames = sqrtf(distSqr) / getWeaponSpeed();
+			const UnsignedInt now = TheGameLogic->getFrame();
+			IncomingDamageTracker::bookShot(victimID, sourceID,
+				estimateWeaponTemplateDamage(sourceObj, victimObj, NULL, bonus),
+				now, now + REAL_TO_INT_CEIL(flightFrames));
+		}
+
 
 		ProjectileUpdateInterface* pui = NULL;
 		for (BehaviorModule** u = projectile->getBehaviorModules(); *u; ++u)
@@ -1492,6 +1515,9 @@ void WeaponTemplate::dealDamageInternal(ObjectID sourceID, ObjectID victimID, co
 			}
 
 			curVictim->attemptDamage(&damageInfo);
+
+			// whatever was booked for this shot has now been spent
+			IncomingDamageTracker::shotLanded(curVictim->getID(), damageInfo.in.m_sourceID);
 			//DEBUG_ASSERTLOG(damageInfo.out.m_noEffect, ("WeaponTemplate::dealDamageInternal: dealt to %s %08lx: attempted %f, actual %f (%f)\n",
 			//	curVictim->getTemplate()->getName().str(),curVictim,
 			//	damageInfo.in.m_amount, damageInfo.out.m_actualDamageDealt, damageInfo.out.m_actualDamageClipped));
@@ -1627,6 +1653,8 @@ void WeaponStore::update()
 			++ddi;
 		}
 	}
+
+	IncomingDamageTracker::update(TheGameLogic->getFrame());
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1663,6 +1691,7 @@ void WeaponStore::reset()
 	}
 
 	deleteAllDelayedDamage();
+	IncomingDamageTracker::reset();
 	resetWeaponTemplates();
 }
 

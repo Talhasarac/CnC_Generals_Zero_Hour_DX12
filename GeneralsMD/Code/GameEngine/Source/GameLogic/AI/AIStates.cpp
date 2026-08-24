@@ -54,6 +54,7 @@
 #include "GameLogic/AITNGuard.h"
 #include "GameLogic/AIStateMachine.h"
 #include "GameLogic/AIPathfind.h"
+#include "GameLogic/IncomingDamage.h"
 #include "GameLogic/Locomotor.h"
 #include "GameLogic/PartitionManager.h"
 #include "GameLogic/PolygonTrigger.h"
@@ -5551,6 +5552,18 @@ StateReturnType AIAttackFireWeaponState::update()
 	{
 		// if our target is dead, go ahead and stop.
 		if (!victim || victim->isEffectivelyDead())
+			return STATE_FAILURE;
+
+		//
+		// The shots already in the air add up to more than the victim has left, so this one would be
+		// spent on something that is dead the moment they land.  Drop the attack: whatever put us on
+		// this target on our own initiative - guarding, attack moving, the idle scan - runs again on
+		// its own clock, and the acquisition filter now passes over this victim and hands us the next
+		// one, or nothing, in which case we simply hold.  Only our own initiative is second-guessed
+		// here; an explicit order from the player is carried out as given.
+		//
+		AIUpdateInterface* ai = obj->getAI();
+		if (ai && ai->getLastCommandSource() == CMD_FROM_AI && IncomingDamageTracker::isAlreadyDoomed(victim))
 			return STATE_FAILURE;
 	}
 	WeaponSlotType wslot;
