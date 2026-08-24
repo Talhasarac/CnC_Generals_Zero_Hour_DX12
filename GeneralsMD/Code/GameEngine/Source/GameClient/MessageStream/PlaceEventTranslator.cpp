@@ -40,6 +40,7 @@
 #include "GameClient/ControlBar.h"
 #include "GameClient/Drawable.h"
 #include "GameClient/Eva.h"
+#include "GameClient/Mouse.h"
 #include "GameClient/PlaceEventTranslator.h"
 
 #include "GameLogic/GameLogic.h"
@@ -53,6 +54,39 @@
 //#pragma optimize("", off)
 //#pragma MESSAGE("************************************** WARNING, optimization disabled for debugging purposes")
 #endif
+
+//-------------------------------------------------------------------------------------------------
+/** How far from the anchor the cursor has to travel before the drag counts as aiming the structure
+	* rather than as a plain click, in pixels. */
+static const Int PLACEMENT_DRAG_THRESHOLD_DIST = 5;
+
+//-------------------------------------------------------------------------------------------------
+/** How far the cursor is from the placement anchor right now, in pixels.  This reads the mouse
+	* rather than the pixel carried by the message on purpose: Mouse::createStreamMessages appends
+	* MSG_RAW_MOUSE_POSITION before it processes this frame's events, so that pixel is already one
+	* batch of movement old, and the structure would be aimed at where the cursor had been rather than
+	* where it was let go. */
+//-------------------------------------------------------------------------------------------------
+static Bool getPlacementDrag( ICoord2D *start, ICoord2D *end )
+{
+	ICoord2D mouse = TheMouse->getMouseStatus()->pos;
+
+	TheInGameUI->getPlacementPoints( start, NULL );
+
+	Int x = mouse.x - start->x;
+	Int y = mouse.y - start->y;
+
+	if( ( x * x ) + ( y * y ) < PLACEMENT_DRAG_THRESHOLD_DIST * PLACEMENT_DRAG_THRESHOLD_DIST )
+	{
+		// no drag: there is one point, not two
+		*end = *start;
+		return FALSE;
+	}
+
+	*end = mouse;
+	return TRUE;
+
+}  // end getPlacementDrag
 
 //-------------------------------------------------------------------------------------------------
 PlaceEventTranslator::PlaceEventTranslator() : m_frameOfUpButton(-1), m_stripClickTaken(FALSE)
@@ -194,11 +228,26 @@ GameMessageDisposition PlaceEventTranslator::translateGameMessage(const GameMess
 				ICoord2D anchorStart, anchorEnd;
 				Bool isLineBuild = TheBuildAssistant->isLineBuildTemplate( build );
 
-				// get the angle of the drawable at the cursor to use as the initial angle
-				angle = TheInGameUI->getPlacementAngle();
-
 				// get start point from the anchor arrow used to place and select angles
 				TheInGameUI->getPlacementPoints( &anchorStart, &anchorEnd );
+
+				//
+				// The structure faces wherever the player dragged to.  Take that from where the
+				// cursor is at this instant rather than from the heading the ghost happens to be
+				// wearing: the ghost is turned once a frame in InGameUI::update, which runs before
+				// the message stream is propagated and off an anchor end that is itself a frame
+				// behind, so a quick drag-and-release used to build the structure facing two frames
+				// of mouse travel back.  A press that never left the anchor is not aiming at
+				// anything, so that one keeps the heading already on the ghost.
+				//
+				angle = TheInGameUI->getPlacementAngle();
+				if( getPlacementDrag( &anchorStart, &anchorEnd ) )
+				{
+					angle = TheInGameUI->computePlacementAngle( &anchorStart, &anchorEnd );
+
+					// and the next one goes down facing the same way, as with the wheel
+					TheInGameUI->setPlacementAngle( angle );
+				}
 
 				// translate the screen position of start to world target location
 				TheTacticalView->screenToTerrain( &anchorStart, &world );
@@ -349,33 +398,26 @@ GameMessageDisposition PlaceEventTranslator::translateGameMessage(const GameMess
 		}  
 
 		//---------------------------------------------------------------------------------------------
+		case GameMessage::MSG_RAW_MOUSE_LEFT_DRAG:
 		case GameMessage::MSG_RAW_MOUSE_POSITION:
 		{
 			// if a building placement is in progress update the destination position
 			if (TheInGameUI->isPlacementAnchored())
 			{
-				const Int PLACEMENT_DRAG_THRESHOLD_DIST = 5;  // in pixels away from anchor point
-				ICoord2D mouse = msg->getArgument(0)->pixel;
-
 				//
 				// we will only process placement end point sets (clicking, and dragging to set angles)
 				// if we have moved far enough away from the start point
 				//
-				ICoord2D start;
-				TheInGameUI->getPlacementPoints( &start, NULL );
-				
-				Int x, y;
-				x = mouse.x - start.x;
-				y = mouse.y - start.y;
-				if( sqrt( (x * x) + (y * y) ) >= PLACEMENT_DRAG_THRESHOLD_DIST )
+				ICoord2D start, end;
+				if( getPlacementDrag( &start, &end ) )
 				{
-				
-					TheInGameUI->setPlacementEnd(&mouse);
+
+					TheInGameUI->setPlacementEnd( &end );
 					disp = DESTROY_MESSAGE;
 
 				}  // end if
 
-			}  
+			}
 			break;
 		}
 	}  

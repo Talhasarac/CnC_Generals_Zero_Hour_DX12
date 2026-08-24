@@ -44,6 +44,7 @@
 #include "GameClient/Shell.h"
 #include "GameClient/GameClient.h"
 #include "GameClient/KeyDefs.h"
+#include "GameClient/Keyboard.h"		// for the ctrl+wheel building rotation
 #include "GameClient/View.h"
 #include "GameClient/Drawable.h"
 #include "GameClient/LookAtXlat.h"
@@ -384,6 +385,14 @@ GameMessageDisposition LookAtTranslator::translateGameMessage(const GameMessage 
 			m_lastMouseMoveFrame = TheGameLogic->getFrame();
 
 			Int spin = msg->getArgument( 1 )->integer;
+
+			//
+			// Ctrl+wheel turns the structure on the cursor by 45 degrees a notch instead of zooming.
+			// The wheel is otherwise wasted while placing, and the drag-to-aim interface it replaces
+			// cannot hit an exact eighth of a turn.  Eaten so the same notch does not also zoom.
+			//
+			if (TheKeyboard->isCtrl() && TheInGameUI->rotatePendingPlacement( spin ))
+				return DESTROY_MESSAGE;
 
 			//
 			// ZoomToCursor: remember the world point under the cursor, zoom, then shift the camera

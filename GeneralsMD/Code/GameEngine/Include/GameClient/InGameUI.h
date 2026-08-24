@@ -440,6 +440,20 @@ public:  // ********************************************************************
 	virtual Bool isPlacementAnchored( void );													///< is placement arrow anchor set
 	virtual void getPlacementPoints( ICoord2D *start, ICoord2D *end );///< get the placemnt arrow points
 	virtual Real getPlacementAngle( void );														///< placement angle of drawable at cursor when placing down structures
+	virtual Real computePlacementAngle( const ICoord2D *start, const ICoord2D *end );	///< heading a drag from start to end aims a structure at
+
+	/** Round a heading to the nearest eighth of a turn.  Nearest, not toward or away from zero:
+		* toAngle returns -PI..PI and the drag has to feel the same on both halves of the circle, so
+		* every heading is at most 22.5 degrees of mouse travel from the one it snaps to.  Inline so a
+		* test can reach it without linking the whole in-game UI. */
+	static Real snapAngleTo45( Real angle )
+	{
+		const Real step = PI / 4.0f;
+
+		return ((Real)REAL_TO_INT_FLOOR( angle / step + 0.5f )) * step;
+	}
+	virtual void setPlacementAngle( Real angle );											///< aim the structure on the cursor, and keep that heading for the next one
+	virtual Bool rotatePendingPlacement( Int steps );									///< turn the structure on the cursor by 45 degrees a step
 
 	// Drawable selection mechanisms
 	virtual void selectDrawable( Drawable *draw );					///< Mark given Drawable as "selected"
@@ -748,6 +762,8 @@ protected:
 	Bool												m_placeAnchorInProgress;								///< is place angle interface for placement active
 	ICoord2D										m_placeAnchorStart;											///< place angle anchor start
 	ICoord2D										m_placeAnchorEnd;												///< place angle anchor end
+	Real												m_placeAngleOffset;											///< wheel-chosen heading, added to every structure's own view angle
+	Bool												m_placementLegal;												///< last legality verdict for the spot under the structure being placed
 	Int													m_selectCount;													///< Number of objects currently "selected"
 	Int													m_maxSelectCount;												///< Max number of objects to select
 	UnsignedInt									m_frameSelectionChanged;								///< Frame when the selection last changed.

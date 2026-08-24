@@ -104,6 +104,25 @@ static const Real placementOpacity = 0.45f;
 static const RGBColor illegalBuildColor = { 1.0, 0.0, 0.0 };
 
 //-------------------------------------------------------------------------------------------------
+/** Pointer to show while a structure rides the cursor.  Mouse::BUILD_PLACEMENT and
+	* INVALID_BUILD_PLACEMENT are two names in CursorININames[] that no shipped Mouse.ini ever
+	* defines, so asking for them left m_cursorInfo empty and drew nothing at all - the pointer
+	* simply vanished for as long as something was being placed.  Honour the build cursors when art
+	* for them does exist (a mod may add it), and otherwise fall back to cursors that are always
+	* there: the crosshair for a spot that can be built on, the no-go pointer for one that cannot. */
+//-------------------------------------------------------------------------------------------------
+static Mouse::MouseCursor placementCursor( Bool legal )
+{
+	Mouse::MouseCursor wanted = legal ? Mouse::BUILD_PLACEMENT : Mouse::INVALID_BUILD_PLACEMENT;
+
+	if( TheMouse->m_cursorInfo[ wanted ].cursorName.isEmpty() == FALSE )
+		return wanted;
+
+	return legal ? Mouse::CROSS : Mouse::GENERIC_INVALID;
+
+}  // end placementCursor
+
+//-------------------------------------------------------------------------------------------------
 /// The InGameUI singleton instance.
 InGameUI *TheInGameUI = NULL;
 
@@ -1002,6 +1021,8 @@ InGameUI::InGameUI()
 	m_placeAnchorStart.x = m_placeAnchorStart.y = 0;
 	m_placeAnchorEnd.x = m_placeAnchorEnd.y = 0;
 	m_placeAnchorInProgress = FALSE;
+	m_placeAngleOffset = 0.0f;
+	m_placementLegal = TRUE;
 
 	m_videoStream = NULL;
 	m_videoBuffer = NULL;
@@ -1525,27 +1546,7 @@ void InGameUI::handleBuildPlacements( void )
 
 			// only adjust angle if we've actually moved the mouse
 			if( start.x != end.x || start.y != end.y )
-			{
-				Coord3D worldStart, worldEnd;
-
-				// project the start and the end points of the line anchor into the 3D world
-				TheTacticalView->screenToTerrain( &start, &worldStart );
-				TheTacticalView->screenToTerrain( &end, &worldEnd );
-				
-				Coord2D v;
-				v.x = worldEnd.x - worldStart.x;
-				v.y = worldEnd.y - worldStart.y;
-				angle = v.toAngle();
-
-				// optional 45 degree snap (SnapBuildPlacementTo45 in Options.ini) - lines walls and
-				// defenses up with the base instead of leaving them at whatever the drag produced.
-				if( TheGlobalData->m_snapBuildPlacementTo45 )
-				{
-					const Real step = PI / 4.0f;
-					angle = ((Real)REAL_TO_INT_FLOOR( angle / step + (angle >= 0.0f ? 0.5f : -0.5f) )) * step;
-				}
-
-			}  // end if
+				angle = computePlacementAngle( &start, &end );
 
 		}  // end if
 		else
@@ -1591,6 +1592,9 @@ void InGameUI::handleBuildPlacements( void )
 																											 BuildAssistant::IGNORE_STEALTHED,
 																											 builderObject,
 																											 NULL );
+			// the cursor reads this too - see createCommandHint's MOUSEMODE_BUILD_PLACE case
+			m_placementLegal = ( lbc == LBC_OK );
+
 			if( lbc != LBC_OK )
 				m_placeIcon[ 0 ]->colorTint( &illegalBuildColor );
 			else
@@ -2050,6 +2054,7 @@ void InGameUI::reset( void )
 
 	// remove any build available status
 	placeBuildAvailable( NULL, NULL );
+	m_placeAngleOffset = 0.0f;
 
 	// free any message resources allocated
 	freeMessageResources();
@@ -2863,18 +2868,13 @@ void InGameUI::createCommandHint( const GameMessage *msg )
 					setMouseCursor(Mouse::ARROW);
 					return;
 				}
-				switch (t)
-				{
-					case GameMessage::MSG_DO_MOVETO_HINT:
-					case GameMessage::MSG_DO_ATTACKMOVETO_HINT:
-					case GameMessage::MSG_ADD_WAYPOINT:
-						setMouseCursor(Mouse::BUILD_PLACEMENT);
-						break;
-					case GameMessage::MSG_DO_ATTACK_OBJECT_HINT:
-					case GameMessage::MSG_DO_ATTACK_OBJECT_AFTER_MOVING_HINT:
-						setMouseCursor(Mouse::INVALID_BUILD_PLACEMENT);
-						break;
-				}
+				//
+				// what is under the cursor does not matter while a structure is on it - whether the
+				// spot can be built on does, and handleBuildPlacements already worked that out for
+				// the tint on the ghost.  Anything the hint said would have left the pointer with no
+				// art at all: see placementCursor.
+				//
+				setMouseCursor( placementCursor( m_placementLegal ) );
 			}
 			break;
 		case MOUSEMODE_GUI_COMMAND:
@@ -3177,7 +3177,8 @@ void InGameUI::placeBuildAvailable( const ThingTemplate *build, Drawable *buildD
 		if( build )
 		{
 			m_mouseMode = MOUSEMODE_BUILD_PLACE;
-			m_mouseModeCursor = Mouse::CROSS;
+			m_placementLegal = TRUE;
+			m_mouseModeCursor = placementCursor( TRUE );
 
 			Drawable *draw;
 
@@ -3185,7 +3186,7 @@ void InGameUI::placeBuildAvailable( const ThingTemplate *build, Drawable *buildD
 			TheMouse->capture();
 
 			// hack for changing cursor
-			setMouseCursor( Mouse::CROSS );
+			setMouseCursor( (Mouse::MouseCursor)m_mouseModeCursor );
 
 			// deselect all drawables, otherwise they move to the place we click
 			///@ todo when message stream order more formalized eliminate this
@@ -3212,6 +3213,10 @@ void InGameUI::placeBuildAvailable( const ThingTemplate *build, Drawable *buildD
 
 			// don't forget to take into account the current view angle
 			// angle += TheTacticalView->getAngle();	Don't do this - makes odd angled building placements.  jba.
+
+			// carry over whatever heading the player wheeled to last time, so a row of walls or
+			// bunkers can be laid down all facing the same way (see rotatePendingPlacement)
+			angle = normalizeAngle( angle + m_placeAngleOffset );
 
 			// set the angle in the icon we just created
 			draw->setOrientation( angle );
@@ -3339,6 +3344,78 @@ Real InGameUI::getPlacementAngle( void )
 	return 0.0f;
 
 }  // end getPlacementAngle
+
+//-------------------------------------------------------------------------------------------------
+/** The heading a drag from 'start' to 'end' (both in screen pixels) aims a structure at.  The two
+	* points are projected onto the terrain first, so the answer is a world heading and not a screen
+	* one: dragging "up" the screen faces the building away from the camera whatever the camera is
+	* turned to. */
+//-------------------------------------------------------------------------------------------------
+Real InGameUI::computePlacementAngle( const ICoord2D *start, const ICoord2D *end )
+{
+	Coord3D worldStart, worldEnd;
+
+	TheTacticalView->screenToTerrain( start, &worldStart );
+	TheTacticalView->screenToTerrain( end, &worldEnd );
+
+	Coord2D v;
+	v.x = worldEnd.x - worldStart.x;
+	v.y = worldEnd.y - worldStart.y;
+
+	Real angle = v.toAngle();
+
+	// optional 45 degree snap (SnapBuildPlacementTo45 in Options.ini) - lines walls and
+	// defenses up with the base instead of leaving them at whatever the drag produced.
+	if( TheGlobalData->m_snapBuildPlacementTo45 )
+		angle = snapAngleTo45( angle );
+
+	return angle;
+
+}  // end computePlacementAngle
+
+//-------------------------------------------------------------------------------------------------
+/** Aim the structure sitting on the cursor at 'angle', and keep that heading for the placements
+	* that follow - the same offset the wheel writes (see rotatePendingPlacement), so a wall aimed by
+	* dragging carries on in the direction it was aimed instead of snapping back to the template's own
+	* view angle on the next piece. */
+//-------------------------------------------------------------------------------------------------
+void InGameUI::setPlacementAngle( Real angle )
+{
+	if( m_pendingPlaceType == NULL )
+		return;
+
+	m_placeAngleOffset = normalizeAngle( angle - m_pendingPlaceType->getPlacementViewAngle() );
+
+	for( Int i = 0; i < TheGlobalData->m_maxLineBuildObjects; i++ )
+		if( m_placeIcon[ i ] )
+			m_placeIcon[ i ]->setOrientation( angle );
+
+}  // end setPlacementAngle
+
+//-------------------------------------------------------------------------------------------------
+/** Turn the structure sitting on the cursor by 'steps' eighths of a turn.  The chosen heading is
+	* kept for the placements that follow, so a row of walls or a line of bunkers can be laid down
+	* facing the same way without re-aiming each one - it is an offset rather than an absolute angle
+	* so that each structure still starts from its own designed view angle.  Does nothing while the
+	* drag-to-aim anchor is down: that interface recomputes the angle from the drag every frame and
+	* would throw this away on the next one. */
+//-------------------------------------------------------------------------------------------------
+Bool InGameUI::rotatePendingPlacement( Int steps )
+{
+	const Real step = PI / 4.0f;
+
+	if( steps == 0 || m_pendingPlaceType == NULL || m_placeIcon[ 0 ] == NULL || isPlacementAnchored() )
+		return FALSE;
+
+	m_placeAngleOffset = normalizeAngle( m_placeAngleOffset + steps * step );
+
+	for( Int i = 0; i < TheGlobalData->m_maxLineBuildObjects; i++ )
+		if( m_placeIcon[ i ] )
+			m_placeIcon[ i ]->setOrientation( normalizeAngle( m_placeIcon[ i ]->getOrientation() + steps * step ) );
+
+	return TRUE;
+
+}  // end rotatePendingPlacement
 
 //-------------------------------------------------------------------------------------------------
 /** Mark given Drawable as "selected". */
