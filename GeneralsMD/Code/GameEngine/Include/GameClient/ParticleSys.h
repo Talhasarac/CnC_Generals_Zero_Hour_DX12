@@ -500,6 +500,12 @@ class ParticleSystemTemplate : public MemoryPoolObject, protected ParticleSystem
 	MEMORY_POOL_GLUE_WITH_USERLOOKUP_CREATE( ParticleSystemTemplate, "ParticleSystemTemplatePool" )		
 
 public:
+
+	/** Force terrain collision on for a system whose INI never asked for it ("-particlebounce").
+		* ParticleSystemInfo is a protected base, so the manager needs a way in. */
+	void forceGroundCollision( Real bounce, Real friction )
+	{ m_groundCollision = TRUE; m_groundBounce = bounce; m_groundFriction = friction; }
+
 	ParticleSystemTemplate( const AsciiString &name );
 
 	AsciiString getName( void ) const { return m_name; }

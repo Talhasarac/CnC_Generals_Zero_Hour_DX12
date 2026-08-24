@@ -475,7 +475,8 @@ public:  // ********************************************************************
 	// One cameo of the global production strip: which producer it belongs to, which entry of that
 	// producer's queue it is, and where it was drawn this frame.
 	//
-	enum { MAX_PRODUCTION_STRIP = 40 };			///< as many cameos as the strip will ever draw, both rows
+	enum { PRODUCTION_STRIP_ROW_MAX = 16 };	///< cameos one row will draw; the rest become a "+N"
+	enum { PRODUCTION_STRIP_ROWS = 2 };			///< the global row, and the selected producer's row
 	struct ProductionStripSlot
 	{
 		ObjectID			producer;						///< the building this item is queued on
@@ -774,7 +775,7 @@ protected:
 	void drawIncomeRate( void );					///< income per minute, drawn beside the money window
 	void updateIncomeEstimate( Player *player );	///< income per minute, shown beside the money
 	void drawProductionStrip( void );			///< the production queue rows above the control bar
-	void drawProductionStripRow( Int first, Int last, Int y );	///< one row of those, [first, last)
+	void drawProductionStripRow( Int row, Int y );	///< one of those rows, at that top edge
 
 	Bool												m_placementRangeRingUp;	///< we put a radius cursor up for a pending structure, so we owe a clear
 	Real												m_placementRingRadius;	///< the radius that ring was built at, so it is not rebuilt every frame
@@ -794,9 +795,10 @@ protected:
 	// each, oldest first, left aligned above the control bar. drawProductionStrip() lays it out
 	// and records where each cameo landed; handleProductionStripClick() reads those back.
 	//
-	ProductionStripSlot					m_productionStrip[ MAX_PRODUCTION_STRIP ];
-	Int													m_productionStripCount;	///< how many of those slots are live this frame
-	Int													m_productionStripGlobalCount;	///< of those, how many belong to the top (global) row
+	ProductionStripSlot					m_productionStrip[ PRODUCTION_STRIP_ROWS ][ PRODUCTION_STRIP_ROW_MAX ];
+	Int													m_productionStripCount[ PRODUCTION_STRIP_ROWS ];	///< cameos drawn per row
+	Int													m_productionStripTotal[ PRODUCTION_STRIP_ROWS ];	///< items queued per row, drawn or not
+	DisplayString *							m_productionStripOverflow;	///< the "+N" that stands for the rest of a row
 
 	Coord2D											m_superweaponPosition;
 	Real												m_superweaponFlashDuration;

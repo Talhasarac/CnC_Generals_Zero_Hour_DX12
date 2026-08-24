@@ -817,6 +817,7 @@ GlobalData::GlobalData()
 
 	m_drawEntireTerrain = FALSE;
 	m_maxParticleCount = 0;
+	m_particleGroundBounce = FALSE;
 	m_maxFieldParticleCount = 30;
 	
 	// End Add

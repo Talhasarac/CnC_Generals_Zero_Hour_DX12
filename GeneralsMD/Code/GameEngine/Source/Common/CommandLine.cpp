@@ -767,6 +767,19 @@ Int parseNoShellMap(char *args[], int)
 	return 1;
 }
 
+// Turn terrain collision on for every particle system at once.  The shipped
+// ParticleSystem.ini lives inside INIZH.big and a loose copy would have to replace the whole
+// file, so this is how the effect gets seen before any INI is written.
+// ponytail: a preview switch - the real answer is GroundCollision per system in the INI
+Int parseParticleBounce(char *args[], int)
+{
+	if (TheWritableGlobalData)
+	{
+		TheWritableGlobalData->m_particleGroundBounce = TRUE;
+	}
+	return 1;
+}
+
 Int parseNoShaders(char *args[], int)
 {
 	if (TheWritableGlobalData)
@@ -1144,6 +1157,7 @@ static CommandLineParam params[] =
 	{ "-playStats", parsePlayStats },
 	{ "-mod", parseMod },
 	{ "-noshaders", parseNoShaders },
+	{ "-particlebounce", parseParticleBounce },
 	{ "-quickstart", parseQuickStart },
 
 #if (defined(_DEBUG) || defined(_INTERNAL))

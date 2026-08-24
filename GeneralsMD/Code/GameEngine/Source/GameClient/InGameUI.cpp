@@ -1032,8 +1032,12 @@ InGameUI::InGameUI()
 	m_hudLastMoney = -1;
 	m_hudLastMoneyFrame = 0;
 	m_hudIncomePerMin = 0;
-	m_productionStripCount = 0;
-	m_productionStripGlobalCount = 0;
+	for( Int stripRow = 0; stripRow < PRODUCTION_STRIP_ROWS; stripRow++ )
+	{
+		m_productionStripCount[ stripRow ] = 0;
+		m_productionStripTotal[ stripRow ] = 0;
+	}
+	m_productionStripOverflow = NULL;
 
 	m_superweaponPosition.x = 0.7f;
 	m_superweaponPosition.y = 0.7f;
@@ -5407,24 +5411,28 @@ void InGameUI::drawHudOverlay( void )
 // The production strip: one cameo per queued item, drawn over the world just above the control
 // bar, left aligned in a row that grows to the right. The top row is global - everything the local
 // player has queued anywhere. When a single producer is selected its own queue gets a second row
-// beneath it. Units and upgrades wear the same two border colours the command bar uses. The item a
-// building is actually working on wears a radial fill. A click takes the camera to the building an
-// item is queued on; ctrl-click cancels it.
+// beneath it. Each row draws at most PRODUCTION_STRIP_ROW_MAX cameos and finishes with a "+N" for
+// whatever else is queued. Units and upgrades wear the same two border colours the command bar
+// uses. The item a building is actually working on wears a radial fill. A click takes the camera
+// to the building an item is queued on; ctrl-click cancels it.
 //-------------------------------------------------------------------------------------------------
 enum
 {
 	PRODUCTION_STRIP_CAMEO	= 32,		///< cameo edge in pixels
 	PRODUCTION_STRIP_GAP		= 3,		///< space between cameos, and between the two rows
 	PRODUCTION_STRIP_LEFT		= 8,		///< inset from the left edge of the screen
-	PRODUCTION_STRIP_LIFT		= 6			///< clearance above the control bar
+	PRODUCTION_STRIP_LIFT		= 6,		///< clearance above the control bar
+	PRODUCTION_STRIP_MORE		= 34		///< width kept for the "+N" that closes an overflowing row
 };
 
 //-------------------------------------------------------------------------------------------------
-/** Append everything this object has queued, units and upgrades alike, in queue order. */
+/** Append everything this object has queued, units and upgrades alike, in queue order. Everything
+	* is counted in *total; only the first 'max' of them get a slot to be drawn in. */
 //-------------------------------------------------------------------------------------------------
-static void appendProducerQueue( Object *obj, InGameUI::ProductionStripSlot *slots, Int *count )
+static void appendProducerQueue( Object *obj, InGameUI::ProductionStripSlot *slots,
+																 Int *count, Int max, Int *total )
 {
-	if( obj == NULL || *count >= InGameUI::MAX_PRODUCTION_STRIP )
+	if( obj == NULL )
 		return;
 
 	ProductionUpdateInterface *pu = obj->getProductionUpdateInterface();
@@ -5456,8 +5464,13 @@ static void appendProducerQueue( Object *obj, InGameUI::ProductionStripSlot *slo
 		else
 			continue;
 
-		while( repeat-- > 0 && *count < InGameUI::MAX_PRODUCTION_STRIP )
+		while( repeat-- > 0 )
 		{
+			(*total)++;
+
+			if( *count >= max )
+				continue;					// past the end of the row: counted, but not drawn
+
 			InGameUI::ProductionStripSlot *slot = &slots[ (*count)++ ];
 			slot->producer = obj->getID();
 			slot->id = id;
@@ -5475,12 +5488,13 @@ struct ProductionStripGather
 {
 	InGameUI::ProductionStripSlot *slot;
 	Int *count;
+	Int *total;
 };
 
 static void gatherProductionStrip( Object *obj, void *userData )
 {
 	ProductionStripGather *g = (ProductionStripGather *)userData;
-	appendProducerQueue( obj, g->slot, g->count );
+	appendProducerQueue( obj, g->slot, g->count, InGameUI::PRODUCTION_STRIP_ROW_MAX, g->total );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -5509,24 +5523,27 @@ static const ProductionEntry *findStripEntry( ProductionUpdateInterface *pu,
 }
 
 //-------------------------------------------------------------------------------------------------
-/** Lay out and draw one row, [first, last) of the slot array, with its top edge at y. */
+/** Lay out and draw one row, with its top edge at y. */
 //-------------------------------------------------------------------------------------------------
-void InGameUI::drawProductionStripRow( Int first, Int last, Int y )
+void InGameUI::drawProductionStripRow( Int row, Int y )
 {
-	if( first >= last )
+	const Int count = m_productionStripCount[ row ];
+	if( count < 1 )
 		return;
 
-	const Int count = last - first;
-	const Int rowWidth = count * PRODUCTION_STRIP_CAMEO + ( count - 1 ) * PRODUCTION_STRIP_GAP;
+	const Int hidden = m_productionStripTotal[ row ] - count;
+	Int rowWidth = count * PRODUCTION_STRIP_CAMEO + ( count - 1 ) * PRODUCTION_STRIP_GAP;
+	if( hidden > 0 )
+		rowWidth += PRODUCTION_STRIP_GAP + PRODUCTION_STRIP_MORE;
 
 	// one plate behind the row, so the cameos read over any terrain
 	TheDisplay->drawFillRect( PRODUCTION_STRIP_LEFT - 3, y - 3, rowWidth + 6, PRODUCTION_STRIP_CAMEO + 6,
 														GameMakeColor( 0, 0, 0, 130 ) );
 
 	Int x = PRODUCTION_STRIP_LEFT;
-	for( Int i = first; i < last; i++ )
+	for( Int i = 0; i < count; i++ )
 	{
-		ProductionStripSlot *slot = &m_productionStrip[ i ];
+		ProductionStripSlot *slot = &m_productionStrip[ row ][ i ];
 		slot->pos.x = x;
 		slot->pos.y = y;
 
@@ -5564,13 +5581,43 @@ void InGameUI::drawProductionStripRow( Int first, Int last, Int y )
 
 		x += PRODUCTION_STRIP_CAMEO + PRODUCTION_STRIP_GAP;
 	}
+
+	//
+	// whatever did not fit closes the row as a "+N". It is not clickable: there is no one item
+	// behind it, and the row it stands for is already reachable by selecting the building.
+	//
+	if( hidden > 0 )
+	{
+		if( m_productionStripOverflow == NULL )
+		{
+			m_productionStripOverflow = TheDisplayStringManager->newDisplayString();
+			m_productionStripOverflow->setFont( TheFontLibrary->getFont( m_superweaponNormalFont,
+													TheGlobalLanguageData->adjustFontSize( HUD_OVERLAY_POINT_SIZE ),
+													TRUE ) );
+		}
+
+		UnicodeString text;
+		text.format( L"+%d", hidden );
+		m_productionStripOverflow->setText( text );
+
+		Int textWidth = 0, textHeight = 0;
+		m_productionStripOverflow->getSize( &textWidth, &textHeight );
+
+		m_productionStripOverflow->draw( x + ( PRODUCTION_STRIP_MORE - textWidth ) / 2,
+																		 y + ( PRODUCTION_STRIP_CAMEO - textHeight ) / 2,
+																		 GameMakeColor( 235, 235, 235, 255 ),
+																		 GameMakeColor( 0, 0, 0, 255 ) );
+	}
 }
 
 //-------------------------------------------------------------------------------------------------
 void InGameUI::drawProductionStrip( void )
 {
-	m_productionStripCount = 0;
-	m_productionStripGlobalCount = 0;
+	for( Int row = 0; row < PRODUCTION_STRIP_ROWS; row++ )
+	{
+		m_productionStripCount[ row ] = 0;
+		m_productionStripTotal[ row ] = 0;
+	}
 
 	if( TheGameLogic == NULL || !TheGameLogic->isInGame() || TheGameLogic->isInShellGame() )
 		return;
@@ -5580,10 +5627,10 @@ void InGameUI::drawProductionStrip( void )
 		return;
 
 	ProductionStripGather gather;
-	gather.slot = m_productionStrip;
-	gather.count = &m_productionStripCount;
+	gather.slot = m_productionStrip[ 0 ];
+	gather.count = &m_productionStripCount[ 0 ];
+	gather.total = &m_productionStripTotal[ 0 ];
 	player->iterateObjects( gatherProductionStrip, &gather );
-	m_productionStripGlobalCount = m_productionStripCount;
 
 	//
 	// a single selected producer gets its own row underneath, so the building you are looking at
@@ -5593,10 +5640,11 @@ void InGameUI::drawProductionStrip( void )
 	{
 		Object *sel = m_selectedDrawables.front()->getObject();
 		if( sel && sel->getControllingPlayer() == player )
-			appendProducerQueue( sel, m_productionStrip, &m_productionStripCount );
+			appendProducerQueue( sel, m_productionStrip[ 1 ], &m_productionStripCount[ 1 ],
+													 PRODUCTION_STRIP_ROW_MAX, &m_productionStripTotal[ 1 ] );
 	}
 
-	if( m_productionStripCount == 0 )
+	if( m_productionStripCount[ 0 ] == 0 && m_productionStripCount[ 1 ] == 0 )
 		return;
 
 	//
@@ -5614,61 +5662,63 @@ void InGameUI::drawProductionStrip( void )
 	}
 
 	// the selected building's row is the lower one, nearest the bar it belongs to
-	const Bool hasSelectedRow = ( m_productionStripCount > m_productionStripGlobalCount );
 	const Int lowerY = barTop - PRODUCTION_STRIP_CAMEO - PRODUCTION_STRIP_LIFT;
 	const Int upperY = lowerY - PRODUCTION_STRIP_CAMEO - PRODUCTION_STRIP_GAP;
 
-	if( hasSelectedRow )
+	if( m_productionStripCount[ 1 ] > 0 )
 	{
 		if( upperY < 0 )
 			return;
-		drawProductionStripRow( 0, m_productionStripGlobalCount, upperY );
-		drawProductionStripRow( m_productionStripGlobalCount, m_productionStripCount, lowerY );
+		drawProductionStripRow( 0, upperY );
+		drawProductionStripRow( 1, lowerY );
 	}
 	else
 	{
 		if( lowerY < 0 )
 			return;
-		drawProductionStripRow( 0, m_productionStripGlobalCount, lowerY );
+		drawProductionStripRow( 0, lowerY );
 	}
 }
 
 //-------------------------------------------------------------------------------------------------
 Bool InGameUI::handleProductionStripClick( const ICoord2D *mouse, Bool cancel )
 {
-	if( mouse == NULL || m_productionStripCount == 0 )
+	if( mouse == NULL )
 		return FALSE;
 
-	for( Int i = 0; i < m_productionStripCount; i++ )
+	for( Int row = 0; row < PRODUCTION_STRIP_ROWS; row++ )
 	{
-		const ProductionStripSlot *slot = &m_productionStrip[ i ];
-
-		if( mouse->x < slot->pos.x || mouse->x >= slot->pos.x + PRODUCTION_STRIP_CAMEO ||
-				mouse->y < slot->pos.y || mouse->y >= slot->pos.y + PRODUCTION_STRIP_CAMEO )
-			continue;
-
-		Object *producer = TheGameLogic->findObjectByID( slot->producer );
-		if( producer == NULL )
-			return TRUE;					// the building died under the cursor - the click is still ours
-
-		if( cancel )
+		for( Int i = 0; i < m_productionStripCount[ row ]; i++ )
 		{
-			//
-			// the producer travels with the message: the strip cancels on buildings that are not
-			// selected, so the logic cannot work out whose queue this is otherwise
-			//
-			GameMessage *msg = TheMessageStream->appendMessage( slot->isUpgrade
-																												 ? GameMessage::MSG_CANCEL_UPGRADE
-																												 : GameMessage::MSG_CANCEL_UNIT_CREATE );
-			msg->appendIntegerArgument( slot->id );
-			msg->appendObjectIDArgument( slot->producer );
-		}
-		else
-		{
-			TheTacticalView->lookAt( producer->getPosition() );
-		}
+			const ProductionStripSlot *slot = &m_productionStrip[ row ][ i ];
 
-		return TRUE;
+			if( mouse->x < slot->pos.x || mouse->x >= slot->pos.x + PRODUCTION_STRIP_CAMEO ||
+					mouse->y < slot->pos.y || mouse->y >= slot->pos.y + PRODUCTION_STRIP_CAMEO )
+				continue;
+
+			Object *producer = TheGameLogic->findObjectByID( slot->producer );
+			if( producer == NULL )
+				return TRUE;				// the building died under the cursor - the click is still ours
+
+			if( cancel )
+			{
+				//
+				// the producer travels with the message: the strip cancels on buildings that are not
+				// selected, so the logic cannot work out whose queue this is otherwise
+				//
+				GameMessage *msg = TheMessageStream->appendMessage( slot->isUpgrade
+																													 ? GameMessage::MSG_CANCEL_UPGRADE
+																													 : GameMessage::MSG_CANCEL_UNIT_CREATE );
+				msg->appendIntegerArgument( slot->id );
+				msg->appendObjectIDArgument( slot->producer );
+			}
+			else
+			{
+				TheTacticalView->lookAt( producer->getPosition() );
+			}
+
+			return TRUE;
+		}
 	}
 
 	return FALSE;

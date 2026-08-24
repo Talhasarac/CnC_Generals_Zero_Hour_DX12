@@ -2934,6 +2934,16 @@ void ParticleSystemManager::init( void )
 	INI ini;
 	ini.load( AsciiString( "Data\\INI\\ParticleSystem.ini" ), INI_LOAD_OVERWRITE, NULL );
 
+	// "-particlebounce" on the command line: every system hits the terrain, using the built-in
+	// defaults.  Without it nothing changes unless a system's INI sets GroundCollision itself.
+	if( TheGlobalData && TheGlobalData->m_particleGroundBounce )
+	{
+		for( TemplateMap::iterator it = m_templateMap.begin(); it != m_templateMap.end(); ++it )
+			it->second->forceGroundCollision( 0.35f, 0.6f );
+		DEBUG_LOG(("-particlebounce: terrain collision forced on for %d particle systems\n",
+							(Int)m_templateMap.size()));
+	}
+
 	// sanity, our lists must be empty!!
 	for( Int i = 0; i < NUM_PARTICLE_PRIORITIES; ++i )
 	{
