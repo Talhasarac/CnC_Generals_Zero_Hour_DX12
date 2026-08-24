@@ -65,6 +65,7 @@
 #include "GameClient/InGameUI.h"
 #include "GameClient/VideoPlayer.h"
 #include "GameClient/Mouse.h"
+#include "GameClient/Keyboard.h"
 #include "GameClient/GadgetStaticText.h"
 #include "GameClient/View.h"
 #include "GameClient/TerrainVisual.h"	
@@ -5602,12 +5603,39 @@ void InGameUI::drawProductionStripRow( Int row, Int y )
 																	 GameMakeColor( 0, 0, 0, 100 ) );
 		}
 
+		//
+		// ctrl is the strip's cancel modifier, so while it is held the cameo under the cursor says
+		// so: it goes red and wears a minus. Without it a ctrl-click is a guess about which cameo
+		// the cursor is really on, and an accidental cancel costs the whole item.
+		//
+		Bool cancelHover = FALSE;
+		if( TheKeyboard && TheKeyboard->isCtrl() && TheMouse )
+		{
+			const MouseIO *io = TheMouse->getMouseStatus();
+			cancelHover = io && io->pos.x >= x && io->pos.x < x + PRODUCTION_STRIP_CAMEO &&
+										io->pos.y >= y && io->pos.y < y + PRODUCTION_STRIP_CAMEO;
+		}
+
 		// same border colours the command bar puts on its build and upgrade buttons
 		Color border = GameMakeColor( 160, 160, 160, 160 );
-		if( TheControlBar )
+		if( cancelHover )
+			border = GameMakeColor( 255, 80, 80, 255 );
+		else if( TheControlBar )
 			border = slot->isUpgrade ? TheControlBar->getUpgradeBorderColor()
 															 : TheControlBar->getBuildBorderColor();
 		TheDisplay->drawOpenRect( x, y, PRODUCTION_STRIP_CAMEO, PRODUCTION_STRIP_CAMEO, 1.0f, border );
+
+		if( cancelHover )
+		{
+			const Int barInset = PRODUCTION_STRIP_CAMEO / 4;
+			const Int barHeight = 4;
+
+			TheDisplay->drawFillRect( x, y, PRODUCTION_STRIP_CAMEO, PRODUCTION_STRIP_CAMEO,
+																GameMakeColor( 190, 0, 0, 120 ) );
+			TheDisplay->drawFillRect( x + barInset, y + ( PRODUCTION_STRIP_CAMEO - barHeight ) / 2,
+																PRODUCTION_STRIP_CAMEO - 2 * barInset, barHeight,
+																GameMakeColor( 255, 255, 255, 255 ) );
+		}
 
 		x += PRODUCTION_STRIP_CAMEO + PRODUCTION_STRIP_GAP;
 	}
