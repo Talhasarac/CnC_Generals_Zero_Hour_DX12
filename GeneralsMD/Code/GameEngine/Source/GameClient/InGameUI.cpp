@@ -1029,9 +1029,12 @@ InGameUI::InGameUI()
 	m_hudLastSampleFrame = 0;
 	m_hudLastSampleMs = 0;
 	m_hudFps = 0.0f;
-	m_hudLastMoney = -1;
+	for( Int incomeBucket = 0; incomeBucket < INCOME_SAMPLES; incomeBucket++ )
+		m_incomeSamples[ incomeBucket ] = 0;
+	m_incomeSampleCount = 0;
+	m_incomeSamplePlayer = -1;
 	m_hudLastMoneyFrame = 0;
-	m_hudIncomePerMin = 0;
+	m_hudIncomePerMin = -1;
 	for( Int stripRow = 0; stripRow < PRODUCTION_STRIP_ROWS; stripRow++ )
 	{
 		m_productionStripCount[ stripRow ] = 0;
@@ -5267,35 +5270,62 @@ void InGameUI::updateFloatingText( void )
 	* only behind -displayDebug together with a screenful of engine internals. */
 //-------------------------------------------------------------------------------------------------
 //-------------------------------------------------------------------------------------------------
-/** Income per minute for the local player, as the change in the balance over the last sampling
-	* window. Deliberately a delta of the balance rather than a tap into the deposit paths: it
-	* counts crates and refunds too, which is what you actually want to compare a build against. */
+/** The ring math behind the income estimate: cash per minute from the oldest bucket we still hold
+	* to the newest.  A free function, not a member, so test_gameengine can drive it without a
+	* Player.  Returns -1 while there is only one bucket, i.e. no span to average over yet. */
+//-------------------------------------------------------------------------------------------------
+Int computeIncomePerMinute( const Int *samples, UnsignedInt ringSize, UnsignedInt count, Int sampleSeconds )
+{
+	if( samples == NULL || ringSize == 0 || count < 2 || sampleSeconds <= 0 )
+		return -1;
+
+	const UnsignedInt newest = count - 1;
+	const UnsignedInt oldest = (newest >= ringSize) ? newest - (ringSize - 1) : 0;
+	const Int span = (Int)(newest - oldest);		// buckets spanned, at least one
+
+	return (samples[ newest % ringSize ] - samples[ oldest % ringSize ]) * 60 / (span * sampleSeconds);
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Income per minute for the local player, averaged over the last 30 seconds of play.
+	* Sampled off the score keeper's cumulative earnings, not off the balance: the balance falls
+	* every time you build, and a balance delta therefore reads spending as zero income - which is
+	* what you have while doing anything at all.  What the score keeper counts is money that came
+	* in (supplies, crates, oil, hackers, bounties); production refunds and script grants do not
+	* count as income, which is the answer you want when comparing a rate against a build. */
 //-------------------------------------------------------------------------------------------------
 void InGameUI::updateIncomeEstimate( Player *player )
 {
 	if( player == NULL || TheGameLogic == NULL )
 		return;
 
-	const UnsignedInt SAMPLE_FRAMES = 10 * LOGICFRAMES_PER_SECOND;
+	const UnsignedInt SAMPLE_FRAMES = INCOME_SAMPLE_SECONDS * LOGICFRAMES_PER_SECOND;
 	const UnsignedInt logicFrame = TheGameLogic->getFrame();
-	Int money = player->getMoney()->countMoney();
+	const Int playerIndex = player->getPlayerIndex();
+	const Int earned = player->getScoreKeeper()->getTotalMoneyEarned();
 
-	if( m_hudLastMoney < 0 )
+	// a new game, or an observer looking at somebody else: start the window over
+	if( m_incomeSampleCount == 0 || playerIndex != m_incomeSamplePlayer || logicFrame < m_hudLastMoneyFrame )
 	{
-		m_hudLastMoney = money;
+		m_incomeSamplePlayer = playerIndex;
+		m_incomeSamples[ 0 ] = earned;
+		m_incomeSampleCount = 1;
 		m_hudLastMoneyFrame = logicFrame;
+		m_hudIncomePerMin = -1;
 		return;
 	}
 
-	if( logicFrame >= m_hudLastMoneyFrame + SAMPLE_FRAMES )
-	{
-		Int delta = money - m_hudLastMoney;
-		if( delta < 0 )
-			delta = 0;			// spending is not negative income
-		m_hudIncomePerMin = delta * (60 * LOGICFRAMES_PER_SECOND) / (Int)SAMPLE_FRAMES;
-		m_hudLastMoney = money;
-		m_hudLastMoneyFrame = logicFrame;
-	}
+	if( logicFrame < m_hudLastMoneyFrame + SAMPLE_FRAMES )
+		return;
+
+	m_incomeSamples[ m_incomeSampleCount % INCOME_SAMPLES ] = earned;
+	++m_incomeSampleCount;
+	m_hudLastMoneyFrame = logicFrame;
+
+	// average over every bucket we hold, so the number is live 2 seconds in and settles into a
+	// true 30 second rate once the ring is full
+	m_hudIncomePerMin = computeIncomePerMinute( m_incomeSamples, INCOME_SAMPLES,
+																							m_incomeSampleCount, INCOME_SAMPLE_SECONDS );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -5305,7 +5335,7 @@ void InGameUI::updateIncomeEstimate( Player *player )
 //-------------------------------------------------------------------------------------------------
 void InGameUI::drawIncomeRate( void )
 {
-	if( !TheGlobalData->m_showHudOverlay || m_hudIncomePerMin <= 0 )
+	if( !TheGlobalData->m_showHudOverlay || m_hudIncomePerMin < 0 )
 		return;
 
 	if( TheGameLogic == NULL || !TheGameLogic->isInGame() || TheGameLogic->isInShellGame() )

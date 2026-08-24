@@ -786,9 +786,14 @@ protected:
 	UnsignedInt									m_hudLastSampleFrame;		///< client frame the fps sample was last refreshed on
 	UnsignedInt									m_hudLastSampleMs;			///< wall clock of that sample
 	Real												m_hudFps;								///< smoothed render rate
-	Int													m_hudLastMoney;					///< player money at the last income sample
-	UnsignedInt									m_hudLastMoneyFrame;		///< logic frame of that sample
-	Int													m_hudIncomePerMin;			///< most recent income estimate, cash per minute
+	// Income is sampled from the player's cumulative earnings every INCOME_SAMPLE_SECONDS and
+	// averaged over the whole ring, so a lumpy supply run reads as a rate instead of a spike.
+	enum { INCOME_SAMPLES = 16, INCOME_SAMPLE_SECONDS = 2 };	///< 16 buckets of 2s = a 30s window
+	Int													m_incomeSamples[ INCOME_SAMPLES ];	///< cumulative money earned, one per bucket
+	UnsignedInt									m_incomeSampleCount;		///< buckets taken so far, the ring index is this mod INCOME_SAMPLES
+	Int													m_incomeSamplePlayer;		///< whose earnings those are, so an observer switching players restarts
+	UnsignedInt									m_hudLastMoneyFrame;		///< logic frame of the last sample
+	Int													m_hudIncomePerMin;			///< most recent income estimate, cash per minute, -1 until the window is warm
 
 	//
 	// The global production strip: every unit the local player has queued anywhere, one cameo
