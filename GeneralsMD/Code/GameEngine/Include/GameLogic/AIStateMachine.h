@@ -597,10 +597,12 @@ protected:
 	enum {ATTACK_MOVE_LEASH_CELLS=12};					///< how far a victim may pull us off the attack move
 	enum {ATTACK_MOVE_DUD_ENGAGE_FRAMES=15};		///< a fight shorter than this, with the victim still alive, never started
 	enum {ATTACK_MOVE_REACQUIRE_DELAY=30};			///< frames of pure movement after a dud fight or a broken leash
+	enum {ATTACK_MOVE_RETALIATE_FRAMES=30};			///< how recently we must have been hit to turn on whoever hit us
 
 	void startEngaging( Object *victim );				///< stop here and hand the victim to the attack sub-machine
 	void stopEngaging( void );									///< the fight is over; put back what startEngaging changed
 	Bool hasLeftTheLeash( void );								///< has the victim dragged us too far off the attack move?
+	Object *findRetaliationTarget( void );			///< whoever is shooting us right now, if we can shoot back
 	Bool mayEngageYet( void );									///< has the required progress toward the goal been made?
 	void requireProgressTowardGoal( void );			///< refuse to fight again until we are closer to the goal
 	void applyGroupSpeed( void );								///< hold this unit to the ordered group's speed

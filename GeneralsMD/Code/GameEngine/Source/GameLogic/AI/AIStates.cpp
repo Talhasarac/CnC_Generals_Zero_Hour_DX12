@@ -3810,6 +3810,64 @@ Bool AIAttackMoveToState::hasLeftTheLeash( void )
 
 //----------------------------------------------------------------------------------------------------------
 /**
+ * The retaliation rule, with no Object involved so test_gameengine can link straight to it - the
+ * same trick as AIAttackMove_leashBroken above.
+ *
+ * On attack move a unit picks the target the scan happens to hand it, which is nearly always the
+ * nearest one, and then stays on it while something else shoots it in the back. Shooting back is
+ * both what a player expects and the better trade, so whoever damaged us most recently wins the
+ * target selection - provided the damage is fresh (an old grudge is not a fight), we are not
+ * already fighting them, and we can actually attack them.
+ *
+ * 'lastDamageFrame' is the body module's damage timestamp: 0 when nothing has ever hit us and
+ * 0xffffffff when it has been stamped as "never", so both must read as stale. Comparing 'now'
+ * against it first keeps unsigned arithmetic from wrapping either case into a fresh hit.
+ */
+Bool AIAttackMove_shouldRetaliate( UnsignedInt lastDamageFrame, UnsignedInt now, Int windowFrames,
+																	 Bool alreadyFightingTheAttacker, Bool canAttackTheAttacker )
+{
+	if (!canAttackTheAttacker || alreadyFightingTheAttacker)
+		return FALSE;
+
+	if (lastDamageFrame == 0 || now < lastDamageFrame)
+		return FALSE;
+
+	return (now - lastDamageFrame) <= (UnsignedInt)windowFrames;
+}
+
+//----------------------------------------------------------------------------------------------------------
+/**
+ * Whoever just shot us, if turning on them is worth doing; see AIAttackMove_shouldRetaliate above.
+ */
+Object *AIAttackMoveToState::findRetaliationTarget( void )
+{
+	Object *owner = getMachineOwner();
+	BodyModuleInterface *body = owner->getBodyModule();
+	const DamageInfo *damage = body->getLastDamageInfo();
+	if (damage == NULL)
+		return NULL;			// an inactive body keeps no damage history at all
+
+	Object *attacker = TheGameLogic->findObjectByID( damage->in.m_sourceID );
+	if (attacker == NULL || attacker->isEffectivelyDead())
+		return NULL;
+
+	Bool canShootBack = owner->isAbleToAttack() && owner->getRelationship( attacker ) == ENEMIES;
+	if (canShootBack)
+	{
+		CanAttackResult result = owner->getAbleToAttackSpecificObject( ATTACK_NEW_TARGET, attacker, CMD_FROM_AI );
+		canShootBack = (result == ATTACKRESULT_POSSIBLE || result == ATTACKRESULT_POSSIBLE_AFTER_MOVING);
+	}
+
+	if (!AIAttackMove_shouldRetaliate( body->getLastDamageTimestamp(), TheGameLogic->getFrame(),
+																		 ATTACK_MOVE_RETALIATE_FRAMES,
+																		 attacker->getID() == m_victimID, canShootBack ))
+		return NULL;
+
+	return attacker;
+}
+
+//----------------------------------------------------------------------------------------------------------
+/**
  * The leash alone does not bound a chase: it is measured from wherever the fight started, so a
  * victim that keeps backing off is re-acquired from a leash length further along every time and
  * walks the unit off the map one leash at a time.  After a broken leash the unit therefore owes the
@@ -3876,6 +3934,23 @@ StateReturnType AIAttackMoveToState::update()
 		}
 		else
 		{
+			//
+			// Something is shooting us while we are busy with somebody else: turn on it instead.
+			// On our own scan clock, so a fight cannot be restarted every frame by splash damage.
+			//
+			UnsignedInt now = TheGameLogic->getFrame();
+			if (now >= m_frameToScanOn)
+			{
+				Object *shooter = findRetaliationTarget();
+				if (shooter)
+				{
+					stopEngaging();
+					m_frameToScanOn = now + ATTACK_MOVE_SCAN_RATE;
+					startEngaging(shooter);
+					return STATE_CONTINUE;
+				}
+			}
+
 			// The move stopped once, in startEngaging; from here the attack machine owns the
 			// locomotor, so that its approach can close with the victim and its own arrival can stop
 			// it.  (Clearing the goal and the MOVING condition every frame - as this state used to -
@@ -3913,7 +3988,10 @@ StateReturnType AIAttackMoveToState::update()
 			// enough to drive right past an enemy), and take anything in vision range, not just what
 			// is already within weapon range - we stop and close with whatever we find.
 			ai->setNextMoodCheckTime(now);
-			Object* nextObjectToAttack = ai->getNextMoodTarget( true, false, true );
+			// whoever is shooting us beats whatever the scan would have picked (usually the nearest)
+			Object* nextObjectToAttack = findRetaliationTarget();
+			if (nextObjectToAttack == NULL)
+				nextObjectToAttack = ai->getNextMoodTarget( true, false, true );
 			if (nextObjectToAttack != NULL)
 			{
 				startEngaging(nextObjectToAttack);
