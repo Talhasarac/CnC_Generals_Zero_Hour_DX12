@@ -167,6 +167,13 @@ Alongside it: zoom further out (with the whole map drawn, so the corners are not
 the cursor, 45-degree snapping for camera rotation and building placement, edge scrolling in
 windowed mode, and scrolling speed that no longer depends on your frame rate.
 
+**Zoom toward the cursor works now.** It was in the options and it did nothing at all. The camera
+does not jump to a new zoom, it glides there over the next fraction of a second - and the game was
+measuring how far the ground had slid under your pointer straight away, before the camera had moved
+a millimetre, so it always measured nothing and moved nothing. The spot under your pointer is now
+held there for the whole glide. Roll the wheel over the far corner of your base and you end up at
+that corner, not in the middle of the screen.
+
 **Hold Ctrl and roll the wheel to turn a building before you put it down** — a clean 45 degrees a
 notch, and the next building you place keeps the same facing, so a wall or a line of bunkers goes
 down straight without aiming each piece by hand.
