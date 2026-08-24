@@ -355,6 +355,37 @@ void Particle::applyForce( const Coord3D *force )
 }
 
 // ------------------------------------------------------------------------------------------------
+/** Collide a particle with the ground.  The velocity is split into the part heading into the
+ * surface and the part sliding along it: the first is reflected and scaled by 'bounce', the
+ * second scaled by 'friction'.  Working off the terrain normal rather than a flat Z flip means
+ * debris rolls down a slope instead of hopping straight up off it.
+ *
+ * A particle already moving away from the surface is only lifted clear, never flipped back in -
+ * that is what keeps a resting particle resting instead of jittering. */
+// ------------------------------------------------------------------------------------------------
+Bool particleGroundBounce( Coord3D *pos, Coord3D *vel, Real groundZ,
+													 const Coord3D *normal, Real bounce, Real friction )
+{
+	if( pos->z >= groundZ )
+		return FALSE;
+
+	pos->z = groundZ;
+
+	const Real intoSurface = vel->x * normal->x + vel->y * normal->y + vel->z * normal->z;
+	if( intoSurface >= 0.0f )
+		return TRUE;
+
+	Coord3D alongNormal;
+	alongNormal.set( normal->x * intoSurface, normal->y * intoSurface, normal->z * intoSurface );
+
+	vel->x = (vel->x - alongNormal.x) * friction - alongNormal.x * bounce;
+	vel->y = (vel->y - alongNormal.y) * friction - alongNormal.y * bounce;
+	vel->z = (vel->z - alongNormal.z) * friction - alongNormal.z * bounce;
+
+	return TRUE;
+}
+
+// ------------------------------------------------------------------------------------------------
 /** Update the behavior of an individual particle */
 // ------------------------------------------------------------------------------------------------
 Bool Particle::update( void )
@@ -380,6 +411,18 @@ Bool Particle::update( void )
 	// see if we should even do anything
 	if( windMotion != ParticleSystemInfo::WIND_MOTION_NOT_USED )
 		doWindMotion();
+
+	// hit the ground, if this system asked to.  Only while descending, so the terrain is not
+	// sampled for every rising smoke puff in the scene.
+	// ponytail: terrain heightmap only - buildings, bridges and the water surface are not consulted
+	if( m_system->isGroundCollision() && TheTerrainLogic != NULL
+			&& (m_vel.z + driftVel->z) < 0.0f )
+	{
+		Coord3D groundNormal;
+		const Real groundZ = TheTerrainLogic->getGroundHeight( m_pos.x, m_pos.y, &groundNormal );
+		particleGroundBounce( &m_pos, &m_vel, groundZ, &groundNormal,
+												m_system->getGroundBounce(), m_system->getGroundFriction() );
+	}
 
 	// update orientation
 	m_angleZ += m_angularRateZ;
@@ -738,6 +781,9 @@ ParticleSystemInfo::ParticleSystemInfo()
 	//Initializations inserted
 	m_driftVelocity.zero();
 	m_gravity = 0.0f;
+	m_groundCollision = FALSE;	// retail behaviour: particles pass through the terrain
+	m_groundBounce = 0.35f;			// only consulted once an INI sets GroundCollision = Yes
+	m_groundFriction = 0.6f;
 	m_isEmissionVolumeHollow = FALSE;
 	m_isOneShot = FALSE;
 	m_slavePosOffset.zero();
@@ -796,7 +842,8 @@ void ParticleSystemInfo::xfer( Xfer *xfer )
 	Int i;
 
 	// version 
-	XferVersion currentVersion = 1;
+	// 2: ground collision (m_groundCollision / m_groundBounce / m_groundFriction)
+	XferVersion currentVersion = 2;
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
@@ -1016,6 +1063,14 @@ void ParticleSystemInfo::xfer( Xfer *xfer )
 
 	// wind motion moving to end angle
 	xfer->xferByte( &m_windMotionMovingToEndAngle );
+
+	// ground collision - added in version 2, absent from saves written before it
+	if( version >= 2 )
+	{
+		xfer->xferBool( &m_groundCollision );
+		xfer->xferReal( &m_groundBounce );
+		xfer->xferReal( &m_groundFriction );
+	}
 
 }  // end xfer
 
@@ -2622,6 +2677,9 @@ const FieldParse ParticleSystemTemplate::m_fieldParseTable[] =
 
 	{ "VelocityDamping",				INI::parseGameClientRandomVariable,	NULL,		offsetof( ParticleSystemTemplate, m_velDamping ) },
 	{ "Gravity",								INI::parseReal,																NULL,		offsetof( ParticleSystemTemplate, m_gravity ) },
+	{ "GroundCollision",						INI::parseBool,																NULL,		offsetof( ParticleSystemTemplate, m_groundCollision ) },
+	{ "GroundBounce",							INI::parseReal,																NULL,		offsetof( ParticleSystemTemplate, m_groundBounce ) },
+	{ "GroundFriction",						INI::parseReal,																NULL,		offsetof( ParticleSystemTemplate, m_groundFriction ) },
 	{ "SlaveSystem",						INI::parseAsciiString,												NULL,		offsetof( ParticleSystemTemplate, m_slaveSystemName ) },
 	{ "SlavePosOffset",					INI::parseCoord3D,														NULL,		offsetof( ParticleSystemTemplate, m_slavePosOffset ) },
 	{ "PerParticleAttachedSystem",		INI::parseAsciiString,								NULL,		offsetof( ParticleSystemTemplate, m_attachedSystemName ) },

@@ -288,6 +288,15 @@ static char *WindMotionNames[] =
  * All of the properties of a particle system, used by both ParticleSystemTemplates
  * and ParticleSystem classes.
  */
+/**
+ * Collide one particle with the ground.  Free of ParticleSystem on purpose: it needs no
+ * subsystems, so it can be exercised directly (test_gameengine).  pos/vel are world space and
+ * are updated in place; groundZ and normal are what TheTerrainLogic reports under pos.
+ * Returns TRUE if the particle was at or below the ground.
+ */
+extern Bool particleGroundBounce( Coord3D *pos, Coord3D *vel, Real groundZ,
+															 const Coord3D *normal, Real bounce, Real friction );
+
 class ParticleSystemInfo : public Snapshot
 {
 
@@ -356,6 +365,13 @@ public:
 
 	Coord3D m_driftVelocity;										///< additional velocity added to all particles
 	Real m_gravity;															///< gravity acceleration (global Z) for particles in this system
+
+	// Terrain collision.  Retail particles fall straight through the ground; sparks, debris and
+	// smoke all vanish into the hillside instead of hitting it.  Off by default, so every
+	// existing particle system keeps its shipped behaviour until its INI opts in.
+	Bool m_groundCollision;												///< if true, particles bounce off the terrain instead of passing through
+	Real m_groundBounce;													///< fraction of the velocity into the ground that comes back out (0 = dead stop, 1 = elastic)
+	Real m_groundFriction;												///< fraction of the velocity along the ground kept per contact (1 = frictionless slide)
 
 	AsciiString m_slaveSystemName;							///< if non-empty, create a system whose particles track this system's
 	Coord3D m_slavePosOffset;										///< positional offset of slave particles relative to master's
@@ -547,6 +563,9 @@ public:
   void setSkipParentXfrm(Bool enable) { m_skipParentXfrm = enable; } ///<disable transforming particle system with parent matrix.
 		
 	const Coord3D *getDriftVelocity( void ) { return &m_driftVelocity; }	///< get the drift velocity of the system
+	Bool isGroundCollision( void ) const { return m_groundCollision; }		///< do this system's particles hit the terrain?
+	Real getGroundBounce( void ) const { return m_groundBounce; }				///< restitution against the terrain
+	Real getGroundFriction( void ) const { return m_groundFriction; }		///< drag along the terrain
 
 	void attachToDrawable( const Drawable *draw );							///< attach this particle system to a Drawable
 	void attachToObject( const Object *obj );									///< attach this particle system to an Object

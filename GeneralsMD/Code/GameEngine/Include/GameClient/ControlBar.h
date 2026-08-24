@@ -791,6 +791,9 @@ public:
 	const Image *getStarImage( void );
 
 	Color getBorderColor( void ){return m_commandBarBorderColor;}
+	/// the two button border colours the bar itself uses, so anything drawn outside it can match
+	Color getBuildBorderColor( void ){return m_commandButtonBorderBuildColor;}
+	Color getUpgradeBorderColor( void ){return m_commandButtonBorderUpgradeColor;}
 	void updateBorderColor( Color color) {m_commandBarBorderColor = color;	}
 
 	/// set the command data into the button

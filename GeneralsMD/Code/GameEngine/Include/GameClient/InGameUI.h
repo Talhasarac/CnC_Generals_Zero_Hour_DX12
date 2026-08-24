@@ -475,12 +475,13 @@ public:  // ********************************************************************
 	// One cameo of the global production strip: which producer it belongs to, which entry of that
 	// producer's queue it is, and where it was drawn this frame.
 	//
-	enum { MAX_PRODUCTION_STRIP = 24 };			///< as many cameos as the strip will ever draw
+	enum { MAX_PRODUCTION_STRIP = 40 };			///< as many cameos as the strip will ever draw, both rows
 	struct ProductionStripSlot
 	{
 		ObjectID			producer;						///< the building this item is queued on
-		Int						id;									///< its ProductionID in that building's queue
+		Int						id;									///< a unit's ProductionID, or an upgrade's name key
 																			///  (kept as an Int so this header stays clear of GameLogic)
+		Bool					isUpgrade;					///< which of those two the id means
 		ICoord2D			pos;								///< top left corner of the cameo on screen
 	};
 
@@ -772,7 +773,8 @@ protected:
 	void drawHudOverlay( void );					///< the small elapsed-time / fps plate (ShowHudOverlay)
 	void drawIncomeRate( void );					///< income per minute, drawn beside the money window
 	void updateIncomeEstimate( Player *player );	///< income per minute, shown beside the money
-	void drawProductionStrip( void );			///< the global production queue, above the control bar
+	void drawProductionStrip( void );			///< the production queue rows above the control bar
+	void drawProductionStripRow( Int first, Int last, Int y );	///< one row of those, [first, last)
 
 	Bool												m_placementRangeRingUp;	///< we put a radius cursor up for a pending structure, so we owe a clear
 	Real												m_placementRingRadius;	///< the radius that ring was built at, so it is not rebuilt every frame
@@ -794,6 +796,7 @@ protected:
 	//
 	ProductionStripSlot					m_productionStrip[ MAX_PRODUCTION_STRIP ];
 	Int													m_productionStripCount;	///< how many of those slots are live this frame
+	Int													m_productionStripGlobalCount;	///< of those, how many belong to the top (global) row
 
 	Coord2D											m_superweaponPosition;
 	Real												m_superweaponFlashDuration;

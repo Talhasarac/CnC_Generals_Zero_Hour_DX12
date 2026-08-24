@@ -1381,7 +1381,11 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 		//---------------------------------------------------------------------------------------------
 		case GameMessage::MSG_CANCEL_UPGRADE:
 		{
-			Object *producer = getSingleObjectFromSelection(currentlySelectedGroup);
+			// as above: an explicit producer means the click came from somewhere other than that
+			// building's own command bar, and the ownership check below authorizes it
+			Object *producer = msg->getArgumentCount() > 1
+												 ? TheGameLogic->findObjectByID( msg->getArgument( 1 )->objectID )
+												 : getSingleObjectFromSelection(currentlySelectedGroup);
 			const UpgradeTemplate *upgradeT = TheUpgradeCenter->findUpgradeByKey( (NameKeyType)(msg->getArgument( 0 )->integer) );
 
 			// sanity
@@ -1454,14 +1458,14 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 			Object *producer = NULL;
 			ProductionID productionID = (ProductionID)msg->getArgument( 0 )->integer;
 
-			// an explicit producer (right-click cancel, multi-select) must be one of the selected objects
-			if( msg->getArgumentCount() > 1 && currentlySelectedGroup )
-			{
-				ObjectID producerID = msg->getArgument( 1 )->objectID;
-				const VecObjectID& ids = currentlySelectedGroup->getAllIDs();
-				if( std::find( ids.begin(), ids.end(), producerID ) != ids.end() )
-					producer = TheGameLogic->findObjectByID( producerID );
-			}
+			//
+			// An explicit producer travels with the message when the click did not come from the
+			// selected building's own bar - a multi-selection's queue, or the global production
+			// strip, which cancels on a building the player never selected. The ownership check
+			// below is what authorizes it; membership of the current selection is not required.
+			//
+			if( msg->getArgumentCount() > 1 )
+				producer = TheGameLogic->findObjectByID( msg->getArgument( 1 )->objectID );
 			else
 				producer = getSingleObjectFromSelection(currentlySelectedGroup);
 			
