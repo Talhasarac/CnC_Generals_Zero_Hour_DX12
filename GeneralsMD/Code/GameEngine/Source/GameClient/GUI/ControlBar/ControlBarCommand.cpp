@@ -731,6 +731,22 @@ void ControlBar::updateContextCommand( void )
 			}
 		}
 
+		//
+		// an upgrade button wears the same radial fill while its upgrade is the one the building is
+		// researching. An upgrade is never queued twice, so there is no count badge to go with it.
+		// The button is disabled for the duration - getCommandAvailability refuses an upgrade that
+		// is already in production - and the clock draws over the disabled state too.
+		//
+		if( ( command->getCommandType() == GUI_COMMAND_PLAYER_UPGRADE ||
+					command->getCommandType() == GUI_COMMAND_OBJECT_UPGRADE ) &&
+				pu && m_currContext != CB_CONTEXT_MULTI_SELECT )
+		{
+			const ProductionEntry *first = pu->firstProduction();
+			if( first && first->getProductionType() == PRODUCTION_UPGRADE &&
+					first->getProductionUpgrade() == command->getUpgradeTemplate() )
+				GadgetButtonDrawClock( win, first->getPercentComplete(), BuildClockColor );
+		}
+
 		// a structure outside the armed chord group greys out until the chord resolves
 		if( m_chordGroup >= 0 && command->getCommandType() == GUI_COMMAND_DOZER_CONSTRUCT &&
 				( i < CHORD_GROUP_SIZE ) != ( m_chordGroup == 0 ) )
