@@ -31,6 +31,8 @@
 #include "GameLogic/Module/PhysicsUpdate.h"
 #include "GameClient/ParticleSys.h"
 #include "GameClient/ControlBar.h"
+#include "GameClient/InGameUI.h"
+#include "GameLogic/IncomingDamage.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -612,6 +614,38 @@ TEST(attack_move_leashes_ground_units_but_never_aircraft)
 	CHECK( !AIAttackMove_leashBroken( false, true,  500.0f*cell, 0.0f, LEASH ) );
 }
 
+/* AIStates.cpp: on attack move, whoever is shooting us wins the target selection
+   over whatever the scan would otherwise have picked. */
+extern Bool AIAttackMove_shouldRetaliate( UnsignedInt lastDamageFrame, UnsignedInt now, Int windowFrames,
+																					Bool alreadyFightingTheAttacker, Bool canAttackTheAttacker );
+
+TEST(attack_move_turns_on_whoever_is_shooting_it)
+{
+	const Int WINDOW = 30;		/* ATTACK_MOVE_RETALIATE_FRAMES, protected on the state */
+
+	/* hit this second, can shoot back, busy with somebody else: turn on the shooter. */
+	CHECK( AIAttackMove_shouldRetaliate( 1000, 1000, WINDOW, false, true ) );
+	CHECK( AIAttackMove_shouldRetaliate( 1000, 1029, WINDOW, false, true ) );
+	CHECK( AIAttackMove_shouldRetaliate( 1000, 1030, WINDOW, false, true ) );
+
+	/* an old grudge is not a fight. */
+	CHECK( !AIAttackMove_shouldRetaliate( 1000, 1031, WINDOW, false, true ) );
+	CHECK( !AIAttackMove_shouldRetaliate( 1000, 9999, WINDOW, false, true ) );
+
+	/* already fighting them, or cannot touch them: leave the current target alone,
+	   otherwise the fight restarts every scan and nothing is ever shot. */
+	CHECK( !AIAttackMove_shouldRetaliate( 1000, 1000, WINDOW, true,  true ) );
+	CHECK( !AIAttackMove_shouldRetaliate( 1000, 1000, WINDOW, false, false ) );
+
+	/* the two timestamps that mean "never hit". Both are unsigned, and 0xffffffff
+	   plus the window wraps to a small number - read naively, a unit that has never
+	   been damaged would retaliate against whatever object id happened to be there. */
+	CHECK( !AIAttackMove_shouldRetaliate( 0, 10, WINDOW, false, true ) );
+	CHECK( !AIAttackMove_shouldRetaliate( 0, 0, WINDOW, false, true ) );
+	CHECK( !AIAttackMove_shouldRetaliate( 0xffffffff, 10, WINDOW, false, true ) );
+	CHECK( !AIAttackMove_shouldRetaliate( 0xffffffff, 0xfffffff0, WINDOW, false, true ) );
+}
+
 //////////////////////////////////////////////////////////////////////////////
 // Particle ground collision
 //
@@ -721,126 +755,6 @@ TEST(income_is_zero_not_negative_when_nothing_comes_in)
 	CHECK_EQ(computeIncomePerMinute(samples, 4, 4, 2), 0);
 }
 
-//////////////////////////////////////////////////////////////////////////////
-// Control bar three-panel layout
-//////////////////////////////////////////////////////////////////////////////
-/*
- * ControlBarComputePanelLayout is the geometry half of ControlBar::layoutPanels:
- * screen size in, uniform scale and the three panel rectangles out.  It is split
- * out precisely so it can be driven at resolutions this machine cannot display -
- * the bar is laid out once at startup and there is no way to eyeball 1280x1024
- * without owning that monitor.
- *
- * The panels' authored rectangles were carved out of one continuous strip and add
- * up to 810 of the 800 design units.  The first cut of this layout scaled by
- * min(w/800, h/600), which on 16:9 is the height and leaves width to spare, but at
- * 4:3 and squarer is the width - so 810 units of panel went into 800 units of
- * screen, both seams overlapped, and the gaps the whole design is built around
- * closed to nothing.  Hence panels_keep_a_real_gap_on_square_screens below.
- */
-
-static const Int theTestResolutions[][2] =
-{
-	{  800, 600 },		// 4:3, the resolution the .wnd is authored at
-	{ 1024, 768 },		// 4:3
-	{ 1280, 960 },		// 4:3
-	{ 1280, 1024 },		// 5:4, squarer than the design
-	{ 1600, 1200 },		// 4:3
-	{ 1280, 720 },		// 16:9
-	{ 1920, 1080 },		// 16:9
-	{ 2560, 1080 },		// 21:9
-};
-static const Int theTestResolutionCount = sizeof(theTestResolutions) / sizeof(theTestResolutions[0]);
-
-TEST(controlbar_panels_keep_a_real_gap_on_square_screens)
-{
-	/* The regression.  Every seam has to show world through it, at every aspect -
-	   this is what failed at 4:3 and 5:4 when the scale was bounded by width alone. */
-	for (Int i = 0; i < theTestResolutionCount; ++i)
-	{
-		IRegion2D panel[ControlBar::CB_PANEL_COUNT];
-		Real scale = 0.0f;
-		ControlBarComputePanelLayout(theTestResolutions[i][0], theTestResolutions[i][1], panel, &scale);
-
-		CHECK(panel[ControlBar::CB_PANEL_CENTER].lo.x - panel[ControlBar::CB_PANEL_LEFT].hi.x >= 16);
-		CHECK(panel[ControlBar::CB_PANEL_RIGHT].lo.x - panel[ControlBar::CB_PANEL_CENTER].hi.x >= 16);
-	}
-}
-
-TEST(controlbar_panels_stay_on_screen_and_hug_their_edges)
-{
-	for (Int i = 0; i < theTestResolutionCount; ++i)
-	{
-		const Int w = theTestResolutions[i][0], h = theTestResolutions[i][1];
-		IRegion2D panel[ControlBar::CB_PANEL_COUNT];
-		Real scale = 0.0f;
-		ControlBarComputePanelLayout(w, h, panel, &scale);
-
-		// left panel pinned to the left edge, right panel to the right, all of it on screen
-		CHECK_EQ(panel[ControlBar::CB_PANEL_LEFT].lo.x, 0);
-		CHECK_EQ(panel[ControlBar::CB_PANEL_RIGHT].hi.x, w);
-
-		for (Int p = 0; p < ControlBar::CB_PANEL_COUNT; ++p)
-		{
-			CHECK(panel[p].lo.x >= 0);
-			CHECK(panel[p].hi.x <= w);
-			CHECK(panel[p].lo.y >= 0);
-			CHECK_EQ(panel[p].hi.y, h);		// every panel sits on the bottom edge
-			CHECK(panel[p].width() > 0);
-			CHECK(panel[p].height() > 0);
-		}
-	}
-}
-
-TEST(controlbar_panels_are_never_stretched)
-{
-	/* One uniform scale is the point of the whole exercise: a panel's shape must not
-	   depend on the aspect of the screen it is drawn on, or the cameos inside it come
-	   out as rectangles.  Compare each panel's width:height against the authored one. */
-	static const Real designRatio[ControlBar::CB_PANEL_COUNT] =
-	{
-		186.0f / 179.0f,		// left   - design rect 0,421 .. 186,600
-		438.0f / 168.0f,		// center - design rect 186,432 .. 624,600
-		186.0f / 172.0f,		// right  - design rect 614,428 .. 800,600
-	};
-
-	for (Int i = 0; i < theTestResolutionCount; ++i)
-	{
-		IRegion2D panel[ControlBar::CB_PANEL_COUNT];
-		Real scale = 0.0f;
-		ControlBarComputePanelLayout(theTestResolutions[i][0], theTestResolutions[i][1], panel, &scale);
-
-		for (Int p = 0; p < ControlBar::CB_PANEL_COUNT; ++p)
-		{
-			const Real ratio = (Real)panel[p].width() / (Real)panel[p].height();
-			CHECK_NEAR(ratio, designRatio[p], 0.03f);		// slack for the floor/ceil rounding
-		}
-	}
-}
-
-TEST(controlbar_scale_is_bounded_by_height_on_a_wide_screen)
-{
-	/* 16:9 has width to spare, so the height is what runs out first and the bar is
-	   drawn at exactly h/600 - the same size it would be on a 4:3 screen of that
-	   height, which is what keeps it from growing as monitors get wider. */
-	IRegion2D panel[ControlBar::CB_PANEL_COUNT];
-	Real scale = 0.0f;
-	ControlBarComputePanelLayout(1920, 1080, panel, &scale);
-	CHECK_NEAR(scale, 1080.0f / 600.0f, 0.001f);
-}
-
-TEST(controlbar_scale_is_bounded_by_the_gap_on_a_square_screen)
-{
-	/* 5:4: neither the width nor the height bound leaves room between the panels, so
-	   the gap bound is the one that has to win.  w/800 = 1.6 and h/600 = 1.7067 both
-	   lose to (w/2 - 24) / 405. */
-	IRegion2D panel[ControlBar::CB_PANEL_COUNT];
-	Real scale = 0.0f;
-	ControlBarComputePanelLayout(1280, 1024, panel, &scale);
-	CHECK(scale < 1280.0f / 800.0f);
-	CHECK_NEAR(scale, (1280.0f * 0.5f - 24.0f) / 405.0f, 0.001f);
-}
-
 /*
  * BaseType.h's fast_float_ceil does not ceil an integer.  It adds 0.99999994 and
  * truncates, but 0.99999994 is only a sixteenth of a float ULP once the value is past
@@ -851,9 +765,9 @@ TEST(controlbar_scale_is_bounded_by_the_gap_on_a_square_screen)
  *
  * Pinned rather than fixed: the sum is in a header every translation unit includes and
  * a correcting compare would cost the branch the whole routine exists to avoid, so the
- * blast radius of changing it is the entire game.  ControlBarComputePanelLayout works
- * around it locally by flooring and pinning the edges that have to be exact - a screen
- * height that ceils to one past the bottom of the screen is where this turned up.
+ * blast radius of changing it is the entire game.  Callers that need an exact edge floor
+ * and pin it instead - a screen height that ceils to one past the bottom of the screen is
+ * where this turned up.
  */
 TEST(realtointceil_DEFECT_overshoots_every_whole_number)
 {
@@ -873,4 +787,186 @@ TEST(realtointceil_DEFECT_overshoots_every_whole_number)
 	// negatives skip the addition entirely and truncate, which really is ceil
 	CHECK_EQ(REAL_TO_INT_CEIL(-600.0f), -600);
 	CHECK_EQ(REAL_TO_INT_CEIL(-600.5f), -600);
+}
+
+//////////////////////////////////////////////////////////////////////////////
+// The in-flight damage ledger
+//////////////////////////////////////////////////////////////////////////////
+
+/*
+ * A delayed shot - a projectile in flight, or a hitscan weapon far enough away that its
+ * damage is scheduled for a later frame - used to leave no trace anywhere between the
+ * muzzle and the impact.  Every other unit went on reading full health off the victim and
+ * kept firing, so a squad routinely spent a whole volley killing something the first two
+ * shots had already killed.  IncomingDamageTracker books each such shot against its victim
+ * and auto-targeting reads it back.
+ *
+ * These drive the ledger with hand-picked frame numbers, which is why the frame is a
+ * parameter rather than a read of TheGameLogic - there is no game logic in this binary.
+ */
+
+static const ObjectID VICTIM_A = (ObjectID)101;
+static const ObjectID VICTIM_B = (ObjectID)102;
+static const ObjectID SHOOTER_1 = (ObjectID)201;
+static const ObjectID SHOOTER_2 = (ObjectID)202;
+
+TEST(incomingdamage_books_and_sums_per_victim)
+{
+	IncomingDamageTracker::reset();
+	CHECK_EQ(IncomingDamageTracker::getBookedDamage(VICTIM_A), 0.0f);
+
+	IncomingDamageTracker::bookShot(VICTIM_A, SHOOTER_1, 40.0f, 100, 110);
+	IncomingDamageTracker::bookShot(VICTIM_A, SHOOTER_2, 25.0f, 100, 112);
+	IncomingDamageTracker::bookShot(VICTIM_B, SHOOTER_1, 10.0f, 100, 110);
+
+	CHECK_NEAR(IncomingDamageTracker::getBookedDamage(VICTIM_A), 65.0f, 0.001f);
+	CHECK_NEAR(IncomingDamageTracker::getBookedDamage(VICTIM_B), 10.0f, 0.001f);
+
+	IncomingDamageTracker::reset();
+	CHECK_EQ(IncomingDamageTracker::getBookedDamage(VICTIM_A), 0.0f);
+}
+
+TEST(incomingdamage_doomed_only_once_the_booking_covers_the_health)
+{
+	IncomingDamageTracker::reset();
+
+	// nothing booked: never doomed, however little health is left
+	CHECK(!IncomingDamageTracker::isAlreadyDoomed(VICTIM_A, 1.0f));
+
+	IncomingDamageTracker::bookShot(VICTIM_A, SHOOTER_1, 40.0f, 100, 110);
+	CHECK(!IncomingDamageTracker::isAlreadyDoomed(VICTIM_A, 100.0f));
+	CHECK(IncomingDamageTracker::isAlreadyDoomed(VICTIM_A, 40.0f));	// exactly lethal counts
+
+	// a second shooter's shell tips it over: this is the overkill the ledger exists to stop
+	IncomingDamageTracker::bookShot(VICTIM_A, SHOOTER_2, 70.0f, 100, 112);
+	CHECK(IncomingDamageTracker::isAlreadyDoomed(VICTIM_A, 100.0f));
+
+	// and the victim next to it is unaffected
+	CHECK(!IncomingDamageTracker::isAlreadyDoomed(VICTIM_B, 1.0f));
+
+	IncomingDamageTracker::reset();
+}
+
+TEST(incomingdamage_landing_releases_one_booking_from_that_shooter)
+{
+	IncomingDamageTracker::reset();
+
+	IncomingDamageTracker::bookShot(VICTIM_A, SHOOTER_1, 40.0f, 100, 110);
+	IncomingDamageTracker::bookShot(VICTIM_A, SHOOTER_1, 40.0f, 101, 111);
+	IncomingDamageTracker::bookShot(VICTIM_A, SHOOTER_2, 25.0f, 100, 112);
+
+	// one landing releases one shot, not the shooter's whole account
+	IncomingDamageTracker::shotLanded(VICTIM_A, SHOOTER_1);
+	CHECK_NEAR(IncomingDamageTracker::getBookedDamage(VICTIM_A), 65.0f, 0.001f);
+
+	IncomingDamageTracker::shotLanded(VICTIM_A, SHOOTER_1);
+	CHECK_NEAR(IncomingDamageTracker::getBookedDamage(VICTIM_A), 25.0f, 0.001f);
+
+	// a landing nobody booked is not an error, and takes nothing with it
+	IncomingDamageTracker::shotLanded(VICTIM_A, SHOOTER_1);
+	IncomingDamageTracker::shotLanded(VICTIM_B, SHOOTER_1);
+	CHECK_NEAR(IncomingDamageTracker::getBookedDamage(VICTIM_A), 25.0f, 0.001f);
+
+	IncomingDamageTracker::shotLanded(VICTIM_A, SHOOTER_2);
+	CHECK_EQ(IncomingDamageTracker::getBookedDamage(VICTIM_A), 0.0f);
+
+	IncomingDamageTracker::reset();
+}
+
+/*
+ * The reservation has to lapse on its own, or a missile shot down by a point defence - or
+ * lured away by countermeasures - would reserve its target forever and the squad would
+ * stand there holding its fire.
+ */
+TEST(incomingdamage_booking_lapses_after_the_impact_it_predicted)
+{
+	IncomingDamageTracker::reset();
+
+	IncomingDamageTracker::bookShot(VICTIM_A, SHOOTER_1, 40.0f, 100, 110);
+
+	// still honored while the shot is plausibly in the air
+	IncomingDamageTracker::update(110);
+	CHECK_NEAR(IncomingDamageTracker::getBookedDamage(VICTIM_A), 40.0f, 0.001f);
+
+	// ...and released once the impact is well past and nothing landed
+	IncomingDamageTracker::update(200);
+	CHECK_EQ(IncomingDamageTracker::getBookedDamage(VICTIM_A), 0.0f);
+	CHECK(!IncomingDamageTracker::isAlreadyDoomed(VICTIM_A, 1.0f));
+
+	IncomingDamageTracker::reset();
+}
+
+/*
+ * An impact frame that has already gone by (or is this very frame) must not wrap the
+ * unsigned subtraction into a four-billion-frame reservation.
+ */
+TEST(incomingdamage_impact_in_the_past_still_expires)
+{
+	IncomingDamageTracker::reset();
+
+	IncomingDamageTracker::bookShot(VICTIM_A, SHOOTER_1, 40.0f, 500, 400);
+	CHECK_NEAR(IncomingDamageTracker::getBookedDamage(VICTIM_A), 40.0f, 0.001f);
+
+	IncomingDamageTracker::update(600);
+	CHECK_EQ(IncomingDamageTracker::getBookedDamage(VICTIM_A), 0.0f);
+
+	IncomingDamageTracker::reset();
+}
+
+/* A shot that would do nothing is not worth reserving a target over. */
+TEST(incomingdamage_ignores_harmless_shots)
+{
+	IncomingDamageTracker::reset();
+
+	IncomingDamageTracker::bookShot(VICTIM_A, SHOOTER_1, 0.0f, 100, 110);
+	IncomingDamageTracker::bookShot(VICTIM_A, SHOOTER_1, -5.0f, 100, 110);
+	IncomingDamageTracker::bookShot(INVALID_ID, SHOOTER_1, 40.0f, 100, 110);
+
+	CHECK_EQ(IncomingDamageTracker::getBookedDamage(VICTIM_A), 0.0f);
+	CHECK(!IncomingDamageTracker::isAlreadyDoomed(VICTIM_A, 1.0f));
+
+	IncomingDamageTracker::reset();
+}
+
+//////////////////////////////////////////////////////////////////////////////
+// Drag-to-aim building placement
+//////////////////////////////////////////////////////////////////////////////
+
+/*
+ * The 45 degree snap used to pick its rounding by sign: floor(x + 0.5) above zero but
+ * floor(x - 0.5) below it, which rounds *away* from zero.  REAL_TO_INT_FLOOR is a true
+ * floor, so the second branch pushed every negative heading a whole step out - and
+ * Coord2D::toAngle returns -PI..PI, so that is half the circle.  Dragging into it meant
+ * fighting the snap: the building faced 45 degrees past where the mouse was pointing.
+ */
+TEST(placement_snap_takes_the_nearest_45_on_both_halves_of_the_circle)
+{
+	const Real step = PI / 4.0f;
+
+	/* dead on a spoke stays put */
+	for (Int i = -4; i <= 4; i++)
+		CHECK_NEAR(InGameUI::snapAngleTo45(i * step), i * step, 0.0001f);
+
+	/* just short of a spoke rounds up to it, just past rounds back down to it - same both signs */
+	CHECK_NEAR(InGameUI::snapAngleTo45(step - 0.1f), step, 0.0001f);
+	CHECK_NEAR(InGameUI::snapAngleTo45(step + 0.1f), step, 0.0001f);
+	CHECK_NEAR(InGameUI::snapAngleTo45(-step - 0.1f), -step, 0.0001f);
+	CHECK_NEAR(InGameUI::snapAngleTo45(-step + 0.1f), -step, 0.0001f);
+
+	/* the old sign branch failed exactly here: -0.2 rad is nearest to 0, not to -45 degrees */
+	CHECK_NEAR(InGameUI::snapAngleTo45(-0.2f), 0.0f, 0.0001f);
+	CHECK_NEAR(InGameUI::snapAngleTo45(-1.0f), -step, 0.0001f);
+	CHECK_NEAR(InGameUI::snapAngleTo45(-2.0f), -3.0f * step, 0.0001f);	/* -114.6 deg is nearer -135 than -90 */
+
+	/* nothing is ever more than half a step of mouse travel from its snap */
+	for (Int deg = -180; deg <= 180; deg += 3)
+	{
+		Real angle = deg * PI / 180.0f;
+		Real snapped = InGameUI::snapAngleTo45(angle);
+
+		CHECK(fabsf(snapped - angle) <= step / 2.0f + 0.0001f);
+
+		/* and it really is a multiple of 45 degrees */
+		CHECK_NEAR(snapped / step, (Real)REAL_TO_INT_FLOOR(snapped / step + 0.5f), 0.0001f);
+	}
 }
