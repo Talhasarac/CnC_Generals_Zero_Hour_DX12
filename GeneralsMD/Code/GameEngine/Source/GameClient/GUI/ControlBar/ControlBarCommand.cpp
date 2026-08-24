@@ -772,8 +772,8 @@ void ControlBar::updateContextCommand( void )
 			win->winClearStatus( WIN_STATUS_ALWAYS_COLOR );
 		}
 
-		// is the command available
-		CommandAvailability availability = getCommandAvailability( command, obj, win );
+		// is the command available - to any of the selected, not just to the representative
+		CommandAvailability availability = getGroupCommandAvailability( command, obj, win );
 
 		// enable/disable the window control
 		switch( availability )
@@ -942,6 +942,73 @@ static Int getRappellerCount(Object* obj)
 	}
 	return num;
 }
+
+//-------------------------------------------------------------------------------------------------
+/** Ask a whole multi-selection whether it can do this, instead of asking its representative.
+	*
+	* The command bar picks one member of the focused type group to drive the context
+	* (ControlBar::setMultiSelectFocus), and every button was judged against that one object. Select
+	* four barracks where the first already has its upgrade and the button greys out, even though
+	* three of them are waiting to buy it - and clicking it would have gone to the first one anyway.
+	*
+	* So: take the best availability any member of the focused group can offer, and hand back the
+	* member that offered it so processCommandUI can send the order there. Outside a multi-selection
+	* this is exactly getCommandAvailability on the one selected object. */
+//-------------------------------------------------------------------------------------------------
+CommandAvailability ControlBar::getGroupCommandAvailability( const CommandButton *command,
+																														 Object *obj,
+																														 GameWindow *win,
+																														 Object **ableObj ) const
+{
+	if( ableObj )
+		*ableObj = obj;
+
+	CommandAvailability best = getCommandAvailability( command, obj, win );
+
+	if( m_currContext != CB_CONTEXT_MULTI_SELECT || best == COMMAND_AVAILABLE ||
+			m_multiSelectFocus < 0 || m_multiSelectFocus >= m_multiSelectGroupCount )
+		return best;
+
+	const ThingTemplate *focused = m_multiSelectGroupTemplate[ m_multiSelectFocus ];
+	if( focused == NULL )
+		return best;
+
+	//
+	// Hidden means the command does not belong on this bar at all - a different answer in kind
+	// from "this one cannot right now" - so a hidden representative stays hidden. Everything else
+	// is a matter of degree and the most permissive answer in the group wins.
+	//
+	if( best == COMMAND_HIDDEN )
+		return best;
+
+	const DrawableList *selected = TheInGameUI->getAllSelectedDrawables();
+	for( DrawableListCIt it = selected->begin(); it != selected->end(); ++it )
+	{
+		Drawable *draw = *it;
+		if( draw == NULL || draw->getTemplate() != focused )
+			continue;
+
+		Object *other = draw->getObject();
+		if( other == NULL || other == obj )
+			continue;
+
+		CommandAvailability avail = getCommandAvailability( command, other, win );
+		if( avail == COMMAND_HIDDEN )
+			continue;			// it is on the bar for the group; this member just cannot say
+
+		if( commandAvailabilityRank( avail ) > commandAvailabilityRank( best ) )
+		{
+			best = avail;
+			if( ableObj )
+				*ableObj = other;
+			if( best == COMMAND_AVAILABLE )
+				break;
+		}
+	}
+
+	return best;
+
+}  // end getGroupCommandAvailability
 
 //-------------------------------------------------------------------------------------------------
 /** What's the status between 'obj' and the 'command' at present.  Can we do it?  Are

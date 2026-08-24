@@ -205,7 +205,15 @@ CBCommandStatus ControlBar::processCommandUI( GameWindow *control,
 			obj = m_currentSelectedDrawable->getObject();
 		else if( commandButton->getCommandType() != GUI_COMMAND_UNIT_BUILD &&
 						 m_currentSelectedDrawable != NULL )
+		{
+			//
+			// the button was offered because *someone* in the focused group can do this
+			// (getGroupCommandAvailability); send the order to that one rather than to the
+			// representative, which may be the very one that already has the upgrade
+			//
 			obj = m_currentSelectedDrawable->getObject();
+			getGroupCommandAvailability( commandButton, obj, control, &obj );
+		}
 	}
 
 	//@todo Kris -- Special case code so convoy trucks can detonate nuke trucks -- if other things need this,

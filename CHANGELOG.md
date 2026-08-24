@@ -113,6 +113,10 @@ shows that as the one thing you paid for and the one thing a cancel takes back.
 
 Around it, the whole production loop got tightened:
 
+- **An upgrade you can buy is offered even if one of the selected buildings already has it.** Select
+  every barracks you own and the upgrade button used to grey out the moment the first one in the
+  group had bought it, leaving you to hunt the rest down one at a time. The button now lights if
+  *any* of them can still buy it, and the click goes to one that can.
 - **Select several factories, click a unit, and it goes to whichever has the shortest queue.**
   Shift-click queues five, spread the same way.
 - **The nearest free worker takes a new job** — and a worker already halfway through a building does

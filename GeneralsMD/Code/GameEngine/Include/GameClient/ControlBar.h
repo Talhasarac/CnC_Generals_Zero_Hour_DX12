@@ -889,6 +889,31 @@ protected:
 
 	// the following methods are for updating the currently showing context
 	CommandAvailability getCommandAvailability( const CommandButton *command, Object *obj, GameWindow *win, GameWindow *applyToWin = NULL, Bool forceDisabledEvaluation = FALSE ) const;
+
+public:
+	/** How permissive an availability is.  The enum is not written in that order - COMMAND_RESTRICTED
+		* is 0 and COMMAND_AVAILABLE is 1, with HIDDEN and the two "nearly" states after them - so a
+		* group cannot just take the numeric max.  Inline and static so a test can reach it. */
+	static Int commandAvailabilityRank( CommandAvailability a )
+	{
+		switch( a )
+		{
+			case COMMAND_ACTIVE:			return 5;
+			case COMMAND_AVAILABLE:		return 4;
+			case COMMAND_CANT_AFFORD:	return 3;		// the money is the player's; the button reads live
+			case COMMAND_NOT_READY:		return 2;
+			case COMMAND_RESTRICTED:	return 1;
+			default:									return 0;		// COMMAND_HIDDEN
+		}
+	}
+
+protected:
+	/** The same question asked of a whole multi-selection: a command one of the selected buildings
+		* can carry out is offered, not greyed out because the group's representative happens to have
+		* it already. Returns the best availability over the focused type group, and hands back the
+		* member that earned it so the press can be sent there. Outside a multi-selection it is just
+		* getCommandAvailability on the one selected object. */
+	CommandAvailability getGroupCommandAvailability( const CommandButton *command, Object *obj, GameWindow *win, Object **ableObj = NULL ) const;
 	void updateContextMultiSelect( void );
 	void updateContextPurchaseScience( void );
 	void updateContextCommand( void );

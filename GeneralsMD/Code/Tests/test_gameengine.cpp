@@ -984,6 +984,37 @@ TEST(placement_snap_takes_the_nearest_45_on_both_halves_of_the_circle)
  * two.  Get that backwards and every second structure straddles a cell it only half fills,
  * which is the gap-you-cannot-walk-through this snap exists to remove.
  */
+TEST(command_availability_rank_is_not_the_enum_order)
+{
+	/* the whole point of the helper: the enum is declared RESTRICTED, AVAILABLE, ACTIVE, HIDDEN,
+	 * NOT_READY, CANT_AFFORD, so taking the numeric max over a multi-selection would rank
+	 * "cannot afford" above "available" and "hidden" above both */
+	CHECK((Int)COMMAND_HIDDEN > (Int)COMMAND_AVAILABLE);
+	CHECK((Int)COMMAND_CANT_AFFORD > (Int)COMMAND_AVAILABLE);
+
+	/* permissiveness, most to least */
+	CHECK(ControlBar::commandAvailabilityRank(COMMAND_ACTIVE) >
+	      ControlBar::commandAvailabilityRank(COMMAND_AVAILABLE));
+	CHECK(ControlBar::commandAvailabilityRank(COMMAND_AVAILABLE) >
+	      ControlBar::commandAvailabilityRank(COMMAND_CANT_AFFORD));
+	CHECK(ControlBar::commandAvailabilityRank(COMMAND_CANT_AFFORD) >
+	      ControlBar::commandAvailabilityRank(COMMAND_NOT_READY));
+	CHECK(ControlBar::commandAvailabilityRank(COMMAND_NOT_READY) >
+	      ControlBar::commandAvailabilityRank(COMMAND_RESTRICTED));
+	CHECK(ControlBar::commandAvailabilityRank(COMMAND_RESTRICTED) >
+	      ControlBar::commandAvailabilityRank(COMMAND_HIDDEN));
+
+	/* a group of four barracks where only the last can still buy the upgrade: the button is
+	 * offered, because the best answer in the group wins */
+	CommandAvailability group[] = { COMMAND_RESTRICTED, COMMAND_RESTRICTED,
+	                                COMMAND_RESTRICTED, COMMAND_AVAILABLE };
+	CommandAvailability best = group[0];
+	for (Int i = 1; i < 4; i++)
+		if (ControlBar::commandAvailabilityRank(group[i]) > ControlBar::commandAvailabilityRank(best))
+			best = group[i];
+	CHECK_EQ((Int)best, (Int)COMMAND_AVAILABLE);
+}
+
 TEST(placement_grid_snap_puts_footprint_edges_on_cell_lines)
 {
 	const Real cell = 10.0f;
