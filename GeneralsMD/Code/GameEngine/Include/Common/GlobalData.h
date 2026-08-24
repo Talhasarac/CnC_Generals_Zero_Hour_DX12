@@ -128,6 +128,7 @@ public:
 	Bool m_useShadowVolumesForSkins;	// "UseShadowVolumesForSkins": also cast volume shadows off skinned meshes
 	Bool m_useShadowDecals;
 	Bool m_shadowsForProjectiles;	// "ShadowsForProjectiles": missiles and bombs that have no shadow of their own get a decal one
+	Bool m_startAtMaxZoom;					// "StartAtMaxZoom": a game opens as far out as the wheel goes, not at the map's own default
 	Bool m_shadowsForProps;				// "ShadowsForProps": fences, rubbish, shrubs - scenery the art gave no shadow at all
 	Bool m_shadowsForParticles;		// "ShadowsForParticles": big alpha-blended particle clouds drop a soft blob on the ground
 	Bool m_particleGroundBounce;	// "-particlebounce": terrain collision on for every particle system

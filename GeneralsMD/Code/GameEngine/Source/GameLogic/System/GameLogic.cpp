@@ -2028,7 +2028,12 @@ void GameLogic::startNewGame( Bool loadingSaveGame )
 	updateLoadProgress(LOAD_PROGRESS_POST_PRELOAD_ASSETS);
 
 	TheTacticalView->setAngleAndPitchToDefault();
-	TheTacticalView->setZoomToDefault();
+	//StartAtMaxZoom: open the map as far out as the wheel itself may go rather than at the map's
+	//own default height, which is the tighter of the two.
+	if( TheGlobalData->m_startAtMaxZoom )
+		TheTacticalView->setZoomToMax();
+	else
+		TheTacticalView->setZoomToDefault();
 
 	if( TheRecorder )
 		TheRecorder->initControls();
@@ -2074,7 +2079,12 @@ void GameLogic::startNewGame( Bool loadingSaveGame )
 	// Set up the camera height based on the map height & globalData.
 	TheTacticalView->initHeightForMap();
 	TheTacticalView->setAngleAndPitchToDefault();
-	TheTacticalView->setZoomToDefault();
+	//StartAtMaxZoom: open the map as far out as the wheel itself may go rather than at the map's
+	//own default height, which is the tighter of the two.
+	if( TheGlobalData->m_startAtMaxZoom )
+		TheTacticalView->setZoomToMax();
+	else
+		TheTacticalView->setZoomToDefault();
 
 	// update the loadscreen 
 	updateLoadProgress(LOAD_PROGRESS_POST_STARTING_CAMERA_2);

@@ -199,6 +199,8 @@ public:
 	virtual void setHeightAboveGround(Real z);
 	virtual void setZoom(Real z);
 	virtual void setZoomToDefault( void );									///< Set zoom to default value
+	virtual void setZoomToMax( void );												///< Set zoom as far out as the player may zoom by hand
+	void setZoomToHeight( Real heightAboveGround );				///< Frame the camera at this height above the terrain
 
 	virtual void setFieldOfView( Real angle );							///< Set the horizontal field of view angle
 

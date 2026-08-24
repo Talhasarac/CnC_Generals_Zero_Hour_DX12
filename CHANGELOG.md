@@ -174,6 +174,12 @@ a millimetre, so it always measured nothing and moved nothing. The spot under yo
 held there for the whole glide. Roll the wheel over the far corner of your base and you end up at
 that corner, not in the middle of the screen.
 
+**A skirmish opens zoomed all the way out.** The game used to drop you at the map author's own
+camera height, which is tighter than the wheel will go, so the first thing anyone did on every
+single map was roll the wheel back to see their base and the ground around it. It now opens at the
+widest view the wheel can reach. Middle-click still snaps back to the author's framing, and
+`StartAtMaxZoom = No` in `GameData.ini` puts the old opening back.
+
 **Hold Ctrl and roll the wheel to turn a building before you put it down** — a clean 45 degrees a
 notch, and the next building you place keeps the same facing, so a wall or a line of bunkers goes
 down straight without aiming each piece by hand.

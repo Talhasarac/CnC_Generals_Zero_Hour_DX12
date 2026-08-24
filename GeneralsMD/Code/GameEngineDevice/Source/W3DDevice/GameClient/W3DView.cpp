@@ -2065,21 +2065,19 @@ void W3DView::setZoom(Real z)
 
 //-------------------------------------------------------------------------------------------------
 //-------------------------------------------------------------------------------------------------
-void W3DView::setZoomToDefault( void )
+void W3DView::setZoomToHeight( Real heightAboveGround )
 {
-	// default zoom has to be max, otherwise players will just zoom to max always
-
 	// terrain height + desired height offset == cameraOffset * actual zoom
 	// find best approximation of max terrain height we can see
 	Real terrainHeightMax = getHeightAroundPos(m_pos.x, m_pos.y);
 
-	Real desiredHeight = (terrainHeightMax + m_maxHeightAboveGround);
+	Real desiredHeight = (terrainHeightMax + heightAboveGround);
 	Real desiredZoom = desiredHeight / m_cameraOffset.z;
 
-	//DEBUG_LOG(("W3DView::setZoomToDefault() Current zoom: %g  Desired zoom: %g\n", m_zoom, desiredZoom));
+	//DEBUG_LOG(("W3DView::setZoomToHeight() Current zoom: %g  Desired zoom: %g\n", m_zoom, desiredZoom));
 
 	m_zoom = desiredZoom;
-	m_heightAboveGround = m_maxHeightAboveGround;
+	m_heightAboveGround = heightAboveGround;
 
 	m_doingMoveCameraOnWaypointPath = false;
 	m_CameraArrivedAtWaypointOnPathFlag = false;
@@ -2089,6 +2087,24 @@ void W3DView::setZoomToDefault( void )
 	m_doingScriptedCameraLock = false;
 	m_cameraConstraintValid = false; // recalc it.
 	setCameraTransform();
+}
+
+//-------------------------------------------------------------------------------------------------
+//-------------------------------------------------------------------------------------------------
+void W3DView::setZoomToDefault( void )
+{
+	// default zoom has to be max, otherwise players will just zoom to max always
+	setZoomToHeight( m_maxHeightAboveGround );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** As far out as the wheel itself may go: the manual limit stretches the map's own maximum by
+ZOOM_OUT_LIMIT_FACTOR, and this is where a game opens when StartAtMaxZoom is on. */
+//-------------------------------------------------------------------------------------------------
+void W3DView::setZoomToMax( void )
+{
+	setZoomToHeight( m_zoomLimited ? m_maxHeightAboveGround * ZOOM_OUT_LIMIT_FACTOR
+														 : m_maxHeightAboveGround );
 }
 
 //-------------------------------------------------------------------------------------------------

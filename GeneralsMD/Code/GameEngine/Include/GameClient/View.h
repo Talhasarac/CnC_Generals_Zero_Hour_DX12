@@ -185,6 +185,7 @@ public:
 	virtual void zoomIn( void );																				///< Zoom in, closer to the ground, limit to min
 	virtual void zoomOut( void );																				///< Zoom out, farther away from the ground, limit to max
 	virtual void setZoomToDefault( void ) { }														///< Set zoom to default value
+	virtual void setZoomToMax( void ) { }																///< Set zoom as far out as the player may zoom by hand
 	virtual Real getMaxZoom( void ) { return m_maxZoom; }								///< return max zoom value
 	virtual void setOkToAdjustHeight( Bool val ) { m_okToAdjustHeight = val; }	///< Set this to adjust camera height
 
