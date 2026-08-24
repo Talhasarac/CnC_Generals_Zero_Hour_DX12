@@ -5548,19 +5548,11 @@ static void appendProducerQueue( Object *obj, InGameUI::ProductionStripSlot *slo
 
 	for( const ProductionEntry *p = pu->firstProduction(); p; p = pu->nextProduction( p ) )
 	{
-		Int repeat = 1;
 		Int id = 0;
 		Bool isUpgrade = FALSE;
 
 		if( p->getProductionType() == PRODUCTION_UNIT )
 		{
-			//
-			// an entry can stand for several units of the same kind, and each of them is its own
-			// cameo here - the strip counts units, not orders
-			//
-			repeat = p->getProductionQuantityRemaining();
-			if( repeat < 1 )
-				repeat = 1;
 			id = (Int)p->getProductionID();
 		}
 		else if( p->getProductionType() == PRODUCTION_UPGRADE && p->getProductionUpgrade() )
@@ -5571,20 +5563,25 @@ static void appendProducerQueue( Object *obj, InGameUI::ProductionStripSlot *slo
 		else
 			continue;
 
-		while( repeat-- > 0 )
-		{
-			(*total)++;
+		//
+		// one cameo per queue entry, not per unit that entry will deliver. A quantity modifier
+		// (ProductionUpdate's QuantityModifier - the China barracks builds Red Guards in pairs)
+		// makes one order hand back several units, but it is still one order: it was paid for
+		// once, the command bar's count badge counts it once, and one cancel takes all of it
+		// away. Drawing it as several cameos said the player had queued more than they had, and
+		// promised a cancel per cameo that does not exist.
+		//
+		(*total)++;
 
-			if( *count >= max )
-				continue;					// past the end of the row: counted, but not drawn
+		if( *count >= max )
+			continue;						// past the end of the row: counted, but not drawn
 
-			InGameUI::ProductionStripSlot *slot = &slots[ (*count)++ ];
-			slot->producer = obj->getID();
-			slot->id = id;
-			slot->isUpgrade = isUpgrade;
-			slot->pos.x = 0;
-			slot->pos.y = 0;
-		}
+		InGameUI::ProductionStripSlot *slot = &slots[ (*count)++ ];
+		slot->producer = obj->getID();
+		slot->id = id;
+		slot->isUpgrade = isUpgrade;
+		slot->pos.x = 0;
+		slot->pos.y = 0;
 	}
 }
 
