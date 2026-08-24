@@ -471,6 +471,22 @@ public:  // ********************************************************************
 	virtual void draw( void ) = 0;													///< Render the in-game user interface
 	virtual void postDraw( void );													///< Logic which needs to occur after the UI renders
 
+	//
+	// One cameo of the global production strip: which producer it belongs to, which entry of that
+	// producer's queue it is, and where it was drawn this frame.
+	//
+	enum { MAX_PRODUCTION_STRIP = 24 };			///< as many cameos as the strip will ever draw
+	struct ProductionStripSlot
+	{
+		ObjectID			producer;						///< the building this item is queued on
+		Int						id;									///< its ProductionID in that building's queue
+																			///  (kept as an Int so this header stays clear of GameLogic)
+		ICoord2D			pos;								///< top left corner of the cameo on screen
+	};
+
+	/// a click landed on the strip: jump to that producer, or cancel the item when 'cancel' is set
+	Bool handleProductionStripClick( const ICoord2D *mouse, Bool cancel );
+
 	/// Ingame video playback 
 	virtual void playMovie( const AsciiString& movieName );
 	virtual void stopMovie( void );
@@ -756,6 +772,7 @@ protected:
 	void drawHudOverlay( void );					///< the small elapsed-time / fps plate (ShowHudOverlay)
 	void drawIncomeRate( void );					///< income per minute, drawn beside the money window
 	void updateIncomeEstimate( Player *player );	///< income per minute, shown beside the money
+	void drawProductionStrip( void );			///< the global production queue, above the control bar
 
 	Bool												m_placementRangeRingUp;	///< we put a radius cursor up for a pending structure, so we owe a clear
 	Real												m_placementRingRadius;	///< the radius that ring was built at, so it is not rebuilt every frame
@@ -769,6 +786,14 @@ protected:
 	Int													m_hudLastMoney;					///< player money at the last income sample
 	UnsignedInt									m_hudLastMoneyFrame;		///< logic frame of that sample
 	Int													m_hudIncomePerMin;			///< most recent income estimate, cash per minute
+
+	//
+	// The global production strip: every unit the local player has queued anywhere, one cameo
+	// each, oldest first, left aligned above the control bar. drawProductionStrip() lays it out
+	// and records where each cameo landed; handleProductionStripClick() reads those back.
+	//
+	ProductionStripSlot					m_productionStrip[ MAX_PRODUCTION_STRIP ];
+	Int													m_productionStripCount;	///< how many of those slots are live this frame
 
 	Coord2D											m_superweaponPosition;
 	Real												m_superweaponFlashDuration;

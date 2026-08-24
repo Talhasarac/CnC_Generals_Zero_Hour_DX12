@@ -55,7 +55,7 @@
 #endif
 
 //-------------------------------------------------------------------------------------------------
-PlaceEventTranslator::PlaceEventTranslator() : m_frameOfUpButton(-1)
+PlaceEventTranslator::PlaceEventTranslator() : m_frameOfUpButton(-1), m_stripClickTaken(FALSE)
 {
 }
 
@@ -71,12 +71,32 @@ GameMessageDisposition PlaceEventTranslator::translateGameMessage(const GameMess
 {
 	GameMessageDisposition disp = KEEP_MESSAGE;
 
+	// the up that closes a click the strip took is not a selection either
+	if( m_stripClickTaken && msg->getType() == GameMessage::MSG_RAW_MOUSE_LEFT_BUTTON_UP )
+	{
+		m_stripClickTaken = FALSE;
+		return DESTROY_MESSAGE;
+	}
+
 	switch(msg->getType())
 	{
 
 		//---------------------------------------------------------------------------------------------
 		case GameMessage::MSG_RAW_MOUSE_LEFT_BUTTON_DOWN:
 		{
+			//
+			// The global production strip lies over the world rather than inside a window, so
+			// nothing above us has claimed a click on it. Take it here, before placement and long
+			// before selection turns it into a move order. Ctrl cancels the item, a plain click
+			// takes the camera to the building it is queued on.
+			//
+			if( TheInGameUI->handleProductionStripClick( &msg->getArgument(0)->pixel,
+																									 TheKeyboard && TheKeyboard->isCtrl() ) )
+			{
+				m_stripClickTaken = TRUE;
+				return DESTROY_MESSAGE;
+			}
+
 			// if we're in a building placement mode, do the place and send to all players
 			const ThingTemplate *build = TheInGameUI->getPendingPlaceType();
 			if( build && TheInGameUI->isPlacementAnchored() == FALSE )

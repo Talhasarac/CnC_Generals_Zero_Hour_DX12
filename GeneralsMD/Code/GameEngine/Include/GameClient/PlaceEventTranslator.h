@@ -37,6 +37,7 @@ class PlaceEventTranslator : public GameMessageTranslator
 {
 private:
 	UnsignedInt m_frameOfUpButton;
+	Bool m_stripClickTaken;		///< the down went to the global production strip, so its up belongs there too
 
 public:
 	PlaceEventTranslator();

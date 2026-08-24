@@ -1031,6 +1031,7 @@ InGameUI::InGameUI()
 	m_hudLastMoney = -1;
 	m_hudLastMoneyFrame = 0;
 	m_hudIncomePerMin = 0;
+	m_productionStripCount = 0;
 
 	m_superweaponPosition.x = 0.7f;
 	m_superweaponPosition.y = 0.7f;
@@ -3596,6 +3597,7 @@ void InGameUI::postDraw( void )
 {
 	drawHudOverlay();
 	drawIncomeRate();
+	drawProductionStrip();
 
 
 	// render our display strings for the messages if on
@@ -5397,6 +5399,186 @@ void InGameUI::drawHudOverlay( void )
 														GameMakeColor( 0, 0, 0, 140 ) );
 
 	m_hudDisplayString->draw( x, y, GameMakeColor( 235, 235, 235, 255 ), GameMakeColor( 0, 0, 0, 255 ) );
+}
+
+//-------------------------------------------------------------------------------------------------
+// The global production strip: one cameo per queued unit across every building the local player
+// owns, oldest first, left aligned in a row that grows to the right just above the control bar.
+// The item a building is actually working on wears a radial fill. A click jumps the camera to the
+// building it is queued on; ctrl-click cancels it.
+//-------------------------------------------------------------------------------------------------
+enum
+{
+	PRODUCTION_STRIP_CAMEO	= 32,		///< cameo edge in pixels
+	PRODUCTION_STRIP_GAP		= 3,		///< space between cameos
+	PRODUCTION_STRIP_LEFT		= 8,		///< inset from the left edge of the screen
+	PRODUCTION_STRIP_LIFT		= 6			///< clearance above the control bar
+};
+
+//-------------------------------------------------------------------------------------------------
+/** Player::iterateObjects callback: append every unit this producer has queued. */
+//-------------------------------------------------------------------------------------------------
+struct ProductionStripGather
+{
+	InGameUI::ProductionStripSlot *slot;
+	Int *count;
+};
+
+static void gatherProductionStrip( Object *obj, void *userData )
+{
+	ProductionStripGather *g = (ProductionStripGather *)userData;
+
+	if( obj == NULL || *g->count >= InGameUI::MAX_PRODUCTION_STRIP )
+		return;
+
+	ProductionUpdateInterface *pu = obj->getProductionUpdateInterface();
+	if( pu == NULL )
+		return;
+
+	for( const ProductionEntry *p = pu->firstProduction(); p; p = pu->nextProduction( p ) )
+	{
+		if( p->getProductionType() != PRODUCTION_UNIT )
+			continue;
+
+		//
+		// an entry can stand for several units of the same kind, and each of them is its own
+		// cameo here - the strip counts units, not orders
+		//
+		Int remaining = p->getProductionQuantityRemaining();
+		if( remaining < 1 )
+			remaining = 1;
+
+		while( remaining-- > 0 && *g->count < InGameUI::MAX_PRODUCTION_STRIP )
+		{
+			InGameUI::ProductionStripSlot *slot = &g->slot[ (*g->count)++ ];
+			slot->producer = obj->getID();
+			slot->id = (Int)p->getProductionID();
+			slot->pos.x = 0;
+			slot->pos.y = 0;
+		}
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
+void InGameUI::drawProductionStrip( void )
+{
+	m_productionStripCount = 0;
+
+	if( TheGameLogic == NULL || !TheGameLogic->isInGame() || TheGameLogic->isInShellGame() )
+		return;
+
+	Player *player = ThePlayerList ? ThePlayerList->getLocalPlayer() : NULL;
+	if( player == NULL )
+		return;
+
+	ProductionStripGather gather;
+	gather.slot = m_productionStrip;
+	gather.count = &m_productionStripCount;
+	player->iterateObjects( gatherProductionStrip, &gather );
+
+	if( m_productionStripCount == 0 )
+		return;
+
+	//
+	// sit on top of the control bar. If the bar is not up (it is hidden while the game is loading,
+	// and in the observer views) fall back to the bottom of the screen.
+	//
+	Int barTop = TheDisplay->getHeight();
+	static NameKeyType controlBarKey = TheNameKeyGenerator->nameToKey( "ControlBar.wnd:ControlBarParent" );
+	GameWindow *bar = TheWindowManager->winGetWindowFromId( NULL, controlBarKey );
+	if( bar && !bar->winIsHidden() )
+	{
+		ICoord2D barPos;
+		bar->winGetScreenPosition( &barPos.x, &barPos.y );
+		barTop = barPos.y;
+	}
+
+	const Int y = barTop - PRODUCTION_STRIP_CAMEO - PRODUCTION_STRIP_LIFT;
+	if( y < 0 )
+		return;
+
+	// one plate behind the whole row, so the cameos read over any terrain
+	const Int rowWidth = m_productionStripCount * PRODUCTION_STRIP_CAMEO +
+											 ( m_productionStripCount - 1 ) * PRODUCTION_STRIP_GAP;
+	TheDisplay->drawFillRect( PRODUCTION_STRIP_LEFT - 3, y - 3, rowWidth + 6, PRODUCTION_STRIP_CAMEO + 6,
+														GameMakeColor( 0, 0, 0, 130 ) );
+
+	Int x = PRODUCTION_STRIP_LEFT;
+	for( Int i = 0; i < m_productionStripCount; i++ )
+	{
+		ProductionStripSlot *slot = &m_productionStrip[ i ];
+		slot->pos.x = x;
+		slot->pos.y = y;
+
+		//
+		// re-read the entry rather than caching the template: production runs on the logic clock
+		// and this draws on the render clock, so anything held from the gather can be stale
+		//
+		Object *producer = TheGameLogic->findObjectByID( slot->producer );
+		ProductionUpdateInterface *pu = producer ? producer->getProductionUpdateInterface() : NULL;
+		const ProductionEntry *entry = NULL;
+		if( pu )
+			for( const ProductionEntry *p = pu->firstProduction(); p; p = pu->nextProduction( p ) )
+				if( (Int)p->getProductionID() == slot->id )
+				{
+					entry = p;
+					break;
+				}
+
+		if( entry && entry->getProductionObject() )
+		{
+			const Image *cameo = entry->getProductionObject()->getButtonImage();
+			if( cameo )
+				TheDisplay->drawImage( cameo, x, y, x + PRODUCTION_STRIP_CAMEO, y + PRODUCTION_STRIP_CAMEO );
+
+			// the head of a building's queue is the one being worked on, and only it has progress
+			if( pu->firstProduction() == entry && entry->getPercentComplete() > 0.0f )
+				TheDisplay->drawRectClock( x, y, PRODUCTION_STRIP_CAMEO, PRODUCTION_STRIP_CAMEO,
+																	 REAL_TO_INT( entry->getPercentComplete() ),
+																	 GameMakeColor( 0, 0, 0, 100 ) );
+		}
+
+		TheDisplay->drawOpenRect( x, y, PRODUCTION_STRIP_CAMEO, PRODUCTION_STRIP_CAMEO, 1.0f,
+															GameMakeColor( 160, 160, 160, 160 ) );
+
+		x += PRODUCTION_STRIP_CAMEO + PRODUCTION_STRIP_GAP;
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
+Bool InGameUI::handleProductionStripClick( const ICoord2D *mouse, Bool cancel )
+{
+	if( mouse == NULL || m_productionStripCount == 0 )
+		return FALSE;
+
+	for( Int i = 0; i < m_productionStripCount; i++ )
+	{
+		const ProductionStripSlot *slot = &m_productionStrip[ i ];
+
+		if( mouse->x < slot->pos.x || mouse->x >= slot->pos.x + PRODUCTION_STRIP_CAMEO ||
+				mouse->y < slot->pos.y || mouse->y >= slot->pos.y + PRODUCTION_STRIP_CAMEO )
+			continue;
+
+		Object *producer = TheGameLogic->findObjectByID( slot->producer );
+		if( producer == NULL )
+			return TRUE;					// the building died under the cursor - the click is still ours
+
+		if( cancel )
+		{
+			// the producer travels with the message: the logic cannot tell whose queue this is otherwise
+			GameMessage *msg = TheMessageStream->appendMessage( GameMessage::MSG_CANCEL_UNIT_CREATE );
+			msg->appendIntegerArgument( slot->id );
+			msg->appendObjectIDArgument( slot->producer );
+		}
+		else
+		{
+			TheTacticalView->lookAt( producer->getPosition() );
+		}
+
+		return TRUE;
+	}
+
+	return FALSE;
 }
 
 void InGameUI::drawFloatingText( void )
