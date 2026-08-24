@@ -704,17 +704,31 @@ void ControlBar::updateContextCommand( void )
 		//
 		if( command->getCommandType() == GUI_COMMAND_UNIT_BUILD && pu )
 		{
-			Int queued = 0;
-			for( const ProductionEntry *p = pu->firstProduction(); p; p = pu->nextProduction( p ) )
-				if( p->getProductionType() == PRODUCTION_UNIT &&
-						p->getProductionObject() == command->getThingTemplate() )
-					queued++;
-			GadgetButtonSetCount( win, queued );
+			//
+			// a queue belongs to one building. With several producers selected the bar shows the
+			// representative's queue, which is a lie about the rest of the selection, so the badge
+			// and the radial fill stay off (and right-click cancel is refused, see
+			// ControlBar::cancelLastQueuedUnit). The clock clears itself after each draw; the
+			// count badge does not, so put it back to zero.
+			//
+			if( m_currContext == CB_CONTEXT_MULTI_SELECT )
+			{
+				GadgetButtonSetCount( win, 0 );
+			}
+			else
+			{
+				Int queued = 0;
+				for( const ProductionEntry *p = pu->firstProduction(); p; p = pu->nextProduction( p ) )
+					if( p->getProductionType() == PRODUCTION_UNIT &&
+							p->getProductionObject() == command->getThingTemplate() )
+						queued++;
+				GadgetButtonSetCount( win, queued );
 
-			const ProductionEntry *first = pu->firstProduction();
-			if( first && first->getProductionType() == PRODUCTION_UNIT &&
-					first->getProductionObject() == command->getThingTemplate() )
-				GadgetButtonDrawClock( win, first->getPercentComplete(), BuildClockColor );
+				const ProductionEntry *first = pu->firstProduction();
+				if( first && first->getProductionType() == PRODUCTION_UNIT &&
+						first->getProductionObject() == command->getThingTemplate() )
+					GadgetButtonDrawClock( win, first->getPercentComplete(), BuildClockColor );
+			}
 		}
 
 		// a structure outside the armed chord group greys out until the chord resolves

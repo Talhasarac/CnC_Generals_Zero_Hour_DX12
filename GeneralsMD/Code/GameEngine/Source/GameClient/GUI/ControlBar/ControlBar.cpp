@@ -2356,6 +2356,11 @@ Bool ControlBar::cancelLastQueuedUnit( const ThingTemplate *thing )
 	if( thing == NULL )
 		return FALSE;
 
+	// with several producers selected there is no one queue on the bar to take from, and the
+	// buttons show no queue either, so there is nothing here to cancel
+	if( m_currContext == CB_CONTEXT_MULTI_SELECT )
+		return FALSE;
+
 	//
 	// Look across every selected producer, not just the representative one. A shift-click spreads
 	// a batch over all the selected factories, so cancelling only ever on the representative left
