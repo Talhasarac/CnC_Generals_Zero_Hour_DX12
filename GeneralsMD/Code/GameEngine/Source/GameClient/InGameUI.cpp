@@ -1211,7 +1211,6 @@ void InGameUI::init( void )
 
 		// make the tactical display the full screen width for now
 		TheTacticalView->setWidth( TheDisplay->getWidth());
-		// make the tactical display 0.76 of full screen so no drawing under GUI.
 		TheTacticalView->setHeight( TheDisplay->getHeight() * 0.77f);
 	}
 	TheTacticalView->setDefaultView(0.0f, 0.0f, 1.0f);
@@ -5370,13 +5369,8 @@ void InGameUI::drawIncomeRate( void )
 	Int textHeight = 0;
 	m_incomeDisplayString->getSize( NULL, &textHeight );
 
-	//
-	// Beside the balance, on the same baseline, rather than under it. This used to sit below
-	// because the money window ran to the edge of a full width control bar and there was nothing
-	// to its right; the centre panel is 624 design units wide against the money window's 439, so
-	// the rate now goes where it reads as part of the same number.
-	//
-	m_incomeDisplayString->draw( pos.x + size.x + 4, pos.y + ( size.y - textHeight ) / 2,
+	// tucked under the balance rather than after it: the money window runs to the bar's edge
+	m_incomeDisplayString->draw( pos.x + 4, pos.y + size.y - 2,
 															 GameMakeColor( 180, 235, 180, 255 ),
 															 GameMakeColor( 0, 0, 0, 255 ) );
 }

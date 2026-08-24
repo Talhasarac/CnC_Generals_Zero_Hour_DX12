@@ -633,36 +633,52 @@ void W3DCommandBarTopDraw( GameWindow *window, WinInstanceData *instData )
 }
 
 
-//
-// The scheme art (ControlBarScheme) is one wide painting of the whole bar, drawn from a single
-// anchor with its own resolution multiplier. Now that the bar is three separately anchored panels
-// there is nowhere for that painting to go, so it is not drawn at all: each panel gets its own
-// plate here instead, sized from the rectangles ControlBar::layoutPanels worked out.
-//
 void W3DCommandBarBackgroundDraw( GameWindow *window, WinInstanceData *instData )
 {
-	if( !TheControlBar || !TheDisplay )
+
+	ControlBarSchemeManager *man = TheControlBar->getControlBarSchemeManager();
+	if(!man)
 		return;
-
-	const Color plate  = GameMakeColor( 0, 0, 0, 190 );
-	const Color edge   = GameMakeColor( 140, 140, 140, 120 );
-
-	for( Int p = 0; p < ControlBar::CB_PANEL_COUNT; p++ )
+	static NameKeyType winNamekey	= TheNameKeyGenerator->nameToKey( AsciiString( "ControlBar.wnd:BackgroundMarker" ) );
+	GameWindow *win =  TheWindowManager->winGetWindowFromId(NULL,winNamekey);
+	static ICoord2D basePos;
+	if(!win)
 	{
-		const IRegion2D *r = TheControlBar->getPanelRect( p );
-		if( r->width() <= 0 || r->height() <= 0 )
-			continue;
-
-		TheDisplay->drawFillRect( r->lo.x, r->lo.y, r->width(), r->height(), plate );
-		TheDisplay->drawOpenRect( r->lo.x, r->lo.y, r->width(), r->height(), 1.0f, edge );
+		return;
+		//win = TheWindowManager->winGetWindowFromId(NULL,TheNameKeyGenerator->nameToKey( AsciiString( "ControlBar.wnd:BackgroundMarker" ) ));
 	}
+	TheControlBar->getBackgroundMarkerPos(&basePos.x, &basePos.y);
+	ICoord2D pos, offset;
+	win->winGetScreenPosition(&pos.x,&pos.y);
+	offset.x = pos.x - basePos.x;
+	offset.y = pos.y - basePos.y;
+
+	man->drawBackground(offset);
 }
 
 
 void W3DCommandBarForegroundDraw( GameWindow *window, WinInstanceData *instData )
 {
 
-	// nothing sits on top of the plates - see W3DCommandBarBackgroundDraw
+	ControlBarSchemeManager *man = TheControlBar->getControlBarSchemeManager();
+	if(!man)
+		return;
+
+	static NameKeyType winNamekey	= TheNameKeyGenerator->nameToKey( AsciiString( "ControlBar.wnd:BackgroundMarker" ) );
+	GameWindow *win = TheWindowManager->winGetWindowFromId(NULL,winNamekey);
+	static ICoord2D basePos;
+	if(!win)
+	{
+		return;
+		//win = TheWindowManager->winGetWindowFromId(NULL,TheNameKeyGenerator->nameToKey( AsciiString( "ControlBar.wnd:BackgroundMarker" ) ));
+	}
+	TheControlBar->getForegroundMarkerPos(&basePos.x, &basePos.y);
+	ICoord2D pos, offset;
+	win->winGetScreenPosition(&pos.x,&pos.y);
+	offset.x = pos.x - basePos.x;
+	offset.y = pos.y - basePos.y;
+
+	man->drawForeground(offset);
 
 }
 
