@@ -137,6 +137,11 @@ Around it, the whole production loop got tightened:
 - **Aircraft always show how many attack runs they have left**, selected or not. That is the number
   that decides whether you commit them or send them home.
 
+**Health bars are in the owner's colour.** They used to run green to red by how damaged something
+was — which is what the length of the bar was already telling you — and told you nothing about whose
+it was. In the middle of a fight that is the question you actually have. They now match the colour
+the minimap and the selection rings use, so you can read a brawl without clicking anything.
+
 ## Twenty-two-year-old bugs, found by testing
 
 Nothing here was guessed at. Every fix in this section came out of a test written against the
