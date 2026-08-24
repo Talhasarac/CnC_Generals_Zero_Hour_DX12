@@ -1235,6 +1235,68 @@ static const Real thePanelAnchorFraction[ ControlBar::CB_PANEL_COUNT ] = { 0.0f,
 /// ...and which authored x that anchor is, so left pins its left edge and right pins its right
 static const Real thePanelAnchorDesignX[ ControlBar::CB_PANEL_COUNT ] = { 0.0f, 405.0f, 800.0f };
 
+/// how much world has to stay visible between two panels, in screen pixels
+static const Real CONTROL_BAR_MIN_PANEL_GAP = 24.0f;
+
+//-------------------------------------------------------------------------------------------------
+/** Where the three panels land on a dispW x dispH screen, and the uniform scale that puts them
+	* there. Split out of layoutPanels because it is the whole of the geometry and none of the
+	* GameWindow walking, so it can be checked at any resolution without a display. */
+//-------------------------------------------------------------------------------------------------
+void ControlBarComputePanelLayout( Int dispW, Int dispH, IRegion2D *outPanel, Real *outScale )
+{
+	const Real w = (Real)dispW;
+	const Real h = (Real)dispH;
+
+	//
+	// One scale for both axes, so nothing is stretched. Three things bound it:
+	//
+	//   - the width the .wnd was authored against, and
+	//   - the height, whichever of the two runs out first, and
+	//   - the room the panels need to sit apart.
+	//
+	// That last one is not optional. The panels' authored rectangles overlap - they were carved out
+	// of one continuous strip, so they add up to 810 of the 800 design units - and the anchors then
+	// push the outer two to the screen edges. On a 16:9 screen the height bound is the tight one and
+	// there is width to spare, but at 4:3 and squarer the width bound wins and 810 units of panel
+	// land in 800 units of screen: no gap at all and overlapping plates at both seams. Solving
+	// gap >= CONTROL_BAR_MIN_PANEL_GAP for the scale gives the third bound below; both gaps work out
+	// to w/2 - 405*s, so one expression covers them.
+	//
+	Real s = w / CONTROL_BAR_DESIGN_W;
+	const Real byHeight = h / CONTROL_BAR_DESIGN_H;
+	const Real byGap = ( w * 0.5f - CONTROL_BAR_MIN_PANEL_GAP ) / 405.0f;
+
+	if( byHeight < s )
+		s = byHeight;
+	if( byGap < s )
+		s = byGap;
+
+	//
+	// Floor throughout, never REAL_TO_INT_CEIL: BaseType.h's fast_float_ceil adds 0.99999994 and
+	// truncates, and past about 1024 that sum rounds up to the next whole float - so the "ceiling"
+	// of an exact 1080 is 1081, one pixel off the bottom of a 1080p screen. The three edges that
+	// have to be exact are pinned below instead, which is what they mean anyway.
+	//
+	for( Int p = 0; p < ControlBar::CB_PANEL_COUNT; p++ )
+	{
+		const Real originX = w * thePanelAnchorFraction[ p ] - thePanelAnchorDesignX[ p ] * s;
+
+		outPanel[ p ].lo.x = REAL_TO_INT_FLOOR( originX + thePanelDesignRect[ p ].lo.x * s );
+		outPanel[ p ].hi.x = REAL_TO_INT_FLOOR( originX + thePanelDesignRect[ p ].hi.x * s );
+		outPanel[ p ].lo.y = REAL_TO_INT_FLOOR(
+			h - ( CONTROL_BAR_DESIGN_H - thePanelDesignRect[ p ].lo.y ) * s );
+		outPanel[ p ].hi.y = dispH;		// every panel sits on the bottom edge of the screen
+	}
+
+	// the outer two are pinned to the screen edges, so say so rather than hoping the float lands
+	outPanel[ ControlBar::CB_PANEL_LEFT ].lo.x = 0;
+	outPanel[ ControlBar::CB_PANEL_RIGHT ].hi.x = dispW;
+
+	*outScale = s;
+
+}  // end ControlBarComputePanelLayout
+
 //-------------------------------------------------------------------------------------------------
 /** Which panel a direct child of ControlBarParent belongs to. Everything not named here rides in
 	* the middle, which is where the .wnd already puts the money, power and command windows. */
@@ -1303,25 +1365,11 @@ void ControlBar::layoutPanels( void )
 	const Real loadScaleX = dispW / CONTROL_BAR_DESIGN_W;
 	const Real loadScaleY = dispH / CONTROL_BAR_DESIGN_H;
 
-	//
-	// One scale for both axes, the smaller of the two so the three panels always fit side by side.
-	// At 4:3 that is exactly the old scale and the panels still meet; at anything wider they shrink
-	// together and leave the middle of the screen bottom open instead of stretching to fill it.
-	//
-	const Real s = loadScaleX < loadScaleY ? loadScaleX : loadScaleY;
-
 	// where each panel lands on screen - the plates are drawn from this
-	Int p;
-	for( p = 0; p < CB_PANEL_COUNT; p++ )
-	{
-		const Real originX = dispW * thePanelAnchorFraction[ p ] - thePanelAnchorDesignX[ p ] * s;
+	Real s;
+	ControlBarComputePanelLayout( TheDisplay->getWidth(), TheDisplay->getHeight(), m_panelRect, &s );
 
-		m_panelRect[ p ].lo.x = REAL_TO_INT_FLOOR( originX + thePanelDesignRect[ p ].lo.x * s );
-		m_panelRect[ p ].hi.x = REAL_TO_INT_CEIL ( originX + thePanelDesignRect[ p ].hi.x * s );
-		m_panelRect[ p ].lo.y = REAL_TO_INT_FLOOR(
-			dispH - ( CONTROL_BAR_DESIGN_H - thePanelDesignRect[ p ].lo.y ) * s );
-		m_panelRect[ p ].hi.y = REAL_TO_INT_CEIL( dispH );
-	}
+	Int p;
 
 	// the children's positions are relative to the frame, so grab where it is before moving it
 	ICoord2D barOrigin;
@@ -1331,7 +1379,7 @@ void ControlBar::layoutPanels( void )
 	const Int parentTop =
 		REAL_TO_INT_FLOOR( dispH - ( CONTROL_BAR_DESIGN_H - CONTROL_BAR_DESIGN_TOP ) * s );
 	parent->winSetPosition( 0, parentTop );
-	parent->winSetSize( REAL_TO_INT_CEIL( dispW ), REAL_TO_INT_CEIL( dispH ) - parentTop );
+	parent->winSetSize( TheDisplay->getWidth(), TheDisplay->getHeight() - parentTop );
 
 	const Real shrinkX = s / loadScaleX;
 	const Real shrinkY = s / loadScaleY;

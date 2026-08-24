@@ -1121,5 +1121,13 @@ private:
 // EXTERNALS //////////////////////////////////////////////////////////////////////////////////////
 extern ControlBar *TheControlBar;
 
+//
+// The geometry half of ControlBar::layoutPanels, with none of the GameWindow walking: given a
+// screen size it works out the uniform scale the bar is drawn at and where the three panels land.
+// Exposed so it can be checked at resolutions this machine cannot display.
+// outPanel must have room for ControlBar::CB_PANEL_COUNT rectangles.
+//
+void ControlBarComputePanelLayout( Int dispW, Int dispH, IRegion2D *outPanel, Real *outScale );
+
 #endif  // end __CONTROLBAR_H_
 

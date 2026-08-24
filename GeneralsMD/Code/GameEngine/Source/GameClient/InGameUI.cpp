@@ -5370,8 +5370,13 @@ void InGameUI::drawIncomeRate( void )
 	Int textHeight = 0;
 	m_incomeDisplayString->getSize( NULL, &textHeight );
 
-	// tucked under the balance rather than after it: the money window runs to the panel edge
-	m_incomeDisplayString->draw( pos.x + 4, pos.y + size.y - 2,
+	//
+	// Beside the balance, on the same baseline, rather than under it. This used to sit below
+	// because the money window ran to the edge of a full width control bar and there was nothing
+	// to its right; the centre panel is 624 design units wide against the money window's 439, so
+	// the rate now goes where it reads as part of the same number.
+	//
+	m_incomeDisplayString->draw( pos.x + size.x + 4, pos.y + ( size.y - textHeight ) / 2,
 															 GameMakeColor( 180, 235, 180, 255 ),
 															 GameMakeColor( 0, 0, 0, 255 ) );
 }
