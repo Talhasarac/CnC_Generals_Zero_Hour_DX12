@@ -35,7 +35,12 @@ if(MSVC)
   # dump is the only stack we get.  StackDump.cpp walks the EBP chain by hand and
   # /O2 implies /Oy (no frame pointer), which leaves that dump empty; /Zi + /DEBUG
   # then give the frames names instead of bare addresses.  Costs a PDB, buys Phase 5.
-  add_compile_options(/Oy- /Zi)
+  # /FS goes with /Zi: MSBuild compiles a project's sources in parallel and they all write
+  # the one PDB.  Without it the writes go through mspdbsrv.exe, and if that dies or is
+  # killed - which happens when a build is interrupted - every following compile fails with
+  # C1041, or worse, only some of them do and the library is left half-built against an old
+  # header.  /FS serializes the writes in the compilers themselves instead.
+  add_compile_options(/Oy- /Zi /FS)
   add_link_options(/DEBUG)
 endif()
 
@@ -529,6 +534,19 @@ add_test(NAME dx8_smoke_d3d12 COMMAND dx8_smoke -d3d12)
 # "-msaa": a multisampled back buffer, and the plain render target + non-multisampled depth
 # buffer pairing that DX8Wrapper::_Get_Non_MultiSampled_Depth_Buffer hands the screen filters.
 add_test(NAME dx8_smoke_msaa COMMAND dx8_smoke -msaa 4)
+
+# Tools/bigfile.py reads and writes the game's BIG archives (that is how the shipped INIs
+# come out for editing).  Its selfcheck round-trips synthetic files, so it needs no game
+# data - but it does need an interpreter, so it is only registered when one is present.
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND)
+  add_test(NAME bigfile_selfcheck
+           COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/Tools/bigfile.py selfcheck)
+  # Tools/vfx_tune.py rewrites those INIs in place; its selfcheck runs both rule sets over a
+  # synthetic one and checks the block parser did not eat an End or duplicate a key.
+  add_test(NAME vfx_tune_selfcheck
+           COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/Tools/vfx_tune.py selfcheck)
+endif()
 
 if(RELEASE_DEBUG_LOGGING)
   target_compile_definitions(gameengine PRIVATE RELEASE_DEBUG_LOGGING)
