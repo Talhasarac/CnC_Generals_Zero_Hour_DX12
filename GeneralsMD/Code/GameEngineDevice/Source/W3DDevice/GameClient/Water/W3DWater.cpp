@@ -1219,38 +1219,45 @@ void WaterRenderObjClass::enableWaterGrid(Bool state)
 // ------------------------------------------------------------------------------------------------
 void WaterRenderObjClass::update( void )
 {
-	static UnsignedInt lastLogicFrame = 0;
-	UnsignedInt currLogicFrame = 0;
-	
-	if( TheGameLogic )
-		currLogicFrame = TheGameLogic->getFrame();
+	//
+	// The river scroll and the bump flipbook used to advance once per call, which is once per
+	// RENDER frame. That was fine when the loop was capped and wrong now that it is not, and
+	// putting them on the logic clock instead is only half right: the logic rate is the game
+	// speed setting (30 in the shell, 60 in a skirmish), so the water sped up with it. Neither
+	// clock is the water's - it is scenery, so it runs off the wall clock.
+	//
+	// The per-second figures below are EA's per-frame steps times the 30 fps they were authored
+	// against, so WATER_ANIM_SPEED 1.0f reproduces the shipped tempo exactly. It reads as a boil
+	// rather than a swell at that rate, most visibly on the shell map behind the main menu, so
+	// the whole animation - scroll and bump cycle alike - is scaled by one number and keeps its
+	// shape while only its tempo changes.
+	//
+	const Real WATER_ANIM_SPEED = 0.2f;
+	const Real AUTHORED_FPS = 30.0f;
 
-	// we only process some things if the logic frame has changed
-	if( lastLogicFrame != currLogicFrame )
 	{
-		//
-		// The river scroll and the bump frame used to advance on every call, which is once per
-		// RENDER frame - fine when the loop was capped, wrong now that it is not: the water tore
-		// along at whatever the frame rate happened to be. They belong on the logic clock with
-		// the rest of this function.
-		//
-		// EA's step sizes were authored per render frame and read as a boil rather than a swell,
-		// most visibly on the shell map behind the main menu. WATER_ANIM_SPEED scales the whole
-		// animation - scroll and bump cycle alike - so the surface keeps its shape and only its
-		// tempo changes. 1.0f restores the shipped rate.
-		//
-		const Real WATER_ANIM_SPEED = 0.35f;
+		static UnsignedInt lastScrollMs = 0;
+		const UnsignedInt nowMs = timeGetTime();
+		if (lastScrollMs == 0)
+			lastScrollMs = nowMs;
 
-		m_riverVOrigin += 0.002f * WATER_ANIM_SPEED;
-		m_riverXOffset += (Real)(0.0125*33/5000) * WATER_ANIM_SPEED;
-		m_riverYOffset += (Real)(2*0.0125*33/5000) * WATER_ANIM_SPEED;
+		Real elapsedSec = (Real)(nowMs - lastScrollMs) * 0.001f;
+		lastScrollMs = nowMs;
+		if (elapsedSec > 0.1f)
+			elapsedSec = 0.1f;		// a level load must not jump the surface forward
+
+		const Real step = elapsedSec * AUTHORED_FPS * WATER_ANIM_SPEED;
+
+		m_riverVOrigin += 0.002f * step;
+		m_riverXOffset += (Real)(0.0125*33/5000) * step;
+		m_riverYOffset += (Real)(2*0.0125*33/5000) * step;
 		if (m_riverXOffset > 1) m_riverXOffset -= 1;
 		if (m_riverYOffset > 1) m_riverYOffset -= 1;
 		if (m_riverXOffset < -1) m_riverXOffset += 1;
 		if (m_riverYOffset < -1) m_riverYOffset += 1;
 
 		// the bump texture is a flipbook, so it can only be slowed by holding each frame longer
-		m_bumpFrameAccum += WATER_ANIM_SPEED;
+		m_bumpFrameAccum += step;
 		while (m_bumpFrameAccum >= 1.0f)
 		{
 			m_bumpFrameAccum -= 1.0f;
@@ -1259,8 +1266,17 @@ void WaterRenderObjClass::update( void )
 				m_iBumpFrame = 0;
 			}
 		}
+	}
 
+	static UnsignedInt lastLogicFrame = 0;
+	UnsignedInt currLogicFrame = 0;
 
+	if( TheGameLogic )
+		currLogicFrame = TheGameLogic->getFrame();
+
+	// the rest is gameplay-visible mesh motion and stays on the logic clock
+	if( lastLogicFrame != currLogicFrame )
+	{
 		// for vertex animated water we need to update the vector field
 		if( m_doWaterGrid && m_meshInMotion == TRUE )
 		{
