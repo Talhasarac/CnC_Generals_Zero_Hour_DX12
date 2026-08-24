@@ -132,6 +132,9 @@ Around it, the whole production loop got tightened:
   behind it, a charge bar on superweapons, a progress clock on upgrades being researched. A bar only
   appears while something is really happening: your command centre used to wear a yellow bar from
   the first second of the match, charging a general's power nobody had bought yet.
+- **The charge bar over a superweapon or a supply drop zone now says how many seconds are left**,
+  the same way the production bar beside it always has. A bar filling up tells you something is
+  coming; the number tells you whether it is worth waiting for.
 - **Income per minute next to your money**, averaged over the last half-minute of what you actually
   earned — so it does not swing wildly the moment you spend something.
 - **Aircraft always show how many attack runs they have left**, selected or not. That is the number

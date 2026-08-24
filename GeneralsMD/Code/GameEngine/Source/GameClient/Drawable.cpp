@@ -4054,6 +4054,7 @@ void Drawable::drawHealthBar(const IRegion2D* healthBarRegion)
 		{
 			const UnsignedInt now = TheGameLogic->getFrame();
 			Real chargePct = -1.0f;
+			UnsignedInt chargeFramesLeft = 0;		// for the seconds written over the bar
 
 			const Player *owner = obj->getControllingPlayer();
 
@@ -4081,7 +4082,10 @@ void Drawable::drawHealthBar(const IRegion2D* healthBarRegion)
 				if( pct < 0.0f ) pct = 0.0f;
 				if( pct > 100.0f ) pct = 100.0f;
 				if( chargePct < 0.0f || pct < chargePct )
+				{
 					chargePct = pct;
+					chargeFramesLeft = ready - now;
+				}
 			}
 
 			if( chargePct < 0.0f )
@@ -4090,9 +4094,20 @@ void Drawable::drawHealthBar(const IRegion2D* healthBarRegion)
 				OCLUpdate *ocl = (OCLUpdate*)obj->findUpdateModule( key_OCLUpdate );
 				if( ocl != NULL )
 				{
-					chargePct = ocl->getCountdownPercent() * 100.0f;
+					//
+					// Both OCLUpdate accessors subtract frame numbers as UnsignedInt, so once the
+					// creation frame is behind us they wrap to something enormous rather than going
+					// negative. Clamping the bar hides that; the seconds would print it, so take the
+					// frame count only while the raw percentage is still inside its own range.
+					//
+					const Real rawPct = ocl->getCountdownPercent();
+
+					chargePct = rawPct * 100.0f;
 					if( chargePct < 0.0f ) chargePct = 0.0f;
 					if( chargePct > 100.0f ) chargePct = 100.0f;
+
+					if( rawPct >= 0.0f && rawPct < 1.0f )
+						chargeFramesLeft = ocl->getRemainingFrames();
 				}
 			}
 
@@ -4104,6 +4119,40 @@ void Drawable::drawHealthBar(const IRegion2D* healthBarRegion)
 				TheDisplay->drawFillRect( healthBarRegion->lo.x + 1, chargeY + 1,
 																	(healthBoxWidth - 2) * chargePct * 0.01f, healthBoxHeight - 2,
 																	GameMakeColor( 255, 255, 0, 255 ) );
+
+				//
+				// ... and how long that is, the same way a production bar says it. A bar filling up
+				// tells you something is coming; it does not tell you whether to wait for it. The
+				// supply drop zone is the one this matters most for - its whole job is a payout on
+				// a clock.
+				//
+				if( chargeFramesLeft > 0 )
+				{
+					// real seconds: the logic runs at the game-speed rate, not a fixed 30 a second
+					Int logicFps = TheGameEngine ? TheGameEngine->getFramesPerSecondLimit() : 0;
+					if( logicFps <= 0 )
+						logicFps = LOGICFRAMES_PER_SECOND;
+
+					// one shared string: draw() renders immediately and the manager lives for the app
+					static DisplayString *chargeTimeString = NULL;
+					if( chargeTimeString == NULL )
+					{
+						chargeTimeString = TheDisplayStringManager->newDisplayString();
+						chargeTimeString->setFont( TheFontLibrary->getFont( TheInGameUI->getDrawableCaptionFontName(),
+																TheGlobalLanguageData->adjustFontSize( TheInGameUI->getDrawableCaptionPointSize() - 2 ),
+																FALSE ) );
+					}
+
+					UnicodeString text;
+					text.format( L"%ds", REAL_TO_INT_CEIL( INT_TO_REAL( chargeFramesLeft ) / logicFps ) );
+					if( chargeTimeString->getText().compare( text ) != 0 )
+						chargeTimeString->setText( text );
+
+					Int textW, textH;
+					chargeTimeString->getSize( &textW, &textH );
+					chargeTimeString->draw( healthBarRegion->lo.x, chargeY - textH,
+																	GameMakeColor( 255, 255, 0, 255 ), GameMakeColor( 0, 0, 0, 255 ) );
+				}
 			}
 		}
 
