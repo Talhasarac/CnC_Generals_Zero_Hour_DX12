@@ -58,7 +58,6 @@ enum
 
 #include <stdio.h>
 #include <string.h>
-#include <math.h>
 #include <assetmgr.h>
 #include <texture.h>
 #include "Common/MapReaderWriterInfo.h"
@@ -1394,7 +1393,6 @@ Int W3DTreeBuffer::addTreeType(const W3DTreeDrawModuleData *data)
 	m_treeTypes[m_numTreeTypes].m_data = data;
 	m_treeTypes[m_numTreeTypes].m_offset = offset;
 	m_treeTypes[m_numTreeTypes].m_shadowSize = (box.Extent.X + box.Extent.Y); // Average extent * 2. jba.
-	m_treeTypes[m_numTreeTypes].m_shadowHeight = box.Center.Z + box.Extent.Z; // top of the model above its base.
 	m_treeTypes[m_numTreeTypes].m_doShadow = data->m_doShadow;
 	m_numTreeTypes++;
 	return m_numTreeTypes-1;
@@ -1611,16 +1609,12 @@ void W3DTreeBuffer::drawTrees(CameraClass * camera, RefRenderObjListIterator *pD
 
 	Int curTree;
 	// Draw tree shadows.
-	// Trees are batched vertices with no render object of their own, so a volume shadow is not
-	// available to them - the shared blob is all there is.  Lean and stretch it along the sun so it
-	// at least points where every other shadow in the scene points, and draw it whenever either
-	// shadow option is on: with volumes only, trees used to be the one thing standing on nothing.
+	// Trees are batched vertices with no render object of their own, so the one shared blob decal
+	// is all they can have.  The loop used to be gated on m_useShadowDecals alone, so with volume
+	// shadows picked trees were the one thing in the scene standing on nothing; draw it under
+	// either option.
 	if (m_shadow && TheW3DProjectedShadowManager &&
 			(TheGlobalData->m_useShadowDecals || TheGlobalData->m_useShadowVolumes)) {
-		Vector3 sun(0.0f, 0.0f, 1.0f);
-		if (TheW3DShadowManager) {
-			sun = TheW3DShadowManager->getLightPosWorld(0);
-		}
 		for (curTree=0; curTree<m_numTrees; curTree++) {
 			Int type = m_trees[curTree].treeType;
 			if (type<0) { // deleted.
@@ -1634,24 +1628,8 @@ void W3DTreeBuffer::drawTrees(CameraClass * camera, RefRenderObjListIterator *pD
 					m_trees[curTree].m_toppleState == TOPPLE_DOWN) {
 				continue;
 			}
-			const Real size = m_treeTypes[type].m_shadowSize;
-			Real dirX = 1.0f, dirY = 0.0f, reach = 0.0f;
-			const Real dx = m_trees[curTree].location.X - sun.X;
-			const Real dy = m_trees[curTree].location.Y - sun.Y;
-			const Real dz = sun.Z - m_trees[curTree].location.Z;
-			const Real len = (Real)sqrt(dx*dx + dy*dy);
-			if (len > 0.001f && dz > 1.0f) {
-				dirX = dx/len;
-				dirY = dy/len;
-				reach = m_treeTypes[type].m_shadowHeight * len / dz;
-				if (reach > 2.0f*size) {
-					reach = 2.0f*size;	// a low sun would otherwise smear one tree across half the map.
-				}
-			}
-			m_shadow->setAngle((Real)atan2(dirY, dirX));
-			m_shadow->setSize(size + reach, -size*factor);
-			m_shadow->setPosition(m_trees[curTree].location.X + dirX*reach*0.5f,
-					m_trees[curTree].location.Y + dirY*reach*0.5f, m_trees[curTree].location.Z);
+			m_shadow->setSize(m_treeTypes[type].m_shadowSize, -m_treeTypes[type].m_shadowSize*factor);
+			m_shadow->setPosition(m_trees[curTree].location.X, m_trees[curTree].location.Y, m_trees[curTree].location.Z);
 			TheW3DProjectedShadowManager->queueDecal(m_shadow);
 		}
 		TheW3DProjectedShadowManager->flushDecals(m_shadow->getTexture(0), SHADOW_DECAL);

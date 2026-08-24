@@ -189,11 +189,25 @@ void LookAtTranslator::updateZoomToCursor( void )
 	world.zero();
 	TheTacticalView->screenToTerrain( &m_zoomAnchorPixel, &world );
 
-	Coord2D shift;
-	shift.x = m_zoomAnchorWorld.x - world.x;
-	shift.y = m_zoomAnchorWorld.y - world.y;
-	if (shift.x != 0.0f || shift.y != 0.0f)
-		TheTacticalView->scrollBy( &shift );
+	//
+	// Move the camera by the world-space residual itself.  scrollBy() is not the way to do it:
+	// its delta is a *screen* delta that it pushes through Device_To_World_Space with a fixed
+	// 250 unit resolution and then scales by frame time, so a world offset handed to it comes
+	// out as some other distance entirely and the anchor never lands.  lookAt is the exact move:
+	// given a z on the ground it is a plain setPosition plus setCameraTransform, so the camera is
+	// still clamped to the map the same way scrolling is.
+	//
+	const Real shiftX = m_zoomAnchorWorld.x - world.x;
+	const Real shiftY = m_zoomAnchorWorld.y - world.y;
+	if (shiftX != 0.0f || shiftY != 0.0f)
+	{
+		Coord3D pos;
+		TheTacticalView->getPosition( &pos );
+		pos.x += shiftX;
+		pos.y += shiftY;
+		pos.z = 0.0f;
+		TheTacticalView->lookAt( &pos );
+	}
 
 	//
 	// The first few ticks are a grace period: the wheel is handled in the message stream, which

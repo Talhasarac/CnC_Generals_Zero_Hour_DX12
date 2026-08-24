@@ -170,14 +170,17 @@ windowed mode, and scrolling speed that no longer depends on your frame rate.
 **Zoom toward the cursor works now.** It was in the options and it did nothing at all. The camera
 does not jump to a new zoom, it glides there over the next fraction of a second - and the game was
 measuring how far the ground had slid under your pointer straight away, before the camera had moved
-a millimetre, so it always measured nothing and moved nothing. The spot under your pointer is now
+a millimetre, so it always measured nothing and moved nothing. Then it did measure the slide, and
+handed it to the part of the camera that scrolls in screen inches rather than ground yards, so the
+camera went somewhere else instead. The spot under your pointer is now
 held there for the whole glide. Roll the wheel over the far corner of your base and you end up at
 that corner, not in the middle of the screen.
 
 **A skirmish opens zoomed all the way out.** The game used to drop you at the map author's own
 camera height, which is tighter than the wheel will go, so the first thing anyone did on every
 single map was roll the wheel back to see their base and the ground around it. It now opens at the
-widest view the wheel can reach. Middle-click still snaps back to the author's framing, and
+widest view the wheel can reach — the main menu behind the buttons is left alone, at the framing it
+was built for. Middle-click still snaps back to the author's framing, and
 `StartAtMaxZoom = No` in `GameData.ini` puts the old opening back.
 
 **Hold Ctrl and roll the wheel to turn a building before you put it down** — a clean 45 degrees a
@@ -234,13 +237,13 @@ sparks are too small and too short-lived to earn it, and fire and glows are stil
 shade. It is one soft patch per plume rather than a shadow for every puff, so a battlefield full of
 smoke costs no more than a battlefield with one fire.
 
-Then the trees. Every one of them dropped the same round grey blob, the same size in every
-direction, no matter where the sun was or how tall the tree was — and if you had shadows set to
-the good kind rather than the cheap kind, the trees dropped nothing at all, so a forest sat on
-clean ground next to buildings with long shadows behind them. A tree's shadow now leans away from
-the sun and stretches by the tree's own height, the way everything else on the map does, and it
-is drawn whichever shadow setting you are on. At noon it is a pool under the trunk; late in the
-day the whole treeline lies across the ground in front of you.
+Then the trees. If you had shadows set to the good kind rather than the cheap kind, the trees
+dropped nothing at all, so a forest sat on clean ground next to buildings with long shadows behind
+them. Trees are drawn in one batch to keep a forest cheap, which is why they have never had a
+shadow with a shape - what they get is one soft pool under the trunk, and it is now drawn whichever
+shadow setting you are on. Leaning that pool away from the sun was tried and put back: a round
+smudge sitting a tree's width to one side does not read as that tree's shadow, it reads as a stain
+on the ground.
 
 And the scenery nobody gave a shadow to at all: fences, walls of tyres, rubbish piles, low
 shrubs, the props that dress a map. They stood on the terrain with nothing under them, which is
@@ -321,7 +324,9 @@ question. The aircraft attack-move fix came from a log line, not an argument.
 **Things that did not work were reverted, and written down.** A wider field of view for widescreen
 looked past the edge of the maps and went back. Four separate pathfinding experiments were tried in
 game, made things worse, and were reverted. A three-panel command bar that fixed the widescreen
-stretch was tried and reverted too — the game's own bar is the one people want to see. All of it is
+stretch was tried and reverted too — the game's own bar is the one people want to see. Tree shadows
+that leaned away from the sun went the same way, on the evidence of before-and-after screenshots.
+All of it is
 recorded so nobody re-tries it in two years.
 
 **Bugs deliberately left alone are pinned by a test** that documents the current behaviour, so
@@ -335,6 +340,13 @@ having a shadow built from his pose, frame by frame. What is still missing is a 
 has stood in front of a skirmish full of soldiers to judge how they look, or measured what they cost
 in frames. If they turn out to be ugly or expensive, `UseShadowVolumesForSkins = No` turns them off
 and this entry gets rewritten.
+
+**Zoom toward the cursor has been fixed twice and eyeballed once.** The first fix measured a camera
+that had not moved; the second found the camera being pushed in the wrong units. The second one is
+argued from the code rather than watched: the mouse wheel cannot be faked from outside the game —
+injected wheel events never reach its input, which is how it was established that they never
+arrived rather than that they arrived and did nothing. If it still misses the mark, say so and it
+gets a third look.
 
 ---
 

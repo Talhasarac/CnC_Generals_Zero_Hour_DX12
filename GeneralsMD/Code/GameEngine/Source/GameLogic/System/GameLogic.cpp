@@ -2029,8 +2029,9 @@ void GameLogic::startNewGame( Bool loadingSaveGame )
 
 	TheTacticalView->setAngleAndPitchToDefault();
 	//StartAtMaxZoom: open the map as far out as the wheel itself may go rather than at the map's
-	//own default height, which is the tighter of the two.
-	if( TheGlobalData->m_startAtMaxZoom )
+	//own default height, which is the tighter of the two.  Not the shell map behind the menus:
+	//that one is framed as a set piece and its own default framing is the point of it.
+	if( TheGlobalData->m_startAtMaxZoom && !isInShellGame() )
 		TheTacticalView->setZoomToMax();
 	else
 		TheTacticalView->setZoomToDefault();
@@ -2080,8 +2081,9 @@ void GameLogic::startNewGame( Bool loadingSaveGame )
 	TheTacticalView->initHeightForMap();
 	TheTacticalView->setAngleAndPitchToDefault();
 	//StartAtMaxZoom: open the map as far out as the wheel itself may go rather than at the map's
-	//own default height, which is the tighter of the two.
-	if( TheGlobalData->m_startAtMaxZoom )
+	//own default height, which is the tighter of the two.  Not the shell map behind the menus:
+	//that one is framed as a set piece and its own default framing is the point of it.
+	if( TheGlobalData->m_startAtMaxZoom && !isInShellGame() )
 		TheTacticalView->setZoomToMax();
 	else
 		TheTacticalView->setZoomToDefault();
