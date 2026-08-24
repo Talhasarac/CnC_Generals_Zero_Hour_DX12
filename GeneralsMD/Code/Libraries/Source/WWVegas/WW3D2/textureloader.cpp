@@ -337,9 +337,20 @@ void TextureLoader::Init()
 
 void TextureLoader::Deinit()
 {
-	FastCriticalSectionClass::LockClass lock(_BackgroundCriticalSection);
+	//
+	// Stop() sets running=false, then spins (capped at 3000ms, WWLib/thread.h) waiting for the
+	// loader thread to exit before TerminateThread-ing it. This used to hold _BackgroundCriticalSection
+	// for that whole wait. Thread_Function only checks running between tasks - it takes that same
+	// lock first, to pop the next one (textureloader.cpp, LoaderThreadClass::Thread_Function) - so if
+	// the loader thread reached that line after we grabbed the lock here, it blocked on the lock we
+	// were holding while we blocked on it inside Stop(): a guaranteed deadlock, paid out as the full
+	// 3-second TerminateThread ceiling on every quit that caught a texture load in flight. Stop()
+	// unlocked instead: the loader either finishes its current task and exits on its own, or was
+	// never near the lock and exits immediately either way.
+	//
 	_TextureLoadThread.Stop();
 
+	FastCriticalSectionClass::LockClass lock(_BackgroundCriticalSection);
 	ThumbnailManagerClass::Deinit();
 	TextureLoadTaskClass::Delete_Free_Pool();
 }

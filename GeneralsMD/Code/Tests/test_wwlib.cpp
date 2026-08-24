@@ -40,8 +40,11 @@
 #include "ramfile.h"
 #include "chunkio.h"
 #include "wwfile.h"
+#include "thread.h"
+#include "mutex.h"
 
 #include <stdlib.h>
+#include <windows.h>
 
 //////////////////////////////////////////////////////////////////////////////
 // Helpers
@@ -1298,4 +1301,78 @@ TEST(cpudetect_logs_are_printable)
 	/* The compact log is tab separated; the OS code is the first field and
 	   must never be blank. */
 	CHECK(p[0] != '\t');
+}
+
+//-------------------------------------------------------------------------------------------------
+// ThreadClass::Stop() deadlock pattern -----------------------------------------------------------
+//-------------------------------------------------------------------------------------------------
+//
+// Regression for the shutdown stall fixed in WW3D2's TextureLoader::Deinit (textureloader.cpp):
+// that function used to take a FastCriticalSectionClass lock and only THEN call Stop() on the
+// worker thread, which takes that same lock every time round its loop before checking whether it
+// should keep running. If the worker reached its own lock acquire after the main thread grabbed
+// it, both sides blocked forever - the worker on the lock, the main thread inside Stop()'s
+// wait-for-exit spin - so every quit that caught the worker mid-loop paid the full 3-second
+// TerminateThread ceiling. The fix is ordering: call Stop() before taking the lock, so the worker
+// is free to finish its own acquire, see running go false, and exit on its own.
+//
+// TextureLoader itself needs a live D3D device, so this reproduces the same two primitives -
+// ThreadClass and FastCriticalSectionClass - standalone. LockLoopWorker plays the loader thread's
+// role exactly: grab the lock, hold it briefly, release, repeat.
+//
+class LockLoopWorker : public ThreadClass
+{
+public:
+	LockLoopWorker(FastCriticalSectionClass &lock) : ThreadClass("LockLoopWorker"), m_lock(lock) {}
+
+protected:
+	virtual void Thread_Function()
+	{
+		while (running)
+		{
+			FastCriticalSectionClass::LockClass lock(m_lock);
+			for (volatile int i = 0; i < 2000; ++i) {}
+		}
+	}
+
+private:
+	FastCriticalSectionClass &m_lock;
+};
+
+TEST(threadclass_stop_deadlocks_if_the_caller_holds_the_workers_lock)
+{
+	/* Pins the buggy ordering: take the lock the worker also wants, then call Stop() while still
+	   holding it. A short timeout keeps the (expected) deadlock from costing real seconds - what
+	   matters is that it reliably runs out the whole timeout instead of returning early, which is
+	   exactly what turned into the 3-second quit stall in the real code. */
+	FastCriticalSectionClass lock;
+	LockLoopWorker worker(lock);
+	worker.Execute();
+	ThreadClass::Sleep_Ms(20); // let it get into its loop
+
+	unsigned start = GetTickCount();
+	{
+		FastCriticalSectionClass::LockClass held(lock);
+		worker.Stop(300);
+	}
+	unsigned elapsed = GetTickCount() - start;
+
+	CHECK(elapsed >= 250);
+}
+
+TEST(threadclass_stop_returns_promptly_when_called_unlocked)
+{
+	/* The fix, in the shape TextureLoader::Deinit now uses: call Stop() before taking the lock the
+	   worker wants. The worker finishes whatever it is doing, sees running go false at the top of
+	   its loop, and exits - no contention with this thread at all. */
+	FastCriticalSectionClass lock;
+	LockLoopWorker worker(lock);
+	worker.Execute();
+	ThreadClass::Sleep_Ms(20);
+
+	unsigned start = GetTickCount();
+	worker.Stop(300);
+	unsigned elapsed = GetTickCount() - start;
+
+	CHECK(elapsed < 250);
 }
