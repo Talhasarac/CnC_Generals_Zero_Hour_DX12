@@ -245,11 +245,23 @@ darken a single pixel, so a forest sat on clean bright sand next to tanks with s
 them. The blob is now blended onto the ground the way its own artwork describes it — the same
 picture, the same darkness EA chose, actually visible.
 
-So every tree on the map has a shadow now. So does every palm, every bush and every piece of
-scenery that only ever had the soft kind, whichever shadow setting you play on. Leaning that pool
-away from the sun was tried and put back: a round smudge sitting a tree's width to one side does
-not read as that tree's shadow, it reads as a stain on the ground.
+So every tree on the map has a shadow now — and not just a pool. A tree was the last thing out
+there whose shadow was a circle while everything else threw its own shape. It threw a circle for
+three reasons, all of them the game's own: the trees ask for the cheap kind by name; the shadow
+builder refuses any part of a model marked see-through, and a tree's *trunk* is marked see-through
+along with its leaves, so the whole tree was refused; and leaves are flat sheets, which cannot cast
+a solid shadow no matter what you do with them.
 
+Trees are now handled the way the soldiers were: they get a real shadow built from the model, and
+the see-through rule is only lifted when it would otherwise leave the tree with nothing at all — a
+helicopter's rotor still does not throw a solid disc. What comes out is the trunk, stretched across
+the ground in the sun's direction, with the soft pool kept underneath for the crown the leaves
+cannot cast. Palms on a beach now lie their trunks across the sand.
+
+Every tree, too, not most of them: 27 of the game's 128 tree types never said whether they should
+cast at all, and silently got nothing. They cast now. So do the bushes, the palms and the scenery.
+`ShadowsForProps = No` in `GameData.ini` puts every bit of this back the way it was if a map full
+of trees costs you frames.
 And the scenery nobody gave a shadow to at all: fences, walls of tyres, rubbish piles, low
 shrubs, the props that dress a map. They stood on the terrain with nothing under them, which is
 the one thing the eye picks out instantly. Anything that cannot move and had no shadow now casts

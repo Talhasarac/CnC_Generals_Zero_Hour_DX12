@@ -1620,7 +1620,11 @@ void W3DTreeBuffer::drawTrees(CameraClass * camera, RefRenderObjListIterator *pD
 			if (type<0) { // deleted.
 				continue;
 			}
-			if (!m_trees[curTree].visible || !m_treeTypes[type].m_doShadow) {
+			//DoShadow is the tree type's own say, and 27 of the game's 128 tree types never name it at
+			//all - the module data defaults it to false, so those stood on clean ground.  With
+			//ShadowsForProps on, every tree gets the blob and the flag only decides it when that is off.
+			if (!m_trees[curTree].visible ||
+				(!m_treeTypes[type].m_doShadow && !TheGlobalData->m_shadowsForProps)) {
 				continue;
 			}
 			Real factor = 1.0f;
