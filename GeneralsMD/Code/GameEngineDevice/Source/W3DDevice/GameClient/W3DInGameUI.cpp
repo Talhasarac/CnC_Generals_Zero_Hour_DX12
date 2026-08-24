@@ -32,6 +32,8 @@
 #include "Common/GlobalData.h"
 #include "Common/ThingTemplate.h"
 #include "Common/ThingFactory.h"
+#include "GameLogic/AI.h"
+#include "GameLogic/AIPathfind.h"
 #include "GameLogic/TerrainLogic.h"
 #include "GameLogic/GameLogic.h"
 #include "GameLogic/Object.h"
@@ -282,6 +284,7 @@ W3DInGameUI::W3DInGameUI()
 
 	m_buildingPlacementAnchor = NULL;
 	m_buildingPlacementArrow = NULL;
+	m_buildGridRender = NULL;
 
 }  // end W3DInGameUI
 
@@ -302,6 +305,13 @@ W3DInGameUI::~W3DInGameUI()
 
 	REF_PTR_RELEASE( m_buildingPlacementAnchor );
 	REF_PTR_RELEASE( m_buildingPlacementArrow );
+
+	if( m_buildGridRender )
+	{
+		m_buildGridRender->Reset();
+		delete m_buildGridRender;
+		m_buildGridRender = NULL;
+	}
 
 }  // end ~W3DInGameUI
 
@@ -443,6 +453,131 @@ void W3DInGameUI::draw( void )
 #endif
 
 }  // end draw
+
+//-------------------------------------------------------------------------------------------------
+/** Draw the pathfinder's own cell grid under the structure sitting on the cursor, and cross out
+	* the cells it cannot go on.  GridBuildPlacement snaps a footprint's edges to these very lines
+	* (see snapPlacementToGrid), so being able to see them is the difference between guessing at a
+	* flush row of buildings and laying one out.
+	*
+	* Only the cells around the cursor are drawn.  The whole map's worth would be a wall of lines,
+	* and the ones being aimed at are the ones worth seeing - so the lines also fade out towards the
+	* edge of the patch instead of ending on a hard square.
+	*
+	* "Cannot build" here is the pathfinder cell's own type: water, a cliff, rubble, an existing
+	* structure, plain impassable.  It deliberately does not run the full isLocationLegalToBuild for
+	* every cell - that is a per-structure query (build radius, shroud, supply proximity) and a
+	* couple of hundred of them a frame is not worth it.  The ghost's own red tint already answers
+	* that question for the one spot the cursor is actually on. */
+//-------------------------------------------------------------------------------------------------
+void W3DInGameUI::drawBuildGrid( void )
+{
+	// the grid you see is the grid you snap to: with the snap off it would mean nothing
+	if( m_pendingPlaceType == NULL || TheGlobalData->m_gridBuildPlacement == FALSE )
+		return;
+	if( m_placeIcon == NULL || m_placeIcon[ 0 ] == NULL )
+		return;
+	if( TheTacticalView == NULL || TheDisplay == NULL || TheTerrainLogic == NULL || TheAI == NULL )
+		return;
+
+	Pathfinder *pathfinder = TheAI->pathfinder();
+	if( pathfinder == NULL )
+		return;
+
+	const Coord3D *center = m_placeIcon[ 0 ]->getPosition();
+	if( center == NULL )
+		return;
+
+	// how many cells each way around the cursor we light up
+	enum { GRID_RADIUS = 14 };
+	enum { GRID_CELLS = GRID_RADIUS * 2 + 1, GRID_POINTS = GRID_CELLS + 1 };
+
+	// the pathfinder's own cell indexing, so the lines drawn are the lines it reasons about
+	const Int cellX = REAL_TO_INT_FLOOR( (center->x + 0.5f) / PATHFIND_CELL_SIZE_F ) - GRID_RADIUS;
+	const Int cellY = REAL_TO_INT_FLOOR( (center->y + 0.5f) / PATHFIND_CELL_SIZE_F ) - GRID_RADIUS;
+
+	// project every corner of the patch once, rather than four times per cell
+	ICoord2D screen[ GRID_POINTS ][ GRID_POINTS ];
+	Bool onScreen[ GRID_POINTS ][ GRID_POINTS ];
+	Int ix, iy;
+	for( iy = 0; iy < GRID_POINTS; ++iy )
+	{
+		for( ix = 0; ix < GRID_POINTS; ++ix )
+		{
+			Coord3D world;
+			world.x = placementGridLine( cellX + ix );
+			world.y = placementGridLine( cellY + iy );
+			world.z = TheTerrainLogic->getGroundHeight( world.x, world.y );
+			onScreen[ iy ][ ix ] = TheTacticalView->worldToScreen( &world, &screen[ iy ][ ix ] );
+		}
+	}
+
+	if( m_buildGridRender == NULL )
+		m_buildGridRender = NEW Render2DClass;
+	if( m_buildGridRender == NULL )
+		return;
+
+	m_buildGridRender->Reset();
+	m_buildGridRender->Enable_Texturing( FALSE );
+	m_buildGridRender->Set_Coordinate_Range( RectClass( 0, 0, (Real)TheDisplay->getWidth(),
+																											(Real)TheDisplay->getHeight() ) );
+
+	// the lines fade to nothing at the edge of the patch, measured from the cursor's own cell
+	const Real fadeFrom = (Real)GRID_RADIUS;
+
+	// the grid itself
+	for( iy = 0; iy < GRID_POINTS; ++iy )
+	{
+		for( ix = 0; ix < GRID_POINTS; ++ix )
+		{
+			// distance in cells from the middle, on the axis the segment runs along
+			const Real dx = (Real)fabs( ix - GRID_RADIUS - 0.5f );
+			const Real dy = (Real)fabs( iy - GRID_RADIUS - 0.5f );
+
+			const Real d = ( dx > dy ) ? dx : dy;
+			const Int alpha = REAL_TO_INT( 0x50 * ( 1.0f - d / fadeFrom ) );
+			if( alpha <= 0 )
+				continue;
+
+			const UnsignedInt color = (alpha << 24) | 0x00FFFFFF;
+
+			if( ix + 1 < GRID_POINTS && onScreen[ iy ][ ix ] && onScreen[ iy ][ ix + 1 ] )
+				m_buildGridRender->Add_Line( Vector2( (Real)screen[ iy ][ ix ].x, (Real)screen[ iy ][ ix ].y ),
+																		 Vector2( (Real)screen[ iy ][ ix + 1 ].x, (Real)screen[ iy ][ ix + 1 ].y ),
+																		 1.0f, color );
+
+			if( iy + 1 < GRID_POINTS && onScreen[ iy ][ ix ] && onScreen[ iy + 1 ][ ix ] )
+				m_buildGridRender->Add_Line( Vector2( (Real)screen[ iy ][ ix ].x, (Real)screen[ iy ][ ix ].y ),
+																		 Vector2( (Real)screen[ iy + 1 ][ ix ].x, (Real)screen[ iy + 1 ][ ix ].y ),
+																		 1.0f, color );
+		}
+	}
+
+	// and an X through every cell a structure cannot stand on
+	for( iy = 0; iy < GRID_CELLS; ++iy )
+	{
+		for( ix = 0; ix < GRID_CELLS; ++ix )
+		{
+			PathfindCell *cell = pathfinder->getCell( LAYER_GROUND, cellX + ix, cellY + iy );
+			if( cell == NULL || cell->getType() == PathfindCell::CELL_CLEAR )
+				continue;
+
+			if( !onScreen[ iy ][ ix ] || !onScreen[ iy + 1 ][ ix + 1 ] ||
+					!onScreen[ iy ][ ix + 1 ] || !onScreen[ iy + 1 ][ ix ] )
+				continue;
+
+			m_buildGridRender->Add_Line( Vector2( (Real)screen[ iy ][ ix ].x, (Real)screen[ iy ][ ix ].y ),
+																	 Vector2( (Real)screen[ iy + 1 ][ ix + 1 ].x, (Real)screen[ iy + 1 ][ ix + 1 ].y ),
+																	 1.0f, 0xAAFF3030 );
+			m_buildGridRender->Add_Line( Vector2( (Real)screen[ iy ][ ix + 1 ].x, (Real)screen[ iy ][ ix + 1 ].y ),
+																	 Vector2( (Real)screen[ iy + 1 ][ ix ].x, (Real)screen[ iy + 1 ][ ix ].y ),
+																	 1.0f, 0xAAFF3030 );
+		}
+	}
+
+	m_buildGridRender->Render();
+
+}  // end drawBuildGrid
 
 //-------------------------------------------------------------------------------------------------
 /** draw 2d selection region on screen */

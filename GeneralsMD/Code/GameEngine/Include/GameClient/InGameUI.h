@@ -457,19 +457,28 @@ public:  // ********************************************************************
 		* the pathfinder actually reasons about. */
 	virtual void snapPlacementToGrid( Coord3D *world, const ThingTemplate *what, Real angle ) const;
 
+	/** Where the pathfinder's cell boundaries actually are.  It files a world position under
+		* floor( (v + 0.5) / PATHFIND_CELL_SIZE ) (see Pathfinder::internal_classifyObjectFootprint),
+		* so cell k spans [10k - 0.5, 10k + 9.5) - the lines are at k*10 - 0.5, half a unit off the
+		* round numbers.  Snapping to the round numbers left every footprint edge half a unit inside
+		* the neighbouring cell, so two buildings that looked flush were both claiming it. */
+	enum { PLACEMENT_CELL = 10 };										///< PATHFIND_CELL_SIZE, without the pathfinder header
+	static Real placementGridLine( Int k ) { return k * (Real)PLACEMENT_CELL - 0.5f; }
+
 	/** One axis of that snap.  'extent' is the structure's half-size along this axis, so a footprint
 		* that is an odd number of cells wide is centred on a cell and an even one on the line between
 		* two - either way its edges land on grid lines and two neighbours can share one.  Inline and
 		* static so a test can reach it without linking the whole in-game UI. */
 	static Real snapPlacementAxis( Real v, Real extent )
 	{
-		const Real cell = 10.0f;		// PATHFIND_CELL_SIZE_F: one pathfinder cell, one grid square
+		const Real cell = (Real)PLACEMENT_CELL;		// one pathfinder cell, one grid square
+		const Real line = placementGridLine( 0 );	// where cell 0 starts
 
 		Int cells = REAL_TO_INT_FLOOR( 2.0f * extent / cell + 0.5f );
 		if( cells < 1 )
 			cells = 1;
 
-		const Real offset = (cells & 1) ? cell * 0.5f : 0.0f;
+		const Real offset = ((cells & 1) ? cell * 0.5f : 0.0f) + line;
 
 		return ((Real)REAL_TO_INT_FLOOR( (v - offset) / cell + 0.5f )) * cell + offset;
 	}
@@ -748,6 +757,8 @@ protected:
 	void updateFloatingText( void );						///< Update function to move our floating text
 	void drawFloatingText( void );							///< Draw all our floating text
 	void clearFloatingText( void );							///< clear the floating text list
+
+	virtual void drawBuildGrid( void ) { }				///< the pathfinder's build grid under a pending structure
 
 	void clearWorldAnimations( void );					///< delete all world animations
 	void updateAndDrawWorldAnimations( void );	///< update and draw visible world animations

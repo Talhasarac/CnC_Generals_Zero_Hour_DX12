@@ -988,16 +988,21 @@ TEST(placement_grid_snap_puts_footprint_edges_on_cell_lines)
 {
 	const Real cell = 10.0f;
 
+	/* The pathfinder files a position under floor((v + 0.5) / 10), so its cell lines sit at
+	 * k*10 - 0.5, not at k*10.  Everything below is measured against those. */
+	CHECK_NEAR(InGameUI::placementGridLine(0), -0.5f, 0.0001f);
+	CHECK_NEAR(InGameUI::placementGridLine(3), 29.5f, 0.0001f);
+
 	/* 3 cells wide (extent 15) - centre on a cell centre, whatever it started as */
-	CHECK_NEAR(InGameUI::snapPlacementAxis(0.0f, 15.0f), 5.0f, 0.0001f);
-	CHECK_NEAR(InGameUI::snapPlacementAxis(4.0f, 15.0f), 5.0f, 0.0001f);
-	CHECK_NEAR(InGameUI::snapPlacementAxis(9.0f, 15.0f), 5.0f, 0.0001f);
-	CHECK_NEAR(InGameUI::snapPlacementAxis(11.0f, 15.0f), 15.0f, 0.0001f);
+	CHECK_NEAR(InGameUI::snapPlacementAxis(0.0f, 15.0f), 4.5f, 0.0001f);
+	CHECK_NEAR(InGameUI::snapPlacementAxis(4.0f, 15.0f), 4.5f, 0.0001f);
+	CHECK_NEAR(InGameUI::snapPlacementAxis(9.0f, 15.0f), 4.5f, 0.0001f);
+	CHECK_NEAR(InGameUI::snapPlacementAxis(11.0f, 15.0f), 14.5f, 0.0001f);
 
 	/* 4 cells wide (extent 20) - centre on a cell line */
-	CHECK_NEAR(InGameUI::snapPlacementAxis(4.0f, 20.0f), 0.0f, 0.0001f);
-	CHECK_NEAR(InGameUI::snapPlacementAxis(6.0f, 20.0f), 10.0f, 0.0001f);
-	CHECK_NEAR(InGameUI::snapPlacementAxis(123.0f, 20.0f), 120.0f, 0.0001f);
+	CHECK_NEAR(InGameUI::snapPlacementAxis(4.0f, 20.0f), -0.5f, 0.0001f);
+	CHECK_NEAR(InGameUI::snapPlacementAxis(6.0f, 20.0f), 9.5f, 0.0001f);
+	CHECK_NEAR(InGameUI::snapPlacementAxis(123.0f, 20.0f), 119.5f, 0.0001f);
 
 	/* a snap never moves anything more than half a cell */
 	for (Int i = 0; i < 400; i++)
@@ -1008,18 +1013,26 @@ TEST(placement_grid_snap_puts_footprint_edges_on_cell_lines)
 		CHECK(fabsf(InGameUI::snapPlacementAxis(v, 20.0f) - v) <= cell / 2.0f + 0.0001f);
 	}
 
-	/* and both edges of the footprint end up on cell lines, odd width and even alike */
+	/* and both edges of the footprint end up on the pathfinder's own cell lines, odd width and
+	 * even alike - which is what makes the cells a structure blocks exactly the cells it covers */
 	for (Int cells = 1; cells <= 8; cells++)
 	{
 		Real extent = cells * cell * 0.5f;
 		Real centre = InGameUI::snapPlacementAxis(37.3f, extent);
-		Real lo = (centre - extent) / cell;
-		Real hi = (centre + extent) / cell;
+		Real lo = (centre - extent - InGameUI::placementGridLine(0)) / cell;
+		Real hi = (centre + extent - InGameUI::placementGridLine(0)) / cell;
 
 		CHECK_NEAR(lo, (Real)REAL_TO_INT_FLOOR(lo + 0.5f), 0.0001f);
 		CHECK_NEAR(hi, (Real)REAL_TO_INT_FLOOR(hi + 0.5f), 0.0001f);
+
+		/* the cell the pathfinder puts each edge in is the first and last cell covered: no
+		 * half-unit sliver of a neighbouring cell left over for the building next door */
+		CHECK_EQ(REAL_TO_INT_FLOOR((centre - extent + 0.5f) / cell),
+		         REAL_TO_INT_FLOOR((centre - extent + 0.5f + 0.1f) / cell));
+		CHECK_EQ(REAL_TO_INT_FLOOR((centre + extent + 0.5f) / cell) - 1,
+		         REAL_TO_INT_FLOOR((centre + extent + 0.5f - 0.1f) / cell));
 	}
 
 	/* a template with no footprint worth the name still lands on a whole cell, not on nothing */
-	CHECK_NEAR(InGameUI::snapPlacementAxis(13.0f, 0.0f), 15.0f, 0.0001f);
+	CHECK_NEAR(InGameUI::snapPlacementAxis(13.0f, 0.0f), 14.5f, 0.0001f);
 }

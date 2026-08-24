@@ -78,11 +78,18 @@ protected:
 	virtual void drawMoveHints( View *view );			///< draw move hint visual feedback
 	virtual void drawAttackHints( View *view );		///< draw attack hint visual feedback
 	virtual void drawPlaceAngle( View *view ); 		///< draw place building angle if needed
+	virtual void drawBuildGrid( void );						///< the pathfinder's build grid under a pending structure
 
 	RenderObjClass *m_moveHintRenderObj[ MAX_MOVE_HINTS ];
 	HAnimClass		 *m_moveHintAnim[ MAX_MOVE_HINTS ];
 	RenderObjClass *m_buildingPlacementAnchor;
 	RenderObjClass *m_buildingPlacementArrow;
+
+	/** The build grid is a few thousand short lines, and TheDisplay->drawLine is a Reset() and a
+		* Render() each - one draw call per segment (EA's own @todo on it).  One renderer of our own,
+		* filled in a single pass and drawn once, is what lets the patch be wide enough to lay a base
+		* out on. */
+	Render2DClass *m_buildGridRender;
 
 };  // end class W3DInGameUI
 

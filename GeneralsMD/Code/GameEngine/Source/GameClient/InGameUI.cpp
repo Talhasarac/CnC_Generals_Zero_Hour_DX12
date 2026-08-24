@@ -1715,6 +1715,9 @@ void InGameUI::preDraw( void )
 	// handle radius-cursors, if any
 	handleRadiusCursor();
 
+	// show the build grid under a structure waiting to be placed
+	drawBuildGrid();
+
 	// draw the floating text first;
 	drawFloatingText();
 
@@ -3401,6 +3404,14 @@ void InGameUI::snapPlacementToGrid( Coord3D *world, const ThingTemplate *what, R
 	if( geom.getGeomType() != GEOMETRY_BOX )
 		major = minor = geom.getBoundingCircleRadius();
 
+	// The ground a structure really takes is not its collision box: BuildAssistant's own clearance
+	// check grows both radii by the factory bib (isLocationClearOfObjects' myBounds), and the bib is
+	// the concrete apron you can see under it.  Snapping the bare box left that apron hanging off
+	// the grid by the bib's width, which is what makes a placed building look like it did not
+	// quite sit down on its squares.
+	major += what->getFactoryExtraBibWidth();
+	minor += what->getFactoryExtraBibWidth();
+
 	const Real c = (Real)fabs( Cos( angle ) );
 	const Real sn = (Real)fabs( Sin( angle ) );
 
@@ -3408,6 +3419,7 @@ void InGameUI::snapPlacementToGrid( Coord3D *world, const ThingTemplate *what, R
 	world->y = snapPlacementAxis( world->y, major * sn + minor * c );
 
 }  // end snapPlacementToGrid
+
 
 //-------------------------------------------------------------------------------------------------
 /** Aim the structure sitting on the cursor at 'angle', and keep that heading for the placements

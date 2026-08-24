@@ -165,7 +165,9 @@ what the game looks like.
 
 Alongside it: zoom further out (with the whole map drawn, so the corners are not black), zoom toward
 the cursor, 45-degree snapping for camera rotation and building placement, edge scrolling in
-windowed mode, and scrolling speed that no longer depends on your frame rate.
+windowed mode, and scrolling speed that no longer depends on your frame rate. The extra zoom-out was
+pulled back in after playing with it — a quarter again on top of what the original allowed, rather
+than half, which had the camera so high the units stopped reading as units.
 
 **Zoom toward the cursor works now.** It was in the options and it did nothing at all. The camera
 does not jump to a new zoom, it glides there over the next fraction of a second - and the game was
@@ -193,6 +195,19 @@ stripe of ground between them too narrow to walk a soldier through but too wide 
 Placement now lands on the same ten-foot squares the pathfinder reasons about, so neighbours share
 an edge, a row of them comes out straight, and the gaps you leave are gaps you meant to leave. Put
 `GridBuildPlacement = No` in `Options.ini` for the old to-the-pixel placement.
+
+**And now you can see those squares.** Pick a structure and the ground under it comes up ruled into
+the grid it is about to land on — a wide patch, enough to plan a whole row against, fading out
+towards its edge rather than stopping on a hard line. Every square you cannot build on — water, a
+cliff, rubble, something already standing there — is crossed out in red as you pass over it, so you
+find the edge of the buildable ground by looking at it instead of by being told *no* after the click.
+
+Two things were quietly out by a hair and are now exact. The squares the game reasons about are not
+where the round numbers are — they sit half a foot off — so every building was going down half a
+foot inside its neighbour's square, which is the sliver the snapping was meant to remove in the
+first place. And a factory's concrete apron is wider than the building on top of it; that apron is
+what you see, and what the game measures when it decides whether two buildings fit, so it is now
+what gets lined up. Buildings sit *on* their squares now rather than near them.
 
 **A building now faces the way you drag it.** Press, pull out in the direction you want it to look,
 let go — that has always been how you aim a structure, but the game was reading your aim two frames
