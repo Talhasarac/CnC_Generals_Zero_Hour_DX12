@@ -460,7 +460,18 @@ add_custom_command(TARGET generals POST_BUILD
           $<TARGET_PDB_FILE:generals> ${CMAKE_CURRENT_SOURCE_DIR}/../Run/
   # d3d8to9's d3d8.dll next to the exe = the renderer runs on Direct3D 9.
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
-          $<TARGET_FILE:d3d8to9> ${CMAKE_CURRENT_SOURCE_DIR}/../Run/)
+          $<TARGET_FILE:d3d8to9> ${CMAKE_CURRENT_SOURCE_DIR}/../Run/
+  # The fork's key bindings and their labels.  Run/ is gitignored, so these two
+  # used to be hand-made files that silently went stale every time a command was
+  # added - the tracked copies under Code/Data are the masters and this puts them
+  # where the game reads them.  A loose file beats every .big, and the game never
+  # writes either one back, so overwriting them on each build is safe.
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          ${CMAKE_CURRENT_SOURCE_DIR}/Data/INI/CommandMap.ini
+          ${CMAKE_CURRENT_SOURCE_DIR}/../Run/Data/INI/
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          ${CMAKE_CURRENT_SOURCE_DIR}/Data/Patch.str
+          ${CMAKE_CURRENT_SOURCE_DIR}/../Run/Data/)
 add_dependencies(generals d3d8to9)
 
 # ===========================================================================

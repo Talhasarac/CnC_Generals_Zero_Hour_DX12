@@ -1,0 +1,298 @@
+// MASTER COPY - this is the tracked one.  The build copies it to
+// Run/Data/Patch.str, which is where the game reads it from and which is
+// gitignored, so edit THIS file and rebuild (or copy it across by hand).
+//
+// Patch.str is the 1.04 string overlay from PatchData.big.  The two original
+// strings are kept; everything after them is this fork's, and every command
+// added to Data/INI/CommandMap.ini needs a pair here or Options > Keyboard
+// shows a blank row.
+//
+// Comments are '//' - GameText.cpp parseStringFile skips exactly that.
+
+GUI:CustomMission
+"CUSTOM MISSION"
+END
+
+GUI:StartCustomMission
+"START GAME"
+END
+
+GUI:SelectNextIdleWorker
+"Select Next Idle Worker"
+END
+
+GUI:SelectNextIdleWorkerDescription
+"Selects the next dozer or worker that has nothing to do and centers the view on it."
+END
+
+GUI:CommandSlot01
+"Command Bar Slot 01"
+END
+
+GUI:CommandSlot01Description
+"Presses command bar slot 01 (column 1, top row, 'Q' in the default grid layout)."
+END
+
+GUI:CommandSlot02
+"Command Bar Slot 02"
+END
+
+GUI:CommandSlot02Description
+"Presses command bar slot 02 (column 1, bottom row, 'Z' in the default grid layout)."
+END
+
+GUI:CommandSlot03
+"Command Bar Slot 03"
+END
+
+GUI:CommandSlot03Description
+"Presses command bar slot 03 (column 2, top row, 'W' in the default grid layout)."
+END
+
+GUI:CommandSlot04
+"Command Bar Slot 04"
+END
+
+GUI:CommandSlot04Description
+"Presses command bar slot 04 (column 2, bottom row, 'X' in the default grid layout)."
+END
+
+GUI:CommandSlot05
+"Command Bar Slot 05"
+END
+
+GUI:CommandSlot05Description
+"Presses command bar slot 05 (column 3, top row, 'E' in the default grid layout)."
+END
+
+GUI:CommandSlot06
+"Command Bar Slot 06"
+END
+
+GUI:CommandSlot06Description
+"Presses command bar slot 06 (column 3, bottom row, 'C' in the default grid layout)."
+END
+
+GUI:CommandSlot07
+"Command Bar Slot 07"
+END
+
+GUI:CommandSlot07Description
+"Presses command bar slot 07 (column 4, top row, 'R' in the default grid layout)."
+END
+
+GUI:CommandSlot08
+"Command Bar Slot 08"
+END
+
+GUI:CommandSlot08Description
+"Presses command bar slot 08 (column 4, bottom row, 'V' in the default grid layout)."
+END
+
+GUI:CommandSlot09
+"Command Bar Slot 09"
+END
+
+GUI:CommandSlot09Description
+"Presses command bar slot 09 (column 5, top row, 'T' in the default grid layout)."
+END
+
+GUI:CommandSlot10
+"Command Bar Slot 10"
+END
+
+GUI:CommandSlot10Description
+"Presses command bar slot 10 (column 5, bottom row, 'B' in the default grid layout)."
+END
+
+GUI:CommandSlot11
+"Command Bar Slot 11"
+END
+
+GUI:CommandSlot11Description
+"Presses command bar slot 11 (column 6, top row, 'Y' in the default grid layout)."
+END
+
+GUI:CommandSlot12
+"Command Bar Slot 12"
+END
+
+GUI:CommandSlot12Description
+"Presses command bar slot 12 (column 6, bottom row, 'N' in the default grid layout)."
+END
+
+GUI:CommandSlot13
+"Command Bar Slot 13"
+END
+
+GUI:CommandSlot13Description
+"Presses command bar slot 13 (column 7, top row, 'U' in the default grid layout)."
+END
+
+GUI:CommandSlot14
+"Command Bar Slot 14"
+END
+
+GUI:CommandSlot14Description
+"Presses command bar slot 14 (column 7, bottom row, 'M' in the default grid layout)."
+END
+
+GUI:ToggleAttackMove
+"Attack Move"
+END
+
+GUI:ToggleAttackMoveDescription
+"Arms attack move: the next move order makes the selected units fight anything they meet on the way."
+END
+
+GUI:HoldPosition
+"Hold Position"
+END
+
+GUI:HoldPositionDescription
+"Every selected unit guards the spot it is standing on: it shoots what comes into range and never chases it."
+END
+
+GUI:TogglePause
+"Pause"
+END
+
+GUI:TogglePauseDescription
+"Pauses and resumes the game. Single player and replays only."
+END
+
+GUI:GamePaused
+"Game paused."
+END
+
+GUI:GameResumed
+"Game resumed."
+END
+
+GUI:GameSpeedUp
+"Game Speed Up"
+END
+
+GUI:GameSpeedUpDescription
+"Speeds the game up by five logic frames a second. Single player and replays only."
+END
+
+GUI:GameSpeedDown
+"Game Speed Down"
+END
+
+GUI:GameSpeedDownDescription
+"Slows the game down by five logic frames a second. Single player and replays only."
+END
+
+GUI:GameSpeedReset
+"Normal Game Speed"
+END
+
+GUI:GameSpeedResetDescription
+"Puts the game back to its normal speed. Single player and replays only."
+END
+
+GUI:SelectAllMilitary
+"Select Military Units"
+END
+
+GUI:SelectAllMilitaryDescription
+"Selects your armed units on screen. Press again to select them across the whole map."
+END
+
+GUI:SelectAllVehicles
+"Select Vehicles"
+END
+
+GUI:SelectAllVehiclesDescription
+"Selects your ground vehicles on screen, dozers and workers excluded. Press again for the whole map."
+END
+
+GUI:SelectAllBarracks
+"Select Barracks"
+END
+
+GUI:SelectAllBarracksDescription
+"Selects your infantry-producing buildings on screen. Press again to select them across the whole map."
+END
+
+GUI:SelectAllWarFactories
+"Select War Factories"
+END
+
+GUI:SelectAllWarFactoriesDescription
+"Selects your vehicle-producing buildings on screen. Press again to select them across the whole map."
+END
+
+GUI:SelectAllAirfields
+"Select Airfields"
+END
+
+GUI:SelectAllAirfieldsDescription
+"Selects your airfields and helipads on screen. Press again to select them across the whole map."
+END
+
+GUI:ShortcutSlot01
+"General's Power 1"
+END
+
+GUI:ShortcutSlot01Description
+"Presses the first button of the general's power bar in the top right corner."
+END
+
+GUI:ShortcutSlot02
+"General's Power 2"
+END
+
+GUI:ShortcutSlot02Description
+"Presses the second button of the general's power bar in the top right corner."
+END
+
+GUI:ShortcutSlot03
+"General's Power 3"
+END
+
+GUI:ShortcutSlot03Description
+"Presses the third button of the general's power bar in the top right corner."
+END
+
+GUI:ShortcutSlot04
+"General's Power 4"
+END
+
+GUI:ShortcutSlot04Description
+"Presses the fourth button of the general's power bar in the top right corner."
+END
+
+GUI:ShortcutSlot05
+"General's Power 5"
+END
+
+GUI:ShortcutSlot05Description
+"Presses the fifth button of the general's power bar in the top right corner."
+END
+
+GUI:ShortcutSlot06
+"General's Power 6"
+END
+
+GUI:ShortcutSlot06Description
+"Presses the sixth button of the general's power bar in the top right corner."
+END
+
+GUI:ShortcutSlot07
+"General's Power 7"
+END
+
+GUI:ShortcutSlot07Description
+"Presses the seventh button of the general's power bar in the top right corner."
+END
+
+GUI:ShortcutSlot08
+"General's Power 8"
+END
+
+GUI:ShortcutSlot08Description
+"Presses the eighth button of the general's power bar in the top right corner."
+END

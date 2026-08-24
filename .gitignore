@@ -3,3 +3,7 @@ build/
 
 # Build/test logs from the CMake port loop
 *.log
+
+# Python bytecode from Tools/
+__pycache__/
+*.pyc
