@@ -769,6 +769,19 @@ Bool OptionPreferences::getSnapCameraRotateTo45(void)
 	return stricmp(it->second.str(), "yes") == 0;
 }
 
+Bool OptionPreferences::getGridBuildPlacement(void)
+{
+	// Experimental Options.ini key.  Retail places a structure wherever the cursor happens to be,
+	// to the pixel; with this on the footprint lands on the pathfinder's own 10-unit build grid, so
+	// two buildings put down by eye end up sharing an edge instead of leaving a stripe of ground
+	// too narrow to walk through.
+	OptionPreferences::const_iterator it = find("GridBuildPlacement");
+	if (it == end())
+		return TheGlobalData->m_gridBuildPlacement;
+
+	return stricmp(it->second.str(), "yes") == 0;
+}
+
 Bool OptionPreferences::getMiddleMousePans(void)
 {
 	OptionPreferences::const_iterator it = find("MiddleMousePans");

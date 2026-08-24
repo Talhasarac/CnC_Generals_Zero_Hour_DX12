@@ -1562,6 +1562,7 @@ void InGameUI::handleBuildPlacements( void )
 		/**@todo this whole orientation vector thing is LAME! Must replace, all I want to
 		to do is set a simple angle and have it automatically change, ug! */
 		TheTacticalView->screenToTerrain( &loc, &world );
+		snapPlacementToGrid( &world, m_pendingPlaceType, angle );
 		m_placeIcon[ 0 ]->setPosition( &world );
 		m_placeIcon[ 0 ]->setOrientation( angle );
 
@@ -1631,6 +1632,10 @@ void InGameUI::handleBuildPlacements( void )
 			Coord3D worldStart, worldEnd;
 			TheTacticalView->screenToTerrain( &screenStart, &worldStart );
 			TheTacticalView->screenToTerrain( &screenEnd, &worldEnd );
+
+			// both ends, so a wall lands on the grid and tiles from a grid square
+			snapPlacementToGrid( &worldStart, m_pendingPlaceType, angle );
+			snapPlacementToGrid( &worldEnd, m_pendingPlaceType, angle );
 
 			// how big are each of our objects
 			Real objectSize = m_pendingPlaceType->getTemplateGeometryInfo().getMajorRadius() * 2.0f;
@@ -3372,6 +3377,37 @@ Real InGameUI::computePlacementAngle( const ICoord2D *start, const ICoord2D *end
 	return angle;
 
 }  // end computePlacementAngle
+
+//-------------------------------------------------------------------------------------------------
+/** Experimental GridBuildPlacement (Options.ini): put the structure on the pathfinder's build grid
+	* instead of wherever the cursor happened to be to the pixel.  Everything the pathfinder does is
+	* in 10-unit cells (PATHFIND_CELL_SIZE), and a structure dropped a couple of units off that grid
+	* blocks a strip of a cell it does not fill, which is what leaves the gaps you cannot walk a
+	* soldier through between two buildings that look flush.  Snapping the footprint's edges to the
+	* grid lines makes neighbours share an edge exactly, and a row of them come out straight.
+	*
+	* The footprint is the template's own geometry, turned by the heading it is being placed at: a
+	* box is major along its facing and minor across it, and anything round is its bounding circle.
+	* At 45 degrees the axis-aligned extents grow, which is right - that is the ground it covers. */
+//-------------------------------------------------------------------------------------------------
+void InGameUI::snapPlacementToGrid( Coord3D *world, const ThingTemplate *what, Real angle ) const
+{
+	if( world == NULL || what == NULL || TheGlobalData->m_gridBuildPlacement == FALSE )
+		return;
+
+	const GeometryInfo &geom = what->getTemplateGeometryInfo();
+	Real major = geom.getMajorRadius();
+	Real minor = geom.getMinorRadius();
+	if( geom.getGeomType() != GEOMETRY_BOX )
+		major = minor = geom.getBoundingCircleRadius();
+
+	const Real c = (Real)fabs( Cos( angle ) );
+	const Real sn = (Real)fabs( Sin( angle ) );
+
+	world->x = snapPlacementAxis( world->x, major * c + minor * sn );
+	world->y = snapPlacementAxis( world->y, major * sn + minor * c );
+
+}  // end snapPlacementToGrid
 
 //-------------------------------------------------------------------------------------------------
 /** Aim the structure sitting on the cursor at 'angle', and keep that heading for the placements

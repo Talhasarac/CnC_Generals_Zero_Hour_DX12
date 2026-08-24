@@ -718,6 +718,128 @@ TEST(particle_already_leaving_the_surface_is_only_lifted_clear)
 	CHECK_NEAR(vel.x, 1.0f, 1e-5f);
 }
 
+//////////////////////////////////////////////////////////////////////////////
+// The ground blob under a particle system
+//
+// particleShadowBlob* is the whole of the decision: which systems earn a soft
+// shadow on the terrain, where it goes, how big it is and how dark.  Pure
+// arithmetic over the live particles, so it can be driven directly.
+//////////////////////////////////////////////////////////////////////////////
+
+static void blobFeed(ParticleShadowBlob *blob, Int count, Real size, Real alpha)
+{
+	for (Int i = 0; i < count; i++)
+		particleShadowBlobAdd(blob, (Real)i, 0.0f, size, alpha);
+}
+
+TEST(blob_reset_leaves_nothing_to_resolve)
+{
+	ParticleShadowBlob blob;
+	Real x, y, sx, sy;
+	Int op;
+
+	particleShadowBlobReset(&blob);
+	CHECK_EQ(blob.m_count, 0);
+	CHECK(!particleShadowBlobResolve(&blob, &x, &y, &sx, &sy, &op));
+}
+
+TEST(blob_rejects_a_bullet_trail_because_its_particles_are_tiny)
+{
+	// plenty of particles, all of them a couple of units across - this is the case that
+	// keeps trails, sparks and muzzle flashes from staining the ground
+	ParticleShadowBlob blob;
+	Real x, y, sx, sy;
+	Int op;
+
+	particleShadowBlobReset(&blob);
+	blobFeed(&blob, 40, 3.0f, 1.0f);
+	CHECK(!particleShadowBlobResolve(&blob, &x, &y, &sx, &sy, &op));
+}
+
+TEST(blob_rejects_a_puff_of_one_or_two_particles)
+{
+	ParticleShadowBlob blob;
+	Real x, y, sx, sy;
+	Int op;
+
+	particleShadowBlobReset(&blob);
+	blobFeed(&blob, 2, 50.0f, 1.0f);
+	CHECK(!particleShadowBlobResolve(&blob, &x, &y, &sx, &sy, &op));
+}
+
+TEST(blob_rejects_a_cloud_that_has_faded_to_nothing)
+{
+	// big particles, enough of them, but no alpha left: a decal here would be a black
+	// smear under smoke that is no longer drawn
+	ParticleShadowBlob blob;
+	Real x, y, sx, sy;
+	Int op;
+
+	particleShadowBlobReset(&blob);
+	blobFeed(&blob, 10, 60.0f, 0.0f);
+	CHECK(!particleShadowBlobResolve(&blob, &x, &y, &sx, &sy, &op));
+}
+
+TEST(blob_centres_on_the_particles_and_covers_their_spread_plus_one_particle)
+{
+	ParticleShadowBlob blob;
+	Real x, y, sx, sy;
+	Int op;
+
+	particleShadowBlobReset(&blob);
+	particleShadowBlobAdd(&blob, 100.0f, 200.0f, 20.0f, 0.5f);
+	particleShadowBlobAdd(&blob, 140.0f, 200.0f, 30.0f, 0.5f);
+	particleShadowBlobAdd(&blob, 120.0f, 260.0f, 10.0f, 0.5f);
+
+	CHECK(particleShadowBlobResolve(&blob, &x, &y, &sx, &sy, &op));
+	CHECK_NEAR(x, 120.0f, 1e-4f);					// midpoint of 100..140
+	CHECK_NEAR(y, 230.0f, 1e-4f);					// midpoint of 200..260
+	CHECK_NEAR(sx, 40.0f + 30.0f, 1e-4f);	// spread plus the biggest particle's width
+	CHECK_NEAR(sy, 60.0f + 30.0f, 1e-4f);
+	CHECK(op > 0);
+}
+
+TEST(blob_darkens_with_more_smoke_then_saturates_below_opaque)
+{
+	ParticleShadowBlob thin, thick, absurd;
+	Real x, y, sx, sy;
+	Int thinOp, thickOp, absurdOp;
+
+	particleShadowBlobReset(&thin);
+	blobFeed(&thin, 4, 40.0f, 0.25f);
+	CHECK(particleShadowBlobResolve(&thin, &x, &y, &sx, &sy, &thinOp));
+
+	particleShadowBlobReset(&thick);
+	blobFeed(&thick, 8, 40.0f, 1.0f);		// past the saturation point
+	CHECK(particleShadowBlobResolve(&thick, &x, &y, &sx, &sy, &thickOp));
+
+	particleShadowBlobReset(&absurd);
+	blobFeed(&absurd, 200, 40.0f, 1.0f);
+	CHECK(particleShadowBlobResolve(&absurd, &x, &y, &sx, &sy, &absurdOp));
+
+	CHECK(thinOp < thickOp);
+	CHECK(thickOp <= absurdOp);
+	CHECK(absurdOp < 255);		// smoke shades the ground, it never blacks it out
+	CHECK_EQ(thickOp, absurdOp);	// and past saturation more smoke changes nothing
+}
+
+TEST(blob_never_smears_wider_than_the_cap)
+{
+	// a wind-blown system whose particles have drifted right across the map
+	ParticleShadowBlob blob;
+	Real x, y, sx, sy;
+	Int op;
+
+	particleShadowBlobReset(&blob);
+	particleShadowBlobAdd(&blob, 0.0f, 0.0f, 40.0f, 1.0f);
+	particleShadowBlobAdd(&blob, 5000.0f, 4000.0f, 40.0f, 1.0f);
+	particleShadowBlobAdd(&blob, 2500.0f, 2000.0f, 40.0f, 1.0f);
+
+	CHECK(particleShadowBlobResolve(&blob, &x, &y, &sx, &sy, &op));
+	CHECK(sx <= 300.0f);
+	CHECK(sy <= 300.0f);
+}
+
 // ---------------------------------------------------------------------------------------------
 // The HUD income estimate (InGameUI.cpp).  It samples the score keeper's cumulative earnings
 // into a ring of buckets and averages over every bucket it holds.
@@ -969,4 +1091,51 @@ TEST(placement_snap_takes_the_nearest_45_on_both_halves_of_the_circle)
 		/* and it really is a multiple of 45 degrees */
 		CHECK_NEAR(snapped / step, (Real)REAL_TO_INT_FLOOR(snapped / step + 0.5f), 0.0001f);
 	}
+}
+
+/*
+ * GridBuildPlacement.  The grid is the pathfinder's, 10 world units a cell, and what has to
+ * land on it is the footprint's *edges*, not its centre: an odd number of cells wide means
+ * the centre sits in the middle of a cell, an even number means it sits on the line between
+ * two.  Get that backwards and every second structure straddles a cell it only half fills,
+ * which is the gap-you-cannot-walk-through this snap exists to remove.
+ */
+TEST(placement_grid_snap_puts_footprint_edges_on_cell_lines)
+{
+	const Real cell = 10.0f;
+
+	/* 3 cells wide (extent 15) - centre on a cell centre, whatever it started as */
+	CHECK_NEAR(InGameUI::snapPlacementAxis(0.0f, 15.0f), 5.0f, 0.0001f);
+	CHECK_NEAR(InGameUI::snapPlacementAxis(4.0f, 15.0f), 5.0f, 0.0001f);
+	CHECK_NEAR(InGameUI::snapPlacementAxis(9.0f, 15.0f), 5.0f, 0.0001f);
+	CHECK_NEAR(InGameUI::snapPlacementAxis(11.0f, 15.0f), 15.0f, 0.0001f);
+
+	/* 4 cells wide (extent 20) - centre on a cell line */
+	CHECK_NEAR(InGameUI::snapPlacementAxis(4.0f, 20.0f), 0.0f, 0.0001f);
+	CHECK_NEAR(InGameUI::snapPlacementAxis(6.0f, 20.0f), 10.0f, 0.0001f);
+	CHECK_NEAR(InGameUI::snapPlacementAxis(123.0f, 20.0f), 120.0f, 0.0001f);
+
+	/* a snap never moves anything more than half a cell */
+	for (Int i = 0; i < 400; i++)
+	{
+		Real v = i * 0.7f;
+
+		CHECK(fabsf(InGameUI::snapPlacementAxis(v, 15.0f) - v) <= cell / 2.0f + 0.0001f);
+		CHECK(fabsf(InGameUI::snapPlacementAxis(v, 20.0f) - v) <= cell / 2.0f + 0.0001f);
+	}
+
+	/* and both edges of the footprint end up on cell lines, odd width and even alike */
+	for (Int cells = 1; cells <= 8; cells++)
+	{
+		Real extent = cells * cell * 0.5f;
+		Real centre = InGameUI::snapPlacementAxis(37.3f, extent);
+		Real lo = (centre - extent) / cell;
+		Real hi = (centre + extent) / cell;
+
+		CHECK_NEAR(lo, (Real)REAL_TO_INT_FLOOR(lo + 0.5f), 0.0001f);
+		CHECK_NEAR(hi, (Real)REAL_TO_INT_FLOOR(hi + 0.5f), 0.0001f);
+	}
+
+	/* a template with no footprint worth the name still lands on a whole cell, not on nothing */
+	CHECK_NEAR(InGameUI::snapPlacementAxis(13.0f, 0.0f), 15.0f, 0.0001f);
 }

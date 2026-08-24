@@ -99,6 +99,8 @@ GlobalData* GlobalData::m_theOriginal = NULL;
 	{ "UseShadowVolumes",						INI::parseBool,				NULL,			offsetof( GlobalData, m_useShadowVolumes ) },
 	{ "UseShadowVolumesForSkins",		INI::parseBool,				NULL,			offsetof( GlobalData, m_useShadowVolumesForSkins ) },
 	{ "UseShadowDecals",						INI::parseBool,				NULL,			offsetof( GlobalData, m_useShadowDecals ) },
+	{ "ShadowsForProjectiles",						INI::parseBool,				NULL,			offsetof( GlobalData, m_shadowsForProjectiles ) },
+	{ "ShadowsForParticles",						INI::parseBool,				NULL,			offsetof( GlobalData, m_shadowsForParticles ) },
 	{ "TextureReductionFactor",			INI::parseInt,				NULL,			offsetof( GlobalData, m_textureReductionFactor ) },
 	{ "UseBehindBuildingMarker",		INI::parseBool,				NULL,			offsetof( GlobalData, m_enableBehindBuildingMarkers ) },
 	{ "WaterPositionX",							INI::parseReal,				NULL,			offsetof( GlobalData, m_waterPositionX ) },
@@ -185,6 +187,7 @@ GlobalData* GlobalData::m_theOriginal = NULL;
 	{ "EdgeScrollInWindowedMode",	INI::parseBool,				NULL,			offsetof( GlobalData, m_edgeScrollInWindowedMode ) },
 	{ "SnapBuildPlacementTo45",		INI::parseBool,				NULL,			offsetof( GlobalData, m_snapBuildPlacementTo45 ) },
 	{ "SnapCameraRotateTo45",			INI::parseBool,				NULL,			offsetof( GlobalData, m_snapCameraRotateTo45 ) },
+	{ "GridBuildPlacement",				INI::parseBool,				NULL,			offsetof( GlobalData, m_gridBuildPlacement ) },
 	{ "MiddleMousePans",					INI::parseBool,				NULL,			offsetof( GlobalData, m_middleMousePans ) },
 	{ "ZoomToCursor",							INI::parseBool,				NULL,			offsetof( GlobalData, m_zoomToCursor ) },
 	{ "ShowHudOverlay",						INI::parseBool,				NULL,			offsetof( GlobalData, m_showHudOverlay ) },
@@ -642,6 +645,8 @@ GlobalData::GlobalData()
 	m_useShadowVolumes = FALSE;
 	m_useShadowVolumesForSkins = TRUE;	//on by default: the shipped INI has no entry for it
 	m_useShadowDecals = FALSE;
+	m_shadowsForProjectiles = TRUE;	//on by default: the shipped INI has no entry for it
+	m_shadowsForParticles = TRUE;	//on by default: the shipped INI has no entry for it
 	m_textureReductionFactor = -1;
 	m_enableBehindBuildingMarkers = TRUE;
 	m_scriptDebug = FALSE;
@@ -1004,6 +1009,7 @@ GlobalData::GlobalData()
 	m_edgeScrollInWindowedMode = TRUE;
 	m_snapBuildPlacementTo45 = TRUE;
 	m_snapCameraRotateTo45 = TRUE;
+	m_gridBuildPlacement = TRUE;
 	// middle-drag stays a rotate by default (it snaps to 45 degrees on release); pan is opt-in
 	m_middleMousePans = FALSE;
 	m_zoomToCursor = TRUE;

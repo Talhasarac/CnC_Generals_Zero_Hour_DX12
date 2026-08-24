@@ -452,6 +452,27 @@ public:  // ********************************************************************
 
 		return ((Real)REAL_TO_INT_FLOOR( angle / step + 0.5f )) * step;
 	}
+	/** Experimental GridBuildPlacement: quantize a structure's position to the pathfinder's own
+		* build grid, so that structures put down by eye line up with each other and with the cells
+		* the pathfinder actually reasons about. */
+	virtual void snapPlacementToGrid( Coord3D *world, const ThingTemplate *what, Real angle ) const;
+
+	/** One axis of that snap.  'extent' is the structure's half-size along this axis, so a footprint
+		* that is an odd number of cells wide is centred on a cell and an even one on the line between
+		* two - either way its edges land on grid lines and two neighbours can share one.  Inline and
+		* static so a test can reach it without linking the whole in-game UI. */
+	static Real snapPlacementAxis( Real v, Real extent )
+	{
+		const Real cell = 10.0f;		// PATHFIND_CELL_SIZE_F: one pathfinder cell, one grid square
+
+		Int cells = REAL_TO_INT_FLOOR( 2.0f * extent / cell + 0.5f );
+		if( cells < 1 )
+			cells = 1;
+
+		const Real offset = (cells & 1) ? cell * 0.5f : 0.0f;
+
+		return ((Real)REAL_TO_INT_FLOOR( (v - offset) / cell + 0.5f )) * cell + offset;
+	}
 	virtual void setPlacementAngle( Real angle );											///< aim the structure on the cursor, and keep that heading for the next one
 	virtual Bool rotatePendingPlacement( Int steps );									///< turn the structure on the cursor by 45 degrees a step
 

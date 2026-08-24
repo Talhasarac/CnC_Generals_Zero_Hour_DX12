@@ -112,6 +112,7 @@ public:
 	Bool getEdgeScrollInWindowedMode(void);
 	Bool getSnapBuildPlacementTo45(void);
 	Bool getSnapCameraRotateTo45(void);
+	Bool getGridBuildPlacement(void);
 	Bool getMiddleMousePans(void);
 	Bool getZoomToCursor(void);
 	Bool getShowHudOverlay(void);

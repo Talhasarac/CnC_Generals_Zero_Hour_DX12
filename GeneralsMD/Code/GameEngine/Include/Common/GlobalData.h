@@ -127,6 +127,8 @@ public:
 	Bool m_useShadowVolumes;
 	Bool m_useShadowVolumesForSkins;	// "UseShadowVolumesForSkins": also cast volume shadows off skinned meshes
 	Bool m_useShadowDecals;
+	Bool m_shadowsForProjectiles;	// "ShadowsForProjectiles": missiles and bombs that have no shadow of their own get a decal one
+	Bool m_shadowsForParticles;		// "ShadowsForParticles": big alpha-blended particle clouds drop a soft blob on the ground
 	Bool m_particleGroundBounce;	// "-particlebounce": terrain collision on for every particle system
 	Int  m_textureReductionFactor;	//how much to cut texture resolution: 2 is half, 3 is quarter, etc.
 	Bool m_enableBehindBuildingMarkers;
@@ -329,6 +331,7 @@ public:
 	Bool m_edgeScrollInWindowedMode;	///< allow screen-edge scrolling while running in a window
 	Bool m_snapBuildPlacementTo45;		///< quantize the drag-to-rotate build placement angle to 45 degrees
 	Bool m_snapCameraRotateTo45;		///< quantize the camera heading to 45 degrees when a middle-drag rotate ends
+	Bool m_gridBuildPlacement;			///< quantize structure placement to the pathfinder's build grid
 	Bool m_middleMousePans;				///< middle-button drag pans the camera instead of rotating it
 	Bool m_zoomToCursor;				///< the mouse wheel zooms toward whatever the cursor is over
 	Bool m_showHudOverlay;				///< draw the fps / elapsed time / income line in the corner

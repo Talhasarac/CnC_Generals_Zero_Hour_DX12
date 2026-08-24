@@ -178,6 +178,13 @@ that corner, not in the middle of the screen.
 notch, and the next building you place keeps the same facing, so a wall or a line of bunkers goes
 down straight without aiming each piece by hand.
 
+**Buildings snap to the grid the game itself thinks in** (experimental, on by default). Put two
+structures down next to each other by eye and they used to end up a few feet out of line, leaving a
+stripe of ground between them too narrow to walk a soldier through but too wide to look deliberate.
+Placement now lands on the same ten-foot squares the pathfinder reasons about, so neighbours share
+an edge, a row of them comes out straight, and the gaps you leave are gaps you meant to leave. Put
+`GridBuildPlacement = No` in `Options.ini` for the old to-the-pixel placement.
+
 **A building now faces the way you drag it.** Press, pull out in the direction you want it to look,
 let go — that has always been how you aim a structure, but the game was reading your aim two frames
 late, so anything faster than a slow deliberate drag went down pointing somewhere you never chose.
@@ -206,6 +213,23 @@ slopes like theirs do.
 
 If you would rather have the old flat blobs back — they are cheaper to draw — put
 `UseShadowVolumesForSkins = No` in the game's `GameData.ini`.
+
+Two more things had no shadow at all. A Scud, a Tomahawk, a rocket, a bomb falling out of a
+bomber — every one of them crossed the map with nothing underneath it, and there was no way to tell
+from the screen whether a missile was about to clear a ridge or plough into it. They all have a
+shadow now, sized from the missile itself, and it runs along the ground beneath the thing as it
+flies: you can watch a Scud's shadow climb a hill ahead of the Scud.
+
+And the smoke. A burning building, a dust plume, the black column off a wrecked tank — the smoke
+hung over the terrain in full daylight with clean bright ground beneath it. Now a big soft cloud
+darkens the ground under itself, and the patch drifts and fades exactly as the smoke does, so a fire
+that dies out takes its shade with it. Only real clouds get one: bullet trails, muzzle flashes and
+sparks are too small and too short-lived to earn it, and fire and glows are still light rather than
+shade. It is one soft patch per plume rather than a shadow for every puff, so a battlefield full of
+smoke costs no more than a battlefield with one fire.
+
+Both are switchable the same way: `ShadowsForProjectiles = No` and `ShadowsForParticles = No` in
+`GameData.ini`.
 
 ## It does not crash
 
