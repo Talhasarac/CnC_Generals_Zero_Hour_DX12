@@ -829,14 +829,40 @@ void WaterTracksRenderSystem::shutdown( void )
 void WaterTracksRenderSystem::update()
 {
 
-	static  Int iLastTime=timeGetTime();
 	WaterTracksObj *mod=m_usedModules,*nextMod;
 
-	Int timeDiff = timeGetTime()-iLastTime;
-	iLastTime += timeDiff;
+	//
+	// This is where the beach waves come from, and EA measured the real elapsed time here and then
+	// threw it away: the next line used to be an unconditional `timeDiff = 1.0f/30.0f*1000.0f;`
+	// under the comment "Lock framerate to 30 fps". update() is called once per RENDER frame, so
+	// that hands every wave a fixed 33 ms of simulation per frame - correct only while the render
+	// loop is held at 30fps, and this fork's is not. At a few hundred frames a second the surf ran
+	// roughly ten times too fast, which is what the shell map behind the main menu shows.
+	//
+	// The waves are integrated in milliseconds through an Int (WaterTracksObj::update), so the
+	// remainder is carried rather than truncated - at 300fps a 3.3 ms frame would otherwise lose a
+	// third of its motion to the cast every frame. The counter is the performance counter and not
+	// timeGetTime for the same reason: a 1 ms tick quantises a 3 ms frame by a third.
+	//
+	static LARGE_INTEGER perfFreq = { 0 };
+	static LARGE_INTEGER lastCount = { 0 };
+	static Real carryMs = 0.0f;
+	LARGE_INTEGER nowCount;
 
-	//Lock framerate to 30 fps
-	timeDiff = 1.0f/30.0f*1000.0f;
+	if (perfFreq.QuadPart == 0)
+		QueryPerformanceFrequency(&perfFreq);
+	QueryPerformanceCounter(&nowCount);
+	if (lastCount.QuadPart == 0)
+		lastCount.QuadPart = nowCount.QuadPart;
+
+	Real elapsedMs = (Real)((double)(nowCount.QuadPart - lastCount.QuadPart) * 1000.0 / (double)perfFreq.QuadPart);
+	lastCount.QuadPart = nowCount.QuadPart;
+	if (elapsedMs > 100.0f)
+		elapsedMs = 100.0f;		// a level load must not run the surf forward
+
+	carryMs += elapsedMs;
+	Int timeDiff = (Int)carryMs;
+	carryMs -= (Real)timeDiff;
 
 	//first update all the tracks
 	while( mod )

@@ -1227,26 +1227,41 @@ void WaterRenderObjClass::update( void )
 	// clock is the water's - it is scenery, so it runs off the wall clock.
 	//
 	// The per-second figures below are EA's per-frame steps times the 30 fps they were authored
-	// against, so WATER_ANIM_SPEED 1.0f reproduces the shipped tempo exactly. It reads as a boil
-	// rather than a swell at that rate, most visibly on the shell map behind the main menu, so
-	// the whole animation - scroll and bump cycle alike - is scaled by one number and keeps its
-	// shape while only its tempo changes.
+	// against, so a speed of 1.0f reproduces the shipped tempo exactly. It reads as a boil rather
+	// than a swell at that rate, most visibly on the shell map behind the main menu.
 	//
-	const Real WATER_ANIM_SPEED = 0.2f;
+	// Two rates, not one. The scroll and the noise wobble are the swell and are continuous, so
+	// scaling them just slows the motion. The bump texture is a 32-frame flipbook and is the fine
+	// ripple, and a flipbook has no in-between state: the only way to slow it is to hold each
+	// frame longer, and at 0.2 that is six frames a second - the eye reads that as a stutter, not
+	// as slow water. So the flipbook keeps its authored rate and only the scroll is scaled.
+	//
+	const Real WATER_SCROLL_SPEED = 0.2f;
 	const Real AUTHORED_FPS = 30.0f;
+	const Real BUMP_FRAMES_PER_SEC = AUTHORED_FPS;
 
 	{
-		static UnsignedInt lastScrollMs = 0;
-		const UnsignedInt nowMs = timeGetTime();
-		if (lastScrollMs == 0)
-			lastScrollMs = nowMs;
+		//
+		// timeGetTime ticks at 1ms even under timeBeginPeriod(1), and an uncapped shell runs
+		// several hundred frames a second, so the per-frame delta alternated between 0 and 1ms
+		// and the surface advanced in visible lurches. The performance counter is sub-microsecond.
+		//
+		static LARGE_INTEGER perfFreq = { 0 };
+		static LARGE_INTEGER lastCount = { 0 };
+		LARGE_INTEGER nowCount;
 
-		Real elapsedSec = (Real)(nowMs - lastScrollMs) * 0.001f;
-		lastScrollMs = nowMs;
+		if (perfFreq.QuadPart == 0)
+			QueryPerformanceFrequency(&perfFreq);
+		QueryPerformanceCounter(&nowCount);
+		if (lastCount.QuadPart == 0)
+			lastCount.QuadPart = nowCount.QuadPart;
+
+		Real elapsedSec = (Real)((double)(nowCount.QuadPart - lastCount.QuadPart) / (double)perfFreq.QuadPart);
+		lastCount.QuadPart = nowCount.QuadPart;
 		if (elapsedSec > 0.1f)
 			elapsedSec = 0.1f;		// a level load must not jump the surface forward
 
-		const Real step = elapsedSec * AUTHORED_FPS * WATER_ANIM_SPEED;
+		const Real step = elapsedSec * AUTHORED_FPS * WATER_SCROLL_SPEED;
 
 		m_riverVOrigin += 0.002f * step;
 		m_riverXOffset += (Real)(0.0125*33/5000) * step;
@@ -1256,8 +1271,8 @@ void WaterRenderObjClass::update( void )
 		if (m_riverXOffset < -1) m_riverXOffset += 1;
 		if (m_riverYOffset < -1) m_riverYOffset += 1;
 
-		// the bump texture is a flipbook, so it can only be slowed by holding each frame longer
-		m_bumpFrameAccum += step;
+		// the flipbook runs at its authored rate - see the two-rates note above
+		m_bumpFrameAccum += elapsedSec * BUMP_FRAMES_PER_SEC;
 		while (m_bumpFrameAccum >= 1.0f)
 		{
 			m_bumpFrameAccum -= 1.0f;
