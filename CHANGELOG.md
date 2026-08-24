@@ -120,7 +120,9 @@ Around it, the whole production loop got tightened:
   including one whose builder died.
 - **Workers go back to collecting supplies** after they finish, instead of standing there.
 - **Timings everywhere**: seconds left on a building going up, the current unit and the whole queue
-  behind it, a charge bar on superweapons, a progress clock on upgrades being researched.
+  behind it, a charge bar on superweapons, a progress clock on upgrades being researched. A bar only
+  appears while something is really happening: your command centre used to wear a yellow bar from
+  the first second of the match, charging a general's power nobody had bought yet.
 - **Income per minute next to your money**, averaged over the last half-minute of what you actually
   earned — so it does not swing wildly the moment you spend something.
 - **Aircraft always show how many attack runs they have left**, selected or not. That is the number

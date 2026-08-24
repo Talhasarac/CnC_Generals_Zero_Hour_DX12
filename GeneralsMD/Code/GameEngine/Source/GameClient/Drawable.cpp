@@ -4018,8 +4018,15 @@ void Drawable::drawHealthBar(const IRegion2D* healthBarRegion)
 		//
 		// A superweapon charging, or a building on a timed payout (the supply drop zone), gets the
 		// same yellow bar the production queue uses. Only powers that carry a public timer count -
-		// that is the flag the superweapon list in the corner goes by - so the command centre's
-		// general's powers do not put a permanent bar on the main base.
+		// that is the flag the superweapon list in the corner goes by.
+		//
+		// A power only counts while it is really counting down towards something the player can
+		// fire. Every command centre carries one public-timer power from the first frame of the
+		// game (crate drop, napalm strike, black market nuke), all of them locked behind a general's
+		// promotion nobody has bought yet and all of them charging away regardless - so the main
+		// base wore a permanent bar that stood for nothing. A power whose science the player does
+		// not own is skipped, and so is one that has finished charging: a full bar that never
+		// empties is the same clutter in a different colour.
 		//
 		if( obj->isLocallyControlled() &&
 				!obj->getStatusBits().test( OBJECT_STATUS_UNDER_CONSTRUCTION ) &&
@@ -4028,13 +4035,19 @@ void Drawable::drawHealthBar(const IRegion2D* healthBarRegion)
 			const UnsignedInt now = TheGameLogic->getFrame();
 			Real chargePct = -1.0f;
 
+			const Player *owner = obj->getControllingPlayer();
+
 			for( BehaviorModule** m = obj->getBehaviorModules(); *m; ++m )
 			{
 				SpecialPowerModuleInterface* sp = (*m)->getSpecialPower();
-				if( sp == NULL )
+				if( sp == NULL || sp->isReady() )
 					continue;
 				const SpecialPowerTemplate *tmpl = sp->getSpecialPowerTemplate();
 				if( tmpl == NULL || !tmpl->hasPublicTimer() )
+					continue;
+
+				ScienceType needed = sp->getRequiredScience();
+				if( needed != SCIENCE_INVALID && (owner == NULL || !owner->hasScience( needed )) )
 					continue;
 
 				Real full = INT_TO_REAL( tmpl->getReloadTime() );
@@ -4042,8 +4055,9 @@ void Drawable::drawHealthBar(const IRegion2D* healthBarRegion)
 					continue;
 
 				UnsignedInt ready = sp->getReadyFrame();
-				Real left = (ready > now) ? INT_TO_REAL( ready - now ) : 0.0f;
-				Real pct = 100.0f * (1.0f - left / full);
+				if( ready <= now )
+					continue;
+				Real pct = 100.0f * (1.0f - INT_TO_REAL( ready - now ) / full);
 				if( pct < 0.0f ) pct = 0.0f;
 				if( pct > 100.0f ) pct = 100.0f;
 				if( chargePct < 0.0f || pct < chargePct )
