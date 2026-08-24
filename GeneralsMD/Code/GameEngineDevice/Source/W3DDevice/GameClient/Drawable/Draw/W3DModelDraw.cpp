@@ -1850,6 +1850,46 @@ void W3DModelDraw::releaseShadows(void)	///< frees all shadow resources used by 
 	m_shadow = NULL;
 }
 
+/** Does this model contain any skinned (bone-deformed) geometry?  Infantry and other animated
+characters do; vehicles and structures are built from rigid sub-meshes.  Only LOD 0 is checked - that
+is the LOD the shadow system fetches its live meshes from. */
+static Bool hasSkinnedGeometry(RenderObjClass *robj)
+{
+	if (robj == NULL || robj->Class_ID() != RenderObjClass::CLASSID_HLOD)
+		return FALSE;
+
+	HLodClass *hlod=(HLodClass *)robj;
+
+	for (Int i=0; i<hlod->Get_Lod_Model_Count(0); i++)
+	{
+		RenderObjClass *lodModel=hlod->Peek_Lod_Model(0,i);
+
+		if (lodModel && lodModel->Class_ID() == RenderObjClass::CLASSID_MESH &&
+				((MeshClass *)lodModel)->Peek_Model()->Get_Flag(MeshGeometryClass::SKIN))
+			return TRUE;
+	}
+
+	return FALSE;
+}
+
+/** Infantry ship with a flat blob decal because the old shadow system refused to build a volume out
+of a skinned mesh.  It can now, so give them a real cast shadow that follows the pose.  Returns TRUE
+when the type was changed, so the caller can fall back if no volume geometry could be built. */
+static Bool promoteSkinShadowToVolume(RenderObjClass *robj, Shadow::ShadowTypeInfo *shadowInfo)
+{
+	if (shadowInfo->m_type != SHADOW_DECAL ||
+			!TheGlobalData->m_useShadowVolumes || !TheGlobalData->m_useShadowVolumesForSkins ||
+			!hasSkinnedGeometry(robj))
+		return FALSE;
+
+	shadowInfo->m_type = SHADOW_VOLUME;
+	//m_sizeX is the decal's width for a decal but the sun's elevation angle for a volume -
+	//feeding the decal size through would clamp the shadow to a nonsense length.
+	shadowInfo->m_sizeX = 0.0f;
+	shadowInfo->m_sizeY = 0.0f;
+	return TRUE;
+}
+
 /** Create shadow resources if not already present. This is used to dynamically enable/disable shadows by the options screen*/
 void W3DModelDraw::allocateShadows(void)
 {
@@ -1868,7 +1908,19 @@ void W3DModelDraw::allocateShadows(void)
 		shadowInfo.m_sizeY					= tmplate->getShadowSizeY();
 		shadowInfo.m_offsetX				= tmplate->getShadowOffsetX();
 		shadowInfo.m_offsetY				= tmplate->getShadowOffsetY();
+
+		Bool promotedToVolume = promoteSkinShadowToVolume(m_renderObject, &shadowInfo);
+
   		m_shadow = TheW3DShadowManager->addShadow(m_renderObject, &shadowInfo);
+
+		if (m_shadow == NULL && promotedToVolume)
+		{	//no usable shadow geometry in this model - fall back to the decal the template asked for
+			shadowInfo.m_type		= (ShadowType)tmplate->getShadowType();
+			shadowInfo.m_sizeX	= tmplate->getShadowSizeX();
+			shadowInfo.m_sizeY	= tmplate->getShadowSizeY();
+			m_shadow = TheW3DShadowManager->addShadow(m_renderObject, &shadowInfo);
+		}
+
 		if (m_shadow)
 		{	m_shadow->enableShadowInvisible(m_fullyObscuredByShroud);
 			if (m_renderObject->Is_Hidden() || !m_shadowEnabled)
@@ -3077,7 +3129,18 @@ void W3DModelDraw::setModelState(const ModelConditionInfo* newState)
 			shadowInfo.m_sizeY					= tmplate->getShadowSizeY();
 			shadowInfo.m_offsetX				= tmplate->getShadowOffsetX();
 			shadowInfo.m_offsetY				= tmplate->getShadowOffsetY();
+			Bool promotedToVolume = promoteSkinShadowToVolume(m_renderObject, &shadowInfo);
+
   			m_shadow = TheW3DShadowManager->addShadow(m_renderObject, &shadowInfo, draw);
+
+			if (m_shadow == NULL && promotedToVolume)
+			{	//no usable shadow geometry in this model - fall back to the decal the template asked for
+				shadowInfo.m_type		= (ShadowType)tmplate->getShadowType();
+				shadowInfo.m_sizeX	= tmplate->getShadowSizeX();
+				shadowInfo.m_sizeY	= tmplate->getShadowSizeY();
+				m_shadow = TheW3DShadowManager->addShadow(m_renderObject, &shadowInfo, draw);
+			}
+
 			if (m_shadow)
 			{	m_shadow->enableShadowInvisible(m_fullyObscuredByShroud);
 				m_shadow->enableShadowRender(m_shadowEnabled);

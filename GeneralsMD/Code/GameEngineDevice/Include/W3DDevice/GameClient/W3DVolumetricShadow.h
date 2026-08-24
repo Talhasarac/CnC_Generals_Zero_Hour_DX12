@@ -41,6 +41,8 @@ struct Geometry;	//forward reference
 struct PolyNeighbor;	//forward reference
 class W3DVolumetricShadow;	//forward reference
 class Drawable;	//forward reference
+class MeshClass;	//forward reference
+class W3DShadowGeometryMesh;	//forward reference
 
 struct W3DVolumetricShadowRenderTask : public W3DBufferManager::W3DRenderTask
 {
@@ -125,7 +127,10 @@ class W3DVolumetricShadow	: public Shadow
 		// called once per frame, updates shadow volume when necessary
 		void Update();
 		void updateVolumes(Real zoffset);	///<update shadow volumes of all meshes in this model
-		void updateMeshVolume(Int meshIndex, Int lightIndex, const Matrix3D *meshXform, const AABoxClass &meshBox, float floorZ);///<update shadow volume of this mesh.
+		void updateMeshVolume(Int meshIndex, Int lightIndex, MeshClass *mesh, const Matrix3D *meshXform, const AABoxClass &meshBox, float floorZ);///<update shadow volume of this mesh.
+		///pose a skinned mesh into shared scratch so its silhouette can be built from the current frame.
+		static Bool poseSkinMesh(W3DShadowGeometryMesh *geomMesh, MeshClass *mesh);
+		static void releaseSkinScratch(void);	///<free the shared skinning scratch buffers.
 
 		// rendering interface
 		void RenderVolume(Int meshIndex, Int lightIndex);	///<renders a specifc volume from the model hierarchy

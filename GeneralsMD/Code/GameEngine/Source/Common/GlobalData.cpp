@@ -97,6 +97,7 @@ GlobalData* GlobalData::m_theOriginal = NULL;
 	{ "UseCloudPlane",							INI::parseBool,				NULL,			offsetof( GlobalData, m_useCloudPlane ) },
 	{ "DownwindAngle",							INI::parseReal,				NULL,			offsetof( GlobalData, m_downwindAngle ) },
 	{ "UseShadowVolumes",						INI::parseBool,				NULL,			offsetof( GlobalData, m_useShadowVolumes ) },
+	{ "UseShadowVolumesForSkins",		INI::parseBool,				NULL,			offsetof( GlobalData, m_useShadowVolumesForSkins ) },
 	{ "UseShadowDecals",						INI::parseBool,				NULL,			offsetof( GlobalData, m_useShadowDecals ) },
 	{ "TextureReductionFactor",			INI::parseInt,				NULL,			offsetof( GlobalData, m_textureReductionFactor ) },
 	{ "UseBehindBuildingMarker",		INI::parseBool,				NULL,			offsetof( GlobalData, m_enableBehindBuildingMarkers ) },
@@ -639,6 +640,7 @@ GlobalData::GlobalData()
 	m_useCloudPlane = FALSE;
 	m_downwindAngle = ( -0.785f );//Northeast!
 	m_useShadowVolumes = FALSE;
+	m_useShadowVolumesForSkins = TRUE;	//on by default: the shipped INI has no entry for it
 	m_useShadowDecals = FALSE;
 	m_textureReductionFactor = -1;
 	m_enableBehindBuildingMarkers = TRUE;
