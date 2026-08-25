@@ -44,6 +44,7 @@
 #include "GameClient/GameClient.h"
 #include "GameClient/InGameUI.h"
 #include "GameClient/ParticleSys.h"
+#include "GameClient/Shadow.h"
 
 #include "GameLogic/GameLogic.h"
 #include "GameLogic/Object.h"
@@ -352,6 +353,83 @@ void Particle::applyForce( const Coord3D *force )
 	m_accel.x += force->x;
 	m_accel.y += force->y;
 	m_accel.z += force->z;
+}
+
+// ------------------------------------------------------------------------------------------------
+/** The soft blob a whole particle system drops on the terrain.  See ParticleSys.h - free of
+ * ParticleSystem so the whole decision is testable without a renderer. */
+// ------------------------------------------------------------------------------------------------
+void particleShadowBlobReset( ParticleShadowBlob *blob )
+{
+	blob->m_count = 0;
+	blob->m_minX = blob->m_maxX = 0.0f;
+	blob->m_minY = blob->m_maxY = 0.0f;
+	blob->m_maxSize = 0.0f;
+	blob->m_sumAlpha = 0.0f;
+}
+
+// ------------------------------------------------------------------------------------------------
+void particleShadowBlobAdd( ParticleShadowBlob *blob, Real x, Real y, Real size, Real alpha )
+{
+	if (blob->m_count == 0)
+	{
+		blob->m_minX = blob->m_maxX = x;
+		blob->m_minY = blob->m_maxY = y;
+	}
+	else
+	{
+		if (x < blob->m_minX) blob->m_minX = x;
+		if (x > blob->m_maxX) blob->m_maxX = x;
+		if (y < blob->m_minY) blob->m_minY = y;
+		if (y > blob->m_maxY) blob->m_maxY = y;
+	}
+
+	if (size > blob->m_maxSize)
+		blob->m_maxSize = size;
+
+	if (alpha > 0.0f)
+		blob->m_sumAlpha += alpha;
+
+	blob->m_count++;
+}
+
+// ------------------------------------------------------------------------------------------------
+Bool particleShadowBlobResolve( const ParticleShadowBlob *blob, Real *centerX, Real *centerY,
+																Real *sizeX, Real *sizeY, Int *opacity )
+{
+	// A handful of tiny motes is a bullet trail, a muzzle flash or a spark shower.  A cloud that
+	// has faded out is not drawn any more and must not leave a stain.  None of them earn a decal,
+	// and saying so here is also how a system that had one gives it back.
+	const Int   MIN_PARTICLES = 3;
+	const Real  MIN_PARTICLE_SIZE = 15.0f;		///< world units across
+	const Real  MAX_BLOB_SIZE = 300.0f;				///< a wind-blown system must not smear over the map
+	const Real  ALPHA_SATURATION = 6.0f;			///< summed alpha at which the blob is as dark as it gets
+	const Real  MAX_OPACITY = 80.0f;					///< smoke shades the ground, it never blacks it out
+
+	if (blob->m_count < MIN_PARTICLES)
+		return FALSE;
+
+	if (blob->m_maxSize < MIN_PARTICLE_SIZE)
+		return FALSE;
+
+	if (blob->m_sumAlpha <= 0.0f)
+		return FALSE;
+
+	*centerX = (blob->m_minX + blob->m_maxX) * 0.5f;
+	*centerY = (blob->m_minY + blob->m_maxY) * 0.5f;
+
+	// the cloud's own spread, widened by one particle so the edge particles are covered too
+	Real spreadX = (blob->m_maxX - blob->m_minX) + blob->m_maxSize;
+	Real spreadY = (blob->m_maxY - blob->m_minY) + blob->m_maxSize;
+	*sizeX = spreadX > MAX_BLOB_SIZE ? MAX_BLOB_SIZE : spreadX;
+	*sizeY = spreadY > MAX_BLOB_SIZE ? MAX_BLOB_SIZE : spreadY;
+
+	Real depth = blob->m_sumAlpha / ALPHA_SATURATION;
+	if (depth > 1.0f)
+		depth = 1.0f;
+	*opacity = REAL_TO_INT( depth * MAX_OPACITY );
+
+	return TRUE;
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -1237,6 +1315,7 @@ ParticleSystem::ParticleSystem( const ParticleSystemTemplate *sysTemplate,
 	m_particleCount = 0;
 	m_personalityStore = 0;
 	m_controlParticle = NULL;
+	m_groundShadow = NULL;
 
 	TheParticleSystemManager->friend_addParticleSystem(this);
 
@@ -1269,6 +1348,9 @@ ParticleSystem::~ParticleSystem()
 
 	}  // end if
 	
+
+	// give the ground blob back before the particles it was measured from go away
+	releaseGroundShadow();
 
 	// destroy all particles "in the air"
 	while (m_systemParticlesHead)
@@ -2110,6 +2192,10 @@ Bool ParticleSystem::update( Int localPlayerIndex  )
 	//
 	// Update all particles in the system
 	//
+	Bool castsGroundShadow = shouldCastGroundShadow();
+	ParticleShadowBlob shadowBlob;
+	particleShadowBlobReset( &shadowBlob );
+
 	Particle *p = m_systemParticlesHead;
 	Particle *oldParticle;
 	while (p)
@@ -2131,9 +2217,20 @@ Bool ParticleSystem::update( Int localPlayerIndex  )
 			p = p->m_systemNext;
 			oldParticle->deleteInstance();
 		} else {
+			// one decal stands in for the whole cloud, so measure the survivors as we pass them
+			if (castsGroundShadow)
+			{
+				const Coord3D *ppos = p->getPosition();
+				particleShadowBlobAdd( &shadowBlob, ppos->x, ppos->y, p->getSize(), p->getAlpha() );
+			}
 			p = p->m_systemNext;
 		}
 	}
+
+	if (castsGroundShadow)
+		updateGroundShadow( &shadowBlob );
+	else
+		releaseGroundShadow();
 
 	//
 	// If we have been "destroyed", wait for all of our particles to die off,
@@ -2160,6 +2257,92 @@ Bool ParticleSystem::update( Int localPlayerIndex  )
 	}
 
 	return true;
+}
+
+// ------------------------------------------------------------------------------------------------
+/** Give the ground blob back.  The decal's manager lives inside TheGameClient, and shutdownAll
+ * runs in reverse init order, so TheGameClient - and with it every decal it was holding - is gone
+ * before TheParticleSystemManager destroys the systems.  Releasing then would follow a dangling
+ * pointer, so the NULL manager is the signal that there is nothing left to give back. */
+// ------------------------------------------------------------------------------------------------
+void ParticleSystem::releaseGroundShadow( void )
+{
+	if (m_groundShadow)
+	{
+		if (TheProjectedShadowManager)
+			m_groundShadow->release();
+		m_groundShadow = NULL;
+	}
+}
+
+// ------------------------------------------------------------------------------------------------
+/** Is this system a big soft cloud - smoke, dust, a plume - rather than fire, a glow or a decal
+ * that is already on the ground?  Additive systems are light rather than shade, and a
+ * ground-aligned one is drawn flat on the terrain already. */
+// ------------------------------------------------------------------------------------------------
+Bool ParticleSystem::shouldCastGroundShadow( void ) const
+{
+	// not defensive: test_gameengine_stubs.cpp defines the manager pointer as NULL
+	if (TheProjectedShadowManager == NULL || TheGlobalData == NULL)
+		return FALSE;
+
+	if (!TheGlobalData->m_shadowsForParticles)
+		return FALSE;
+
+	if (m_particleType != PARTICLE && m_particleType != VOLUME_PARTICLE)
+		return FALSE;
+
+	if (m_shaderType != ALPHA && m_shaderType != ALPHA_TEST)
+		return FALSE;
+
+	if (m_isGroundAligned)
+		return FALSE;
+
+	return TRUE;
+}
+
+// ------------------------------------------------------------------------------------------------
+/** Refresh - or release - the one decal that shades the ground under this system's particles. */
+// ------------------------------------------------------------------------------------------------
+void ParticleSystem::updateGroundShadow( const ParticleShadowBlob *blob )
+{
+	Real centerX, centerY, sizeX, sizeY;
+	Int opacity;
+
+	if (!particleShadowBlobResolve( blob, &centerX, &centerY, &sizeX, &sizeY, &opacity ))
+	{
+		// the cloud shrank, thinned out or blew away: take the stain with it
+		releaseGroundShadow();
+		return;
+	}
+
+	if (m_groundShadow == NULL)
+	{
+		Shadow::ShadowTypeInfo decalInfo;
+		decalInfo.allowUpdates = FALSE;			// the texture never changes
+		decalInfo.allowWorldAlign = TRUE;		// let it wrap over the terrain it lands on
+		// SHADOW_ALPHA_DECAL, not SHADOW_DECAL: only the alpha/additive decals are honoured by
+		// setOpacity/setColor and taken off m_decalList by removeShadow, and this one has to fade.
+		decalInfo.m_type = SHADOW_ALPHA_DECAL;
+		strcpy( decalInfo.m_ShadowName, "shadow" );
+		// nonzero on purpose - this addDecal overload divides by the size directly
+		decalInfo.m_sizeX = sizeX;
+		decalInfo.m_sizeY = sizeY;
+		decalInfo.m_offsetX = 0.0f;
+		decalInfo.m_offsetY = 0.0f;
+
+		m_groundShadow = TheProjectedShadowManager->addDecal( &decalInfo );
+		if (m_groundShadow == NULL)
+			return;
+
+		m_groundShadow->setAngle( 0.0f );
+		m_groundShadow->setColor( 0x00000000 );		// black: this is shade, not a tint
+	}
+
+	m_groundShadow->setSize( sizeX, sizeY );
+	m_groundShadow->setPosition( centerX, centerY,
+															 TheTerrainLogic ? TheTerrainLogic->getGroundHeight( centerX, centerY ) : 0.0f );
+	m_groundShadow->setOpacity( opacity );
 }
 
 // ------------------------------------------------------------------------------------------------

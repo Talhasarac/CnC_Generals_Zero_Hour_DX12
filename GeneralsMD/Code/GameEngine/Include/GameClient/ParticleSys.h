@@ -55,6 +55,7 @@ struct FieldParse;
 class INI;
 class DebugWindowDialog;		// really ParticleEditorDialog
 class RenderInfoClass;			// ick
+class Shadow;
 
 enum ParticleSystemID
 {
@@ -296,6 +297,34 @@ static char *WindMotionNames[] =
  */
 extern Bool particleGroundBounce( Coord3D *pos, Coord3D *vel, Real groundZ,
 															 const Coord3D *normal, Real bounce, Real friction );
+
+/**
+ * The soft blob a whole particle system drops on the terrain.  A cloud of billboards has no
+ * silhouette to project, so one decal stands in for the lot: accumulate every live particle's
+ * footprint here, then ask Resolve where it goes, how big it is and how dark.
+ *
+ * Free of ParticleSystem for the same reason particleGroundBounce is - it needs no subsystems,
+ * so the whole decision can be driven directly (test_gameengine).
+ */
+struct ParticleShadowBlob
+{
+	Int		m_count;						///< particles accumulated
+	Real	m_minX, m_maxX;			///< world-space extent of the cloud
+	Real	m_minY, m_maxY;
+	Real	m_maxSize;					///< the widest particle in it
+	Real	m_sumAlpha;					///< summed opacity, the stand-in for optical depth
+};
+
+extern void particleShadowBlobReset( ParticleShadowBlob *blob );
+extern void particleShadowBlobAdd( ParticleShadowBlob *blob, Real x, Real y, Real size, Real alpha );
+
+/**
+ * Turn the accumulated particles into a decal.  Returns FALSE when this system has not earned
+ * one - too few particles, particles too small (trails, sparks, muzzle flashes) or no alpha left -
+ * which is also the signal to release a decal it already has.
+ */
+extern Bool particleShadowBlobResolve( const ParticleShadowBlob *blob, Real *centerX, Real *centerY,
+																			 Real *sizeX, Real *sizeY, Int *opacity );
 
 class ParticleSystemInfo : public Snapshot
 {
@@ -659,6 +688,9 @@ public:
 	Real getWindAngle( void ) { return m_windAngle; }
 	WindMotion getWindMotion( void ) { return m_windMotion; }
 
+	/// TRUE if this system is the kind of big soft cloud that should shade the ground under it
+	Bool shouldCastGroundShadow( void ) const;
+
 protected:
 
 	// snapshot methods
@@ -677,8 +709,15 @@ protected:
 	const Coord3D *computePointOnUnitSphere( void );	///< compute a random point on a unit sphere
 
 protected:
+	/// refresh (or release) the one decal that shades the ground under this system's particles
+	void updateGroundShadow( const ParticleShadowBlob *blob );
+	void releaseGroundShadow( void );							///< give the ground blob back, if we have one
+
+protected:
 	Particle *				m_systemParticlesHead;
 	Particle *				m_systemParticlesTail;
+
+	Shadow *					m_groundShadow;									///< client-only soft blob on the terrain, never xfered
 
 	UnsignedInt				m_particleCount;								///< current count of particles for this system
 	ParticleSystemID	m_systemID;											///< unique id given to this system from the particle system manager

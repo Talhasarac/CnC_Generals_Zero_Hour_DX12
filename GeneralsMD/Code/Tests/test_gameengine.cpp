@@ -717,12 +717,128 @@ TEST(particle_already_leaving_the_surface_is_only_lifted_clear)
 	CHECK_NEAR(vel.z, 2.0f, 1e-5f);
 	CHECK_NEAR(vel.x, 1.0f, 1e-5f);
 }
+
 //////////////////////////////////////////////////////////////////////////////
-// The ground blob under a particle system used to be covered here, but the
-// particleShadowBlob* implementation is in no source file any more - only the
-// changelogs remember it.  The tests went with it rather than keeping a block
-// that cannot compile; bring them back with the code, not before.
+// The ground blob under a particle system
+//
+// particleShadowBlob* is the whole of the decision: which systems earn a soft
+// shadow on the terrain, where it goes, how big it is and how dark.  Pure
+// arithmetic over the live particles, so it can be driven directly.
 //////////////////////////////////////////////////////////////////////////////
+
+static void blobFeed(ParticleShadowBlob *blob, Int count, Real size, Real alpha)
+{
+	for (Int i = 0; i < count; i++)
+		particleShadowBlobAdd(blob, (Real)i, 0.0f, size, alpha);
+}
+
+TEST(blob_reset_leaves_nothing_to_resolve)
+{
+	ParticleShadowBlob blob;
+	Real x, y, sx, sy;
+	Int op;
+
+	particleShadowBlobReset(&blob);
+	CHECK_EQ(blob.m_count, 0);
+	CHECK(!particleShadowBlobResolve(&blob, &x, &y, &sx, &sy, &op));
+}
+
+TEST(blob_rejects_a_bullet_trail_because_its_particles_are_tiny)
+{
+	// plenty of particles, all of them a couple of units across - this is the case that
+	// keeps trails, sparks and muzzle flashes from staining the ground
+	ParticleShadowBlob blob;
+	Real x, y, sx, sy;
+	Int op;
+
+	particleShadowBlobReset(&blob);
+	blobFeed(&blob, 40, 3.0f, 1.0f);
+	CHECK(!particleShadowBlobResolve(&blob, &x, &y, &sx, &sy, &op));
+}
+
+TEST(blob_rejects_a_puff_of_one_or_two_particles)
+{
+	ParticleShadowBlob blob;
+	Real x, y, sx, sy;
+	Int op;
+
+	particleShadowBlobReset(&blob);
+	blobFeed(&blob, 2, 50.0f, 1.0f);
+	CHECK(!particleShadowBlobResolve(&blob, &x, &y, &sx, &sy, &op));
+}
+
+TEST(blob_rejects_a_cloud_that_has_faded_to_nothing)
+{
+	// big particles, enough of them, but no alpha left: a decal here would be a black
+	// smear under smoke that is no longer drawn
+	ParticleShadowBlob blob;
+	Real x, y, sx, sy;
+	Int op;
+
+	particleShadowBlobReset(&blob);
+	blobFeed(&blob, 10, 60.0f, 0.0f);
+	CHECK(!particleShadowBlobResolve(&blob, &x, &y, &sx, &sy, &op));
+}
+
+TEST(blob_centres_on_the_particles_and_covers_their_spread_plus_one_particle)
+{
+	ParticleShadowBlob blob;
+	Real x, y, sx, sy;
+	Int op;
+
+	particleShadowBlobReset(&blob);
+	particleShadowBlobAdd(&blob, 100.0f, 200.0f, 20.0f, 0.5f);
+	particleShadowBlobAdd(&blob, 140.0f, 200.0f, 30.0f, 0.5f);
+	particleShadowBlobAdd(&blob, 120.0f, 260.0f, 10.0f, 0.5f);
+
+	CHECK(particleShadowBlobResolve(&blob, &x, &y, &sx, &sy, &op));
+	CHECK_NEAR(x, 120.0f, 1e-4f);					// midpoint of 100..140
+	CHECK_NEAR(y, 230.0f, 1e-4f);					// midpoint of 200..260
+	CHECK_NEAR(sx, 40.0f + 30.0f, 1e-4f);	// spread plus the biggest particle's width
+	CHECK_NEAR(sy, 60.0f + 30.0f, 1e-4f);
+	CHECK(op > 0);
+}
+
+TEST(blob_darkens_with_more_smoke_then_saturates_below_opaque)
+{
+	ParticleShadowBlob thin, thick, absurd;
+	Real x, y, sx, sy;
+	Int thinOp, thickOp, absurdOp;
+
+	particleShadowBlobReset(&thin);
+	blobFeed(&thin, 4, 40.0f, 0.25f);
+	CHECK(particleShadowBlobResolve(&thin, &x, &y, &sx, &sy, &thinOp));
+
+	particleShadowBlobReset(&thick);
+	blobFeed(&thick, 8, 40.0f, 1.0f);		// past the saturation point
+	CHECK(particleShadowBlobResolve(&thick, &x, &y, &sx, &sy, &thickOp));
+
+	particleShadowBlobReset(&absurd);
+	blobFeed(&absurd, 200, 40.0f, 1.0f);
+	CHECK(particleShadowBlobResolve(&absurd, &x, &y, &sx, &sy, &absurdOp));
+
+	CHECK(thinOp < thickOp);
+	CHECK(thickOp <= absurdOp);
+	CHECK(absurdOp < 255);		// smoke shades the ground, it never blacks it out
+	CHECK_EQ(thickOp, absurdOp);	// and past saturation more smoke changes nothing
+}
+
+TEST(blob_never_smears_wider_than_the_cap)
+{
+	// a wind-blown system whose particles have drifted right across the map
+	ParticleShadowBlob blob;
+	Real x, y, sx, sy;
+	Int op;
+
+	particleShadowBlobReset(&blob);
+	particleShadowBlobAdd(&blob, 0.0f, 0.0f, 40.0f, 1.0f);
+	particleShadowBlobAdd(&blob, 5000.0f, 4000.0f, 40.0f, 1.0f);
+	particleShadowBlobAdd(&blob, 2500.0f, 2000.0f, 40.0f, 1.0f);
+
+	CHECK(particleShadowBlobResolve(&blob, &x, &y, &sx, &sy, &op));
+	CHECK(sx <= 300.0f);
+	CHECK(sy <= 300.0f);
+}
 
 // ---------------------------------------------------------------------------------------------
 // The HUD income estimate (InGameUI.cpp).  It samples the score keeper's cumulative earnings

@@ -404,6 +404,13 @@ has stood in front of a skirmish full of soldiers to judge how they look, or mea
 in frames. If they turn out to be ugly or expensive, `UseShadowVolumesForSkins = No` turns them off
 and this entry gets rewritten.
 
+**The shade under smoke went missing between builds and was written a second time.** The feature
+was described here and had tests written for it, and then the code itself was simply not in the
+project any more — so the tests could not build, and the test runner kept passing because it was
+still running yesterday's copy of itself. The notes were detailed enough to rebuild it from, which
+is the whole argument for keeping them: same rules for which clouds earn a patch, same softness,
+same tests, and this time both the tests and a screenshot of a dust plume on the ground say so.
+
 **The missing tree shadows were found with screenshots, not with reasoning.** Three separate
 explanations for them looked convincing on paper and were all wrong. What settled it was painting
 the shadows bright red for one build and looking: red under some trees and not others said the
