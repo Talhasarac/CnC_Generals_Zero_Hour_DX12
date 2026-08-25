@@ -836,9 +836,13 @@ protected:
 	DisplayString *							m_hudDisplayString;			///< the ShowHudOverlay line (fps / clock / income)
 	DisplayString *							m_incomeDisplayString;	///< the "(+N/min)" drawn beside the money
 	Int													m_lastIncomeDisplayed;	///< so that string is only rebuilt when the rate changes
-	UnsignedInt									m_hudLastSampleFrame;		///< client frame the fps sample was last refreshed on
+	UnsignedInt									m_hudDrawCount;					///< rendered frames counted by drawHudOverlay itself
+	UnsignedInt									m_hudLastSampleFrame;		///< m_hudDrawCount the fps sample was last refreshed on
 	UnsignedInt									m_hudLastSampleMs;			///< wall clock of that sample
 	Real												m_hudFps;								///< smoothed render rate
+	UnsignedInt									m_hudLastSampleLogicFrame;	///< logic frame at that same sample
+	Real												m_hudLogicHz;						///< logic frames actually simulated per real second
+	UnsignedInt									m_hudRealClockBaseMs;		///< wall clock the two elapsed-time readouts were aligned at
 	// A script time freeze stops the logic clock, and the military subtitle's counters are
 	// logic frames, so they have to be stepped by hand while it lasts.  These two turn the
 	// wall clock into that step without drift: every update works out how many 30Hz frames

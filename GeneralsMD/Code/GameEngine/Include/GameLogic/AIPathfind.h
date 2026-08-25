@@ -53,6 +53,60 @@ class PathfindZoneManager;
 
   typedef UnsignedShort zoneStorageType;
 
+//----------------------------------------------------------------------------------------------------------
+// Zone equivalency sets.
+//
+// A zone equivalency array answers "which zone is this zone really the same as".  EA stored it
+// flat - every entry already held its set's representative - and merged two sets by relabelling
+// *every* entry of the array, so one merge cost O(zones) and a whole-map rezone cost
+// O(cells x zones).  On a big map with a few thousand zones that is tens of milliseconds, once
+// every ZONE_UPDATE_FREQUENCY frames, all inside one logic frame.
+//
+// The array is used as the parent forest of a union-find instead: pathfindZoneFind walks to the
+// root with path compression, pathfindZoneUnion links the higher root under the lower one, and
+// pathfindZoneFlatten collapses the forest back to the flat form every reader outside the merge
+// loops still expects.  Linking the higher root under the lower one is exactly EA's "keep the
+// lower zone" rule, so a set's representative is still the smallest id in it and the flattened
+// array is identical to what the relabelling version produced - only the cost changes.
+//
+// Every link points from a higher id to a lower one, which is what lets the flatten be a single
+// ascending pass and what keeps pathfindZoneFind's walk terminating.
+//----------------------------------------------------------------------------------------------------------
+
+inline Int pathfindZoneFind( zoneStorageType *zoneEquivalency, Int zone )
+{
+	Int root = zone;
+	while (zoneEquivalency[root] != root) {
+		root = zoneEquivalency[root];
+	}
+	while (zoneEquivalency[zone] != root) {
+		Int next = zoneEquivalency[zone];
+		zoneEquivalency[zone] = (zoneStorageType)root;
+		zone = next;
+	}
+	return root;
+}
+
+inline void pathfindZoneUnion( zoneStorageType *zoneEquivalency, Int zoneA, Int zoneB )
+{
+	Int rootA = pathfindZoneFind( zoneEquivalency, zoneA );
+	Int rootB = pathfindZoneFind( zoneEquivalency, zoneB );
+	if (rootA == rootB) return;
+	if (rootB < rootA) {
+		zoneEquivalency[rootA] = (zoneStorageType)rootB;	// keep the lower zone
+	} else {
+		zoneEquivalency[rootB] = (zoneStorageType)rootA;
+	}
+}
+
+inline void pathfindZoneFlatten( zoneStorageType *zoneEquivalency, Int numZones )
+{
+	for (Int i = 0; i < numZones; i++) {
+		zoneEquivalency[i] = zoneEquivalency[zoneEquivalency[i]];
+	}
+}
+
+
 
 //----------------------------------------------------------------------------------------------------------
 
@@ -301,6 +355,9 @@ public:
 
 	UnsignedInt costSoFar( PathfindCell *parent );
 
+	/// tell the open list its single seed cell, so the tail pointer starts out right
+	static void setOpenListSeed( PathfindCell *cell );
+
 	/// put self on "open" list in ascending cost order, return new list
 	PathfindCell *putOnSortedOpenList( PathfindCell *list );		
 
@@ -539,6 +596,8 @@ public:
 	Bool isPassable(Int cellX, Int cellY) const;
 	Bool clipIsPassable(Int cellX, Int cellY) const;
 	void setPassable(Int cellX, Int cellY, Bool passable);
+	/// mark this cell's block passable together with the eight blocks around it, clipped to the map
+	void setPassableWithNeighbors(Int cellX, Int cellY);
 
 	void setAllPassable(void);
 
@@ -642,6 +701,17 @@ public:
 		const Coord3D *to, ObjectID ignoreObject=INVALID_ID );  ///< Can we build any path at all between the locations	(terrain, buildings & units check - slower)
 
 	Bool queueForPath(ObjectID id);	 ///< The object wants to request a pathfind, so put it on the list to process.
+
+	//
+	// Per-frame accounting of where pathfinder time actually goes. The slow-frame log used to
+	// charge all of it to `processPathfindQueue`, and most slow frames turned out to run no
+	// search large enough to log itself - so the cost is spread over the other entry points
+	// (patching, attack paths, goal and position updates, footprint reclassification) and there
+	// was no way to tell which. Reset at the top of each logic frame, printed when the frame runs
+	// over budget. Timing only, nothing the simulation reads.
+	//
+	static void resetProfile( void );							///< start a new frame's tally
+	static const char *getProfileReport( void );	///< "patch 12x/3.1 attack 4x/8.0", empty when idle
 	void processPathfindQueue(void); ///< Process some or all of the queued pathfinds.
 	void forceMapRecalculation( );	///< Force pathfind map recomputation. If region is given, only that area is recomputed
 
@@ -861,6 +931,7 @@ private:
 
 	PathfindCell *m_openList;											///< Cells ready to be explored
 	PathfindCell *m_closedList;										///< Cells already explored
+	Int m_probeBestDistSqr;											///< closest a straight-line-to-goal probe has been fired from, this search
 
 	Bool m_isMapReady;														///< True if all cells of map have been classified
 	Bool m_isTunneling;														///< True if path started in an obstacle
@@ -888,6 +959,12 @@ private:
 	Int						m_queuePRHead;
 	Int						m_queuePRTail;
 	Int						m_cumulativeCellsAllocated;
+
+	/* diagnostics only - never read by the simulation, so it stays out of xfer().  Records
+		 whether the cell search now running was fenced into a hierarchical corridor or was let
+		 loose on the whole map, so the slow-search log can say which of the two is costing the
+		 frame. */
+	Bool					m_lastSearchRestricted;
 };
 
 

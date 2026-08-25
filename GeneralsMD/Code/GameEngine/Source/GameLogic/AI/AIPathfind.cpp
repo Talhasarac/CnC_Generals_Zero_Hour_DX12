@@ -109,6 +109,83 @@ struct TCheckMovementInfo
 
 inline Int IABS(Int x) {	if (x>=0) return x; return -x;};
 
+//-------------------------------------------------------------------------------------------------
+// Where a logic frame's pathfinder time actually went.  The slow-frame log charged all of it to
+// `processPathfindQueue`, and most slow frames run no search big enough to log itself - so the
+// cost sits in the other entry points and nothing said which.  A scope object per public entry
+// charges the time to a slot; only the outermost one is timed, so a `findPath` that calls
+// `findHierarchicalPath` is not counted twice.  Timing only; no simulation state is read here,
+// so nothing about this can go out of sync.
+//-------------------------------------------------------------------------------------------------
+enum { PF_QUEUE, PF_FIND, PF_CLOSEST, PF_ATTACK, PF_SAFE, PF_PATCH, PF_MOVEAWAY,
+			 PF_ADJUST, PF_GOAL, PF_POS, PF_FOOTPRINT, PF_EXIST, PF_HIER, PF_MOVECHECK,
+			 PF_ZONES, PF_ZONEMOD,
+			 // count-only from here down: these sit in the innermost loops, where two
+			 // QueryPerformanceCounter calls each would cost more than the thing being measured
+			 PF_EXPAND, PF_MC_EXPAND, PF_MC_LINE, PF_MC_LINEPASS, PF_OPENWALK, PF_ZONEMERGE,
+			 PF_SLOTS };
+static const char *thePFSlotName[ PF_SLOTS ] =
+{ "queue", "find", "closest", "attack", "safe", "patch", "moveaway",
+	"adjust", "goal", "pos", "footprint", "exist", "hier", "movecheck",
+	"zones", "zonemod",
+	"expand", "mc.expand", "mc.line", "mc.linepass", "openwalk", "zone.merge" };
+static __int64 thePFTicks[ PF_SLOTS ];
+static Int thePFCalls[ PF_SLOTS ];
+static Int thePFDepth = 0;
+static char thePFReport[ 512 ];
+
+inline void pfBump( Int slot ) { thePFCalls[ slot ]++; }
+
+class PathProfile
+{
+public:
+	PathProfile( Int slot ) : m_slot( slot ), m_timed( thePFDepth == 0 )
+	{
+		thePFCalls[ slot ]++;
+		if( m_timed )
+		{
+			thePFDepth++;
+			QueryPerformanceCounter( (LARGE_INTEGER *)&m_start );
+		}
+	}
+	~PathProfile()
+	{
+		if( m_timed )
+		{
+			__int64 end;
+			QueryPerformanceCounter( (LARGE_INTEGER *)&end );
+			thePFTicks[ m_slot ] += end - m_start;
+			thePFDepth--;
+		}
+	}
+private:
+	Int m_slot;
+	Bool m_timed;
+	__int64 m_start;
+};
+
+// Times unconditionally, even when nested inside a PathProfile scope - the enclosing slot's
+// total then includes this one.  For costs that sit *inside* an already-timed entry point and
+// would otherwise be invisible.
+class PathProfileInner
+{
+public:
+	PathProfileInner( Int slot ) : m_slot( slot )
+	{
+		thePFCalls[ slot ]++;
+		QueryPerformanceCounter( (LARGE_INTEGER *)&m_start );
+	}
+	~PathProfileInner()
+	{
+		__int64 end;
+		QueryPerformanceCounter( (LARGE_INTEGER *)&end );
+		thePFTicks[ m_slot ] += end - m_start;
+	}
+private:
+	Int m_slot;
+	__int64 m_start;
+};
+
 //-----------------------------------------------------------------------------------
 static Int frameToShowObstacles;
 
@@ -1524,6 +1601,21 @@ Bool PathfindCell::removeObstacle( Object *obstacle )
 }
 
 /// put self on "open" list in ascending cost order, return new list
+/* EA walked this list from the head on every insert and stopped only past the last cell of equal
+	 cost, so a search with a wide frontier paid O(open list) per cell it expanded.  Measured with the
+	 `openwalk` counter on a 1-human / 7-AI skirmish: 62,490,219 walk steps over 108 slow frames, with
+	 8,871,712 of them in a single frame - about 400 steps per insert.  The list is doubly linked, so
+	 keep a tail pointer and walk in from whichever end is nearer the new cell's cost, taking the two
+	 common cases (cheaper than everything, dearer than everything) in constant time.  The insertion
+	 point is unchanged - still after every cell of equal cost - so the search expands exactly the
+	 cells it did before and lockstep holds. */
+static PathfindCellInfo *theOpenListTail = NULL;
+
+void PathfindCell::setOpenListSeed( PathfindCell *cell )
+{
+	theOpenListTail = cell ? cell->m_info : NULL;
+}
+
 PathfindCell *PathfindCell::putOnSortedOpenList( PathfindCell *list )
 {
 	DEBUG_ASSERTCRASH(m_info, ("Has to have info."));
@@ -1533,39 +1625,63 @@ PathfindCell *PathfindCell::putOnSortedOpenList( PathfindCell *list )
 		list = this;
 		m_info->m_prevOpen = NULL;
 		m_info->m_nextOpen = NULL;
+		theOpenListTail = m_info;
 	}
 	else
 	{
-		// insertion sort
-		PathfindCell *c, *lastCell = NULL;
-		for( c = list; c; c = c->getNextOpen() )
-		{
-			if (c->m_info->m_totalCost > m_info->m_totalCost)
-				break;
+		DEBUG_ASSERTCRASH(theOpenListTail && theOpenListTail->m_nextOpen==NULL, ("Open list tail is stale."));
+		const UnsignedInt cost = m_info->m_totalCost;
+		PathfindCellInfo *tail = theOpenListTail;
+		PathfindCellInfo *before;		// insert after this one, NULL means at the head
 
-			lastCell = c;
+		if (cost >= tail->m_totalCost)
+		{
+			before = tail;												// dearer than everything - append
 		}
-
-		if (c)
+		else if (cost < list->m_info->m_totalCost)
 		{
-			// insert just before "c"
-			if (c->m_info->m_prevOpen)
-				c->m_info->m_prevOpen->m_nextOpen = this->m_info;
-			else
-				list = this;
-
-			m_info->m_prevOpen = c->m_info->m_prevOpen;
-			c->m_info->m_prevOpen = this->m_info;
-				
-			m_info->m_nextOpen = c->m_info;
-
+			before = NULL;												// cheaper than everything - prepend
+		}
+		else if (cost - list->m_info->m_totalCost <= tail->m_totalCost - cost)
+		{
+			// nearer the cheap end - walk forward to the first cell that costs more than us
+			PathfindCellInfo *c;
+			before = NULL;
+			for( c = list->m_info; c; c = c->m_nextOpen )
+			{
+				pfBump( PF_OPENWALK );
+				if (c->m_totalCost > cost)
+					break;
+				before = c;
+			}
 		}
 		else
 		{
-			// append after "lastCell" - end of list
-			lastCell->m_info->m_nextOpen = this->m_info;
-			m_info->m_prevOpen = lastCell->m_info;
-			m_info->m_nextOpen = NULL;
+			// nearer the dear end - walk back to the last cell that does not cost more than us
+			before = tail;
+			while (before && before->m_totalCost > cost)
+			{
+				pfBump( PF_OPENWALK );
+				before = before->m_prevOpen;
+			}
+		}
+
+		if (before)
+		{
+			m_info->m_nextOpen = before->m_nextOpen;
+			m_info->m_prevOpen = before;
+			if (before->m_nextOpen)
+				before->m_nextOpen->m_prevOpen = m_info;
+			else
+				theOpenListTail = m_info;
+			before->m_nextOpen = m_info;
+		}
+		else
+		{
+			m_info->m_prevOpen = NULL;
+			m_info->m_nextOpen = list->m_info;
+			list->m_info->m_prevOpen = m_info;
+			list = this;
 		}
 	}
 
@@ -1576,11 +1692,14 @@ PathfindCell *PathfindCell::putOnSortedOpenList( PathfindCell *list )
 	return list;
 }
 
+
 /// remove self from "open" list
 PathfindCell *PathfindCell::removeFromOpenList( PathfindCell *list )
 {
 	DEBUG_ASSERTCRASH(m_info, ("Has to have info."));
 	DEBUG_ASSERTCRASH(m_info->m_closed==FALSE && m_info->m_open==TRUE, ("Serious error - Invalid flags. jba"));
+	if (theOpenListTail == m_info)
+		theOpenListTail = m_info->m_prevOpen;
 	if (m_info->m_nextOpen)
 		m_info->m_nextOpen->m_prevOpen = m_info->m_prevOpen;
 	
@@ -1599,6 +1718,7 @@ PathfindCell *PathfindCell::removeFromOpenList( PathfindCell *list )
 /// remove all cells from "open" list
 Int PathfindCell::releaseOpenList( PathfindCell *list )
 {
+	theOpenListTail = NULL;
 	Int count = 0;
 	while (list) {
 		count++;
@@ -1718,6 +1838,22 @@ UnsignedInt PathfindCell::costToGoal( PathfindCell *goal )
 
 #endif
 
+	/* The estimate above prices a step at COST_ORTHOGONAL, but costSoFar charges a real step far
+		 more than that: COST_DIAGONAL for a diagonal, +4/+8/+16 for a 45/90/135 degree turn, another
+		 COST_DIAGONAL for a pinched cell, and whatever the terrain adds. So the estimate is a long
+		 way under the truth, and an A* whose estimate is too low stops steering: it fans out and
+		 expands nearly every cell it is allowed to touch instead of walking towards the goal. That
+		 is what the measurements showed - a 315-cell route expanding 17578 cells, essentially the
+		 entire corridor, at 229 ms.
+
+		 HEURISTIC_WEIGHT_NUM/DEN brings the estimate up towards what a step really costs. The search
+		 is no longer guaranteed to find the *cheapest* route, only one within the weight factor of
+		 it, which for a unit walking across a map is a trade worth making many times over: the
+		 route is a few cells longer, the search is several times cheaper, and the frame does not
+		 stall. It stays integer arithmetic and a fixed ratio, so every machine and every replay
+		 expands the same cells in the same order. */
+	enum { HEURISTIC_WEIGHT_NUM = 3, HEURISTIC_WEIGHT_DEN = 2 };
+	cost = (cost * HEURISTIC_WEIGHT_NUM) / HEURISTIC_WEIGHT_DEN;
 
 	return cost;
 }
@@ -1892,30 +2028,21 @@ static void __fastcall resolveBlockZones(Int srcZone, Int targetZone, zoneStorag
 	}
 }
 
+// Merge two zone sets.  This used to relabel the whole array (see the union-find comment in
+// AIPathfind.h); the array is now the union-find's parent forest and the merge is O(1) amortized.
+// The set representative is still the smallest id in it, so the flattened result is unchanged.
 static void __fastcall resolveZones(Int srcZone, Int targetZone, zoneStorageType *zoneEquivalency, Int sizeOfZE)
 {
-	Int i;
 	// We have two zones being combined now. Keep the lower zone.
 	DEBUG_ASSERTCRASH(srcZone!=0 && targetZone!=0,  ("Bad resolve zones	."));
 	DEBUG_ASSERTCRASH(srcZone<sizeOfZE && targetZone<sizeOfZE,  ("Bad resolve zones	."));
-	srcZone = zoneEquivalency[srcZone];
-	targetZone = zoneEquivalency[targetZone];
-	DEBUG_ASSERTCRASH(srcZone<sizeOfZE && targetZone<sizeOfZE,  ("Bad resolve zones	."));
-	zoneStorageType finalZone;
-	if (targetZone<srcZone) {
-		finalZone = zoneEquivalency[targetZone];
-	} else {
-		finalZone = zoneEquivalency[srcZone];
-	}
-	DEBUG_ASSERTCRASH(finalZone<sizeOfZE ,  ("Bad resolve zones	."));
-	for (i=0; i<sizeOfZE; i++) { 
-		zoneStorageType ze = zoneEquivalency[i];
-		if (ze == targetZone || ze == srcZone) {
-			zoneEquivalency[i] = finalZone;
-		}
-	}
+	pfBump( PF_ZONEMERGE );
+	pathfindZoneUnion( zoneEquivalency, srcZone, targetZone );
 }
 
+// Both arrays must be flat on entry.  The merge loop below turns zoneArray back into a union-find
+// forest, so its reads go through pathfindZoneFind and it flattens the array again on the way out
+// - callers past this point index it directly.
 static void flattenZones(zoneStorageType *zoneArray, zoneStorageType *zoneHierarchical, Int sizeOfZones)
 {
 	Int i;
@@ -1929,21 +2056,22 @@ static void flattenZones(zoneStorageType *zoneArray, zoneStorageType *zoneHierar
 #if 1
 
 	for (i=0; i<sizeOfZones; i++) {
-		Int zone1 = zoneArray[i];
+		Int zone1 = pathfindZoneFind(zoneArray, i);
 		Int zone2 = zoneHierarchical[i];
 		if (zone1!=zone2) {
 			resolveZones(zone1, zone2, zoneArray, sizeOfZones);
 		}
 	}
+	pathfindZoneFlatten(zoneArray, sizeOfZones);
 #endif
 }
 
 inline void applyZone(PathfindCell &targetCell, const PathfindCell &sourceCell, zoneStorageType *zoneEquivalency, Int sizeOfZE)
 {
 	DEBUG_ASSERTCRASH(sourceCell.getZone()!=0, ("Unset source zone."));
-	Int srcZone = zoneEquivalency[sourceCell.getZone()];
+	Int srcZone = pathfindZoneFind(zoneEquivalency, sourceCell.getZone());
 	//DEBUG_ASSERTCRASH(srcZone!=0, ("Bad zone equivalency zone."));
-	Int targetZone = zoneEquivalency[targetCell.getZone()];
+	Int targetZone = pathfindZoneFind(zoneEquivalency, targetCell.getZone());
 
 	if (targetZone == 0) {
 		targetCell.setZone(srcZone);
@@ -2320,6 +2448,7 @@ static  Bool  s_stopForceCalling = FALSE;
 
 void PathfindZoneManager::calculateZones( PathfindCell **map, PathfindLayer layers[], const IRegion2D &globalBounds )
 {
+	PathProfileInner pfProfile( PF_ZONES );
 
 #ifdef DEBUG_QPF
 #if defined(DEBUG_LOGGING) 
@@ -2401,6 +2530,8 @@ void PathfindZoneManager::calculateZones( PathfindCell **map, PathfindLayer laye
 	}
 
 	Int totalZones = m_maxZone;
+	// The merges above left a union-find forest; the collapse below indexes the array directly.
+	pathfindZoneFlatten(zoneEquivalency, totalZones);
 //	if (totalZones>maxZones/2) {
 //		DEBUG_LOG(("Max zones %d\n", m_maxZone));
 //	}
@@ -2788,6 +2919,13 @@ void PathfindZoneManager::calculateZones( PathfindCell **map, PathfindLayer laye
 
   
   
+	// Same again for the arrays sweep 2 merged into: flattenZones wants them flat on entry.
+	pathfindZoneFlatten(m_groundCliffZones, m_maxZone);
+	pathfindZoneFlatten(m_groundWaterZones, m_maxZone);
+	pathfindZoneFlatten(m_groundRubbleZones, m_maxZone);
+	pathfindZoneFlatten(m_terrainZones, m_maxZone);
+	pathfindZoneFlatten(m_crusherZones, m_maxZone);
+
   //THIS BLOCK IS 20% 
 	flattenZones(m_groundCliffZones, m_hierarchicalZones, m_maxZone);
 	flattenZones(m_groundWaterZones, m_hierarchicalZones, m_maxZone);
@@ -2859,6 +2997,7 @@ void PathfindZoneManager::calculateZones( PathfindCell **map, PathfindLayer laye
  */
 void PathfindZoneManager::updateZonesForModify(PathfindCell **map, PathfindLayer layers[], const IRegion2D &structureBounds, const IRegion2D &globalBounds )
 {
+	PathProfileInner pfProfile( PF_ZONEMOD );
 
 #ifdef DEBUG_QPF
 #if defined(DEBUG_LOGGING) 
@@ -3048,6 +3187,24 @@ void PathfindZoneManager::setPassable(Int cellX, Int cellY, Bool passable)
 		return;
 	}
 	m_zoneBlocks[blockX][blockY].setPassable(passable);
+}
+
+//
+// Set the passable flag for the block at this location and the eight blocks around it.
+//
+void PathfindZoneManager::setPassableWithNeighbors(Int cellX, Int cellY)
+{
+	Int blockX = cellX/ZONE_BLOCK_SIZE;
+	Int blockY = cellY/ZONE_BLOCK_SIZE;
+
+	Int i, j;
+	for (i = blockX-1; i <= blockX+1; i++) {
+		if (i<0 || i>=m_zoneBlockExtent.x) continue;
+		for (j = blockY-1; j <= blockY+1; j++) {
+			if (j<0 || j>=m_zoneBlockExtent.y) continue;
+			m_zoneBlocks[i][j].setPassable(true);
+		}
+	}
 }
 
 //
@@ -3860,8 +4017,46 @@ Pathfinder::~Pathfinder( void )
 	PathfindCellInfo::releaseCellInfos();
 }
 
+
+void Pathfinder::resetProfile( void )
+{
+	for( Int i = 0; i < PF_SLOTS; i++ )
+	{
+		thePFTicks[ i ] = 0;
+		thePFCalls[ i ] = 0;
+	}
+	thePFDepth = 0;
+}
+
+const char *Pathfinder::getProfileReport( void )
+{
+	__int64 freq = 0;
+	QueryPerformanceFrequency( (LARGE_INTEGER *)&freq );
+	thePFReport[ 0 ] = 0;
+	Int len = 0;
+	for( Int i = 0; i < PF_SLOTS; i++ )
+	{
+		if( thePFCalls[ i ] == 0 )
+			continue;
+		const Real ms = freq ? (Real)(thePFTicks[ i ] * 1000.0 / (double)freq) : 0.0f;
+		char one[ 64 ];
+		if( i >= PF_EXPAND )
+			sprintf( one, "%s %dx ", thePFSlotName[ i ], thePFCalls[ i ] );
+		else
+			sprintf( one, "%s %dx/%.1f ", thePFSlotName[ i ], thePFCalls[ i ], ms );
+		Int oneLen = strlen( one );
+		if( len + oneLen >= (Int)sizeof( thePFReport ) - 1 )
+			break;
+		strcpy( thePFReport + len, one );
+		len += oneLen;
+	}
+	return thePFReport;
+}
+
+
 void Pathfinder::reset( void )
 {
+	m_probeBestDistSqr = 0x7FFFFFFF;
 	frameToShowObstacles = 0;
 	DEBUG_LOG(("Pathfind cell is %d bytes, PathfindCellInfo is %d bytes\n", sizeof(PathfindCell), sizeof(PathfindCellInfo)));
 
@@ -3897,6 +4092,7 @@ void Pathfinder::reset( void )
 	// pathfind grid cells have not been classified yet
 	m_isMapReady = false;
 	m_cumulativeCellsAllocated = 0;
+	m_lastSearchRestricted = false;
 
 	debugPathPos.x = 0.0f;
 	debugPathPos.y = 0.0f;
@@ -4147,6 +4343,7 @@ void Pathfinder::classifyFence( Object *obj, Bool insert )
  */
 void Pathfinder::classifyObjectFootprint( Object *obj, Bool insert )
 {
+	PathProfile pfProfile( PF_FOOTPRINT );
 	if (obj->isKindOf(KINDOF_MINE)) {
 		return;  // don't pathfind around mines.
 	}
@@ -4839,6 +5036,8 @@ Bool Pathfinder::validMovementTerrain( PathfindLayerEnum layer, const Locomotor*
 // Releases the cells on the open & closed lists.
 //
 void Pathfinder::cleanOpenAndClosedLists(void) {
+	m_probeBestDistSqr = 0x7FFFFFFF;	// a new search gets a fresh probe budget
+	PathfindCell::setOpenListSeed( NULL );
 	Int count = 0;
 	if (m_openList) {
 		count += PathfindCell::releaseOpenList(m_openList);
@@ -5023,6 +5222,7 @@ Bool Pathfinder::checkDestination(const Object *obj, Int cellX, Int cellY, Pathf
  */
 Bool Pathfinder::checkForMovement(const Object *obj, TCheckMovementInfo &info)	  
 {
+	PathProfile pfProfile( PF_MOVECHECK );
 	info.allyFixedCount = 0;
 	info.allyMoving = false;
 	info.allyGoal = false;
@@ -5351,6 +5551,7 @@ Bool Pathfinder::checkForLanding(Int cellX, Int cellY, PathfindLayerEnum layer,
  */
 Bool Pathfinder::adjustToLandingDestination(Object *obj, Coord3D *dest)
 {
+	PathProfile pfProfile( PF_ADJUST );
 	Int iRadius;
 	Bool center;
 	getRadiusAndCenter(obj, iRadius, center);
@@ -5429,6 +5630,7 @@ Bool Pathfinder::adjustToLandingDestination(Object *obj, Coord3D *dest)
  */
 Bool Pathfinder::adjustDestination(Object *obj, const LocomotorSet& locomotorSet, Coord3D *dest, const Coord3D *groupDest)
 {
+	PathProfile pfProfile( PF_ADJUST );
 	if( obj->isKindOf(KINDOF_PROJECTILE) )
 	{
 		return true; // missiles can go wherever they want to. jba.
@@ -5538,6 +5740,7 @@ Bool Pathfinder::checkForTarget(const Object *obj, 	Int cellX, Int cellY, const 
 Bool Pathfinder::adjustTargetDestination(const Object *obj, const Object *target, const Coord3D *targetPos, 
 																				 const Weapon *weapon, Coord3D *dest)
 {
+	PathProfile pfProfile( PF_ADJUST );
 	Int iRadius;
 	Bool center;
 	getRadiusAndCenter(obj, iRadius, center);
@@ -5620,6 +5823,7 @@ Bool Pathfinder::checkForPossible(Bool isCrusher, Int fromZone,  Bool center, co
 Bool Pathfinder::adjustToPossibleDestination(Object *obj, const LocomotorSet& locomotorSet, 
 																						 Coord3D *dest)
 {
+	PathProfile pfProfile( PF_ADJUST );
 	Int radius;
 	Bool center;
 	getRadiusAndCenter(obj, radius, center);
@@ -5890,6 +6094,7 @@ void Pathfinder::doDebugIcons(void) {
  */
 Path *Pathfinder::getAircraftPath( const Object *obj, const Coord3D *to )
 {
+	PathProfile pfProfile( PF_FIND );
 	// for now, quick path objects don't pathfind, generally airborne units
 	// build a trivial one-node path containing destination, then avoid buildings.
 	
@@ -5966,6 +6171,7 @@ Path *Pathfinder::getAircraftPath( const Object *obj, const Coord3D *to )
 //DECLARE_PERF_TIMER(processPathfindQueue)
 void Pathfinder::processPathfindQueue(void)
 {
+	PathProfile pfProfile( PF_QUEUE );
 	//USE_PERF_TIMER(processPathfindQueue)
 	if (!m_isMapReady) {
 		return;
@@ -6141,6 +6347,7 @@ struct ExamineCellsStruct
 			info.radius = d->radius;
 			info.considerTransient = false;
 			info.acceptableSurfaces = d->theLoco->getValidSurfaces();
+			pfBump( PF_MC_LINE );
 			if (!d->thePathfinder->checkForMovement(d->obj, info) || info.enemyFixed) {
 				return 1; //abort.
 			}	
@@ -6208,6 +6415,7 @@ Int Pathfinder::examineNeighboringCells(PathfindCell *parentCell, PathfindCell *
 																				 Bool isHuman, Bool centerInCell, Int radius, const ICoord2D &startCellNdx,
 																				 const Object *obj, Int attackDistance)
 {
+	pfBump( PF_EXPAND );
 		Bool canPathThroughUnits = false;
 		if (obj && obj->getAIUpdateInterface()) {
 			canPathThroughUnits = obj->getAIUpdateInterface()->canPathThroughUnits();
@@ -6216,7 +6424,26 @@ Int Pathfinder::examineNeighboringCells(PathfindCell *parentCell, PathfindCell *
 			unregisterPathUsage(obj->getAIUpdateInterface()->getPath());
 		}
 		Bool isCrusher = obj ? obj->getCrusherLevel() > 0 : false;
-		if (attackDistance==NO_ATTACK && !m_isTunneling && !locomotorSet.isDownhillOnly() && goalCell) {
+		/* The straight-line-to-goal probe below walks every cell between this cell and the goal and
+			 runs a full checkForMovement on each of them.  EA fired it from *every* cell the search
+			 expanded, so an open map cost O(cells expanded * distance to goal) movement checks - a
+			 single 5000-cell search was measured at 1.4 million of them, and that was the whole of the
+			 pathfinder's frame time.  The probe only ever adds shortcut cells to the open list, so
+			 skipping one costs nothing but a little more exploring; fire it only when this cell is
+			 strictly closer to the goal than any cell we have probed from in this search, which is
+			 exactly when the shortcut has a new chance of getting through.  Deterministic: the state
+			 is a plain function of the search's own cell order and is cleared with the lists. */
+		Bool probeToGoal = false;
+		if (goalCell) {
+			Int pdx = IABS(goalCell->getXIndex()-parentCell->getXIndex());
+			Int pdy = IABS(goalCell->getYIndex()-parentCell->getYIndex());
+			Int pdSqr = pdx*pdx + pdy*pdy;
+			if (pdSqr < m_probeBestDistSqr) {
+				m_probeBestDistSqr = pdSqr;
+				probeToGoal = true;
+			}
+		}
+		if (probeToGoal && attackDistance==NO_ATTACK && !m_isTunneling && !locomotorSet.isDownhillOnly() && goalCell) {
 			ExamineCellsStruct info;
 			info.thePathfinder = this;
 			info.theLoco = &locomotorSet;
@@ -6351,6 +6578,7 @@ Int Pathfinder::examineNeighboringCells(PathfindCell *parentCell, PathfindCell *
 			if (dy<0) dy = -dy;
 			if (dx>1+radius) info.considerTransient = false;
 			if (dy>1+radius) info.considerTransient = false;
+			pfBump( PF_MC_EXPAND );
 			if (!checkForMovement(obj, info) || info.enemyFixed) {
 				if (!m_isTunneling) {
 					continue;
@@ -6495,6 +6723,7 @@ Int Pathfinder::examineNeighboringCells(PathfindCell *parentCell, PathfindCell *
 Path *Pathfinder::findPath( Object *obj, const LocomotorSet& locomotorSet, const Coord3D *from, 
 													 const Coord3D *rawTo)
 {
+	PathProfile pfProfile( PF_FIND );
 	if (!clientSafeQuickDoesPathExist(locomotorSet, from, rawTo)) {
 		return NULL;
 	}
@@ -6505,27 +6734,22 @@ Path *Pathfinder::findPath( Object *obj, const LocomotorSet& locomotorSet, const
 
 	m_zoneManager.clearPassableFlags();
 	Path *hPat = findHierarchicalPath(isHuman, locomotorSet, from, rawTo, false);
-	Bool hadCorridor = (hPat != NULL);
 	if (hPat) {
 		hPat->deleteInstance();
 	}	else {
 		m_zoneManager.setAllPassable();
 	}
 
+	/* the corridor the hierarchical search laid out used to get a second, unrestricted retry
+		 when the cell search failed inside it - on the grounds that the corridor can be too
+		 tight for the unit's footprint.  That retry searches the whole map, and the whole map
+		 is what makes a logic frame take seconds: measured searches ran to 140513 cells / 285ms
+		 against a 5000-cell-per-frame budget.  A corridor that is too tight is a corridor to
+		 widen, not a reason to drop the corridor, so the retry is gone. */
+	m_lastSearchRestricted = (hPat != NULL);
 	Path *pat = internalFindPath(obj, locomotorSet, from, rawTo);
 	if (pat!=NULL) {
 		return pat;
-	}
-
-	// the block corridor the hierarchical search laid out can be too tight for this unit's
-	// footprint (or simply wrong); a failed corridor search is cheap, so fall back to the
-	// unrestricted search rather than report no path
-	if (hadCorridor) {
-		m_zoneManager.setAllPassable();
-		pat = internalFindPath(obj, locomotorSet, from, rawTo);
-		if (pat!=NULL) {
-			return pat;
-		}
 	}
 
 /* hierarchical build path code.
@@ -6728,11 +6952,26 @@ Path *Pathfinder::internalFindPath( Object *obj, const LocomotorSet& locomotorSe
 
 	// initialize "open" list to contain start cell
 	m_openList = parentCell;
+	PathfindCell::setOpenListSeed( parentCell );
 
 	// "closed" list is initially empty
 	m_closedList = NULL;
 
 	Int cellCount = 0;
+
+	/* Every other search in this file caps the cells it will look at - findClosestPath has
+		 MAX_CELL_COUNT, patchPath has CELL_LIMIT, findAttackPath has ATTACK_CELL_LIMIT - and this
+		 one, the main one, had none: it ran until the open list emptied, which on a failed search
+		 means every reachable cell on the map.  The per-frame budget does not catch it either,
+		 because PATHFIND_CELLS_PER_FRAME is only tested between queued requests and
+		 m_cumulativeCellsAllocated is only credited once a search has already finished.  So one
+		 request could spend the whole frame: 140513 cells / 285 ms measured, against a budget of
+		 5000.  The cap is a fixed count, not a timer, so every machine and every replay stops the
+		 search at the same cell. */
+	enum { MAX_INTERNAL_CELL_COUNT = 20000 };
+	PathfindCell *closestCell = NULL;
+	Real closestDistanceSqr = FLT_MAX;
+	Bool hitCellCap = false;
 
 	//
 	// Continue search until "open" list is empty, or
@@ -6740,6 +6979,11 @@ Path *Pathfinder::internalFindPath( Object *obj, const LocomotorSet& locomotorSe
 	//
 	while( m_openList != NULL )
 	{
+		if (cellCount > MAX_INTERNAL_CELL_COUNT) {
+			hitCellCap = true;
+			break;
+		}
+
 		// take head cell off of open list - it has lowest estimated total path cost
 		parentCell = m_openList;
 		m_openList = parentCell->removeFromOpenList(m_openList);
@@ -6780,8 +7024,9 @@ Path *Pathfinder::internalFindPath( Object *obj, const LocomotorSet& locomotorSe
 					if (path)
 						for (const PathNode *n = path->getFirstNode(); n; n = n->getNext())
 							nodes++;
-					DEBUG_LOG(("Pathfind frame %d '%s': %d cells, search %.1f ms, build+optimize %.1f ms, %d nodes, (%.0f,%.0f)->(%.0f,%.0f)\n",
+					DEBUG_LOG(("Pathfind frame %d '%s' [%s]: %d cells, search %.1f ms, build+optimize %.1f ms, %d nodes, (%.0f,%.0f)->(%.0f,%.0f)\n",
 										 TheGameLogic->getFrame(), obj ? obj->getTemplate()->getName().str() : "?",
+										 m_lastSearchRestricted ? "corridor" : "openmap",
 										 cellCount, searchMs, buildMs, nodes, from->x, from->y, rawTo->x, rawTo->y));
 				}
 			}
@@ -6793,11 +7038,48 @@ Path *Pathfinder::internalFindPath( Object *obj, const LocomotorSet& locomotorSe
 		// put parent cell onto closed list - its evaluation is finished
 		m_closedList = parentCell->putOnClosedList( m_closedList );
 
+		/* remember the cell that got nearest the goal, so a search stopped by the cap can still
+			 hand back the part of the route it did work out.  Reporting no path at all would leave
+			 the unit standing there refusing the order. */
+		{
+			Int dx = IABS(goalCell->getXIndex()-parentCell->getXIndex());
+			Int dy = IABS(goalCell->getYIndex()-parentCell->getYIndex());
+			Real distSqr = (Real)(dx*dx+dy*dy);
+			if (distSqr < closestDistanceSqr) {
+				closestDistanceSqr = distSqr;
+				closestCell = parentCell;
+			}
+		}
+
 		// Check to see if we can change layers in this cell.
 		checkChangeLayers(parentCell);
 
 		cellCount += examineNeighboringCells(parentCell, goalCell, locomotorSet, isHuman, centerInCell, radius, startCellNdx, obj, NO_ATTACK);
 
+	}
+
+	/* the cap stopped the search - return the best partial route rather than nothing, so the unit
+		 closes on the goal and the next request picks up from there.  The partial path is built the
+		 same way a complete one is, so the caller cannot tell the difference and nothing downstream
+		 needs to learn about capped searches. */
+	if (hitCellCap && closestCell && closestCell != parentCell) {
+		Path *partial = buildActualPath( obj, locomotorSet.getValidSurfaces(), from, closestCell, centerInCell, false );
+		if (partial) {
+			if (fpFreq64 > 0) {
+				__int64 fpTCap = 0;
+				QueryPerformanceCounter((LARGE_INTEGER *)&fpTCap);
+				DEBUG_LOG(("Pathfind CAPPED frame %d unit '%s' [%s]: %d cells, %.1f ms, partial to %d cells short of goal, (%.0f,%.0f)->(%.0f,%.0f)\n",
+									 TheGameLogic->getFrame(), obj ? obj->getTemplate()->getName().str() : "?",
+									 m_lastSearchRestricted ? "corridor" : "openmap",
+									 cellCount, 1000.0f * (Real)(fpTCap - fpT0) / (Real)fpFreq64,
+									 (Int)sqrt(closestDistanceSqr), from->x, from->y, rawTo->x, rawTo->y));
+			}
+			m_isTunneling = false;
+			cleanOpenAndClosedLists();
+			parentCell->releaseInfo();
+			goalCell->releaseInfo();
+			return partial;
+		}
 	}
 
 	// failure - goal cannot be reached
@@ -6858,9 +7140,15 @@ Path *Pathfinder::internalFindPath( Object *obj, const LocomotorSet& locomotorSe
 	// release-visible trace (DebugLogFile.txt): a failed search is otherwise invisible outside
 	// debug builds, and "no path" reports need the cell count to tell a dry pool from a real
 	// dead end
-	DEBUG_LOG(("Pathfind FAILED frame %d unit '%s' from (%.0f,%.0f) to (%.0f,%.0f), %d cells\n",
-						 TheGameLogic->getFrame(), obj ? obj->getTemplate()->getName().str() : "?",
-						 from->x, from->y, to->x, to->y, cellCount));
+	{
+		__int64 fpTFail = 0;
+		QueryPerformanceCounter((LARGE_INTEGER *)&fpTFail);
+		const Real failMs = (fpFreq64 > 0) ? 1000.0f * (Real)(fpTFail - fpT0) / (Real)fpFreq64 : 0.0f;
+		DEBUG_LOG(("Pathfind FAILED frame %d unit '%s' [%s] from (%.0f,%.0f) to (%.0f,%.0f), %d cells, %.1f ms\n",
+							 TheGameLogic->getFrame(), obj ? obj->getTemplate()->getName().str() : "?",
+							 m_lastSearchRestricted ? "corridor" : "openmap",
+							 from->x, from->y, to->x, to->y, cellCount, failMs));
+	}
 	m_isTunneling = false;
 	cleanOpenAndClosedLists();
 	parentCell->releaseInfo();
@@ -6993,23 +7281,19 @@ Path *Pathfinder::buildHierachicalPath( const Coord3D *fromPos, PathfindCell *go
 
 	prependCells(path, fromPos, goalCell, true);
 
-	// Expand the hierarchical path around the starting point. jba [8/24/2003]
-	// This allows the unit to get around friendly units that may be near it.
-	Coord3D pos = *path->getFirstNode()->getPosition();
-	Coord3D minPos = pos;
-	minPos.x -= PathfindZoneManager::ZONE_BLOCK_SIZE*PATHFIND_CELL_SIZE_F;
-	minPos.y -= PathfindZoneManager::ZONE_BLOCK_SIZE*PATHFIND_CELL_SIZE_F;
-	Coord3D maxPos = pos;
-	maxPos.x += PathfindZoneManager::ZONE_BLOCK_SIZE*PATHFIND_CELL_SIZE_F;
-	maxPos.y += PathfindZoneManager::ZONE_BLOCK_SIZE*PATHFIND_CELL_SIZE_F;
-	ICoord2D cellNdxMin, cellNdxMax;
-	worldToCell(&minPos, &cellNdxMin);
-	worldToCell(&maxPos, &cellNdxMax);
-	Int i, j;
-	for (i=cellNdxMin.x; i<=cellNdxMax.x; i++) {
-		for (j=cellNdxMin.y; j<=cellNdxMax.y; j++) {
-			m_zoneManager.setPassable(i, j, true);
-		}
+	/* Widen the corridor by one zone block on every side, along its whole length.
+		 EA did this around the starting point only - jba [8/24/2003], "This allows the unit to get
+		 around friendly units that may be near it" - and the rest of the corridor stayed one block
+		 wide.  A block is ZONE_BLOCK_SIZE cells, so a wide unit whose footprint does not fit that
+		 ribbon failed the cell search, and findPath used to answer that by searching the whole map
+		 instead (measured at 140513 cells / 285 ms against a 5000-cell-per-frame budget).  Widening
+		 is the same rescue at the right level: the search stays bounded by the length of the path
+		 rather than by the area of the map. */
+	for( PathNode *node = path->getFirstNode(); node; node = node->getNext() )
+	{
+		ICoord2D cellNdx;
+		worldToCell(node->getPosition(), &cellNdx);
+		m_zoneManager.setPassableWithNeighbors(cellNdx.x, cellNdx.y);
 	}
 
 #if defined _DEBUG || defined _INTERNAL
@@ -7267,6 +7551,7 @@ Path *Pathfinder::findGroundPath( const Coord3D *from,
 
 	// initialize "open" list to contain start cell
 	m_openList = parentCell;
+	PathfindCell::setOpenListSeed( parentCell );
 
 	// "closed" list is initially empty
 	m_closedList = NULL;
@@ -7610,6 +7895,7 @@ void Pathfinder::processHierarchicalCell( const ICoord2D &scanCell, const ICoord
 Path *Pathfinder::findHierarchicalPath( Bool isHuman, const LocomotorSet& locomotorSet, const Coord3D *from, 
 													 const Coord3D *to, Bool crusher)
 {
+	PathProfile pfProfile( PF_HIER );
 	return internal_findHierarchicalPath(isHuman, locomotorSet.getValidSurfaces(), from, to, crusher, FALSE);
 }
 
@@ -7621,6 +7907,7 @@ Path *Pathfinder::findHierarchicalPath( Bool isHuman, const LocomotorSet& locomo
 Path *Pathfinder::findClosestHierarchicalPath( Bool isHuman, const LocomotorSet& locomotorSet, const Coord3D *from, 
 													 const Coord3D *to, Bool crusher)
 {
+	PathProfile pfProfile( PF_HIER );
 	return internal_findHierarchicalPath(isHuman, locomotorSet.getValidSurfaces(), from, to, crusher, TRUE);
 }
 
@@ -7718,8 +8005,10 @@ Path *Pathfinder::internal_findHierarchicalPath( Bool isHuman, const LocomotorSu
 	if (parentCell->getLayer()==LAYER_GROUND) {
 		// initialize "open" list to contain start cell
 		m_openList = parentCell;
+		PathfindCell::setOpenListSeed( parentCell );
 	}	else {
 		m_openList = parentCell;
+		PathfindCell::setOpenListSeed( parentCell );
 		PathfindLayerEnum layer = parentCell->getLayer();
 		// We're starting on a bridge, so link to land at the bridge end points.
 		ICoord2D ndx;
@@ -8219,6 +8508,7 @@ Bool Pathfinder::clientSafeQuickDoesPathExist( const LocomotorSet& locomotorSet,
 																const Coord3D *from, 
 																const Coord3D *to ) 
 {
+	PathProfile pfProfile( PF_EXIST );
 	// See if terrain or building is blocking the destination.
 	PathfindLayerEnum destinationLayer = TheTerrainLogic->getLayerForDestination(to);
 	if (!validMovementPosition(false, destinationLayer, locomotorSet, to)) {
@@ -8277,6 +8567,7 @@ Bool Pathfinder::clientSafeQuickDoesPathExistForUI( const LocomotorSet& locomoto
 																const Coord3D *from, 
 																const Coord3D *to ) 
 {
+	PathProfile pfProfile( PF_EXIST );
 	// See if terrain or building is blocking the destination.
 	PathfindLayerEnum destinationLayer = TheTerrainLogic->getLayerForDestination(to);
 	PathfindLayerEnum fromLayer = TheTerrainLogic->getLayerForDestination(from);
@@ -8335,6 +8626,7 @@ Bool Pathfinder::slowDoesPathExist( Object *obj,
 																const Coord3D *to,
 																ObjectID ignoreObject)
 {
+	PathProfile pfProfile( PF_EXIST );
 	AIUpdateInterface *ai = obj->getAI();
 	if (ai==NULL) {
 		return false;
@@ -8444,6 +8736,7 @@ Bool Pathfinder::pathDestination( 	Object *obj, const LocomotorSet& locomotorSet
 
 	// initialize "open" list to contain start cell
 	m_openList = parentCell;
+	PathfindCell::setOpenListSeed( parentCell );
 
 	// "closed" list is initially empty
 	m_closedList = NULL;
@@ -8716,6 +9009,7 @@ Int Pathfinder::checkPathCost(Object *obj, const LocomotorSet& locomotorSet, con
 
 	// initialize "open" list to contain start cell
 	m_openList = parentCell;
+	PathfindCell::setOpenListSeed( parentCell );
 
 	// "closed" list is initially empty
 	m_closedList = NULL;
@@ -8868,6 +9162,7 @@ Int Pathfinder::checkPathCost(Object *obj, const LocomotorSet& locomotorSet, con
 Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet, const Coord3D *from, 
 																	Coord3D *rawTo, Bool blocked, Real pathCostMultiplier, Bool moveAllies)
 {
+	PathProfile pfProfile( PF_CLOSEST );
 	//CRCDEBUG_LOG(("Pathfinder::findClosestPath()\n"));
 #if defined _DEBUG || defined _INTERNAL
 	Int startTimeMS = ::GetTickCount();
@@ -9007,6 +9302,7 @@ Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet
 
 	// initialize "open" list to contain start cell
 	m_openList = parentCell;
+	PathfindCell::setOpenListSeed( parentCell );
 
 	// "closed" list is initially empty
 	m_closedList = NULL;
@@ -9803,6 +10099,7 @@ struct LinePassableStruct
 	info.radius = d->radius;
 	info.considerTransient = d->blocked;
 	info.acceptableSurfaces = d->acceptableSurfaces;
+	pfBump( PF_MC_LINEPASS );
 	if (!pathfinder->checkForMovement(d->obj, info))
 	{
 		return 1;	// bail out
@@ -9940,6 +10237,7 @@ void Pathfinder::getRadiusAndCenter(const Object *obj, Int &iRadius, Bool &cente
  */
 void Pathfinder::updateGoal( Object *obj, const Coord3D *newGoalPos, PathfindLayerEnum layer)
 {
+	PathProfile pfProfile( PF_GOAL );
 	if (obj->isKindOf(KINDOF_IMMOBILE)) {
 		// Only consider mobile.
 		return;
@@ -10042,6 +10340,7 @@ void Pathfinder::updateGoal( Object *obj, const Coord3D *newGoalPos, PathfindLay
  */
 void Pathfinder::updateAircraftGoal( Object *obj, const Coord3D *newGoalPos)
 {
+	PathProfile pfProfile( PF_GOAL );
 	if (obj->isKindOf(KINDOF_IMMOBILE)) {
 		// Only consider mobile.
 		return;
@@ -10100,6 +10399,7 @@ void Pathfinder::updateAircraftGoal( Object *obj, const Coord3D *newGoalPos)
  */
 void Pathfinder::removeGoal( Object *obj)
 {
+	PathProfile pfProfile( PF_GOAL );
 	if (obj->isKindOf(KINDOF_IMMOBILE)) {
 		// Only consider mobile.
 		return;
@@ -10160,6 +10460,7 @@ void Pathfinder::removeGoal( Object *obj)
  */
 void Pathfinder::updatePos( Object *obj, const Coord3D *newPos)
 {
+	PathProfile pfProfile( PF_POS );
 	if (obj->isKindOf(KINDOF_IMMOBILE)) 
 	{
 		// Only consider mobile.
@@ -10269,6 +10570,7 @@ void Pathfinder::updatePos( Object *obj, const Coord3D *newPos)
  */
 void Pathfinder::removePos( Object *obj)
 {
+	PathProfile pfProfile( PF_POS );
 	if (obj->isKindOf(KINDOF_IMMOBILE)) {
 		// Only consider mobile.
 		return;
@@ -10327,6 +10629,7 @@ void Pathfinder::removeUnitFromPathfindMap(  Object *obj )
 
 Bool Pathfinder::moveAllies(Object *obj, Path *path)
 {
+	PathProfile pfProfile( PF_MOVEAWAY );
 								 
 #ifdef DO_UNIT_TIMINGS
 #pragma MESSAGE("*** WARNING *** DOING DO_UNIT_TIMINGS!!!!")
@@ -10411,6 +10714,7 @@ if (g_UT_startTiming) return false;
 Path *Pathfinder::getMoveAwayFromPath(Object* obj, Object *otherObj,
 											Path *pathToAvoid, Object *otherObj2, Path *pathToAvoid2)
 {
+	PathProfile pfProfile( PF_MOVEAWAY );
 	if (m_isMapReady == false) return false; // Should always be ok.
 #if defined _DEBUG || defined _INTERNAL
 	Int startTimeMS = ::GetTickCount();
@@ -10472,6 +10776,7 @@ Path *Pathfinder::getMoveAwayFromPath(Object* obj, Object *otherObj,
 
 	// initialize "open" list to contain start cell
 	m_openList = parentCell;
+	PathfindCell::setOpenListSeed( parentCell );
 
 	// "closed" list is initially empty
 	m_closedList = NULL;
@@ -10585,6 +10890,7 @@ Path *Pathfinder::getMoveAwayFromPath(Object* obj, Object *otherObj,
 Path *Pathfinder::patchPath( const Object *obj, const LocomotorSet& locomotorSet, 
 		Path *originalPath, Bool blocked )
 {
+	PathProfile pfProfile( PF_PATCH );
 	//CRCDEBUG_LOG(("Pathfinder::patchPath()\n"));
 #if defined _DEBUG || defined _INTERNAL
 	Int startTimeMS = ::GetTickCount();
@@ -10632,6 +10938,7 @@ Path *Pathfinder::patchPath( const Object *obj, const LocomotorSet& locomotorSet
 
 	// initialize "open" list to contain start cell
 	m_openList = parentCell;
+	PathfindCell::setOpenListSeed( parentCell );
 
 	// "closed" list is initially empty
 	m_closedList = NULL;
@@ -10770,6 +11077,7 @@ Path *Pathfinder::patchPath( const Object *obj, const LocomotorSet& locomotorSet
 Path *Pathfinder::findAttackPath( const Object *obj, const LocomotorSet& locomotorSet, const Coord3D *from,
 		const Object *victim, const Coord3D* victimPos, const Weapon *weapon ) 
 {
+	PathProfile pfProfile( PF_ATTACK );
 	/*
 	CRCDEBUG_LOG(("Pathfinder::findAttackPath() for object %d (%s)\n", obj->getID(), obj->getTemplate()->getName().str()));
 	XferCRC xferCRC;
@@ -10913,6 +11221,7 @@ Path *Pathfinder::findAttackPath( const Object *obj, const LocomotorSet& locomot
 
 	// initialize "open" list to contain start cell
 	m_openList = parentCell;
+	PathfindCell::setOpenListSeed( parentCell );
 
 	// "closed" list is initially empty
 	m_closedList = NULL;
@@ -11126,6 +11435,7 @@ Path *Pathfinder::findAttackPath( const Object *obj, const LocomotorSet& locomot
 Path *Pathfinder::findSafePath( const Object *obj, const LocomotorSet& locomotorSet, 
 		const Coord3D *from, const Coord3D* repulsorPos1, const Coord3D* repulsorPos2, Real repulsorRadius) 
 {
+	PathProfile pfProfile( PF_SAFE );
 	//CRCDEBUG_LOG(("Pathfinder::findSafePath()\n"));
 	if (m_isMapReady == false) return false; // Should always be ok.
 #if defined _DEBUG || defined _INTERNAL
@@ -11164,6 +11474,7 @@ Path *Pathfinder::findSafePath( const Object *obj, const LocomotorSet& locomotor
 
 	// initialize "open" list to contain start cell
 	m_openList = parentCell;
+	PathfindCell::setOpenListSeed( parentCell );
 
 	// "closed" list is initially empty
 	m_closedList = NULL;

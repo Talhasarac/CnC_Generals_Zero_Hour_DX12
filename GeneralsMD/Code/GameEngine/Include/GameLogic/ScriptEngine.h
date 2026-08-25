@@ -233,6 +233,23 @@ public:
 	virtual void reset( void );		///< Reset
 	virtual void update( void );	///< Update
 
+	//
+	// Every side's script list is walked every frame, so one expensive condition costs the logic
+	// frame 30 times a second.  update() keeps the worst script of the frame (EA's own
+	// SPECIAL_SCRIPT_PROFILING already does the measuring - it just had nowhere to report to before
+	// the game ended) and this hands it to GameLogic's slow-frame line.
+	//
+	static const char *getProfileReport( void );
+
+	//
+	// True for the script actions that order a whole team somewhere.  Every one of them lands in
+	// AIGroup::friend_computeGroundPath, which runs a full-map A* on the spot instead of queueing
+	// it, so a skirmish lobby where several AI teams reach their move instruction on the same frame
+	// pays for all of those searches at once.  The sequential-script step lets one of them through
+	// per logic frame and makes the rest wait a frame; see evaluateAndProgressAllSequentialScripts.
+	//
+	static Bool isThrottledTeamMoveAction( Int actionType );
+
 	void appendSequentialScript(const SequentialScript *scriptToSequence);
 	void removeSequentialScript(SequentialScript *scriptToRemove);
 	void notifyOfTeamDestruction(Team *teamDestroyed);

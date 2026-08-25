@@ -1371,6 +1371,46 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 			if (!upgradeT)	// sanity
 				break;
 
+			//
+			// Argument 0 is the building the command bar picked to research this. It matters for a
+			// multi-selection: a player upgrade is researched exactly once, so handing the whole
+			// group to `queueUpgrade` below always lands it on the first member of the selection -
+			// the first one to pass the affordability check withdraws the money and every other
+			// member then fails it. That is why clicking four upgrades on four selected barracks
+			// stacked all four on one of them. The bar already chose the least loaded building;
+			// honour that choice when the id is one of the selected objects the player controls,
+			// and fall back to the old group-wide path otherwise. An object upgrade is bought per
+			// building, and the bar now sends one message per building it wants it on, so the
+			// group-wide path must not fire for those either - it would queue N messages on N
+			// buildings each.
+			//
+			Object *producer = NULL;
+			if( currentlySelectedGroup )
+			{
+				ObjectID producerID = msg->getArgument( 0 )->objectID;
+				const VecObjectID& ids = currentlySelectedGroup->getAllIDs();
+				if( std::find( ids.begin(), ids.end(), producerID ) != ids.end() )
+					producer = TheGameLogic->findObjectByID( producerID );
+			}
+
+			if( producer && producer->getControllingPlayer() == thisPlayer )
+			{
+				// same revalidation AIGroup::queueUpgrade does per member, to stop cheaters
+				if( !TheUpgradeCenter->canAffordUpgrade( producer->getControllingPlayer(), upgradeT, FALSE ) )
+					break;
+				if( upgradeT->getUpgradeType() == UPGRADE_TYPE_OBJECT &&
+						( producer->hasUpgrade( upgradeT ) || !producer->affectedByUpgrade( upgradeT ) ) )
+					break;
+				if( !producer->canProduceUpgrade( upgradeT ) )
+					break;
+				ProductionUpdateInterface *pu = producer->getProductionUpdateInterface();
+				if( pu == NULL || pu->canQueueUpgrade( upgradeT ) == CANMAKE_QUEUE_FULL )
+					break;
+
+				pu->queueUpgrade( upgradeT );
+				break;
+			}
+
 			if (currentlySelectedGroup)
 				currentlySelectedGroup->queueUpgrade( upgradeT );
 

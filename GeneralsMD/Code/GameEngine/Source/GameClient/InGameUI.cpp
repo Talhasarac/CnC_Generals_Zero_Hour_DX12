@@ -1049,12 +1049,16 @@ InGameUI::InGameUI()
 	m_hudDisplayString = NULL;
 	m_incomeDisplayString = NULL;
 	m_lastIncomeDisplayed = -1;
+	m_hudDrawCount = 0;
 	m_hudLastSampleFrame = 0;
 	m_hudLastSampleMs = 0;
 	m_cameraKeyLastMs = 0;
 	m_subtitleFreezeStartMs = 0;
 	m_subtitleFreezeSteps = 0;
 	m_hudFps = 0.0f;
+	m_hudLastSampleLogicFrame = 0;
+	m_hudLogicHz = 0.0f;
+	m_hudRealClockBaseMs = 0;
 	for( Int incomeBucket = 0; incomeBucket < INCOME_SAMPLES; incomeBucket++ )
 		m_incomeSamples[ incomeBucket ] = 0;
 	m_incomeSampleCount = 0;
@@ -5599,29 +5603,51 @@ void InGameUI::drawHudOverlay( void )
 		return;
 
 	//
-	// Render rate, sampled over half a second of wall clock so the number is readable. This counts
-	// client frames, which is the render rate - the logic rate is fixed by the game speed.
+	// Two rates, both sampled over half a second of wall clock so the numbers are readable, and
+	// they are not the same thing. Client frames are the render rate. Logic frames are the
+	// simulation, which is *supposed* to run at LOGICFRAMES_PER_SECOND and drops below it exactly
+	// when a frame overruns its budget - so a reading under the nominal rate is the stutter,
+	// measured, rather than something the render rate can be blamed for.
 	//
-	const UnsignedInt clientFrame = TheGameClient->getFrame();
+	// NOT GameClient::getFrame() - that is the simulation frame number from the server, so the
+	// "fps" reading was a second copy of the logic rate and moved with it. postDraw runs once per
+	// rendered frame, so count the draws here instead.
+	++m_hudDrawCount;
+	const UnsignedInt clientFrame = m_hudDrawCount;
+	const UnsignedInt logicFrame = TheGameLogic->getFrame();
 	UnsignedInt nowMs = timeGetTime();
 	if( m_hudLastSampleFrame == 0 )
 	{
 		m_hudLastSampleMs = nowMs;
 		m_hudLastSampleFrame = clientFrame;
+		m_hudLastSampleLogicFrame = logicFrame;
 	}
 	else if( nowMs - m_hudLastSampleMs >= 500 )
 	{
-		m_hudFps = (clientFrame - m_hudLastSampleFrame) * 1000.0f / (Real)(nowMs - m_hudLastSampleMs);
+		const Real elapsed = (Real)(nowMs - m_hudLastSampleMs);
+		m_hudFps = (clientFrame - m_hudLastSampleFrame) * 1000.0f / elapsed;
+		m_hudLogicHz = (logicFrame - m_hudLastSampleLogicFrame) * 1000.0f / elapsed;
 		m_hudLastSampleMs = nowMs;
 		m_hudLastSampleFrame = clientFrame;
+		m_hudLastSampleLogicFrame = logicFrame;
 	}
 
-	UnsignedInt totalSecs = TheGameLogic->getFrame() / LOGICFRAMES_PER_SECOND;
+	//
+	// Game time is logic frames; real time is the wall clock. They start together and drift apart
+	// by however much the simulation has fallen behind - which is the same stutter the two rates
+	// above show, totalled. The base is set the first time the overlay draws rather than at frame
+	// zero, so switching it on mid-game does not invent an hour of lag.
+	//
+	UnsignedInt gameSecs = logicFrame / LOGICFRAMES_PER_SECOND;
+	if( m_hudRealClockBaseMs == 0 )
+		m_hudRealClockBaseMs = nowMs - gameSecs * 1000;
+	UnsignedInt realSecs = (nowMs - m_hudRealClockBaseMs) / 1000;
 
 	UnicodeString text;
-	text.format( L"%d:%02d:%02d   %d fps",
-							 totalSecs / 3600, (totalSecs / 60) % 60, totalSecs % 60,
-							 REAL_TO_INT( m_hudFps ) );
+	text.format( L"%02d:%02d:%02d(%02d:%02d:%02d)   %dhz(%dfps)",
+							 gameSecs / 3600, (gameSecs / 60) % 60, gameSecs % 60,
+							 realSecs / 3600, (realSecs / 60) % 60, realSecs % 60,
+							 REAL_TO_INT( m_hudLogicHz + 0.5f ), REAL_TO_INT( m_hudFps + 0.5f ) );
 
 	if( m_hudDisplayString == NULL )
 	{
@@ -5802,11 +5828,18 @@ void InGameUI::drawProductionStripRow( Int row, Int y )
 			if( cameo )
 				TheDisplay->drawImage( cameo, x, y, x + PRODUCTION_STRIP_CAMEO, y + PRODUCTION_STRIP_CAMEO );
 
-			// the head of a building's queue is the one being worked on, and only it has progress
-			if( pu->firstProduction() == entry && entry->getPercentComplete() > 0.0f )
-				TheDisplay->drawRectClock( x, y, PRODUCTION_STRIP_CAMEO, PRODUCTION_STRIP_CAMEO,
-																	 REAL_TO_INT( entry->getPercentComplete() ),
-																	 GameMakeColor( 0, 0, 0, 100 ) );
+			//
+			// The scrim starts covering the cameo and is swept off as the item is built, the same
+			// way round as the command bar's own clock. Going the other way - filling up with black
+			// as progress runs - meant a cameo that had just appeared was drawn clean, and
+			// `drawRectClock` refuses to draw at all below one percent, so a fresh order and a
+			// nearly finished one looked alike. Only the head of a building's queue has progress;
+			// everything behind it is waiting and wears the full scrim.
+			//
+			const Int percent = ( pu->firstProduction() == entry )
+													? REAL_TO_INT( entry->getPercentComplete() ) : 0;
+			TheDisplay->drawRemainingRectClock( x, y, PRODUCTION_STRIP_CAMEO, PRODUCTION_STRIP_CAMEO,
+																					percent, GameMakeColor( 0, 0, 0, 100 ) );
 		}
 
 		//

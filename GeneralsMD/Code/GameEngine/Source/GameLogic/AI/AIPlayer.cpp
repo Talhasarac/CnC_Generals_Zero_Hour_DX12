@@ -103,6 +103,28 @@ m_curWarehouseID(INVALID_ID)
 	m_baseCenterSet = false;
 	m_difficulty = TheScriptEngine->getGlobalDifficulty(); 
 	m_teamSeconds = TheAI->getAiData()->m_teamSeconds;
+
+	//
+	// Stagger this player's repeating checks.  doBaseBuilding re-arms itself for 2 seconds,
+	// doTeamBuilding for 5 and updateBridgeRepair for 1, all from constants, and every AIPlayer is
+	// built with the same timers on the same frame, so a lobby full of them checks in unison from
+	// the first frame to the last and the whole cost of it lands on one logic frame.  The offset
+	// moves each player to its own slot in the cycle; nothing runs less often.
+	//
+	// The two "ready" timers get the offset as well: they are what anchors the cadence that follows
+	// (both hand their delay a zero on the frame they expire, and both expire on frame 2 for
+	// everyone), so leaving them alone would re-align the players two frames in.  The price is that
+	// the last player's first base-building check comes up to 2 seconds late and its first team
+	// check up to 5 - once, at the start of the match.
+	//
+	const Int playerIndex = p->getPlayerIndex();
+	m_buildDelay = computeUpdatePhase( playerIndex, 2*LOGICFRAMES_PER_SECOND );
+	m_teamDelay = computeUpdatePhase( playerIndex, 5*LOGICFRAMES_PER_SECOND );
+	m_structureTimer += m_buildDelay;
+	m_teamTimer += m_teamDelay;
+	// ...and EA never initialized this one at all.  updateBridgeRepair returns before reading it
+	// while the repair queue is empty, which it is here, so it has been benign - but only just.
+	m_bridgeTimer = computeUpdatePhase( playerIndex, LOGICFRAMES_PER_SECOND );
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -2737,6 +2759,19 @@ Int AIPlayer::computeStructureDelay( void )
 													  TheAI->getAiData()->m_structuresPoorMod,
 													  TheAI->getAiData()->m_structuresWealthyMod,
 													  getBuildRateScale() );
+}
+
+//----------------------------------------------------------------------------------------------------------
+/**
+ * Where in a repeating check's cycle this player sits.  A player's slot is its index alone, so the
+ * answer is the same on every machine and survives a save/load.
+ */
+Int AIPlayer::computeUpdatePhase( Int playerIndex, Int cycleFrames )
+{
+	if (playerIndex < 0 || cycleFrames < 1) {
+		return 0;
+	}
+	return ((playerIndex % MAX_PLAYER_COUNT) * cycleFrames) / MAX_PLAYER_COUNT;
 }
 
 //----------------------------------------------------------------------------------------------------------

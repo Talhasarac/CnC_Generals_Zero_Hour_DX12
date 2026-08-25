@@ -3601,6 +3601,47 @@ static Real logicElapsedMS( const Int64 &from, const Int64 &to )
 	return (Real)( (double)(to - from) * 1000.0 / (double)freq );
 }
 
+#ifdef DEBUG_LOGGING
+//
+// Which update module ate the frame.  The `objects` figure in the slow-frame line is the whole
+// sleepy-update sweep, thousands of modules deep, and that alone never says which one.  Two
+// QueryPerformanceCounter reads per module cost about 0.2ms over a busy frame - they sit inside
+// the `objects` window, so the sweep's own total carries that and the per-module figures do not.
+//
+static Int64							theWorstModuleTicks = 0;
+static NameKeyType					theWorstModuleKey = NAMEKEY_INVALID;
+static const ThingTemplate *theWorstModuleThing = NULL;
+static Int								theModuleUpdateCount = 0;
+
+static void resetModuleProfile( void )
+{
+	theWorstModuleTicks = 0;
+	theWorstModuleKey = NAMEKEY_INVALID;
+	theWorstModuleThing = NULL;
+	theModuleUpdateCount = 0;
+}
+
+static const char *getModuleProfileReport( void )
+{
+	static char report[ 256 ];
+	if( theWorstModuleKey == NAMEKEY_INVALID )
+	{
+		sprintf( report, "%d updates", theModuleUpdateCount );
+	}
+	else
+	{
+		Int64 freq = 0;
+		QueryPerformanceFrequency( (LARGE_INTEGER *)&freq );
+		const Real worstMS = freq ? (Real)( (double)theWorstModuleTicks * 1000.0 / (double)freq ) : 0.0f;
+		sprintf( report, "%d updates, worst %s on %s %.1fms", theModuleUpdateCount,
+					 TheNameKeyGenerator->keyToName( theWorstModuleKey ).str(),
+					 theWorstModuleThing ? theWorstModuleThing->getName().str() : "<none>",
+					 worstMS );
+	}
+	return report;
+}
+#endif
+
 void GameLogic::update( void )
 {
 	USE_PERF_TIMER(GameLogic_update)
@@ -3658,6 +3699,10 @@ void GameLogic::update( void )
 		 costs nothing next to the 33ms the frame is allowed. */
 	Int64 tFrameStart = 0, tScripts = 0, tObjects = 0, tAI = 0, tPartition = 0, tFrameEnd = 0;
 	QueryPerformanceCounter( (LARGE_INTEGER *)&tFrameStart );
+	Pathfinder::resetProfile();
+#ifdef DEBUG_LOGGING
+	resetModuleProfile();
+#endif
 
 	// update (execute) scripts
 	{
@@ -3788,7 +3833,44 @@ void GameLogic::update( void )
 				//DEBUG_LOG(("calling update %08lx (%d %d)... ",update,update->friend_getNextCallFrame(),update->friend_getNextCallPhase()));
 				m_curUpdateModule = u;
 
+#ifdef DEBUG_LOGGING
+				// read the identity before the update - a module may kill its own object
+				const NameKeyType profModuleKey = u->getModuleNameKey();
+				const ThingTemplate *profModuleThing = u->friend_getObject() ? u->friend_getObject()->getTemplate() : NULL;
+				const ObjectID profModuleObjID = u->friend_getObject() ? u->friend_getObject()->getID() : INVALID_ID;
+				Int64 profModuleStart;
+				QueryPerformanceCounter( (LARGE_INTEGER *)&profModuleStart );
+#endif
+
 				sleepLen = u->update();
+
+#ifdef DEBUG_LOGGING
+				{
+					Int64 profModuleEnd;
+					QueryPerformanceCounter( (LARGE_INTEGER *)&profModuleEnd );
+					theModuleUpdateCount++;
+					const Int64 profModuleTicks = profModuleEnd - profModuleStart;
+					if( profModuleTicks > theWorstModuleTicks )
+					{
+						theWorstModuleTicks = profModuleTicks;
+						theWorstModuleKey = profModuleKey;
+						theWorstModuleThing = profModuleThing;
+					}
+					//
+					// A single module that eats a third of the frame on its own is a bug, not load, and the
+					// end-of-frame summary only ever names one of them.  Say so the moment it happens, with
+					// the object id, so the surrounding log lines are that object's own.
+					//
+					const Real profModuleMS = logicElapsedMS( profModuleStart, profModuleEnd );
+					if( profModuleMS > 10.0f )
+					{
+						DEBUG_LOG(("SLOW MODULE frame %d: %s on %s (obj %d) %.1fms\n", now,
+										 TheNameKeyGenerator->keyToName( profModuleKey ).str(),
+										 profModuleThing ? profModuleThing->getName().str() : "<none>",
+										 (Int)profModuleObjID, profModuleMS));
+					}
+				}
+#endif
 				DEBUG_ASSERTCRASH(sleepLen > 0, ("you may not return 0 from update"));
 				if (sleepLen < 1) 
 					sleepLen = UPDATE_SLEEP_NONE;
@@ -3879,8 +3961,11 @@ void GameLogic::update( void )
 			const Real ai = logicElapsedMS( tObjects, tAI );
 			const Real partition = logicElapsedMS( tAI, tPartition );
 			const Real rest = total - scripts - objects - ai - partition;
-			DEBUG_LOG(("SLOW LOGIC FRAME %d: %.1fms | scripts %.1f | objects %.1f | ai %.1f (pathfind %.1f, players %.1f) | partition %.1f | rest %.1f\n",
-								 now, total, scripts, objects, ai, AI::getLastPathfindMS(), AI::getLastPlayerUpdateMS(), partition, rest));
+			DEBUG_LOG(("SLOW LOGIC FRAME %d: %.1fms | scripts %.1f | objects %.1f | ai %.1f (pathfind %.1f, players %.1f) | partition %.1f | rest %.1f\n  sc: %s\n  ob: %s\n  pf: %s\n",
+								 now, total, scripts, objects, ai, AI::getLastPathfindMS(), AI::getLastPlayerUpdateMS(), partition, rest,
+								 TheScriptEngine->getProfileReport(),
+								 getModuleProfileReport(),
+								 Pathfinder::getProfileReport()));
 		}
 	}
 

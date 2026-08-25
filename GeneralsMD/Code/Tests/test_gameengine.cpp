@@ -35,6 +35,7 @@
 #include "GameLogic/IncomingDamage.h"
 #include "GameLogic/AIPlayer.h"
 #include "GameLogic/AIPathfind.h"
+#include "GameLogic/ScriptEngine.h"
 #include "Common/TunnelTracker.h"
 #include "Common/StateMachine.h"
 
@@ -1245,6 +1246,69 @@ TEST(skirmish_build_rate_keeps_the_old_pace_but_not_the_old_flat_clamp)
 	CHECK_EQ(AIPlayer::computeBuildDelay(0.0f, 9000, AIDATA_POOR, AIDATA_WEALTHY, 0.6f, 2.0f, SKIRMISH_RATE), 0);
 }
 
+TEST(skirmish_team_move_actions_are_the_throttled_ones)
+{
+	/* Every action listed here reaches AIGroup::friend_computeGroundPath, which runs a full-map A*
+	 * synchronously.  Six of them landed on one logic frame in a 1v7 skirmish and cost 80ms of a
+	 * 33ms budget, so the sequential-script step lets one through per frame.  Pin the set: adding a
+	 * team-move action without adding it here quietly puts the pile-up back. */
+	CHECK(ScriptEngine::isThrottledTeamMoveAction(ScriptAction::MOVE_TEAM_TO));
+	CHECK(ScriptEngine::isThrottledTeamMoveAction(ScriptAction::TEAM_FOLLOW_WAYPOINTS));
+	CHECK(ScriptEngine::isThrottledTeamMoveAction(ScriptAction::TEAM_FOLLOW_WAYPOINTS_EXACT));
+	CHECK(ScriptEngine::isThrottledTeamMoveAction(ScriptAction::SKIRMISH_FOLLOW_APPROACH_PATH));
+	CHECK(ScriptEngine::isThrottledTeamMoveAction(ScriptAction::SKIRMISH_MOVE_TO_APPROACH_PATH));
+	CHECK(ScriptEngine::isThrottledTeamMoveAction(ScriptAction::CREATE_REINFORCEMENT_TEAM));
+	CHECK(ScriptEngine::isThrottledTeamMoveAction(ScriptAction::SKIRMISH_ATTACK_NEAREST_GROUP_WITH_VALUE));
+
+	/* ...and nothing cheap is throttled, or the AI would crawl for no reason. */
+	CHECK(!ScriptEngine::isThrottledTeamMoveAction(ScriptAction::DEBUG_MESSAGE_BOX));
+	CHECK(!ScriptEngine::isThrottledTeamMoveAction(ScriptAction::ENABLE_SCRIPT));
+	CHECK(!ScriptEngine::isThrottledTeamMoveAction(ScriptAction::SET_FLAG));
+	CHECK(!ScriptEngine::isThrottledTeamMoveAction(ScriptAction::NO_OP));
+	CHECK(!ScriptEngine::isThrottledTeamMoveAction(-1));
+	CHECK(!ScriptEngine::isThrottledTeamMoveAction(0x7fffffff));
+}
+
+TEST(ai_players_do_not_all_check_in_on_the_same_frame)
+{
+	/* Every AIPlayer used to be built with the same timers on the same frame, and every one of
+	 * its repeating checks re-arms itself from a constant, so seven bots ran their base building,
+	 * team building and bridge repair together for the whole match and the cost of all seven
+	 * landed on one logic frame.  The phase is what pulls them apart. */
+	const Int cycle = 2 * LOGICFRAMES_PER_SECOND;
+	Int seen[ MAX_PLAYER_COUNT ];
+	Int i, j;
+	for (i = 0; i < MAX_PLAYER_COUNT; i++)
+	{
+		seen[i] = AIPlayer::computeUpdatePhase(i, cycle);
+		/* A phase is a slot inside the cycle, never a cycle of its own - the check still runs
+		 * exactly as often as it did, just not at the same moment as the neighbour's. */
+		CHECK(seen[i] >= 0);
+		CHECK(seen[i] < cycle);
+	}
+	for (i = 0; i < MAX_PLAYER_COUNT; i++)
+		for (j = i + 1; j < MAX_PLAYER_COUNT; j++)
+			CHECK_NE(seen[i], seen[j]);
+
+	/* It is a function of the player index and nothing else - no clock, no random - or the
+	 * lockstep simulation would desync the moment two machines disagreed. */
+	CHECK_EQ(AIPlayer::computeUpdatePhase(3, cycle), AIPlayer::computeUpdatePhase(3, cycle));
+
+	/* A one-second cycle has fewer frames than MAX_PLAYER_COUNT has players, so the slots
+	 * collide there; what must not happen is a phase outside the cycle. */
+	for (i = 0; i < MAX_PLAYER_COUNT; i++)
+	{
+		const Int shortPhase = AIPlayer::computeUpdatePhase(i, LOGICFRAMES_PER_SECOND);
+		CHECK(shortPhase >= 0);
+		CHECK(shortPhase < LOGICFRAMES_PER_SECOND);
+	}
+
+	/* Garbage in stays harmless: an unset index or a zero cycle means "no offset". */
+	CHECK_EQ(AIPlayer::computeUpdatePhase(-1, cycle), 0);
+	CHECK_EQ(AIPlayer::computeUpdatePhase(0, cycle), 0);
+	CHECK_EQ(AIPlayer::computeUpdatePhase(5, 0), 0);
+}
+
 //////////////////////////////////////////////////////////////////////////////
 // Pathfinder cell info pool
 //////////////////////////////////////////////////////////////////////////////
@@ -1454,4 +1518,226 @@ TEST(statemachine_outlives_the_owner_that_lets_go_of_it_mid_update)
 	/* and deleteInstance() still tolerates a NULL machine, the way the pool one did */
 	machine = NULL;
 	machine->deleteInstance();
+}
+
+
+/* ------------------------------------------------------------------------------------------------
+ * The A* open list.
+ *
+ * `PathfindCell::putOnSortedOpenList` used to walk from the head on every insert, past every cell
+ * of equal cost, which is O(open list) per expanded cell - 62 million walk steps over 108 slow
+ * frames in a real skirmish.  It now keeps a tail pointer and enters from whichever end is nearer
+ * the new cost.  The insertion *point* has to stay exactly where it was, or the search expands a
+ * different set of cells and lockstep breaks, so these check the resulting order against a stable
+ * sort of the same insertion sequence: ascending cost, ties in insertion order.
+ * ---------------------------------------------------------------------------------------------- */
+static PathfindCell *theOpenTestCells = NULL;
+
+static Bool openListOrderMatches( PathfindCell *list, const std::vector<Int>& expected )
+{
+	UnsignedInt n = 0;
+	UnsignedInt prevCost = 0;
+	for( PathfindCell *c = list; c; c = c->getNextOpen() )
+	{
+		if( n >= expected.size() )
+			return false;											// longer than it should be
+		if( c->getTotalCost() < prevCost )
+			return false;											// not sorted
+		if( (Int)(c - theOpenTestCells) != expected[ n ] )
+			return false;											// right costs, wrong tie order
+		prevCost = c->getTotalCost();
+		n++;
+	}
+	return n == expected.size();
+}
+
+TEST(pathfind_open_list_insert_keeps_ascending_cost_and_insertion_order_on_ties)
+{
+	CHECK(bootOnce());
+	PathfindCellInfo::allocateCellInfos();
+
+	const Int count = 400;
+	PathfindCell *cells = MSGNEW("PathfindCellInfo") PathfindCell[ count ];
+	theOpenTestCells = cells;
+
+	/* costs with a lot of ties (the grid quantises everything to multiples of ten) and no
+		 monotonic order, so every branch of the new insert gets used */
+	std::vector<Int> expected;
+	PathfindCell *list = NULL;
+	Int seed = 12345;
+	Int i;
+	for( i = 0; i < count; i++ )
+	{
+		seed = seed * 1103515245 + 12345;
+		UnsignedInt cost = 10 * (UnsignedInt)(((seed >> 16) & 0x7fff) % 25);
+		ICoord2D pos;
+		pos.x = (UnsignedShort)(i % 64);
+		pos.y = (UnsignedShort)(i / 64);
+		CHECK(cells[ i ].allocateInfo( pos ));
+		cells[ i ].setTotalCost( cost );
+
+		/* the reference: insert after every cell of equal or lower cost */
+		std::vector<Int>::iterator it = expected.begin();
+		while( it != expected.end() && cells[ *it ].getTotalCost() <= cost )
+			++it;
+		expected.insert( it, i );
+
+		list = cells[ i ].putOnSortedOpenList( list );
+	}
+	CHECK(openListOrderMatches( list, expected ));
+
+	/* pull cells out - including the head and the tail, the two the fast paths depend on - and
+		 put fresh ones back, which is exactly what an A* loop does */
+	Int removed[ 5 ];
+	removed[ 0 ] = expected.front();
+	removed[ 1 ] = expected.back();
+	removed[ 2 ] = expected[ expected.size() / 2 ];
+	removed[ 3 ] = expected[ 1 ];
+	removed[ 4 ] = expected[ expected.size() - 2 ];
+	for( i = 0; i < 5; i++ )
+	{
+		list = cells[ removed[ i ] ].removeFromOpenList( list );
+		expected.erase( std::find( expected.begin(), expected.end(), removed[ i ] ) );
+	}
+	CHECK(openListOrderMatches( list, expected ));
+
+	for( i = 0; i < 5; i++ )
+	{
+		Int c = removed[ i ];
+		UnsignedInt cost = 10 * (UnsignedInt)(i * 7 % 25);
+		cells[ c ].setTotalCost( cost );
+		std::vector<Int>::iterator it = expected.begin();
+		while( it != expected.end() && cells[ *it ].getTotalCost() <= cost )
+			++it;
+		expected.insert( it, c );
+		list = cells[ c ].putOnSortedOpenList( list );
+	}
+	CHECK(openListOrderMatches( list, expected ));
+
+	/* emptying it one at a time from the tail end must not leave a stale tail behind */
+	while( !expected.empty() )
+	{
+		Int c = expected.back();
+		expected.pop_back();
+		list = cells[ c ].removeFromOpenList( list );
+	}
+	CHECK(list == NULL);
+
+	cells[ 0 ].setTotalCost( 100 );
+	list = cells[ 0 ].putOnSortedOpenList( NULL );
+	cells[ 1 ].setTotalCost( 50 );
+	list = cells[ 1 ].putOnSortedOpenList( list );
+	CHECK(list == &cells[ 1 ]);
+	CHECK(list->getNextOpen() == &cells[ 0 ]);
+
+	PathfindCell::releaseOpenList( list );
+	for( i = 0; i < count; i++ )
+		cells[ i ].releaseInfo();
+	delete [] cells;
+	theOpenTestCells = NULL;
+	PathfindCellInfo::releaseCellInfos();
+}
+
+
+//-------------------------------------------------------------------------------------------------
+// Zone equivalency sets (pathfindZoneFind / pathfindZoneUnion / pathfindZoneFlatten).
+//
+// The pathfinder merges zone ids with a union-find over the equivalency array instead of EA's
+// relabel-the-whole-array loop.  The contract the rest of the pathfinder relies on is exact, not
+// approximate: after flattening, array[i] must be the *smallest* id in i's set, which is what the
+// relabelling version produced.  This drives a long random merge sequence through both the real
+// implementation and a straight-line reference relabeller and requires the two arrays to match
+// entry for entry.
+//-------------------------------------------------------------------------------------------------
+
+// EA's original merge: canonicalize both, keep the lower, relabel every entry.
+static void referenceResolveZones( zoneStorageType *zones, Int srcZone, Int targetZone, Int numZones )
+{
+	srcZone = zones[srcZone];
+	targetZone = zones[targetZone];
+	zoneStorageType finalZone = (targetZone < srcZone) ? zones[targetZone] : zones[srcZone];
+	for (Int i = 0; i < numZones; i++) {
+		zoneStorageType ze = zones[i];
+		if (ze == targetZone || ze == srcZone) {
+			zones[i] = finalZone;
+		}
+	}
+}
+
+TEST(pathfind_zone_union_find_matches_the_relabelling_merge_it_replaced)
+{
+	enum { NUM_ZONES = 500, NUM_MERGES = 4000 };
+	static zoneStorageType real[ NUM_ZONES ];
+	static zoneStorageType ref[ NUM_ZONES ];
+	Int i;
+	for (i = 0; i < NUM_ZONES; i++) {
+		real[ i ] = (zoneStorageType)i;
+		ref[ i ] = (zoneStorageType)i;
+	}
+
+	// A fixed LCG, so a failure is reproducible.
+	UnsignedInt seed = 12345;
+	Int mismatches = 0;
+	Int merges;
+	for (merges = 0; merges < NUM_MERGES; merges++) {
+		seed = seed * 1103515245 + 12345;
+		Int a = 1 + (Int)((seed >> 16) % (NUM_ZONES - 1));
+		seed = seed * 1103515245 + 12345;
+		Int b = 1 + (Int)((seed >> 16) % (NUM_ZONES - 1));
+
+		pathfindZoneUnion( real, a, b );
+		referenceResolveZones( ref, a, b, NUM_ZONES );
+
+		// Reading a set representative mid-sequence must agree too - the merge loops in
+		// calculateZones compare representatives between merges to decide what to merge next.
+		if (pathfindZoneFind( real, a ) != ref[ a ]) mismatches++;
+		if (pathfindZoneFind( real, b ) != ref[ b ]) mismatches++;
+	}
+	CHECK_EQ( mismatches, 0 );
+
+	pathfindZoneFlatten( real, NUM_ZONES );
+	Int diffs = 0;
+	for (i = 0; i < NUM_ZONES; i++) {
+		if (real[ i ] != ref[ i ]) diffs++;
+	}
+	CHECK_EQ( diffs, 0 );
+
+	// The whole array must be flat afterwards: array[array[i]] == array[i].
+	Int notFlat = 0;
+	for (i = 0; i < NUM_ZONES; i++) {
+		if (real[ real[ i ] ] != real[ i ]) notFlat++;
+	}
+	CHECK_EQ( notFlat, 0 );
+
+	// And every representative must be the minimum id of its set.
+	Int notMinimum = 0;
+	for (i = 0; i < NUM_ZONES; i++) {
+		if (real[ i ] > (zoneStorageType)i) notMinimum++;
+	}
+	CHECK_EQ( notMinimum, 0 );
+}
+
+TEST(pathfind_zone_flatten_collapses_a_deep_chain_in_one_pass)
+{
+	// pathfindZoneFlatten is a single ascending pass, which is only correct because every link
+	// points from a higher id to a lower one.  Build the deepest chain the union can produce -
+	// 1 <- 2 <- 3 <- ... - by merging in an order that never gives path compression a chance.
+	enum { NUM_ZONES = 64 };
+	zoneStorageType zones[ NUM_ZONES ];
+	Int i;
+	for (i = 0; i < NUM_ZONES; i++) {
+		zones[ i ] = (zoneStorageType)i;
+	}
+	for (i = NUM_ZONES - 1; i >= 2; i--) {
+		zones[ i ] = (zoneStorageType)(i - 1);		// hand-built chain, no compression
+	}
+	CHECK_EQ( (Int)zones[ NUM_ZONES - 1 ], NUM_ZONES - 2 );
+
+	pathfindZoneFlatten( zones, NUM_ZONES );
+	Int notOne = 0;
+	for (i = 1; i < NUM_ZONES; i++) {
+		if (zones[ i ] != 1) notOne++;
+	}
+	CHECK_EQ( notOne, 0 );
+	CHECK_EQ( (Int)zones[ 0 ], 0 );
 }

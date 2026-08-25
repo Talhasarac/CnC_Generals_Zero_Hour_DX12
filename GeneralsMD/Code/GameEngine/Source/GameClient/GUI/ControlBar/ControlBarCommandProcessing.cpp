@@ -101,6 +101,105 @@ void selectObjectOfType( Object* obj, void* selectObjectsInfo )
 
 
 //-------------------------------------------------------------------------------------------------
+/** How many upgrades this frame has already handed to this building.
+	*
+	* The tally is thrown away as soon as the logic frame changes, because from the next frame on the
+	* buildings' own production queues carry the same information and are the better source. */
+//-------------------------------------------------------------------------------------------------
+Int ControlBar::upgradesSpreadTo( ObjectID id )
+{
+	if( m_upgradeSpreadFrame != TheGameLogic->getFrame() )
+	{
+		m_upgradeSpreadFrame = TheGameLogic->getFrame();
+		m_upgradeSpreadEntries = 0;
+	}
+
+	for( Int i = 0; i < m_upgradeSpreadEntries; i++ )
+		if( m_upgradeSpreadID[ i ] == id )
+			return m_upgradeSpreadCount[ i ];
+
+	return 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Record that one more upgrade went to this building on this frame. */
+//-------------------------------------------------------------------------------------------------
+void ControlBar::noteUpgradeSpread( ObjectID id )
+{
+	upgradesSpreadTo( id );			// rolls the tally over if the frame changed
+
+	for( Int i = 0; i < m_upgradeSpreadEntries; i++ )
+	{
+		if( m_upgradeSpreadID[ i ] == id )
+		{
+			m_upgradeSpreadCount[ i ]++;
+			return;
+		}
+	}
+
+	if( m_upgradeSpreadEntries < UPGRADE_SPREAD_MAX )
+	{
+		m_upgradeSpreadID[ m_upgradeSpreadEntries ] = id;
+		m_upgradeSpreadCount[ m_upgradeSpreadEntries ] = 1;
+		m_upgradeSpreadEntries++;
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Of the selected buildings that can research this player upgrade, the one with the shortest
+	* queue - counting what earlier clicks on this same frame already sent it.
+	*
+	* A player upgrade is researched once for the whole player, so unlike an object upgrade it goes
+	* to exactly one building. The bar used to always name the object it was drawn from, so clicking
+	* three upgrades with four barracks selected stacked all three on one barracks while the other
+	* three stood idle. Ties keep selection order, so the same click on the same selection always
+	* picks the same building. */
+//-------------------------------------------------------------------------------------------------
+Object *ControlBar::pickUpgradeProducer( const UpgradeTemplate *upgradeT, Object *fallback )
+{
+	if( upgradeT == NULL )
+		return fallback;
+
+	Player *player = ThePlayerList->getLocalPlayer();
+	const DrawableList *selected = TheInGameUI->getAllSelectedDrawables();
+	if( selected == NULL )
+		return fallback;
+
+	Object *best = NULL;
+	Int bestLoad = 0;
+
+	for( DrawableListCIt it = selected->begin(); it != selected->end(); ++it )
+	{
+		Object *target = (*it)->getObject();
+		if( target == NULL || target->getControllingPlayer() != player )
+			continue;
+
+		ProductionUpdateInterface *tpu = target->getProductionUpdateInterface();
+		if( tpu == NULL || tpu->canQueueUpgrade( upgradeT ) != CANMAKE_OK )
+			continue;
+
+		if( target->canProduceUpgrade( upgradeT ) == FALSE || tpu->isUpgradeInQueue( upgradeT ) == TRUE )
+			continue;
+
+		Int load = tpu->getProductionCount() + upgradesSpreadTo( target->getID() );
+		DEBUG_LOG(("UpgradeSpread candidate obj %d '%s' queue %d + spread %d = %d\n",
+							 (Int)target->getID(), target->getTemplate()->getName().str(),
+							 (Int)tpu->getProductionCount(), upgradesSpreadTo( target->getID() ), load));
+		if( best == NULL || load < bestLoad )
+		{
+			best = target;
+			bestLoad = load;
+		}
+	}
+
+	DEBUG_LOG(("UpgradeSpread pick for '%s': obj %d (load %d), fallback obj %d\n",
+						 upgradeT->getUpgradeName().str(), best ? (Int)best->getID() : 0, bestLoad,
+						 fallback ? (Int)fallback->getID() : 0));
+
+	return best ? best : fallback;
+}
+
+//-------------------------------------------------------------------------------------------------
 /** Process a button transition message from the window system that should be for one of
 	* our GUI commands */
 //-------------------------------------------------------------------------------------------------
@@ -601,7 +700,23 @@ CBCommandStatus ControlBar::processCommandUI( GameWindow *control,
 				break;
 			}
 
-			ProductionUpdateInterface* pu = obj ? obj->getProductionUpdateInterface() : NULL;
+			//
+			// A player upgrade is researched once for the whole player, so it goes to a single
+			// building - but with several selected there is no reason for that to be the same
+			// building every time. Send it to the one with the shortest queue instead, counting
+			// the upgrades earlier clicks on this frame already handed out, which is something
+			// the buildings' own queues cannot tell us yet because the messages have not reached
+			// the logic. Without this, clicking three upgrades with four barracks selected piled
+			// all three onto one barracks and left the other three idle.
+			//
+			Object *producer = obj;
+			DEBUG_LOG(("UpgradeSpread player upgrade '%s' ctx %d selCount %d rep obj %d\n",
+								 upgradeT->getUpgradeName().str(), (Int)m_currContext,
+								 TheInGameUI ? TheInGameUI->getSelectCount() : -1, (Int)obj->getID()));
+			if( m_currContext == CB_CONTEXT_MULTI_SELECT )
+				producer = pickUpgradeProducer( upgradeT, obj );
+
+			ProductionUpdateInterface* pu = producer ? producer->getProductionUpdateInterface() : NULL;
 			if (pu != NULL)
 			{
 				CanMakeType cmt = pu->canQueueUpgrade(upgradeT);
@@ -612,10 +727,14 @@ CBCommandStatus ControlBar::processCommandUI( GameWindow *control,
 				}
 			}
 
+			if( producer == NULL )
+				break;
+
 			// send the message
 			GameMessage *msg = TheMessageStream->appendMessage( GameMessage::MSG_QUEUE_UPGRADE );
-			msg->appendObjectIDArgument( obj->getID() );
+			msg->appendObjectIDArgument( producer->getID() );
 			msg->appendIntegerArgument( upgradeT->getUpgradeNameKey() );
+			noteUpgradeSpread( producer->getID() );
 
 			break;
 
@@ -691,6 +810,8 @@ CBCommandStatus ControlBar::processCommandUI( GameWindow *control,
 					msg->appendObjectIDArgument( target->getID() );
 					msg->appendIntegerArgument( upgradeT->getUpgradeNameKey() );
 					sent++;
+					DEBUG_LOG(("UpgradeSpread object upgrade '%s' -> obj %d (purse left %d)\n",
+										 upgradeT->getUpgradeName().str(), (Int)target->getID(), purse));
 				}
 
 				if( sent > 0 )

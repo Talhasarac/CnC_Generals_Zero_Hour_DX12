@@ -266,9 +266,32 @@ Around it, the whole production loop got tightened:
   nothing while the research ran.
 - **Select several factories, click a unit, and it goes to whichever has the shortest queue.**
   Shift-click queues five, spread the same way.
+- **A general's upgrade goes to whichever selected building is free.** Some upgrades are bought once
+  for your whole army rather than per building, and those always went to the same one of the selected
+  buildings — click three of them with four barracks selected and one barracks did all three jobs in
+  a row while the other three stood idle. Each click now goes to the shortest queue, and the bar
+  counts the clicks you have already made this instant, so a fast run of three lands on three
+  different buildings.
+- **Clicking an upgrade shows immediately that you clicked it.** The picture is now covered when the
+  work starts and uncovers as it progresses, instead of filling up with a shadow. The old way drew
+  nothing at all until the first percent had gone by, so an upgrade you had just paid for looked
+  exactly like one you had never touched — and with a long upgrade in a queue behind other work, it
+  could look untouched for a while.
+- **The strip above the command bar dims the same way.** A cameo that has just joined the queue is
+  covered and uncovers as it is built, so a fresh order looks like a fresh order. Items waiting
+  behind the one being worked on stay covered.
+- **You can hand a half-built building to another worker.** Click a second worker onto a building
+  already going up and it takes over; the one that was on it goes back to being idle. The game used
+  to refuse the click outright — the cursor did not even offer it — on the grounds that two workers
+  cannot build one thing faster. True, but that is not what you were asking for.
 - **The nearest free worker takes a new job** — and a worker already halfway through a building does
-  not get yanked off it. An idle worker will pick up any half-finished building nobody is working on,
+  not get yanked off it, unless you say so. An idle worker will pick up any half-finished building nobody is working on,
   including one whose builder died.
+- **A worker that is building something still offers you the whole build list.** Its buttons used to
+  grey out until it finished, so lining up the next structure meant waiting or hunting down another
+  worker by hand. Click anyway: the order goes to the nearest idle worker, and only falls back to
+  interrupting a busy one when every worker you own is busy. Same for the build list you get with
+  nothing selected — it stays usable when the whole crew is out working.
 - **Workers go back to collecting supplies** after they finish, instead of standing there.
 - **Timings everywhere**: seconds left on a building going up, the current unit and the whole queue
   behind it, a charge bar on superweapons, a progress clock on upgrades being researched. A bar only
@@ -281,6 +304,15 @@ Around it, the whole production loop got tightened:
   earned — so it does not swing wildly the moment you spend something.
 - **Aircraft always show how many attack runs they have left**, selected or not. That is the number
   that decides whether you commit them or send them home.
+- **The corner readout now tells you two different things instead of one confusing one.** It reads
+  `00:12:30(00:13:04)   30hz(144fps)`: game time and, in brackets, the real time you have been
+  sitting there; then the rate the battle is being simulated at and, in brackets, the rate your
+  screen is being drawn at. They are not the same number, and the difference is the interesting
+  part - the drawing rate can be in the hundreds while the simulation is struggling. When it
+  struggles the first number drops below 30 and the two clocks drift apart by exactly the time it
+  lost.
+  The drawing rate really is the drawing rate now: both figures used to be counted off the same
+  clock, so the number in brackets was a second copy of the simulation rate and moved with it.
 
 **Placing buildings.** The grid you place on is drawn on the ground now instead of over the top of
 everything — it follows the slope, your units and buildings stand on it rather than under it, and
@@ -297,10 +329,12 @@ ground you cannot build on is a soft red wash instead of a scribble. Three more:
 - **A click clears a half-typed building shortcut.** With the structure grid armed and waiting for
   its second key, a click could leave it armed, and the next A or S you pressed became a building to
   place instead of an attack-move or a stop — which cancelled your selection.
-- **The building shortcut now waits the two seconds it promises.** It was counting drawn frames
-  rather than time, so on a fast machine it gave up in a third of a second — press Q, take a breath,
-  and the second key was an attack-move again. It waits two real seconds now, whatever your frame
-  rate.
+- **The two-key building shortcut works.** It was being thrown away the instant it was armed: the
+  command bar redraws itself the moment you press Q, and the redraw wiped the half-typed shortcut,
+  so the second key never had one to finish — Q-Q did nothing and Q-A was an attack-move that
+  cancelled your selection. It now lives until you pick a cell, select something else, or two real
+  seconds pass. (It used to count drawn frames rather than time for that wait, which on a fast
+  machine was a third of a second.)
 - **Escape takes back what you were doing before it opens the menu.** With a building on the cursor,
   a targeting order armed, or a half-typed shortcut waiting, Escape drops that and nothing else.
   Press it again with nothing pending and the pause menu comes up as always.
@@ -548,6 +582,95 @@ Two more long-standing ones from the same pass: a single unit told to move no lo
 the middle of the nearest square — a lone Chinook lands where you clicked, while a group still gets
 the tidy formation. And a footprint change around a structure could permanently mark the ground
 beside it as unbuildable and unwalkable, for the rest of the match.
+
+**A seven-opponent skirmish was still stuttering, though**, and we went looking with a stopwatch
+built into the game. Over one match, 513 turns ran long, and on average **93 percent of that lost
+time was one thing: the pathfinder**. The worst single turn took **three seconds** - the game
+visibly stops while one unit works out where to walk.
+
+The cause was a rescue we had added ourselves. When the coarse route came out too narrow for a big
+vehicle, we let the search start over with the whole map open to it. Generous, and ruinous: the
+pathfinder is allowed 5,000 squares of thinking per turn, and one of those restarted searches was
+measured chewing through **140,513 squares in 285 milliseconds**. The rescue is gone. A route too
+narrow for a tank is a route to widen, not an excuse to search the whole map over again.
+
+So we widened it. The coarse route was being opened out by one square on each side around the
+**starting point only** — the developers' own note says it is there so a unit can get around friendly
+units standing next to it — and the rest of the route, all the way to the destination, stayed a
+single ribbon ten squares wide. Now the whole length of it is opened out. That is the same rescue,
+applied where it costs something proportional to how far you are walking, rather than to how big the
+map is.
+
+And the search itself now has a stopping point. Every other search in the pathfinder had one; the
+main one had none, so a search for a destination it could never reach kept going until it had visited
+every square it could get to. It now stops after 20,000 squares and hands back the best part of the
+route it did work out, so the unit sets off towards where you clicked and works out the rest as it
+goes — instead of the game stopping dead for three seconds and the unit then standing there anyway.
+The limit is a fixed count of squares, not a stopwatch, so a slow machine and a fast one still play
+the same match.
+
+Measured again on the same seven-opponent match, those three together:
+
+| | Long turns | Average | Worst turn | Turns over a second |
+|---|---|---|---|---|
+| Before | 513 | 144 ms | 2,976 ms | 8 |
+| After | 201 | 61 ms | 243 ms | none |
+
+**Then we found why it was still 61 milliseconds.** A pathfinder works by guessing how far it still
+has to go and walking towards the best guess. This one's guess was far too low — it priced every step
+as a straight step on open ground, while the route it actually charges for costs more for a diagonal,
+more again for every turn, and more still for squeezing between buildings. A guess that low stops
+steering: instead of heading for the destination, the search spreads out sideways and ends up looking
+at nearly every square it is allowed to touch. The log caught it in the act — a route about 315
+squares long visiting **17,578 squares**.
+
+The guess now accounts for what a step really costs. The route it finds can be slightly longer than
+the theoretical best, and in exchange the search visits a fraction of the squares. On a unit walking
+across a map that is a trade worth making every time.
+
+**And one more, the big one.** Whenever the pathfinder looked at a square, it also tried drawing a
+straight line from that square all the way to the destination, checking every square on the line for
+anything in the way — a good shortcut when the line is clear. It did that from *every* square it
+looked at. On an open map with seven computer opponents on the move, that came to **130 million**
+of those checks in ten seconds of stuttering, with a single turn hitting **1.4 million**. One
+infantryman crossing open ground burned 130 milliseconds by himself. The shortcut is still there,
+but it is now only drawn from a square that is genuinely closer to the destination than anything
+tried so far — which is the only time it has a new chance of getting through.
+
+That one change took the stuttering turns from 615 to 108 and the time the game spends finding
+routes from 11.8 seconds to 1.6. The worst single route went from 130 milliseconds to 12.
+
+**Then the queue itself.** A pathfinder keeps a list of squares still to look at, cheapest first.
+Adding one meant reading down that list from the cheapest end until the right place turned up —
+about four hundred steps every time, eight times for every square examined. The list runs both ways,
+so it now comes in from whichever end is closer, and the two ordinary cases — cheaper than
+everything, dearer than everything — take no steps at all. Same order out, same routes, less work.
+
+**And the ten-second hiccup.** Every ten seconds or so the game redraws its map of which areas
+connect to which — it has to, because you and seven opponents keep putting buildings in the way.
+Joining two areas together meant rewriting the entire table, once per join, and on a big map that
+table has thousands of entries. The whole redraw landed inside a single turn: thirty to forty
+milliseconds where nothing else happened, no matter what was on screen. Twenty-five turns in one
+match were nothing but this. Joining two areas is now a single operation instead of a full rewrite.
+The map is still redrawn on exactly the same turns, and comes out exactly the same — it just stops
+costing you a turn.
+
+**And seven opponents all thinking at once.** Every computer player asks itself the same questions on
+a fixed rhythm - what to build next, what squad to raise, which bridge to repair - and every one of
+them was handed the same stopwatch, started on the same turn. Seven opponents therefore did all of
+their thinking on the same turn, over and over, for the entire match, while the six turns in between
+had nothing to do. They now take it in turns: each opponent gets its own slot in the cycle. Nobody
+thinks any less often, and no opponent is any slower - the work is simply spread across the turns
+instead of piled onto one of them.
+
+**And their squads marching out at the same moment.** When a computer player finishes a squad and
+sends it off toward you, the game works out the whole route across the map right then and there,
+while everything else waits. One of those cost thirty milliseconds - a whole turn on its own - and in
+a seven-opponent match six of them arrived on the same turn: eighty milliseconds where the game did
+nothing but plan marches. Only one squad is sent on its way per turn now; the rest go on the next
+turn, and the one after. A squad that used to leave on turn 4,120 leaves on turn 4,121 instead, which
+is a thirtieth of a second - you cannot see it, and it was sitting still waiting for orders either
+way.
 
 ## Sound, video, and getting it to start at all
 

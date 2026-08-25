@@ -5500,6 +5500,97 @@ void ScriptEngine::newMap( void )
 /** Update */
 //-------------------------------------------------------------------------------------------------
 DECLARE_PERF_TIMER(ScriptEngine)
+#ifdef DEBUG_LOGGING
+//
+// The frame's worst script.  Filled in by executeScript, read by GameLogic when a frame runs over
+// budget, cleared at the top of every update.
+//
+static Real theWorstScriptMS = 0.0f;
+static AsciiString theWorstScriptName;
+static Real theScriptTotalMS = 0.0f;
+static Int theScriptRunCount = 0;
+
+//
+// update() is billed as "scripts" by GameLogic's slow-frame line, but only a part of it is scripts:
+// it also runs the script actions' and conditions' own per-frame work, walks every team of every
+// player, and steps the sequential scripts.  A map with no scripts at all can still spend twenty
+// milliseconds in here, so the phases are timed separately or there is nothing to go on.
+//
+enum { SCRIPT_PHASE_ACTIONS = 0, SCRIPT_PHASE_CONDITIONS, SCRIPT_PHASE_EVAL, SCRIPT_PHASE_TEAMS,
+			 SCRIPT_PHASE_SEQUENTIAL, SCRIPT_PHASE_COUNT };
+static const char *theScriptPhaseName[ SCRIPT_PHASE_COUNT ] = { "act", "cond", "eval", "teams", "seq" };
+static Real theScriptPhaseMS[ SCRIPT_PHASE_COUNT ];
+static Int64 theScriptPhaseStart = 0;
+
+//
+// The sequential-script step turned out to be the whole of the "scripts" cost on a script-free
+// skirmish map, so it gets counted from the inside: how many entries the list holds, how many times
+// the loop went round, how many AIGroups it built to ask a team whether it is idle, and how long
+// the actions themselves took.
+//
+static Int theSeqCount = 0, theSeqIters = 0, theSeqGroups = 0, theSeqMembers = 0, theSeqActions = 0;
+static Real theSeqGroupMS = 0.0f, theSeqActionMS = 0.0f;
+static Int theSeqWorstAction = -1;
+static Real theSeqWorstActionMS = 0.0f;
+static Int64 theSeqSubStart = 0;
+
+static void seqSubBegin( void )
+{
+	QueryPerformanceCounter( (LARGE_INTEGER *)&theSeqSubStart );
+}
+
+static Real seqSubEnd( void )
+{
+	Int64 now, freq;
+	QueryPerformanceCounter( (LARGE_INTEGER *)&now );
+	QueryPerformanceFrequency( (LARGE_INTEGER *)&freq );
+	if( freq < 1 )
+		return 0.0f;
+	return (Real)((double)(now - theSeqSubStart) * 1000.0 / (double)freq);
+}
+#define SEQ_SUB_BEGIN() seqSubBegin()
+#define SEQ_SUB_END(acc) do { (acc) += seqSubEnd(); } while(0)
+#define SEQ_BUMP(c) do { ++(c); } while(0)
+#define SEQ_ADD(c,n) do { (c) += (n); } while(0)
+
+static void scriptPhaseBegin( void )
+{
+	QueryPerformanceCounter( (LARGE_INTEGER *)&theScriptPhaseStart );
+}
+
+static void scriptPhaseEnd( Int phase )
+{
+	Int64 now, freq;
+	QueryPerformanceCounter( (LARGE_INTEGER *)&now );
+	QueryPerformanceFrequency( (LARGE_INTEGER *)&freq );
+	if( freq > 0 )
+		theScriptPhaseMS[ phase ] += (Real)((double)(now - theScriptPhaseStart) * 1000.0 / (double)freq);
+}
+#define SCRIPT_PHASE_BEGIN() scriptPhaseBegin()
+#define SCRIPT_PHASE_END(p) scriptPhaseEnd(p)
+
+const char *ScriptEngine::getProfileReport( void )
+{
+	static char report[ 512 ];
+	Int used = sprintf( report, "%d scripts/%.1fms worst '%s' %.1fms |", theScriptRunCount, theScriptTotalMS,
+				 theWorstScriptName.isEmpty() ? "<none>" : theWorstScriptName.str(), theWorstScriptMS );
+	for( Int phase = 0; phase < SCRIPT_PHASE_COUNT; phase++ )
+		used += sprintf( report + used, " %s %.1f", theScriptPhaseName[phase], theScriptPhaseMS[phase] );
+	sprintf( report + used, " | seqlist %d iters %d grp %dx/%.1f (%d members) act %dx/%.1f worstact %d/%.1f",
+					 theSeqCount, theSeqIters, theSeqGroups, theSeqGroupMS, theSeqMembers, theSeqActions, theSeqActionMS,
+					 theSeqWorstAction, theSeqWorstActionMS );
+	return report;
+}
+#else
+const char *ScriptEngine::getProfileReport( void ) { return ""; }
+#define SCRIPT_PHASE_BEGIN()
+#define SCRIPT_PHASE_END(p)
+#define SEQ_SUB_BEGIN()
+#define SEQ_SUB_END(acc)
+#define SEQ_BUMP(c)
+#define SEQ_ADD(c,n)
+#endif
+
 void ScriptEngine::update( void )
 {
 	USE_PERF_TIMER(ScriptEngine)
@@ -5520,6 +5611,17 @@ void ScriptEngine::update( void )
 	DEBUG_LOG(("\n\n"));
 */
 #endif
+#endif
+#ifdef DEBUG_LOGGING
+	theWorstScriptMS = 0.0f;
+	theWorstScriptName.clear();
+	theScriptTotalMS = 0.0f;
+	theScriptRunCount = 0;
+	for( Int phase = 0; phase < SCRIPT_PHASE_COUNT; phase++ )
+		theScriptPhaseMS[ phase ] = 0.0f;
+	theSeqCount = theSeqIters = theSeqGroups = theSeqMembers = theSeqActions = 0;
+	theSeqGroupMS = theSeqActionMS = theSeqWorstActionMS = 0.0f;
+	theSeqWorstAction = -1;
 #endif
 	if (m_firstUpdate) {
 		createNamedCache();
@@ -5557,12 +5659,16 @@ void ScriptEngine::update( void )
 		return; // we are just timing down 
 	}
 	
+	SCRIPT_PHASE_BEGIN();
 	if (TheScriptActions) {
 		TheScriptActions->update();
 	}
+	SCRIPT_PHASE_END( SCRIPT_PHASE_ACTIONS );
+	SCRIPT_PHASE_BEGIN();
 	if (TheScriptConditions) {
 		TheScriptConditions->update();
 	}
+	SCRIPT_PHASE_END( SCRIPT_PHASE_CONDITIONS );
 	// Update any countdown timers.
 	Int i;
 	// Note - counters start at 1.  0 means not assigned.
@@ -5576,6 +5682,7 @@ void ScriptEngine::update( void )
 	}
 
 	// Evaluate the scripts.
+	SCRIPT_PHASE_BEGIN();
 	for (i=0; i<TheSidesList->getNumSides(); i++) {
 		m_currentPlayer = ThePlayerList->getNthPlayer(i);
 		ScriptList *pSL = TheSidesList->getSideInfo(i)->getScriptList();
@@ -5593,16 +5700,21 @@ void ScriptEngine::update( void )
 		}
 		m_currentPlayer = NULL;
 	}
+	SCRIPT_PHASE_END( SCRIPT_PHASE_EVAL );
 	
 	// Reset the entered/exited flag in teams, so the next update sets them 
 	// correctly.  Also, execute any team created scripts.
+	SCRIPT_PHASE_BEGIN();
 	ThePlayerList->updateTeamStates();
+	SCRIPT_PHASE_END( SCRIPT_PHASE_TEAMS );
 
 	// Clear the UI Interaction flags.
 	m_uiInteractions.clear();
 
 	// update all sequential stuff.
+	SCRIPT_PHASE_BEGIN();
 	evaluateAndProgressAllSequentialScripts();
+	SCRIPT_PHASE_END( SCRIPT_PHASE_SEQUENTIAL );
 
 	// Script debugger stuff
 	st_CurrentFrame++;
@@ -7047,6 +7159,16 @@ void ScriptEngine::executeScript( Script *pScript )
 	QueryPerformanceCounter((LARGE_INTEGER *)&endTime64);
 	timeToEvaluate = ((Real)(endTime64-startTime64) / (Real)(freq64));
 	pScript->setCurTime(timeToEvaluate);
+	{
+		const Real scriptMS = timeToEvaluate * 1000.0f;
+		theScriptRunCount++;
+		theScriptTotalMS += scriptMS;
+		if( scriptMS > theWorstScriptMS )
+		{
+			theWorstScriptMS = scriptMS;
+			theWorstScriptName = pScript->getName();
+		}
+	}
 #endif
 #endif
 
@@ -7881,13 +8003,39 @@ void ScriptEngine::setSequentialTimer(Team *team, Int frameCount)
 }
 
 
+Bool ScriptEngine::isThrottledTeamMoveAction( Int actionType )
+{
+	switch( actionType )
+	{
+		case ScriptAction::MOVE_TEAM_TO:
+		case ScriptAction::TEAM_FOLLOW_WAYPOINTS:
+		case ScriptAction::TEAM_FOLLOW_WAYPOINTS_EXACT:
+		case ScriptAction::SKIRMISH_FOLLOW_APPROACH_PATH:
+		case ScriptAction::SKIRMISH_MOVE_TO_APPROACH_PATH:
+		case ScriptAction::CREATE_REINFORCEMENT_TEAM:
+		case ScriptAction::SKIRMISH_ATTACK_NEAREST_GROUP_WITH_VALUE:
+			return TRUE;
+	}
+	return FALSE;
+}
+
+//
+// How many of those team moves may be issued in one logic frame.  One is enough to keep the AI
+// moving at the same rate it always did - a team reaches its move instruction once, not every
+// frame - while a lobby full of AI players can no longer stack seven searches onto one frame.
+//
+static const Int MAX_TEAM_MOVES_PER_FRAME = 1;
+
 void ScriptEngine::evaluateAndProgressAllSequentialScripts( void )
 {
 	VecSequentialScriptPtrIt it, lastIt;
 	lastIt = m_sequentialScripts.end();
 
+	SEQ_ADD(theSeqCount, (Int)m_sequentialScripts.size());
+	Int teamMovesThisFrame = 0;
 	Int spinCount = 0;
 	for (it = m_sequentialScripts.begin(); it != m_sequentialScripts.end(); /* empty */) {
+		SEQ_BUMP(theSeqIters);
 		if (it == lastIt) {
 			++spinCount;
 		} else {
@@ -7932,10 +8080,14 @@ void ScriptEngine::evaluateAndProgressAllSequentialScripts( void )
 		}
 
 		AIUpdateInterface *ai = obj ? obj->getAIUpdateInterface() : NULL;
+		SEQ_SUB_BEGIN();
 		AIGroup *aigroup = (team ? TheAI->createGroup() : NULL);
 		if (aigroup) {
 			team->getTeamAsAIGroup(aigroup);
+			SEQ_BUMP(theSeqGroups);
+			SEQ_ADD(theSeqMembers, (Int)aigroup->getCount());
 		}
+		SEQ_SUB_END(theSeqGroupMS);
 
 		if( ai || aigroup ) {
 			if (((ai && (ai->isIdle()) || (aigroup && aigroup->isIdle())) && 
@@ -7993,8 +8145,32 @@ void ScriptEngine::evaluateAndProgressAllSequentialScripts( void )
 						if (TheScriptConditions->evaluateTeamIsContained(action->getParameter(0), false)) {
 							seqScript->m_dontAdvanceInstruction = TRUE;
 						}
+					} else if (m_currentPlayer && teamMovesThisFrame >= MAX_TEAM_MOVES_PER_FRAME &&
+										 isThrottledTeamMoveAction( action->getActionType() )) {
+						//
+						// A skirmish AI team wants a full-map group path and one has already been paid for
+						// this frame.  Hold the instruction and come back to it next frame - the script is
+						// not skipped, only delayed, and the team is idle either way.
+						//
+						seqScript->m_dontAdvanceInstruction = TRUE;
 					} else {
+						if (m_currentPlayer && isThrottledTeamMoveAction( action->getActionType() )) {
+							++teamMovesThisFrame;
+						}
+#ifdef DEBUG_LOGGING
+						const Real seqActionBefore = theSeqActionMS;
+#endif
+						SEQ_SUB_BEGIN();
 						executeActions(action);
+						SEQ_SUB_END(theSeqActionMS);
+						SEQ_BUMP(theSeqActions);
+#ifdef DEBUG_LOGGING
+						if( theSeqActionMS - seqActionBefore > theSeqWorstActionMS )
+						{
+							theSeqWorstActionMS = theSeqActionMS - seqActionBefore;
+							theSeqWorstAction = (Int)action->getActionType();
+						}
+#endif
 					}
 
 					if (displayMessage) {
@@ -8018,8 +8194,12 @@ void ScriptEngine::evaluateAndProgressAllSequentialScripts( void )
 						itAdvanced = true;
 					} else if (team) {
 						// attempt to rebuild the aigroup, as it probably expired during the action execution
+						SEQ_SUB_BEGIN();
 						aigroup = (team ? TheAI->createGroup() : NULL);
 						team->getTeamAsAIGroup(aigroup);
+						SEQ_BUMP(theSeqGroups);
+						SEQ_ADD(theSeqMembers, aigroup ? (Int)aigroup->getCount() : 0);
+						SEQ_SUB_END(theSeqGroupMS);
 					}
 
 					if (aigroup && aigroup->isIdle()) {

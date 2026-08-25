@@ -254,6 +254,15 @@ public:
 	/// the arithmetic behind the two above, free of the Player so a test can reach it
 	static Int computeBuildDelay( Real seconds, Int money, Int poorAt, Int wealthyAt,
 																Real poorMod, Real wealthyMod, Real rateScale );
+
+	/**
+		Where in a repeating check's cycle this player sits.  Every AIPlayer arms the same timers
+		with the same constants on the same frame, so a lobby full of bots does its base building,
+		team building and bridge repair in lockstep for the whole match and the cost of all of them
+		lands on one logic frame.  Spreading them over the cycle changes *when* each one runs, not
+		how often, and it is a function of the player index alone - the simulation stays deterministic.
+	*/
+	static Int computeUpdatePhase( Int playerIndex, Int cycleFrames );
 protected:
 
 	/**

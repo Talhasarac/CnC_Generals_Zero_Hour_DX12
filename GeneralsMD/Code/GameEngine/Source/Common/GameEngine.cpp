@@ -775,10 +775,36 @@ Bool GameEngine_isLogicFrameDue( Real& accumMs, Real elapsedMs, Int logicFps )
  * framerate (m_maxFPS, the game-speed setting), so game speed does not scale with the
  * render framerate.
  */
+#ifdef DEBUG_LOGGING
+//
+// Frame rate watchdog.  A slow logic frame and a slow render both show up to the player as the same
+// stutter, and the logic-side slow-frame log cannot tell them apart because it never sees the client
+// half of the loop.  So time both halves of every pass and, once a second, say what the rate was and
+// where the time went - but only when the rate actually dropped, so a smooth match logs nothing.
+//
+static Real engineElapsedMS( const Int64 &from, const Int64 &to )
+{
+	Int64 freq;
+	QueryPerformanceFrequency( (LARGE_INTEGER *)&freq );
+	if( freq < 1 )
+		return 0.0f;
+	return (Real)((double)(to - from) * 1000.0 / (double)freq);
+}
+#endif
+
 void GameEngine::update( void )
 {
 	USE_PERF_TIMER(GameEngine_update)
 	{
+#ifdef DEBUG_LOGGING
+		static Int fpsFrames = 0;
+		static Real fpsClientTotal = 0.0f, fpsClientMax = 0.0f;
+		static Real fpsLogicTotal = 0.0f, fpsLogicMax = 0.0f;
+		static DWORD fpsWindowStart = timeGetTime();
+		Int64 tClientStart, tClientEnd, tLogicStart, tLogicEnd;
+		Real clientMS = 0.0f, logicMS = 0.0f;
+		QueryPerformanceCounter( (LARGE_INTEGER *)&tClientStart );
+#endif
 
 		{
 			
@@ -800,6 +826,10 @@ void GameEngine::update( void )
 			 
 			TheCDManager->UPDATE();
 		}
+#ifdef DEBUG_LOGGING
+		QueryPerformanceCounter( (LARGE_INTEGER *)&tClientEnd );
+		clientMS = engineElapsedMS( tClientStart, tClientEnd );
+#endif
 
 
 		// Fast-forward modes run a logic frame on every call; otherwise logic ticks at
@@ -831,8 +861,43 @@ void GameEngine::update( void )
 		if (logicFrameDue &&
 				((TheNetwork == NULL && !TheGameLogic->isGamePaused()) || (TheNetwork && TheNetwork->isFrameDataReady())))
 		{
+#ifdef DEBUG_LOGGING
+			QueryPerformanceCounter( (LARGE_INTEGER *)&tLogicStart );
+#endif
 			TheGameLogic->UPDATE();
+#ifdef DEBUG_LOGGING
+			QueryPerformanceCounter( (LARGE_INTEGER *)&tLogicEnd );
+			logicMS = engineElapsedMS( tLogicStart, tLogicEnd );
+#endif
 		}
+
+#ifdef DEBUG_LOGGING
+		fpsFrames++;
+		fpsClientTotal += clientMS;
+		fpsLogicTotal += logicMS;
+		if( clientMS > fpsClientMax ) fpsClientMax = clientMS;
+		if( logicMS > fpsLogicMax ) fpsLogicMax = logicMS;
+		{
+			const DWORD nowMS = timeGetTime();
+			const DWORD windowMS = nowMS - fpsWindowStart;
+			if( windowMS >= 1000 )
+			{
+				const Real fps = (Real)fpsFrames * 1000.0f / (Real)windowMS;
+				if( fps < 50.0f && TheGameLogic && TheGameLogic->isInGame() && !TheGameLogic->isInShellGame() )
+				{
+					DEBUG_LOG(("FPS %.0f over %dms (%d frames, logic frame %d) | client avg %.1f max %.1f | logic avg %.1f max %.1f | unaccounted %.1fms\n",
+										 fps, (Int)windowMS, fpsFrames, TheGameLogic->getFrame(),
+										 fpsClientTotal / fpsFrames, fpsClientMax,
+										 fpsLogicTotal / fpsFrames, fpsLogicMax,
+										 (Real)windowMS - fpsClientTotal - fpsLogicTotal));
+				}
+				fpsFrames = 0;
+				fpsClientTotal = fpsLogicTotal = 0.0f;
+				fpsClientMax = fpsLogicMax = 0.0f;
+				fpsWindowStart = nowMS;
+			}
+		}
+#endif
 
 	}	// end perfGather
 

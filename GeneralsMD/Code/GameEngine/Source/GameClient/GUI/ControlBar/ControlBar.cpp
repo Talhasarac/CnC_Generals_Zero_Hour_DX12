@@ -174,6 +174,8 @@ void ControlBar::pressCommandButton( Int index )
 			{
 				m_chordGroup = ( index == CHORD_SLOT_Q ) ? 0 : 1;
 				m_chordStartMs = timeGetTime();
+				m_chordDrawableID = m_currentSelectedDrawable ? m_currentSelectedDrawable->getID()
+																										 : INVALID_DRAWABLE_ID;
 				markUIDirty();		// the group that is armed greys the other one out
 				return;
 			}
@@ -257,6 +259,7 @@ void ControlBar::dropChord( void )
 		return;
 
 	m_chordGroup = -1;
+	m_chordDrawableID = INVALID_DRAWABLE_ID;
 	markUIDirty();		// the greyed-out half of the structures comes back
 
 }  // end dropChord
@@ -1099,7 +1102,15 @@ ControlBar::ControlBar( void )
 	m_buildPageBackButton = NULL;
 	m_chordGroup = -1;
 	m_chordStartMs = 0;
+	m_chordDrawableID = INVALID_DRAWABLE_ID;
 	m_standInBuilderID = INVALID_DRAWABLE_ID;
+	m_upgradeSpreadFrame = 0;
+	m_upgradeSpreadEntries = 0;
+	for( i = 0; i < UPGRADE_SPREAD_MAX; i++ )
+	{
+		m_upgradeSpreadID[ i ] = INVALID_ID;
+		m_upgradeSpreadCount[ i ] = 0;
+	}
 	for( i = 0; i < MAX_MULTI_SELECT_GROUPS; i++ )
 	{
 		m_multiSelectGroupTemplate[ i ] = NULL;
@@ -1607,6 +1618,18 @@ void ControlBar::update( void )
 	{
 		dropChord();
 	}
+
+	//
+	// ... and neither does a chord whose builder is gone: the command bar is now showing
+	// something else, so the cell the second key would pick is not the one that was armed
+	//
+	if( m_chordGroup >= 0 )
+	{
+		const DrawableID nowShowing = m_currentSelectedDrawable ? m_currentSelectedDrawable->getID()
+																													 : INVALID_DRAWABLE_ID;
+		if( nowShowing != m_chordDrawableID )
+			dropChord();
+	}
 	if(m_controlBarSchemeManager)
 		m_controlBarSchemeManager->update();
 
@@ -1738,22 +1761,6 @@ void ControlBar::update( void )
 			m_standInBuilderID = INVALID_DRAWABLE_ID;
 			m_currentSelectedDrawable = NULL;
 			markUIDirty();
-		}
-		else
-		{
-			// the stand-in went to work - a builder with a job greys its structure buttons out -
-			// so hand the bar to a free builder if there is one
-			AIUpdateInterface *ai = standInObj->getAI();
-			DozerAIInterface *dozer = ai ? ai->getDozerAIInterface() : NULL;
-			if( dozer && !builderIsFree( ai, dozer ) )
-			{
-				Drawable *freeBuilder = findStandInBuilder( TRUE );
-				if( freeBuilder && freeBuilder != standIn )
-				{
-					m_standInBuilderID = INVALID_DRAWABLE_ID;
-					markUIDirty();
-				}
-			}
 		}
 	}
 
@@ -2630,8 +2637,14 @@ void ControlBar::switchToContext( ControlBarContext context, Drawable *draw )
 	// save a pointer for the currently selected drawable
 	m_currentSelectedDrawable = draw;
 
-	// a half-typed structure chord does not survive a context change
-	dropChord();
+	//
+	// a half-typed structure chord used to be dropped here.  It cannot be: evaluateContextUI
+	// erases the bar by switching to CB_CONTEXT_NONE before it rebuilds it, and arming the
+	// chord calls markUIDirty() itself to grey the other group out - so the chord killed
+	// itself on the very next frame and the second key never had a chord to resolve.
+	// ControlBar::update drops it instead, when the drawable driving the bar is no longer the
+	// one the chord was armed on.
+	//
 
 	if (IsInGameChatActive() == FALSE && TheGameLogic && !TheGameLogic->isInShellGame()) {
 		TheWindowManager->winSetFocus( NULL );

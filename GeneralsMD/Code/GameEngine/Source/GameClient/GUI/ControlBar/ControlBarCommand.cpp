@@ -70,7 +70,15 @@
 // PRIVATE DATA ///////////////////////////////////////////////////////////////////////////////////
 static GameWindow *commandWindows[ MAX_COMMANDS_PER_SET ];
 Bool commandWindowsInitialized = FALSE;
-static Color BuildClockColor = GameMakeColor(0,0,0,120);	///< translucent black radial fill drawn over the cameo as production progresses
+/** Translucent black scrim swept off the cameo as production progresses.
+	*
+	* It is drawn with the *inverse* clock - covered at 0%, fully uncovered at 100% - and that is the
+	* whole point. The forward clock (`W3DDisplay::drawRectClock`) early-outs on `percent < 1` and
+	* draws nothing at all, so an upgrade you had just clicked looked exactly like one you had not:
+	* the queue entry existed, the money was spent, and the button gave back no sign of it until the
+	* first percent ticked over. Starting covered means the click shows on screen the instant it
+	* lands, and the cameo reads as "uncovering" rather than "filling up with black". */
+static Color BuildClockColor = GameMakeColor(0,0,0,120);
 
 //-------------------------------------------------------------------------------------------------
 /** Is any selected building of the local player's researching or holding 'upgrade' in its queue?
@@ -772,7 +780,7 @@ void ControlBar::updateContextCommand( void )
 				const ProductionEntry *first = pu->firstProduction();
 				if( first && first->getProductionType() == PRODUCTION_UNIT &&
 						first->getProductionObject() == command->getThingTemplate() )
-					GadgetButtonDrawClock( win, first->getPercentComplete(), BuildClockColor );
+					GadgetButtonDrawInverseClock( win, first->getPercentComplete(), BuildClockColor );
 			}
 		}
 
@@ -792,7 +800,11 @@ void ControlBar::updateContextCommand( void )
 			{
 				upgradeQueuedHere = TRUE;
 				if( entry )
-					GadgetButtonDrawClock( win, entry->getPercentComplete(), BuildClockColor );
+					GadgetButtonDrawInverseClock( win, entry->getPercentComplete(), BuildClockColor );
+				else
+					/* queued but not started - no percentage to show, so show the full scrim. Without
+						 it a waiting upgrade is indistinguishable from one that was never ordered. */
+					GadgetButtonDrawInverseClock( win, 0, BuildClockColor );
 			}
 		}
 
@@ -1225,10 +1237,13 @@ CommandAvailability ControlBar::getCommandAvailability( const CommandButton *com
 			if( dozerAI == NULL )
 				return COMMAND_RESTRICTED;
 
-			// if building anything at all right now we can't build another
-			if( dozerAI->isTaskPending( DOZER_TASK_BUILD ) == TRUE )
-				return COMMAND_RESTRICTED;
-			
+			//
+			// A builder already on a job used to grey out every structure button it had, so
+			// queueing the next building meant waiting for it or picking another dozer by hand.
+			// The button stays live: MSG_DOZER_CONSTRUCT hands the job to the idle builder
+			// nearest the site and only re-tasks a busy one when there is no idle one.
+			//
+
 			// return whether or not the player can build this thing
 			if( player->canBuild( whatToBuild ) == FALSE )
 				return COMMAND_RESTRICTED;

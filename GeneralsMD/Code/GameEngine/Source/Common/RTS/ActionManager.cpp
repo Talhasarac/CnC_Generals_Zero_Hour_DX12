@@ -484,7 +484,17 @@ Bool ActionManager::canResumeConstructionOf( const Object *obj,
 	// add more effectiveness to the construction so we'll say no (this might change for workers
 	// in the future)
 	//
+	// A player clicking one of their own builders onto the site is not "doubling up", though - it
+	// is a handover, and refusing it left the click doing nothing at all with no explanation. The
+	// engine already knows how to hand a site over: `DozerAIUpdate::newTask` makes the new builder
+	// the site's builder, and the old one's build state sees `getBuilderID() != dozer->getID()` on
+	// its next tick and drops the task. So the ban only needs to hold for orders the player did not
+	// give - the skirmish AI and scripts, where two builders trading a site back and forth would be
+	// a loop nobody asked for.
+	//
 	Object *builder = TheGameLogic->findObjectByID( objectBeingConstructed->getBuilderID() );
+	if( builder && builder != obj && commandSource == CMD_FROM_PLAYER )
+		builder = NULL;
 	if( builder )
 	{
 		AIUpdateInterface *ai = builder->getAI();

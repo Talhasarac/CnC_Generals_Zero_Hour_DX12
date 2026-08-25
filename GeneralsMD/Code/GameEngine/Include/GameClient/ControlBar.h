@@ -1002,8 +1002,24 @@ protected:
 	ObjectID m_buildPageObjectID;													///< builder the page belongs to; a new one starts at the menu
 	Int m_chordGroup;																			///< -1, or the structure group (0 = Q, 1 = W) armed by the first chord key
 	UnsignedInt m_chordStartMs;														///< millisecond the chord was armed on, for CHORD_TIMEOUT_MS
+	DrawableID m_chordDrawableID;													///< builder the armed chord addresses; the chord dies if the bar moves to another one
 	DrawableID m_standInBuilderID;												///< with nothing selected, the builder whose command bar is shown (INVALID_DRAWABLE_ID otherwise)
 	Drawable *findStandInBuilder( Bool freeOnly );				///< the local player's free builder (or, unless freeOnly, any builder) to stand in for an empty selection
+
+	/** A player upgrade is researched once, so it goes to exactly one of the selected buildings -
+		* and the bar cannot see the queue an earlier click in this same frame just filled, because
+		* the message only reaches the logic on the next one. Clicking three upgrades on four selected
+		* barracks therefore stacked all three on whichever building the bar was drawn from, and the
+		* other three sat idle. These remember what has been handed out this frame so the next click
+		* can pick a building that is genuinely free. */
+	enum { UPGRADE_SPREAD_MAX = 32 };										///< selections past this fall back to the plain queue count
+	UnsignedInt m_upgradeSpreadFrame;										///< logic frame the tallies below describe; a new frame clears them
+	ObjectID m_upgradeSpreadID[ UPGRADE_SPREAD_MAX ];		///< building handed an upgrade this frame
+	Int m_upgradeSpreadCount[ UPGRADE_SPREAD_MAX ];			///< how many, since one building can take several
+	Int m_upgradeSpreadEntries;													///< used entries in the two arrays above
+	Int upgradesSpreadTo( ObjectID id );								///< upgrades already sent to this building this frame
+	void noteUpgradeSpread( ObjectID id );							///< record one more upgrade sent to this building
+	Object *pickUpgradeProducer( const UpgradeTemplate *upgradeT, Object *fallback );	///< freest selected building that can research it
 
 		// removed from multiplayer branch
 	//GameWindow *m_commandMarkers[ MAX_COMMANDS_PER_SET ];			///< When we don't have a command, they want to show an image	
