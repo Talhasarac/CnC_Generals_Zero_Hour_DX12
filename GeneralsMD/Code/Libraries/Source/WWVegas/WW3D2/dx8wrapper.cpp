@@ -843,7 +843,8 @@ void DX8Wrapper::Enumerate_Devices()
 bool DX8Wrapper::Set_Any_Render_Device(void)
 {
 	// Then fullscreen
-	for (int dev_number = 0; dev_number < _RenderDeviceNameTable.Count(); dev_number++) {
+	int dev_number;
+	for (dev_number = 0; dev_number < _RenderDeviceNameTable.Count(); dev_number++) {
 		if (Set_Render_Device(dev_number,-1,-1,-1,0,false)) {
 			return true;
 		}
@@ -1527,7 +1528,8 @@ bool DX8Wrapper::Find_Color_And_Z_Mode(int resx,int resy,int bitdepth,D3DFORMAT 
 	bool found = false;
 	unsigned int mode = 0;
 
-	for (int format_index=0; format_index < format_count; format_index++) {
+	int format_index;
+	for (format_index =0; format_index < format_count; format_index++) {
 		found |= Find_Color_Mode(format_table[format_index],resx,resy,&mode);
 		if (found) break;
 	}
@@ -2313,7 +2315,8 @@ void DX8Wrapper::Apply_Render_State_Changes()
 	}
 
 	unsigned mask=TEXTURE0_CHANGED;
-	for (int i=0;i<CurrentCaps->Get_Max_Textures_Per_Pass();++i,mask<<=1) 
+	int i;
+	for (i =0;i<CurrentCaps->Get_Max_Textures_Per_Pass();++i,mask<<=1) 
 	{
 		if (render_state_changed&mask) 
 		{
@@ -3154,7 +3157,8 @@ void DX8Wrapper::Set_Light_Environment(LightEnvironmentClass* light_env)
 		}
 
 		D3DLIGHT8 light;		
-		for (int l=0;l<light_count;++l) {
+		int l;
+		for (l =0;l<light_count;++l) {
 			
 			::ZeroMemory(&light, sizeof(D3DLIGHT8));
 			

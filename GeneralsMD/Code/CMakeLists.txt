@@ -41,6 +41,11 @@ if(MSVC)
   # C1041, or worse, only some of them do and the library is left half-built against an old
   # header.  /FS serializes the writes in the compilers themselves instead.
   add_compile_options(/Oy- /Zi /FS)
+  # /MP: build a project's own sources in parallel too, not just one project at a
+  # time.  MSBuild already runs projects concurrently, but gameengine alone is ~580
+  # sources in a single project and was the long pole.  /FS above is what makes this
+  # safe - the PDB writes are serialized in the compilers.
+  add_compile_options(/MP)
   add_link_options(/DEBUG)
 endif()
 
@@ -219,9 +224,11 @@ target_link_libraries(ww3d2
 # The 2001 d3dx8.lib predates SAFESEH and was built against the long-gone
 # libci.lib CRT, so anything linking it has to opt out of both.
 target_link_options(ww3d2 INTERFACE /SAFESEH:NO /NODEFAULTLIB:libci.lib)
-# ponytail: VC6 for-scope leaks at ~40 sites across ww3d2; scoped flag beats mass
-# edits in render code. Burn the sites down later, then drop the flag.
-target_compile_options(ww3d2 PRIVATE /Zc:forScope-)
+# dx8webbrowser.cpp is the one file /MP cannot have: MSVC rejects #import under
+# multi-process compilation (C2813) and finds the directive by a lexical scan, so
+# even though ENABLE_EMBEDDED_BROWSER's block is what holds it, disabling the block
+# would not help.  /MP1 puts just this file back on a single process.
+set_source_files_properties(${WW}/WW3D2/dx8webbrowser.cpp PROPERTIES COMPILE_OPTIONS /MP1)
 
 # Phase 8: 1 kHz EIP sampler that symbolizes against the linker map - the
 # machine has no debugger, so this is how hotspots get names.
@@ -507,13 +514,10 @@ target_include_directories(test_wwutil PRIVATE ${WW}/Wwutil ${WW}/WWLib ${WW}/WW
 
 add_lib_test(test_compression compression)
 
-# ww3d2 needs the same /Zc:forScope- as the library: its headers are included
-# here and dx8fvf.h et al were written for VC6 for-scope rules.
 add_lib_test(test_ww3d2 ww3d2 wwsaveload wwlib wwmath wwdebug)
 target_include_directories(test_ww3d2 PRIVATE
   ${WW}/WW3D2 ${WW}/WWLib ${WW}/WWMath ${WW}/WWDebug ${WW}/WWSaveLoad ${WW}/Wwutil
   ${CMAKE_CURRENT_SOURCE_DIR}/Libraries/DirectX/Include)
-target_compile_options(test_ww3d2 PRIVATE /Zc:forScope-)
 
 add_lib_test(test_wwdownload wwdownload)
 target_include_directories(test_wwdownload PRIVATE ${WW}/WWDownload)
