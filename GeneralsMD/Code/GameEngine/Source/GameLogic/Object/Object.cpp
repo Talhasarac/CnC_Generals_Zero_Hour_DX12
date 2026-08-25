@@ -3899,7 +3899,12 @@ void Object::onDisabledEdge(Bool becomingDisabled)
 	// We will need to adjust power ... somehow ...
 	Int powerToAdjust = getTemplate()->getEnergyProduction();
 	
-	if( powerToAdjust > 0 )
+	//
+	// A plant that is still under construction has never been counted (friend_adjustPowerForPlayer
+	// runs when it is finished), so disabling or re-enabling a building site must not move the
+	// player's power either way.
+	//
+	if( powerToAdjust > 0 && !testStatus( OBJECT_STATUS_UNDER_CONSTRUCTION ) )
 	{
 		// We can't affect something that consumes, or else we go low power which removes the consumption
 		// which makes us not low power so we add the consumption so we go low power...
@@ -4172,19 +4177,6 @@ void Object::xfer( Xfer *xfer )
 	// private status
 	xfer->xferUnsignedByte( &m_privateStatus );
 
-	// OK, now that we have xferred our status bits, it's safe to set the team...
-	if( xfer->getXferMode() == XFER_LOAD )
-	{
-		Team *team = TheTeamFactory->findTeamByID( teamID );
-		if( team == NULL )
-		{
-			DEBUG_CRASH(( "Object::xfer - Unable to load team\n" ));
-			throw SC_INVALID_DATA;
-		}
-		const Bool restoring = true;
-		setOrRestoreTeam( team, restoring );
-	}
-
 	// geometry info
 	xfer->xferSnapshot( &m_geometryInfo );
 
@@ -4235,6 +4227,24 @@ void Object::xfer( Xfer *xfer )
 
 	// disabled till frame
 	xfer->xferUser( m_disabledTillFrame, sizeof( UnsignedInt ) * DISABLED_COUNT );
+
+	//
+	// OK, now that we have xferred our status bits AND our disabled data, it is safe to set the
+	// team: joining one runs friend_adjustPowerForPlayer, which asks isDisabled() - and until the
+	// disabled mask above has been read that answer is whatever the fresh object was built with,
+	// so a saved game brought a disabled power plant back as a working one.
+	//
+	if( xfer->getXferMode() == XFER_LOAD )
+	{
+		Team *team = TheTeamFactory->findTeamByID( teamID );
+		if( team == NULL )
+		{
+			DEBUG_CRASH(( "Object::xfer - Unable to load team\n" ));
+			throw SC_INVALID_DATA;
+		}
+		const Bool restoring = true;
+		setOrRestoreTeam( team, restoring );
+	}
 
 	// special model condition until
 	xfer->xferUnsignedInt( &m_smcUntil );

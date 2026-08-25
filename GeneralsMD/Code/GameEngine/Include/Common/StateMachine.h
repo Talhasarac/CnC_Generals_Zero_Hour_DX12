@@ -37,6 +37,8 @@
 #include "Common/Snapshot.h"
 #include "Common/Xfer.h"
 
+#include "refcount.h"
+
 //-----------------------------------------------------------------------------
 //-----------------------------------------------------------------------------
 //-----------------------------------------------------------------------------
@@ -237,7 +239,7 @@ inline State::~State() { }
 /**
  * A finite state machine.
  */
-class StateMachine : public MemoryPoolObject, public Snapshot
+class StateMachine : public MemoryPoolObject, public Snapshot, public RefCountClass
 {
 	MEMORY_POOL_GLUE_WITH_USERLOOKUP_CREATE( StateMachine, "StateMachinePool" );
 
@@ -341,6 +343,24 @@ protected:
 	virtual void crc( Xfer *xfer );
 	virtual void xfer( Xfer *xfer );
 	virtual void loadPostProcess();	
+
+public:
+	/**
+		The machine is reference counted, so that it can survive its own owner being destroyed
+		while one of its states is updating (see updateStateMachine).  deleteInstance() is the
+		only way this class was ever destroyed, so it becomes "drop the owner's reference"
+		instead, and the pooled memory is handed back from Delete_This when the last one goes.
+	*/
+	void deleteInstance()
+	{
+		if (this)
+			Release_Ref();
+	}
+
+	virtual void Delete_This()
+	{
+		MemoryPoolObject::deleteInstance();
+	}
 
 protected:
 

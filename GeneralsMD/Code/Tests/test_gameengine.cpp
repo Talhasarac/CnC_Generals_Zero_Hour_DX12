@@ -33,6 +33,10 @@
 #include "GameClient/ControlBar.h"
 #include "GameClient/InGameUI.h"
 #include "GameLogic/IncomingDamage.h"
+#include "GameLogic/AIPlayer.h"
+#include "GameLogic/AIPathfind.h"
+#include "Common/TunnelTracker.h"
+#include "Common/StateMachine.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -1182,4 +1186,272 @@ TEST(placement_grid_snap_puts_footprint_edges_on_cell_lines)
 
 	/* a template with no footprint worth the name still lands on a whole cell, not on nothing */
 	CHECK_NEAR(InGameUI::snapPlacementAxis(13.0f, 0.0f), 14.5f, 0.0001f);
+}
+
+
+/* The shipped AIData.ini values, so the numbers below are the ones a real game uses. */
+static const Real AIDATA_TEAM_SECONDS   = 10.0f;
+static const Int  AIDATA_POOR           = 2000;
+static const Int  AIDATA_WEALTHY        = 7000;
+static const Real AIDATA_TEAM_POOR_MOD  = 0.6f;
+static const Real AIDATA_TEAM_RICH_MOD  = 2.0f;
+static const Real SKIRMISH_RATE         = 10.0f/3.0f;
+
+static Int teamDelay(Int money, Real rate)
+{
+	return AIPlayer::computeBuildDelay(AIDATA_TEAM_SECONDS, money, AIDATA_POOR, AIDATA_WEALTHY,
+	                                   AIDATA_TEAM_POOR_MOD, AIDATA_TEAM_RICH_MOD, rate);
+}
+
+TEST(ai_build_delay_follows_the_players_bank_account)
+{
+	/* A campaign AI runs at the rate the data literally says: 10 seconds flat, faster when it
+	 * is rich, slower when it is broke. */
+	CHECK_EQ(teamDelay(4000, 1.0f), 10 * LOGICFRAMES_PER_SECOND);
+	CHECK_EQ(teamDelay(9000, 1.0f),  5 * LOGICFRAMES_PER_SECOND);
+	CHECK_EQ(teamDelay(1000, 1.0f), (Int)(10.0f / 0.6f * LOGICFRAMES_PER_SECOND));
+
+	/* The thresholds are exclusive on both sides - sitting exactly on Poor or exactly on
+	 * Wealthy is neither. */
+	CHECK_EQ(teamDelay(AIDATA_POOR, 1.0f), 10 * LOGICFRAMES_PER_SECOND);
+	CHECK_EQ(teamDelay(AIDATA_WEALTHY, 1.0f), 10 * LOGICFRAMES_PER_SECOND);
+}
+
+TEST(skirmish_build_rate_keeps_the_old_pace_but_not_the_old_flat_clamp)
+{
+	/* The skirmish AI used to clamp both of its timers to a flat 3 seconds every frame they
+	 * counted down.  With the shipped TeamSeconds of 10 that clamp fired for every player at
+	 * every wealth, so TeamsWealthyRate and TeamsPoorRate did nothing at all.  As a rate the
+	 * neutral case still lands on the same 3 seconds... */
+	CHECK_EQ(teamDelay(4000, SKIRMISH_RATE), 3 * LOGICFRAMES_PER_SECOND);
+
+	/* ...and the modifiers around it are alive again: rich presses harder, broke backs off.
+	 * Under the clamp all three of these were 90. */
+	CHECK_EQ(teamDelay(9000, SKIRMISH_RATE), (Int)(1.5f * LOGICFRAMES_PER_SECOND));
+	CHECK_EQ(teamDelay(1000, SKIRMISH_RATE), (Int)(5.0f * LOGICFRAMES_PER_SECOND));
+	CHECK(teamDelay(9000, SKIRMISH_RATE) < teamDelay(4000, SKIRMISH_RATE));
+	CHECK(teamDelay(1000, SKIRMISH_RATE) > teamDelay(4000, SKIRMISH_RATE));
+
+	/* The SET_BASE_CONSTRUCTION_SPEED script action writes the seconds this reads, and the
+	 * clamp is what used to eat anything it asked for above 3 seconds. */
+	const Int scripted = AIPlayer::computeBuildDelay(30.0f, 4000, AIDATA_POOR, AIDATA_WEALTHY,
+	                                                 AIDATA_TEAM_POOR_MOD, AIDATA_TEAM_RICH_MOD,
+	                                                 SKIRMISH_RATE);
+	CHECK_EQ(scripted, 9 * LOGICFRAMES_PER_SECOND);
+	CHECK(scripted > 3 * LOGICFRAMES_PER_SECOND);
+
+	/* StructureSeconds ships as 0, so structures stay on the "as soon as the build delay lets
+	 * you" path they are on today, whatever the rate is. */
+	CHECK_EQ(AIPlayer::computeBuildDelay(0.0f, 9000, AIDATA_POOR, AIDATA_WEALTHY, 0.6f, 2.0f, SKIRMISH_RATE), 0);
+}
+
+//////////////////////////////////////////////////////////////////////////////
+// Pathfinder cell info pool
+//////////////////////////////////////////////////////////////////////////////
+
+/* The A* open and closed lists are drawn from one fixed pool of PathfindCellInfo
+   records.  A search that walks away from a cell without handing its record back
+   leaks one entry, every time it runs, for the rest of the match - and once the
+   pool is dry every pathfind on the map fails and the units stop taking orders.
+   The pool is private, so the only way to measure it is to drain it. */
+enum { CELL_POOL_PROBE_CAP = 400000 };
+
+static Int drainCellInfoPool( void )
+{
+	PathfindCell *cells = new PathfindCell[ CELL_POOL_PROBE_CAP ];
+	Int count = 0;
+	while( count < CELL_POOL_PROBE_CAP )
+	{
+		ICoord2D pos;
+		pos.x = count & 0xff;
+		pos.y = (count >> 8) & 0xff;
+		if( !cells[ count ].allocateInfo( pos ) )
+			break;
+		count++;
+	}
+	for( Int i = 0; i < count; i++ )
+		cells[ i ].releaseInfo();
+	delete [] cells;
+	return count;
+}
+
+TEST(pathfind_pool_comes_back_whole_after_a_search_is_started)
+{
+	CHECK(bootOnce());
+	PathfindCellInfo::allocateCellInfos();
+
+	const Int baseline = drainCellInfoPool();
+	CHECK(baseline > 1000);
+	CHECK(baseline < CELL_POOL_PROBE_CAP);
+
+	{
+		PathfindCell start, goal;
+		ICoord2D sp, gp;
+		sp.x = 10; sp.y = 10;
+		gp.x = 20; gp.y = 30;
+		CHECK(start.allocateInfo(sp));
+		CHECK(goal.allocateInfo(gp));
+
+		/* startPathfind used to mark the start cell as sitting on the open list.  It is not:
+		 * the caller assigns it to m_openList by hand rather than linking it in.  All the flag
+		 * did was make releaseInfo() refuse to hand the record back, so every search that gave
+		 * up early - wrong zone, no path, pool empty - leaked its start cell. */
+		start.startPathfind(&goal);
+		CHECK(!start.getOpen());
+		CHECK(!start.getClosed());
+
+		start.releaseInfo();
+		CHECK(!start.hasInfo());
+		goal.releaseInfo();
+		CHECK(!goal.hasInfo());
+	}
+
+	CHECK_EQ(drainCellInfoPool(), baseline);
+	PathfindCellInfo::releaseCellInfos();
+}
+
+TEST(pathfind_cell_drops_its_parent_link_even_when_it_keeps_its_record)
+{
+	CHECK(bootOnce());
+	PathfindCellInfo::allocateCellInfos();
+
+	const Int baseline = drainCellInfoPool();
+
+	{
+		PathfindCell keeper, parent;
+		ICoord2D kp, pp;
+		kp.x = 5; kp.y = 5;
+		pp.x = 6; pp.y = 5;
+		CHECK(keeper.allocateInfo(kp));
+		CHECK(parent.allocateInfo(pp));
+		keeper.setParentCell(&parent);
+		CHECK(keeper.getParentCell() == &parent);
+
+		/* An obstacle cell hangs on to its record - releaseInfo() returns early for it.  It
+		 * used to return before clearing the parent link as well, so the cell went on pointing
+		 * at a record the very next search hands out to some other cell, and walking the path
+		 * backwards from there reads a stranger's data. */
+		keeper.setType(PathfindCell::CELL_OBSTACLE);
+		keeper.releaseInfo();
+		CHECK(keeper.hasInfo());
+		CHECK(keeper.getParentCell() == NULL);
+
+		keeper.setType(PathfindCell::CELL_CLEAR);
+		keeper.releaseInfo();
+		CHECK(!keeper.hasInfo());
+		parent.releaseInfo();
+		CHECK(!parent.hasInfo());
+	}
+
+	CHECK_EQ(drainCellInfoPool(), baseline);
+	PathfindCellInfo::releaseCellInfos();
+}
+
+TEST(pathfind_obstacle_state_no_longer_borrows_a_search_record)
+{
+	CHECK(bootOnce());
+	PathfindCellInfo::allocateCellInfos();
+
+	const Int baseline = drainCellInfoPool();
+
+	{
+		PathfindCell cell;
+		CHECK(!cell.hasInfo());
+
+		/* Which object stands on a cell, whether it is a fence, whether you can see through it
+		 * and whether an ally is in the way all used to be stored in a pooled search record, so
+		 * a cell had to hold one open for as long as the wall stood on it - and releaseInfo()
+		 * refuses to reclaim an obstacle cell, so every building and fence on the map was a
+		 * permanent bite out of the pool the search draws from.  They are cell state now, and a
+		 * cell answers for them with no record at all. */
+		cell.setBlockedByAlly(TRUE);
+		CHECK(cell.isBlockedByAlly());
+		cell.setBlockedByAlly(FALSE);
+		CHECK(!cell.isBlockedByAlly());
+		CHECK(cell.getObstacleID() == INVALID_ID);
+		CHECK(!cell.isObstacleFence());
+		CHECK(!cell.isObstacleTransparent());
+		CHECK(!cell.isObstaclePresent((ObjectID)17));
+
+		CHECK(!cell.hasInfo());
+	}
+
+	CHECK_EQ(drainCellInfoPool(), baseline);
+	PathfindCellInfo::releaseCellInfos();
+}
+
+
+/* The tunnel network keeps the contain list for every tunnel a player owns, and
+ * TunnelContain::killAllContained has to take that whole list away from the tracker before it
+ * kills anything: a Terrorist that explodes on death kills the tunnel, and the tunnel's own death
+ * walks the same list the outer call is still standing in.  Taking the list away is only half of
+ * it - the tracker's cached size has to follow, or the game reads a count that no longer matches
+ * the list.  No Object is touched here, only the bookkeeping. */
+TEST(tunneltracker_handing_the_contain_list_over_takes_the_count_with_it)
+{
+	CHECK(bootOnce());
+
+	TunnelTracker *tracker = newInstance(TunnelTracker);
+	CHECK_EQ((Int)tracker->getContainCount(), 0);
+
+	ContainedItemsList seeded;
+	seeded.push_back((Object *)0x100);
+	seeded.push_back((Object *)0x200);
+	seeded.push_back((Object *)0x300);
+
+	tracker->swapContainedItemsList(seeded);
+	CHECK(seeded.empty());
+	CHECK_EQ((Int)tracker->getContainCount(), 3);
+	CHECK_EQ((Int)tracker->getContainedItemsList()->size(), 3);
+
+	/* what killAllContained does: take the list, leave the tracker empty and consistent */
+	ContainedItemsList taken;
+	tracker->swapContainedItemsList(taken);
+	CHECK_EQ((Int)taken.size(), 3);
+	CHECK_EQ((Int)tracker->getContainCount(), 0);
+	CHECK(tracker->getContainedItemsList()->empty());
+
+	taken.clear();
+	tracker->deleteInstance();
+}
+
+/* StateMachine is reference counted so that a state update which destroys the
+   machine's owner does not pull the machine out from under updateStateMachine.
+   The owner's deleteInstance() is now just "drop my reference". */
+static Bool s_witnessMachineDestroyed = FALSE;
+
+class WitnessStateMachine : public StateMachine
+{
+	/* borrow the real machine's pool - same size, and MemoryInit.cpp knows the name */
+	MEMORY_POOL_GLUE_WITH_USERLOOKUP_CREATE(WitnessStateMachine, "StateMachinePool")
+public:
+	WitnessStateMachine() : StateMachine(NULL, "witness") {}
+};
+
+WitnessStateMachine::~WitnessStateMachine() { s_witnessMachineDestroyed = TRUE; }
+
+TEST(statemachine_outlives_the_owner_that_lets_go_of_it_mid_update)
+{
+	CHECK(bootOnce());
+
+	s_witnessMachineDestroyed = FALSE;
+	StateMachine *machine = newInstance(WitnessStateMachine);
+	CHECK_EQ(machine->Num_Refs(), 1);
+
+	/* what updateStateMachine holds while m_currentState->update() runs */
+	machine->Add_Ref();
+	CHECK_EQ(machine->Num_Refs(), 2);
+
+	/* the state update kills the owning object, which deletes its machine */
+	machine->deleteInstance();
+	CHECK(!s_witnessMachineDestroyed);
+	CHECK_EQ(machine->Num_Refs(), 1);
+
+	/* update() returns, updateStateMachine drops its reference - now it goes */
+	machine->Release_Ref();
+	CHECK(s_witnessMachineDestroyed);
+
+	/* and deleteInstance() still tolerates a NULL machine, the way the pool one did */
+	machine = NULL;
+	machine->deleteInstance();
 }

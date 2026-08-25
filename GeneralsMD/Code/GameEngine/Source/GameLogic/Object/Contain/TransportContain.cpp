@@ -479,7 +479,8 @@ UpdateSleepTime TransportContain::update()
 {
 	const TransportContainModuleData *moduleData = getTransportContainModuleData();
 
-	if( m_payloadCreated == FALSE )
+	// A transport that was destroyed this frame must not fill itself with a payload on the way out.
+	if( m_payloadCreated == FALSE && !getObject()->isDestroyed() )
 		createPayload();
 
 	if( moduleData && moduleData->m_healthRegen )

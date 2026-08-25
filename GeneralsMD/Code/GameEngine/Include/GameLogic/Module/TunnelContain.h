@@ -40,6 +40,7 @@
 #include "GameLogic/Module/CreateModule.h"
 #include "Common/GameMemory.h"
 class Team;
+class TunnelTracker;
 
 //-------------------------------------------------------------------------------------------------
 class TunnelContainModuleData : public OpenContainModuleData
@@ -102,6 +103,9 @@ public:
 	virtual void onSelling();///< Container is being sold.  Tunnel responds by kicking people out if this is the last tunnel.
 	virtual void onCapture( Player *oldOwner, Player *newOwner ); // Need to change who we are registered with.
 
+	virtual void orderAllPassengersToExit( CommandSourceType commandSource, Bool instantly );
+	virtual void orderAllPassengersToIdle( CommandSourceType commandSource );
+
 	virtual Bool isValidContainerFor(const Object* obj, Bool checkCapacity) const;
 	virtual void addToContainList( Object *obj );		///< The part of AddToContain that inheritors can override (Can't do whole thing because of all the private stuff involved)
 	virtual void removeFromContain( Object *obj, Bool exposeStealthUnits = FALSE );	///< remove 'obj' from contain list
@@ -130,6 +134,14 @@ public:
 	virtual UpdateSleepTime update();												///< called once per frame
 
 protected:
+
+	//
+	// A tunnel keeps nothing of its own - the whole contain list belongs to the owning player's
+	// TunnelTracker, and a Player that has been init'ed but not yet handed a dict does not have one
+	// (Player::init leaves it NULL, Player::initFromDict allocates it).  Every path below that
+	// reaches for the tracker goes through this.
+	//
+	TunnelTracker *getTunnelTracker( void ) const;
 
 	void scatterToNearbyPosition(Object* obj);
 	Bool m_needToRunOnBuildComplete; 

@@ -6833,6 +6833,10 @@ StateReturnType AIExitState::update()
 		if( goalExitInterface == NULL )
 			return STATE_FAILURE;
 
+		// The container died while we were queued to leave it - we are already out, stop asking.
+		if( goal->isEffectivelyDead() )
+			return STATE_FAILURE;
+
 		if( goalExitInterface->isExitBusy() )
 			return STATE_CONTINUE;// Just wait a sec.
 

@@ -37,6 +37,8 @@
 enum { INVALID_SKILLSET_SELECTION = -1 };
 
 class BuildListInfo;
+// this header used to compile only behind whoever happened to include Team.h first
+class TeamPrototype;
 
 /**
  * When a team is selected for training, a list of these
@@ -245,6 +247,22 @@ protected:
 	MAKE_DLINK_HEAD(TeamInQueue, TeamReadyQueue);		///< List of teams built, waiting to reach rally point.
 
 protected:
+	Int computeStructureDelay( void );	///< frames to wait before trying the next structure
+	Int computeTeamDelay( void );				///< frames to wait before trying the next team
+
+public:
+	/// the arithmetic behind the two above, free of the Player so a test can reach it
+	static Int computeBuildDelay( Real seconds, Int money, Int poorAt, Int wealthyAt,
+																Real poorMod, Real wealthyMod, Real rateScale );
+protected:
+
+	/**
+		How much faster than the AIData delays this AI works.  1 = exactly as the data says.
+		The skirmish AI overrides it: it is meant to react faster than a scripted campaign AI,
+		and used to get that by clamping its own timers, which threw the data away.
+	*/
+	virtual Real getBuildRateScale( void ) { return 1.0f; }
+
 	Bool isPossibleToBuildTeam( TeamPrototype *proto, Bool requireIdleFactory, Bool &needMoney );		///< return true if team can be considered for building
 	Object *buildStructureNow(const ThingTemplate *bldgPlan, BuildListInfo *info );		///< Build a base buiding.
 	Object *buildStructureWithDozer(const ThingTemplate *bldgPlan, BuildListInfo *info );		///< Build a base buiding.

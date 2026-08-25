@@ -1173,13 +1173,9 @@ PathfindCellInfo *PathfindCellInfo::getACellInfo(PathfindCell *cell,const ICoord
 		info->m_totalCost = 0;
 		info->m_open = 0;
 		info->m_closed = 0;
-		info->m_obstacleID = INVALID_ID;
 		info->m_goalUnitID = INVALID_ID;
 		info->m_posUnitID = INVALID_ID;
 		info->m_goalAircraftID = INVALID_ID;
-		info->m_obstacleIsFence = false;
-		info->m_obstacleIsTransparent = false;
-		info->m_blockedByAlly = false;
 	}
 	return info;
 }
@@ -1190,8 +1186,6 @@ PathfindCellInfo *PathfindCellInfo::getACellInfo(PathfindCell *cell,const ICoord
 void PathfindCellInfo::releaseACellInfo(PathfindCellInfo *theInfo) 
 {
 	DEBUG_ASSERTCRASH(!theInfo->m_isFree, ("Shouldn't be free."));
-	//@ todo -fix this assert on usa04.  jba.
-	//DEBUG_ASSERTCRASH(theInfo->m_obstacleID==0, ("Shouldn't be obstacle."));
 	theInfo->m_pathParent = s_firstFree;
 	s_firstFree = theInfo;
 	s_firstFree->m_isFree = true;
@@ -1231,8 +1225,11 @@ void PathfindCell::reset( )
 	m_zone = 0;
 	m_aircraftGoal = false;
 	m_pinched = false;
+	m_obstacleID = INVALID_ID;
+	m_blockedByAlly = false;
+	m_obstacleIsFence = false;
+	m_obstacleIsTransparent = false;
 	if (m_info) {
-		m_info->m_obstacleID = INVALID_ID;
 		PathfindCellInfo::releaseACellInfo(m_info);
 		m_info = NULL;
 	}
@@ -1255,7 +1252,9 @@ Bool PathfindCell::startPathfind( PathfindCell *goalCell  )
 	if (goalCell) {
 		m_info->m_totalCost = costToGoal( goalCell );
 	}
-	m_info->m_open = TRUE;
+	// the caller assigns this cell to m_openList by hand rather than linking it in, so it
+	// is not really on a list; saying it is only makes releaseInfo() refuse to free it
+	m_info->m_open = FALSE;
 	m_info->m_closed = FALSE;
 	return true;
 }
@@ -1309,6 +1308,11 @@ Bool PathfindCell::allocateInfo( const ICoord2D &pos )
  */
 void PathfindCell::releaseInfo( void ) 
 { 
+	// a cell that did not make it onto the final path keeps its parent link, and the info
+	// that link points at gets recycled under it - clear it before any of the early outs
+	if (m_info) {
+		m_info->m_pathParent = NULL;
+	}
 	if (m_type==PathfindCell::CELL_OBSTACLE) {
 		return;
 	}
@@ -1469,24 +1473,22 @@ Bool PathfindCell::setTypeAsObstacle( Object *obstacle, Bool isFence, const ICoo
 
 	if (isRubble) {
 		m_type = PathfindCell::CELL_RUBBLE;
-		if (m_info) {
-			m_info->m_obstacleID = INVALID_ID;
-			releaseInfo();
-		}
+		m_obstacleID = INVALID_ID;
+		m_obstacleIsFence = false;
+		m_obstacleIsTransparent = false;
+		releaseInfo();
 		return true;
 	}
 
+	//
+	// This used to reach into the search pool for a record to hold the three values below, and
+	// hand back false - "no obstacle here" - when the pool was empty.  The obstacle then stood
+	// on the map with the cell still marked clear.
+	//
 	m_type = PathfindCell::CELL_OBSTACLE ;
-	if (!m_info) {
-		m_info = PathfindCellInfo::getACellInfo(this, pos);
-		if (!m_info) {
-			DEBUG_CRASH(("Not enough PathFindCellInfos in pool."));
-			return false;
-		}
-	}
-	m_info->m_obstacleID = obstacle->getID();
-	m_info->m_obstacleIsFence = isFence;
-	m_info->m_obstacleIsTransparent = obstacle->isKindOf(KINDOF_CAN_SEE_THROUGH_STRUCTURE);
+	m_obstacleID = obstacle->getID();
+	m_obstacleIsFence = isFence;
+	m_obstacleIsTransparent = obstacle->isKindOf(KINDOF_CAN_SEE_THROUGH_STRUCTURE);
 	return true;
 }
 
@@ -1495,7 +1497,7 @@ Bool PathfindCell::setTypeAsObstacle( Object *obstacle, Bool isFence, const ICoo
  */
 void PathfindCell::setType( CellType type )
 {
-	if (m_info && (m_info->m_obstacleID != INVALID_ID)) {
+	if (m_obstacleID != INVALID_ID) {
 		DEBUG_ASSERTCRASH(type==PathfindCell::CELL_OBSTACLE, ("Wrong type."));
 		m_type = PathfindCell::CELL_OBSTACLE;
 		return;
@@ -1512,10 +1514,11 @@ Bool PathfindCell::removeObstacle( Object *obstacle )
 	if (m_type == PathfindCell::CELL_RUBBLE) {
 		m_type = PathfindCell::CELL_CLEAR;
 	}
-	if (!m_info) return false;
-	if (m_info->m_obstacleID != obstacle->getID()) return false;
+	if (m_obstacleID != obstacle->getID()) return false;
 	m_type = PathfindCell::CELL_CLEAR;
-	m_info->m_obstacleID = INVALID_ID;
+	m_obstacleID = INVALID_ID;
+	m_obstacleIsFence = false;
+	m_obstacleIsTransparent = false;
 	releaseInfo();
 	return true;
 }
@@ -4055,6 +4058,10 @@ void Pathfinder::classifyFence( Object *obj, Bool insert )
 	IRegion2D cellBounds;
 	cellBounds.lo.x = REAL_TO_INT_FLOOR((pos->x + 0.5f)/PATHFIND_CELL_SIZE_F);
 	cellBounds.lo.y = REAL_TO_INT_FLOOR((pos->y + 0.5f)/PATHFIND_CELL_SIZE_F);
+	// hi was left holding whatever was on the stack, and the loop below only ever raises
+	// it - so the zone update below covered a random rectangle
+	cellBounds.hi.x = REAL_TO_INT_CEIL((pos->x + 0.5f)/PATHFIND_CELL_SIZE_F);
+	cellBounds.hi.y = REAL_TO_INT_CEIL((pos->y + 0.5f)/PATHFIND_CELL_SIZE_F);
 	Bool didAnything = false;
 
  	for (Int iy = 0; iy < numStepsY; ++iy, tl_x += ydx, tl_y += ydy)
@@ -4478,16 +4485,12 @@ void Pathfinder::internal_classifyObjectFootprint( Object *obj, Bool insert )
 		}
 	}
 
-	for( j=cellBounds.lo.y; j<=cellBounds.hi.y; j++ )
-	{
-		for( i=cellBounds.lo.x; i<=cellBounds.hi.x; i++ )
-		{
-			if (m_map[i][j].getPinched() && (m_map[i][j].getType() == PathfindCell::CELL_CLEAR)) {
-				m_map[i][j].setType(PathfindCell::CELL_IMPASSABLE);
-				m_map[i][j].setPinched(false);
-			}
-		}
-	}
+	//
+	// A pass here used to promote every pinched-but-clear cell to CELL_IMPASSABLE.  Pinched
+	// cells already cannot be pathed through, so the promotion bought nothing - but it is
+	// permanent, and it also blocks building, so a footprint change could quietly wall off
+	// the ground around a structure for the rest of the match.
+	//
 
 	// Expand building bounds 1 cell.
 #define MARK_BORDER_PINCHED
@@ -5439,12 +5442,12 @@ Bool Pathfinder::adjustDestination(Object *obj, const LocomotorSet& locomotorSet
 	Bool center;
 	getRadiusAndCenter(obj, iRadius, center);
 	ICoord2D cell;
-	Coord3D adjustDest = *dest;
+	Coord3D cellDest = *dest;
 	if (!center) {
-		adjustDest.x += PATHFIND_CELL_SIZE_F/2;
-		adjustDest.y += PATHFIND_CELL_SIZE_F/2;
+		cellDest.x += PATHFIND_CELL_SIZE_F/2;
+		cellDest.y += PATHFIND_CELL_SIZE_F/2;
 	}
-	worldToCell( &adjustDest, &cell );
+	worldToCell( &cellDest, &cell );
 	PathfindLayerEnum layer = TheTerrainLogic->getLayerForDestination(dest);
 	if (groupDest) {
 		layer = TheTerrainLogic->getLayerForDestination(groupDest);
@@ -5455,7 +5458,18 @@ Bool Pathfinder::adjustDestination(Object *obj, const LocomotorSet& locomotorSet
 	Int i, j;
 	i = cell.x;
 	j = cell.y;
-	if (checkForAdjust(obj, locomotorSet, isHuman, i,j, layer, iRadius, center, dest, groupDest)) {
+	//
+	// The centre cell is checked first, and it snapped the order to the middle of that cell
+	// even when nothing was in the way - which is why a lone Chinook never landed where you
+	// clicked.  Keep the click for a single unit; a group still gets the tidy grid, because
+	// without it the formation smears.
+	//
+	Coord3D adjustDest = *dest;
+	if (checkForAdjust(obj, locomotorSet, isHuman, i,j, layer, iRadius, center, &adjustDest, groupDest)) {
+		const Bool singleUnit = obj->getGroup() && obj->getGroup()->getCount() == 1;
+		if (!(isHuman && singleUnit)) {
+			*dest = adjustDest;
+		}
 		return true;
 	}
 
@@ -6668,10 +6682,14 @@ Path *Pathfinder::internalFindPath( Object *obj, const LocomotorSet& locomotorSe
 	zone2 =  m_zoneManager.getEffectiveZone(locomotorSet.getValidSurfaces(), isCrusher, goalCell->getZone());
 
 	if (layer==LAYER_WALL && zone1 == 0) {
+		goalCell->releaseInfo();
+		parentCell->releaseInfo();
 		return NULL;
 	}
 
 	if (destinationLayer==LAYER_WALL && zone2 == 0) {
+		goalCell->releaseInfo();
+		parentCell->releaseInfo();
 		return NULL;
 	}
 
@@ -6767,8 +6785,8 @@ Path *Pathfinder::internalFindPath( Object *obj, const LocomotorSet& locomotorSe
 										 cellCount, searchMs, buildMs, nodes, from->x, from->y, rawTo->x, rawTo->y));
 				}
 			}
-			parentCell->releaseInfo();
 			cleanOpenAndClosedLists();
+			parentCell->releaseInfo();
 			return path;
 		}	
 
@@ -6844,8 +6862,9 @@ Path *Pathfinder::internalFindPath( Object *obj, const LocomotorSet& locomotorSe
 						 TheGameLogic->getFrame(), obj ? obj->getTemplate()->getName().str() : "?",
 						 from->x, from->y, to->x, to->y, cellCount));
 	m_isTunneling = false;
-	goalCell->releaseInfo();
 	cleanOpenAndClosedLists();
+	parentCell->releaseInfo();
+	goalCell->releaseInfo();
 	return NULL;
 }
 
@@ -7220,6 +7239,7 @@ Path *Pathfinder::findGroundPath( const Coord3D *from,
 	PathfindLayerEnum layer = TheTerrainLogic->getLayerForDestination(from);
 	PathfindCell *parentCell = getClippedCell( layer,&clipFrom );
 	if (parentCell == NULL) {
+		goalCell->releaseInfo();
 		return NULL;
 	}
 	if (parentCell!=goalCell) {
@@ -7277,8 +7297,8 @@ Path *Pathfinder::findGroundPath( const Coord3D *from,
 			m_isTunneling = false;
 			// construct and return path
 			Path *path =  buildGroundPath(crusher, from, goalCell, centerInCell, pathDiameter );
-			parentCell->releaseInfo();
 			cleanOpenAndClosedLists();
+			parentCell->releaseInfo();
 			return path;
 		}	
 
@@ -7466,8 +7486,9 @@ Path *Pathfinder::findGroundPath( const Coord3D *from,
 	TheGameLogic->incrementOverallFailedPathfinds();
 #endif
 	m_isTunneling = false;
-	goalCell->releaseInfo();
 	cleanOpenAndClosedLists();
+	parentCell->releaseInfo();
+	goalCell->releaseInfo();
 	return NULL;
 }
 
@@ -7711,7 +7732,14 @@ Path *Pathfinder::internal_findHierarchicalPath( Bool isHuman, const LocomotorSu
 			// Close parent cell;
 			m_openList = parentCell->removeFromOpenList(m_openList);
 			m_closedList = parentCell->putOnClosedList(m_closedList);
-			startCell->allocateInfo(ndx);
+			if (!startCell->allocateInfo(ndx)) {
+				// out of cell infos - anything already linked into the lists has to come off
+				// them before the start and goal cells hand their own records back
+				cleanOpenAndClosedLists();
+				parentCell->releaseInfo();
+				goalCell->releaseInfo();
+				return NULL;
+			}
 			startCell->setParentCellHierarchical(parentCell);
 			cellCount++;
 			Int curCost = startCell->costToHierGoal(parentCell);
@@ -7723,7 +7751,14 @@ Path *Pathfinder::internal_findHierarchicalPath( Bool isHuman, const LocomotorSu
 			m_openList = startCell->putOnSortedOpenList( m_openList );
 
 			cellCount++;
-			cell->allocateInfo(toNdx);
+			if (!cell->allocateInfo(toNdx)) {
+				// out of cell infos - anything already linked into the lists has to come off
+				// them before the start and goal cells hand their own records back
+				cleanOpenAndClosedLists();
+				parentCell->releaseInfo();
+				goalCell->releaseInfo();
+				return NULL;
+			}
 			curCost = cell->costToHierGoal(parentCell);
 			remCost = cell->costToHierGoal(goalCell);
 			cell->setCostSoFar(curCost);
@@ -7807,13 +7842,23 @@ Path *Pathfinder::internal_findHierarchicalPath( Bool isHuman, const LocomotorSu
 					PathfindCell *startCell = getCell(LAYER_GROUND, ndx.x, ndx.y); 
 					if (startCell==NULL) continue;
 					if (startCell != parentCell) {
-						startCell->allocateInfo(ndx);
+						if (!startCell->allocateInfo(ndx)) {
+							cleanOpenAndClosedLists();
+							parentCell->releaseInfo();
+							goalCell->releaseInfo();
+							return NULL;
+						}
 						startCell->setParentCellHierarchical(parentCell);
 						if (!startCell->getClosed() && !startCell->getOpen()) {
 							m_closedList = startCell->putOnClosedList(m_closedList);
 						}
 					}
-					cell->allocateInfo(toNdx);
+					if (!cell->allocateInfo(toNdx)) {
+						cleanOpenAndClosedLists();
+						parentCell->releaseInfo();
+						goalCell->releaseInfo();
+						return NULL;
+					}
 					cell->setParentCellHierarchical(startCell);
 
 					cellCount++;
@@ -7867,11 +7912,9 @@ Path *Pathfinder::internal_findHierarchicalPath( Bool isHuman, const LocomotorSu
 #endif
 			}
 #endif
-			if (goalCell->hasInfo() && !goalCell->getClosed() && !goalCell->getOpen()) {
-				goalCell->releaseInfo();
-			}
-			parentCell->releaseInfo();
 			cleanOpenAndClosedLists();
+			parentCell->releaseInfo();
+			goalCell->releaseInfo();
 			return path;
 		}	
 
@@ -8068,10 +8111,9 @@ Path *Pathfinder::internal_findHierarchicalPath( Bool isHuman, const LocomotorSu
 		}
 #endif
 #endif
-		if (goalCell->hasInfo() && !goalCell->getClosed() && !goalCell->getOpen()) {
-			goalCell->releaseInfo();
-		}
 		cleanOpenAndClosedLists();
+		parentCell->releaseInfo();
+		goalCell->releaseInfo();
 		return path;
 	}
 
@@ -8117,8 +8159,9 @@ Path *Pathfinder::internal_findHierarchicalPath( Bool isHuman, const LocomotorSu
 	TheGameLogic->incrementOverallFailedPathfinds();
 #endif
 	m_isTunneling = false;
-	goalCell->releaseInfo();
 	cleanOpenAndClosedLists();
+	parentCell->releaseInfo();
+	goalCell->releaseInfo();
 	return NULL;
 }
 
@@ -8382,7 +8425,6 @@ Bool Pathfinder::pathDestination( 	Object *obj, const LocomotorSet& locomotorSet
 
 	if (parentCell!=goalCell) {
 		if (!parentCell->allocateInfo(startCellNdx)) {
-			desiredCell->releaseInfo();
 			goalCell->releaseInfo();
 			return FALSE;
 		}
@@ -8496,7 +8538,10 @@ Bool Pathfinder::pathDestination( 	Object *obj, const LocomotorSet& locomotorSet
 			neighborFlags[i] = true;
 
 			if (!newCell->allocateInfo(newCellCoord)) {
-				// Out of cells for pathing...
+				// Out of cells for pathing - unwind the lists before walking out, or every
+				// cell already linked into them keeps its record for good
+				cleanOpenAndClosedLists();
+				goalCell->releaseInfo();
  				return cellCount;
 			}								
 			cellCount++;
@@ -8554,6 +8599,7 @@ Bool Pathfinder::pathDestination( 	Object *obj, const LocomotorSet& locomotorSet
 #endif
 	m_isTunneling = false;
 	cleanOpenAndClosedLists();
+	parentCell->releaseInfo();
 	goalCell->releaseInfo();
 	return false;
 }
@@ -8565,8 +8611,9 @@ struct TightenPathStruct
 	PathfindLayerEnum layer;
 	Int		radius;
 	Bool	center;
-	Bool	foundDest;
-	Coord3D destPos;
+	Bool	foundNewDest;
+	Coord3D orgDestPos;
+	Coord3D newDestPos;
 };
 
 
@@ -8577,13 +8624,15 @@ struct TightenPathStruct
 	if (d->layer != to->getLayer()) {
 		return 0; // abort.
 	}
-	Coord3D pos;
+	// checkForAdjust reads pos as well as writing it, so it has to start from the
+	// destination we are tightening towards rather than from stack litter
+	Coord3D pos = d->orgDestPos;
 	if (!TheAI->pathfinder()->checkForAdjust(d->obj, *d->locomotorSet, true, to_x, to_y, to->getLayer(), d->radius, d->center, &pos, NULL)) 
 	{
 		return 0;	// bail early
 	}
-	d->foundDest = true; 
-	d->destPos = pos;
+	d->foundNewDest = true; 
+	d->newDestPos = pos;
 
 	return 0;	// keep going
 }
@@ -8598,10 +8647,11 @@ void Pathfinder::tightenPath(Object *obj, const LocomotorSet& locomotorSet, Coor
 	info.layer = TheTerrainLogic->getLayerForDestination(from);
 	info.obj = obj;
 	info.locomotorSet = &locomotorSet;
-	info.foundDest = false;
+	info.foundNewDest = false;
+	info.orgDestPos = *to;
 	iterateCellsAlongLine(*from, *to, info.layer, tightenPathCallback, &info);
-	if (info.foundDest) {
-		*from = info.destPos;
+	if (info.foundNewDest) {
+		*from = info.newDestPos;
 	}
 }
 
@@ -8680,15 +8730,16 @@ Int Pathfinder::checkPathCost(Object *obj, const LocomotorSet& locomotorSet, con
 		parentCell = m_openList;
 		m_openList = parentCell->removeFromOpenList(m_openList);
 
-		// put parent cell onto closed list - its evaluation is finished
-		m_closedList = parentCell->putOnClosedList( m_closedList );
-
 		if (parentCell==goalCell) {	 
 			Int cost = parentCell->getTotalCost();
 			m_isTunneling = false;
 			cleanOpenAndClosedLists();
+			parentCell->releaseInfo();
 			return cost;
 		}
+
+		// put parent cell onto closed list - its evaluation is finished
+		m_closedList = parentCell->putOnClosedList( m_closedList );
 
 		if (cellCount > MAX_CELL_COUNT) {
 			continue;
@@ -8749,7 +8800,10 @@ Int Pathfinder::checkPathCost(Object *obj, const LocomotorSet& locomotorSet, con
 			neighborFlags[i] = true;
 
 			if (!newCell->allocateInfo(newCellCoord)) {
-				// Out of cells for pathing...
+				// Out of cells for pathing - unwind the lists before walking out
+				cleanOpenAndClosedLists();
+				parentCell->releaseInfo();
+				goalCell->releaseInfo();
  				return cellCount;
 			}								
 			cellCount++;
@@ -8798,10 +8852,9 @@ Int Pathfinder::checkPathCost(Object *obj, const LocomotorSet& locomotorSet, con
 	}
 
 	m_isTunneling = false;
-	if (goalCell->hasInfo() && !goalCell->getClosed() && !goalCell->getOpen()) {
-		goalCell->releaseInfo();
-	}
 	cleanOpenAndClosedLists();
+	parentCell->releaseInfo();
+	goalCell->releaseInfo();
 	return MAX_COST;
 }
 
@@ -8942,6 +8995,7 @@ Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet
 	if (parentCell!=goalCell) {
 		worldToCell(&clipFrom, &pos2d);
 		if (!parentCell->allocateInfo(pos2d)) {
+			goalCell->releaseInfo();
 			return NULL;
 		}
 	}
@@ -9007,9 +9061,9 @@ Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet
 			m_isTunneling = false;
 			// construct and return path
 			Path *path = buildActualPath( obj, locomotorSet.getValidSurfaces(), from, goalCell, centerInCell, blocked);
+			cleanOpenAndClosedLists();
 			parentCell->releaseInfo();
 			goalCell->releaseInfo();
-			cleanOpenAndClosedLists();
 			return path;
 		}	
 		// put parent cell onto closed list - its evaluation is finished
@@ -9089,8 +9143,9 @@ Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet
 		rawTo->y = closesetCell->getYIndex()*PATHFIND_CELL_SIZE_F + PATHFIND_CELL_SIZE_F/2.0f;
 		// construct and return path
 		Path *path = buildActualPath( obj, locomotorSet.getValidSurfaces(), from, closesetCell, centerInCell, blocked );
-		goalCell->releaseInfo();
 		cleanOpenAndClosedLists();
+		parentCell->releaseInfo();
+		goalCell->releaseInfo();
 		return path;
 	}
 
@@ -9109,8 +9164,9 @@ Path *Pathfinder::findClosestPath( Object *obj, const LocomotorSet& locomotorSet
 	TheGameLogic->incrementOverallFailedPathfinds();
 #endif
 	m_isTunneling = false;
-	goalCell->releaseInfo();
 	cleanOpenAndClosedLists();
+	parentCell->releaseInfo();
+	goalCell->releaseInfo();
 	return NULL;
 }
 
@@ -10496,8 +10552,8 @@ Path *Pathfinder::getMoveAwayFromPath(Object* obj, Object *otherObj,
 			m_isTunneling = false;
 			// construct and return path
 			Path *newPath = buildActualPath( obj, locomotorSet.getValidSurfaces(), obj->getPosition(), parentCell, centerInCell, false);
-			parentCell->releaseInfo();
 			cleanOpenAndClosedLists();
+			parentCell->releaseInfo();
 			return newPath;
 		}	
 		// put parent cell onto closed list - its evaluation is finished
@@ -10518,6 +10574,7 @@ Path *Pathfinder::getMoveAwayFromPath(Object* obj, Object *otherObj,
 #endif
 	m_isTunneling = false;
 	cleanOpenAndClosedLists();
+	parentCell->releaseInfo();
 	return NULL;
 }
 
@@ -10633,7 +10690,7 @@ Path *Pathfinder::patchPath( const Object *obj, const LocomotorSet& locomotorSet
 
 	}	
 	if (startNode == originalPath->getLastNode()) {
-		cleanOpenAndClosedLists();
+		parentCell->releaseInfo();
 		return NULL; // no open nodes.
 	}
 	PathfindCell *candidateGoal;
@@ -10641,6 +10698,7 @@ Path *Pathfinder::patchPath( const Object *obj, const LocomotorSet& locomotorSet
 	ICoord2D goalCellNdx;
 	worldToCell(&goalPos, &goalCellNdx);
 	if (!candidateGoal->allocateInfo(goalCellNdx)) {
+		parentCell->releaseInfo();
 		return NULL;
 	}
 
@@ -10676,8 +10734,8 @@ Path *Pathfinder::patchPath( const Object *obj, const LocomotorSet& locomotorSet
 			// cleanup the path by checking line of sight
 			path->optimize(obj, locomotorSet.getValidSurfaces(), blocked);
 			registerPathUsage(path);
-			parentCell->releaseInfo();
 			cleanOpenAndClosedLists();
+			parentCell->releaseInfo();
 			candidateGoal->releaseInfo();
 
 			return path;
@@ -10701,12 +10759,9 @@ Path *Pathfinder::patchPath( const Object *obj, const LocomotorSet& locomotorSet
 	}
 #endif
 	m_isTunneling = false;
-	if (!candidateGoal->getOpen() && !candidateGoal->getClosed())
-	{
-		// Not on one of the lists 
-		candidateGoal->releaseInfo();
-	}
 	cleanOpenAndClosedLists();
+	parentCell->releaseInfo();
+	candidateGoal->releaseInfo();
 	return false;
 }
 
@@ -10852,6 +10907,7 @@ Path *Pathfinder::findAttackPath( const Object *obj, const LocomotorSet& locomot
 		return NULL;
 
  	if (!goalCell->allocateInfo(victimCellNdx)) {
+		parentCell->releaseInfo();
 		return false;
 	}
 
@@ -11001,10 +11057,9 @@ Path *Pathfinder::findAttackPath( const Object *obj, const LocomotorSet& locomot
 					}
 				}
 				Path *path = buildActualPath( obj, locomotorSet.getValidSurfaces(), obj->getPosition(), parentCell, centerInCell, false);
-				if (goalCell->hasInfo() && !goalCell->getClosed() && !goalCell->getOpen()) {
-					goalCell->releaseInfo();
-				}
 				cleanOpenAndClosedLists();
+				parentCell->releaseInfo();
+				goalCell->releaseInfo();
 				return path;
 			}
 		}	
@@ -11061,10 +11116,9 @@ Path *Pathfinder::findAttackPath( const Object *obj, const LocomotorSet& locomot
 	TheGameLogic->incrementOverallFailedPathfinds();
 #endif
 	m_isTunneling = false;
-	if (goalCell->hasInfo() && !goalCell->getClosed() && !goalCell->getOpen()) {
-		goalCell->releaseInfo();
-	}
 	cleanOpenAndClosedLists();
+	parentCell->releaseInfo();
+	goalCell->releaseInfo();
 	return false;
 }
 
@@ -11186,8 +11240,8 @@ Path *Pathfinder::findSafePath( const Object *obj, const LocomotorSet& locomotor
 #endif
 			// construct and return path
 			Path *path = buildActualPath( obj, locomotorSet.getValidSurfaces(), obj->getPosition(), parentCell, centerInCell, false);
-			parentCell->releaseInfo();
 			cleanOpenAndClosedLists();
+			parentCell->releaseInfo();
 			return path;
 		}	
 
@@ -11223,6 +11277,7 @@ Path *Pathfinder::findSafePath( const Object *obj, const LocomotorSet& locomotor
 #endif
 	m_isTunneling = false;
 	cleanOpenAndClosedLists();
+	parentCell->releaseInfo();
 	return false;
 }
 

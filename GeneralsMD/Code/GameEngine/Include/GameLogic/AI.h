@@ -250,6 +250,13 @@ public:
 	virtual void update( void );					///< do one frame of AI computation
 
 	inline Pathfinder *pathfinder( void ) { return m_pathfinder; }	///< public access to the pathfind system
+
+	/** How long the last AI frame spent in the pathfinder's queue and in the players' own updates,
+		* in milliseconds.  GameLogic's slow frame log reads these: with several AI players a hitch is
+		* either pathfinding or the AIs themselves, and guessing which has been the expensive way to
+		* find out. */
+	static Real getLastPathfindMS( void ) { return s_lastPathfindMS; }
+	static Real getLastPlayerUpdateMS( void ) { return s_lastPlayerUpdateMS; }
 	enum
 	{
 		CAN_SEE														=	1 << 0,
@@ -280,6 +287,9 @@ public:
 	enum FormationID getNextFormationID(void);
 
 	static void parseAiDataDefinition( INI* ini );
+
+	static Real s_lastPathfindMS;						///< see getLastPathfindMS
+	static Real s_lastPlayerUpdateMS;				///< see getLastPlayerUpdateMS
 	const TAiData *getAiData() {return m_aiData;}
 
 	// Note: Does not work for things that do not have AI. (This is in AI.h, after all)

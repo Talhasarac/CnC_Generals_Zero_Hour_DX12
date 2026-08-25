@@ -82,6 +82,7 @@ protected:
 	virtual void xfer( Xfer *xfer );
 	virtual void loadPostProcess( void );
 
+	virtual Real getBuildRateScale( void );
 	virtual void doBaseBuilding(void);
 	virtual void checkReadyTeams(void);
 	virtual void checkQueuedTeams(void);

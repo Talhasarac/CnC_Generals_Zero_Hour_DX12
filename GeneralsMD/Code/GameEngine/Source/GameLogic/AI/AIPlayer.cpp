@@ -800,12 +800,7 @@ void AIPlayer::processBaseBuilding( void )
 						info->decrementNumRebuilds();
 
 						m_readyToBuildStructure = false;
-						m_structureTimer = TheAI->getAiData()->m_structureSeconds*LOGICFRAMES_PER_SECOND;
-						if (m_player->getMoney()->countMoney() < TheAI->getAiData()->m_resourcesPoor) {
-							m_structureTimer = m_structureTimer/TheAI->getAiData()->m_structuresPoorMod;
-						}	else if (m_player->getMoney()->countMoney() > TheAI->getAiData()->m_resourcesWealthy) {
-							m_structureTimer = m_structureTimer/TheAI->getAiData()->m_structuresWealthyMod;
-						}
+						m_structureTimer = computeStructureDelay();
 						m_frameLastBuildingBuilt = TheGameLogic->getFrame();
 						// only build one building per delay loop
 						break;
@@ -835,12 +830,7 @@ void AIPlayer::processBaseBuilding( void )
 								info->decrementNumRebuilds();
 
 								m_readyToBuildStructure = false;
-								m_structureTimer = TheAI->getAiData()->m_structureSeconds*LOGICFRAMES_PER_SECOND;
-								if (m_player->getMoney()->countMoney() < TheAI->getAiData()->m_resourcesPoor) {
-									m_structureTimer = m_structureTimer/TheAI->getAiData()->m_structuresPoorMod;
-								}	else if (m_player->getMoney()->countMoney() > TheAI->getAiData()->m_resourcesWealthy) {
-									m_structureTimer = m_structureTimer/TheAI->getAiData()->m_structuresWealthyMod;
-								}
+								m_structureTimer = computeStructureDelay();
 								m_frameLastBuildingBuilt = TheGameLogic->getFrame();
 								// only build one building per delay loop
 								break;
@@ -1738,12 +1728,7 @@ Bool AIPlayer::selectTeamToBuild( void )
 		// Build it at low priority, as we have selected it automagically. 
 		buildSpecificAITeam(teamProto, false);
 		m_readyToBuildTeam = false;
-		m_teamTimer = m_teamSeconds*LOGICFRAMES_PER_SECOND;
-		if (m_player->getMoney()->countMoney() < TheAI->getAiData()->m_resourcesPoor) {
-			m_teamTimer = m_teamTimer/TheAI->getAiData()->m_teamPoorMod;
-		}	else if (m_player->getMoney()->countMoney() > TheAI->getAiData()->m_resourcesWealthy) {
-			m_teamTimer = m_teamTimer/TheAI->getAiData()->m_teamWealthyMod;
-		}
+		m_teamTimer = computeTeamDelay();
 		return true;
 	}
 	return false;
@@ -2734,6 +2719,57 @@ void AIPlayer::queueUnits( void )
 			}
 		}
 	}
+}
+
+
+//----------------------------------------------------------------------------------------------------------
+/**
+ * Frames to wait before trying the next structure, from AIData's StructureSeconds with the
+ * rate modifier for a poor or a wealthy player applied.  This was four copies of the same
+ * five lines; the skirmish AI needs to bend the result, so it lives in one place now.
+ */
+Int AIPlayer::computeStructureDelay( void )
+{
+	return computeBuildDelay( TheAI->getAiData()->m_structureSeconds,
+													  m_player->getMoney()->countMoney(),
+													  TheAI->getAiData()->m_resourcesPoor,
+													  TheAI->getAiData()->m_resourcesWealthy,
+													  TheAI->getAiData()->m_structuresPoorMod,
+													  TheAI->getAiData()->m_structuresWealthyMod,
+													  getBuildRateScale() );
+}
+
+//----------------------------------------------------------------------------------------------------------
+/**
+ * The delay arithmetic, with nothing of the Player in it so a test can drive it: the written
+ * delay, bent by whichever rate modifier the player's bank account selects, then divided by
+ * how much faster than the data this kind of AI is meant to work.
+ */
+Int AIPlayer::computeBuildDelay( Real seconds, Int money, Int poorAt, Int wealthyAt,
+																 Real poorMod, Real wealthyMod, Real rateScale )
+{
+	if (money < poorAt) {
+		seconds = seconds/poorMod;
+	}	else if (money > wealthyAt) {
+		seconds = seconds/wealthyMod;
+	}
+	return (Int)(seconds*LOGICFRAMES_PER_SECOND/rateScale);
+}
+
+//----------------------------------------------------------------------------------------------------------
+/**
+ * Frames to wait before trying the next team.  Same as computeStructureDelay, except the
+ * base delay is m_teamSeconds, which the SET_BASE_CONSTRUCTION_SPEED script action writes.
+ */
+Int AIPlayer::computeTeamDelay( void )
+{
+	return computeBuildDelay( (Real)m_teamSeconds,
+													  m_player->getMoney()->countMoney(),
+													  TheAI->getAiData()->m_resourcesPoor,
+													  TheAI->getAiData()->m_resourcesWealthy,
+													  TheAI->getAiData()->m_teamPoorMod,
+													  TheAI->getAiData()->m_teamWealthyMod,
+													  getBuildRateScale() );
 }
 
 //----------------------------------------------------------------------------------------------------------

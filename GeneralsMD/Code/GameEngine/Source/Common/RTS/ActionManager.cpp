@@ -1436,6 +1436,16 @@ Bool ActionManager::canSnipeVehicle( const Object *obj, const Object *objectToSn
 			return FALSE;
 		}
 
+		//
+		// A bike whose rider was already sniped or dismounted is not marked unmanned, but there is
+		// nobody left on it to shoot.
+		//
+		ContainModuleInterface *contain = objectToSnipe->getContain();
+		if( contain && contain->isRiderChangeContain() && contain->getContainedItemsList()->empty() )
+		{
+			return FALSE;
+		}
+
 		return TRUE;
 	}
 	

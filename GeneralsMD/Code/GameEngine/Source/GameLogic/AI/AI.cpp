@@ -353,16 +353,38 @@ void AI::reset( void )
 /**
  * Update the AI system
  */
+Real AI::s_lastPathfindMS = 0.0f;
+Real AI::s_lastPlayerUpdateMS = 0.0f;
+
+/** Milliseconds between two performance counter readings. */
+static Real aiElapsedMS( const Int64 &from, const Int64 &to )
+{
+	static Int64 freq = 0;
+	if( freq == 0 )
+		QueryPerformanceFrequency( (LARGE_INTEGER *)&freq );
+	if( freq == 0 )
+		return 0.0f;
+	return (Real)( (double)(to - from) * 1000.0 / (double)freq );
+}
+
 void AI::update( void )
 {
+	Int64 start, afterPathfind, end;
+	QueryPerformanceCounter( (LARGE_INTEGER *)&start );
+
 	// Do pathfinding.
 	m_pathfinder->processPathfindQueue();
+
+	QueryPerformanceCounter( (LARGE_INTEGER *)&afterPathfind );
 
 	// run player updates
 	{
 		ThePlayerList->UPDATE();
 	}
 
+	QueryPerformanceCounter( (LARGE_INTEGER *)&end );
+	s_lastPathfindMS = aiElapsedMS( start, afterPathfind );
+	s_lastPlayerUpdateMS = aiElapsedMS( afterPathfind, end );
 }
 
 /**

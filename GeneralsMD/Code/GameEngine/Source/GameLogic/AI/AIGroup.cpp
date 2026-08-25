@@ -1094,6 +1094,12 @@ void AIGroup::friend_moveFormationToPos( const Coord3D *pos, CommandSourceType c
 		}
 		Object *theUnit = (*i);
 		AIUpdateInterface *ai = theUnit->getAIUpdateInterface();
+		// a group can hold things that do not steer themselves - a formation move means nothing to them
+		if (ai == NULL)
+		{
+			continue;
+		}
+
 		Bool isDifferentFormation = false;
 		Coord2D offset;
 		if (isDifferentFormation) {

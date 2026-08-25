@@ -25,6 +25,12 @@ explosion flashes, tree sway, water, menu transitions, camera drift, screen fade
 and all of it starts racing. Each one now has a clock of its own, so **you get a smooth, modern
 picture and the game still plays like Zero Hour**.
 
+Two more that only show up once the picture is fast: the subtitles under the mission briefings and
+cutscenes used to hold each line for a number of frames rather than for a length of time, so on a
+modern machine they flicked past faster than anyone reads. And the red pulse the radar gives you when
+your base is being attacked was counting frames too — it strobed instead of throbbing, and it timed
+itself out early. Both run on the clock now.
+
 The surf on the beach behind the main menu is the clearest example of how deep this went. The
 original code measured how much real time had passed, and then ignored the answer and moved every
 wave forward by a thirty-third of a second — correct, and only correct, while the picture was pinned
@@ -49,6 +55,11 @@ Fixed. And with it:
   a second of damage, in a check meant to cover ten seconds.
 - One AI decision was made from leftover memory, so **two identical matches did not play out
   identically** — the same class of fault that desyncs a multiplayer game.
+- **The difficulty settings for build speed did nothing.** Every build order the AI placed was
+  pinned to the same three-second wait, whatever the map, the difficulty or the AI's own money.
+  Those numbers are read again: a rich AI presses its advantage, a broke one slows down, and a
+  mission script that asks for a thirty-second pause between buildings finally gets one. The
+  average pace is unchanged, so a skirmish still feels like Zero Hour.
 
 ## Attack-move actually attacks
 
@@ -122,6 +133,20 @@ Around it, the whole production loop got tightened:
   every barracks you own and the upgrade button used to grey out the moment the first one in the
   group had bought it, leaving you to hunt the rest down one at a time. The button now lights if
   *any* of them can still buy it, and the click goes to one that can.
+- **One right click cancels one thing.** Cancelling a queued unit or upgrade used to take three or
+  four tries: the click was only counted if the mouse had not drifted a single pixel off the
+  picture between pressing and releasing. It counts the moment you press now. And the upgrade being
+  researched — the one thing you most want to take back — was the one button that refused
+  clicks at all while it was running.
+- **Buy an upgrade for a group and it spreads.** Select four barracks, click the upgrade, and all
+  four start it, as far as your money goes. It used to buy exactly one and quietly throw the other
+  three clicks away.
+- **The progress clock stopped flickering.** The filling circle over a picture was drawn once per
+  game tick but the picture is redrawn far more often than that, so most frames showed no progress
+  at all and the whole thing strobed. It is steady at any frame rate now.
+- **A group's upgrade shows its progress.** With several buildings selected, the one actually paying
+  for the upgrade is rarely the one the command bar happens to be reading, so the button showed
+  nothing while the research ran.
 - **Select several factories, click a unit, and it goes to whichever has the shortest queue.**
   Shift-click queues five, spread the same way.
 - **The nearest free worker takes a new job** — and a worker already halfway through a building does
@@ -139,6 +164,22 @@ Around it, the whole production loop got tightened:
   earned — so it does not swing wildly the moment you spend something.
 - **Aircraft always show how many attack runs they have left**, selected or not. That is the number
   that decides whether you commit them or send them home.
+
+**Placing buildings.** The grid you place on is drawn on the ground now instead of over the top of
+everything — it follows the slope, your units and buildings stand on it rather than under it, and
+ground you cannot build on is a soft red wash instead of a scribble. Three more:
+
+- **Running out of money no longer strands the building you were placing.** Shift-hold a row of
+  bunkers, run dry halfway, and the ghost used to freeze on the map: it could not be placed, could
+  not be turned, and the click that failed went through to the ground as a move order for whatever
+  you had selected. Now it simply keeps following the cursor until the money comes in.
+- **The range ring appears for GLA defences too.** A stinger site has no gun of its own — it keeps
+  three soldiers alive beside it and they carry the missiles — so the game called it unarmed and
+  drew nothing while you sited it. The faction whose defences most need placing was the one faction
+  that got no help placing them.
+- **A click clears a half-typed building shortcut.** With the structure grid armed and waiting for
+  its second key, a click could leave it armed, and the next A or S you pressed became a building to
+  place instead of an attack-move or a stop — which cancelled your selection.
 
 **Health bars are in the owner's colour.** They used to run green to red by how damaged something
 was — which is what the length of the bar was already telling you — and told you nothing about whose
@@ -328,6 +369,24 @@ looks right to you.
 - The window used to go grey and *Not Responding* during the scripted camera moves on the menu.
 - Half a dozen rarer crashes in combat — poison clouds, mine clearing, killing a garrisoned building,
   crew-killing weapons — all traced and fixed.
+- **Blowing up a full transport was a coin flip.** Kill a Technical, a Battle Bus or a tunnel with
+  Terrorists inside and the passengers explode, and their explosion kills the vehicle that is
+  already in the middle of killing them. The game was walking a list of passengers that the second
+  death had just thrown away. EA patched two versions of this by hand in 2003, one per patch, as
+  players kept finding new ways to trigger it; every remaining version is closed now. Neutron
+  Shells on a loaded Technical, a bunker buster on a tunnel network, a half-damaged Battle Bus —
+  all survivable.
+- **A unit could be loaded into a vehicle that no longer exists**, or a vehicle destroyed on the
+  same frame could still spawn its crew. Both left something in the game holding a pointer to a
+  corpse.
+- **A unit that killed itself took the game with it, sometimes.** Every unit runs on a little
+  machine that decides what it is doing this instant — and that machine belongs to the unit. A
+  Terrorist reaching a truck, a suicide bomber, anything that dies to its own attack, destroyed the
+  machine in the middle of the machine's own turn, and the next few instructions were reading a unit
+  that had already been cleared away. It survives its own death now and finishes the turn properly.
+- **Ordering a Jarmen Kell to snipe an empty bike** — one whose rider you already shot — was a
+  crash rather than a refusal. So was a formation move that included something which cannot drive
+  itself, and telling a hacker to step out of the way at the exact moment it stood up.
 
 And when something does go wrong, it now writes a readable crash report instead of the window
 silently vanishing.
@@ -346,6 +405,25 @@ Measured on a real map, a destination 23 cells away across a ridge:
 | Now | 10,000 | 25 ms |
 
 **Ten times faster.** That is what removes the hitch when you send a large army somewhere far.
+
+The pathfinder has a fixed number of scratch records to search with, and three separate faults were
+handing them out and never taking them back:
+
+- **Every wall, fence and building on the map permanently held one.** They were being used to
+  remember which structure sits on a cell — something that has nothing to do with searching. Build
+  up a base over half an hour and the search runs out of room to think in, and units simply stop
+  taking orders. That state now lives on the map cell itself, where it belongs, and the search keeps
+  everything it started with. The same fault had a second face: with the records gone, a finished
+  building could end up standing on ground the game still believed was clear.
+- **Every abandoned search leaked one**, and an abandoned search is the normal case — a blocked
+  route, an unreachable target, a unit that gets a new order mid-move.
+- **A recycled record could still point at the last unit that used it**, which is how a unit
+  occasionally set off along someone else's route.
+
+Two more long-standing ones from the same pass: a single unit told to move no longer gets nudged to
+the middle of the nearest square — a lone Chinook lands where you clicked, while a group still gets
+the tidy formation. And a footprint change around a structure could permanently mark the ground
+beside it as unbuildable and unwalkable, for the rest of the match.
 
 ## Sound, video, and getting it to start at all
 

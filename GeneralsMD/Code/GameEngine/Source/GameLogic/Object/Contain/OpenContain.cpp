@@ -299,6 +299,14 @@ void OpenContain::addToContain( Object *rider )
 	if( rider == NULL )
 		return;
 
+	//
+	// Neither side of this may already be destroyed.  A destroyed container is about to be deleted
+	// and the rider would be left pointing at freed memory; a destroyed rider leaves the container
+	// holding a record for an object the logic is about to delete.
+	//
+	if( getObject()->isDestroyed() || rider->isDestroyed() )
+		return;
+
 	Drawable *riderDraw = rider->getDrawable();
 	Bool wasSelected = FALSE;
 	if( riderDraw && riderDraw->isSelected() )
@@ -434,17 +442,26 @@ void OpenContain::removeAllContained( Bool exposeStealthUnits )
 //-------------------------------------------------------------------------------------------------
 void OpenContain::killAllContained( void )
 {
-	ContainedItemsList::iterator it = m_containList.begin();
+	//
+	// Empty the contain list up front rather than walking the live one.  A rider that deals fatal
+	// damage as it dies can kill the container itself, and the container's own death then re-enters
+	// this function and walks the same list the outer call is still erasing from.  Shooting a GLA
+	// Technical full of Terrorists with Neutron Shells does exactly that.
+	//
+	ContainedItemsList list;
+	list.swap( m_containList );
+	m_containListSize = 0;
 
- 	while ( it != m_containList.end() )
+	ContainedItemsList::iterator it = list.begin();
+
+ 	while ( it != list.end() )
 	{
     Object *rider = *it;
 
-
+    DEBUG_ASSERTCRASH( rider, ("Contain list must not contain NULL element") );
     if ( rider )
     {
-	    it = m_containList.erase(it);
-	    m_containListSize--;
+	    it = list.erase(it);
 
       onRemoving( rider );
 	    rider->onRemovedFrom( getObject() );
@@ -459,7 +476,7 @@ void OpenContain::killAllContained( void )
 
   DEBUG_ASSERTCRASH( m_containListSize == 0, ("killallcontain just made a booboo, list size != zero.") );
 
-}  // end removeAllContained
+}  // end killAllContained
 
 //--------------------------------------------------------------------------------------------------------
 /** Force all contained objects in the contained list to exit, and kick them in the pants on the way out*/
@@ -1442,35 +1459,55 @@ void OpenContain::processDamageToContained(Real percentDamage)
 {
 	const OpenContainModuleData *data = getOpenContainModuleData();
 
-	const ContainedItemsList* items = getContainedItemsList();
-	if( items )
+	//
+	// Hold the contain list off to one side while the damage goes out.  Advancing the iterator first
+	// (the comment below is EA's) is not enough: a rider that explodes on death can kill the
+	// container, and the container's death then walks the very list this loop is standing in.  A GLA
+	// Battle Bus with two half-dead Terrorists in it does exactly that.
+	//
+	// Caveat: while the list is parked here, damage a dying rider deals cannot reach the other
+	// riders through the container.  Nothing in the shipped data does that.
+	//
+	ContainedItemsList list;
+	m_containList.swap( list );
+	m_containListSize = 0;
+
+	ContainedItemsList::iterator it = list.begin();
+
+	while( it != list.end() )
 	{
-		ContainedItemsList::const_iterator it;
-		it = items->begin();
+		Object *object = *it;
 
-		while( it != items->end() )	// was while(*it), which dereferences end()
+		DEBUG_ASSERTCRASH( object, ("Contain list must not contain NULL element") );
+
+		//Calculate the damage to be inflicted on each unit.
+		Real damage = object->getBodyModule()->getMaxHealth() * percentDamage;
+
+		DamageInfo damageInfo;
+		damageInfo.in.m_damageType = DAMAGE_UNRESISTABLE;
+		damageInfo.in.m_deathType = data->m_isBurnedDeathToUnits ? DEATH_BURNED : DEATH_NORMAL;
+		damageInfo.in.m_sourceID = getObject()->getID();
+		damageInfo.in.m_amount = damage;
+		object->attemptDamage( &damageInfo );
+
+		if( !object->isEffectivelyDead() && percentDamage == 1.0f )
+			object->kill(); // in case we are carrying flame proof troops we have been asked to kill
+
+		if( object->isEffectivelyDead() )
 		{
-			Object *object = *it;
-
-			//Advance to the next iterator before we apply the damage.
-			//It's possible that the damage will kill the unit and foobar
-			//the iterator list.
+			onRemoving( object );
+			object->onRemovedFrom( getObject() );
+			it = list.erase( it );
+		}
+		else
+		{
 			++it;
-
-			//Calculate the damage to be inflicted on each unit.
-			Real damage = object->getBodyModule()->getMaxHealth() * percentDamage;
-
-			DamageInfo damageInfo;
-			damageInfo.in.m_damageType = DAMAGE_UNRESISTABLE;
-			damageInfo.in.m_deathType = data->m_isBurnedDeathToUnits ? DEATH_BURNED : DEATH_NORMAL;
-			damageInfo.in.m_sourceID = getObject()->getID();
-			damageInfo.in.m_amount = damage;
-			object->attemptDamage( &damageInfo );
-
-			if( !object->isEffectivelyDead() && percentDamage == 1.0f )
-				object->kill(); // in case we are carrying flame proof troops we have been asked to kill			
 		}
 	}
+
+	// and hand back whoever survived
+	m_containList.swap( list );
+	m_containListSize = (UnsignedInt)m_containList.size();
 }
 
 //-------------------------------------------------------------------------------------------------

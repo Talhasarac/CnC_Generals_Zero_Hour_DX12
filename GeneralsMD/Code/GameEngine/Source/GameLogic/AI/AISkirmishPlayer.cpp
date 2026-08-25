@@ -266,12 +266,7 @@ void AISkirmishPlayer::processBaseBuilding( void )
 				bldgInfo->decrementNumRebuilds();
 
 				m_readyToBuildStructure = false;
-				m_structureTimer = TheAI->getAiData()->m_structureSeconds*LOGICFRAMES_PER_SECOND;
-				if (m_player->getMoney()->countMoney() < TheAI->getAiData()->m_resourcesPoor) {
-					m_structureTimer = m_structureTimer/TheAI->getAiData()->m_structuresPoorMod;
-				}	else if (m_player->getMoney()->countMoney() > TheAI->getAiData()->m_resourcesWealthy) {
-					m_structureTimer = m_structureTimer/TheAI->getAiData()->m_structuresWealthyMod;
-				}
+				m_structureTimer = computeStructureDelay();
 				m_frameLastBuildingBuilt = TheGameLogic->getFrame();
 				// only build one building per delay loop
 			} // bldg built
@@ -300,12 +295,7 @@ void AISkirmishPlayer::processBaseBuilding( void )
 						info->decrementNumRebuilds();
 
 						m_readyToBuildStructure = false;
-						m_structureTimer = TheAI->getAiData()->m_structureSeconds*LOGICFRAMES_PER_SECOND;
-						if (m_player->getMoney()->countMoney() < TheAI->getAiData()->m_resourcesPoor) {
-							m_structureTimer = m_structureTimer/TheAI->getAiData()->m_structuresPoorMod;
-						}	else if (m_player->getMoney()->countMoney() > TheAI->getAiData()->m_resourcesWealthy) {
-							m_structureTimer = m_structureTimer/TheAI->getAiData()->m_structuresWealthyMod;
-						}
+						m_structureTimer = computeStructureDelay();
 						m_frameLastBuildingBuilt = TheGameLogic->getFrame();
 						// only build one building per delay loop
 						break;
@@ -873,6 +863,25 @@ void AISkirmishPlayer::processTeamBuilding( void )
 
 //----------------------------------------------------------------------------------------------------------
 /**
+ * How much faster than AIData's written delays the skirmish AI works.
+ *
+ * EA got the same effect by clamping m_structureTimer and m_teamTimer to a flat 3 seconds on
+ * every frame they counted down.  That did make the skirmish AI brisk, but it also silently
+ * threw away everything the data said: with the shipped TeamSeconds of 10 the clamp fired for
+ * every player, so TeamsWealthyRate and TeamsPoorRate changed nothing, a rich AI and a broke
+ * AI queued teams at exactly the same 3 second beat, and the SET_BASE_CONSTRUCTION_SPEED
+ * script action could only ever slow an AI down to 3 seconds too.  Expressed as a rate
+ * instead, the shipped values land on the same 3 seconds they do today, and the modifiers
+ * work again around it: a wealthy skirmish AI presses at 1.5 seconds, a poor one drops to 5.
+ * See FINDINGS.md 4.
+ */
+Real AISkirmishPlayer::getBuildRateScale( void )
+{
+	return 10.0f/3.0f;
+}
+
+//----------------------------------------------------------------------------------------------------------
+/**
  * See if it's time to build another base building.
  */
 void AISkirmishPlayer::doBaseBuilding( void )
@@ -884,9 +893,6 @@ void AISkirmishPlayer::doBaseBuilding( void )
 			if (m_structureTimer<=0) {
 				m_readyToBuildStructure = true;
 				m_buildDelay = 0;
-			}
-			if (m_structureTimer > 3*LOGICFRAMES_PER_SECOND) {
-				m_structureTimer = 3*LOGICFRAMES_PER_SECOND;
 			}
 		}
 		// This timer is to keep from banging on the logic each frame.  If something interesting
@@ -936,9 +942,6 @@ void AISkirmishPlayer::doTeamBuilding( void )
 			if (m_teamTimer<=0) {
 				m_readyToBuildTeam = true;
 				m_teamDelay = 0;
-			}
-			if (m_teamTimer > 3*LOGICFRAMES_PER_SECOND) {
-				m_teamTimer = 3*LOGICFRAMES_PER_SECOND;
 			}
 		}
 

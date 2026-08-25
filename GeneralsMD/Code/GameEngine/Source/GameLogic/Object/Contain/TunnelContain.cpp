@@ -67,10 +67,19 @@ TunnelContain::~TunnelContain()
 {
 }
 
-void TunnelContain::addToContainList( Object *obj )
+TunnelTracker *TunnelContain::getTunnelTracker( void ) const
 {
 	Player *owningPlayer = getObject()->getControllingPlayer();
-	owningPlayer->getTunnelSystem()->addToContainList( obj );
+	return owningPlayer ? owningPlayer->getTunnelSystem() : NULL;
+}
+
+void TunnelContain::addToContainList( Object *obj )
+{
+	TunnelTracker *tunnelTracker = getTunnelTracker();
+	if( tunnelTracker == NULL )
+		return;
+
+	tunnelTracker->addToContainList( obj );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -98,16 +107,16 @@ void TunnelContain::removeFromContain( Object *obj, Bool exposeStealthUnits )
 	// we can only remove this object from the contains list of this module if
 	// it is actually contained by this module
 	//
-	Player *owningPlayer = getObject()->getControllingPlayer();
-	if( owningPlayer == NULL )
+	TunnelTracker *tunnelTracker = getTunnelTracker();
+	if( tunnelTracker == NULL )
 		return; //game tear down.  We do the onRemove* stuff first because this is allowed to fail but that still needs to be done
 
-	if( ! owningPlayer->getTunnelSystem()->isInContainer( obj ) )
+	if( ! tunnelTracker->isInContainer( obj ) )
 	{
 		return;
 	}
 
-	owningPlayer->getTunnelSystem()->removeFromContain( obj, exposeStealthUnits );
+	tunnelTracker->removeFromContain( obj, exposeStealthUnits );
 
 }
 
@@ -118,8 +127,11 @@ void TunnelContain::removeFromContain( Object *obj, Bool exposeStealthUnits )
 //--------------------------------------------------------------------------------------------------------
 void TunnelContain::harmAndForceExitAllContained( DamageInfo *info )
 {
-	Player *owningPlayer = getObject()->getControllingPlayer();
-	const ContainedItemsList *fullList = owningPlayer->getTunnelSystem()->getContainedItemsList();
+	TunnelTracker *tunnelTracker = getTunnelTracker();
+	if( tunnelTracker == NULL )
+		return;
+
+	const ContainedItemsList *fullList = tunnelTracker->getContainedItemsList();
 
 	Object *obj;
 	ContainedItemsList::const_iterator it;
@@ -149,18 +161,26 @@ void TunnelContain::harmAndForceExitAllContained( DamageInfo *info )
 //-------------------------------------------------------------------------------------------------
 void TunnelContain::killAllContained( void )
 {
-	Player *owningPlayer = getObject()->getControllingPlayer();
-	const ContainedItemsList *fullList = owningPlayer->getTunnelSystem()->getContainedItemsList();
+	//
+	// Take the tunnel system's list away from it before killing anything: a rider that deals fatal
+	// damage on death kills the tunnel, and the tunnel's death walks this same list again while the
+	// outer call is still iterating it.  Neutron Shells on a tunnel full of Terrorists does it.
+	//
+	TunnelTracker *tunnelTracker = getTunnelTracker();
+	if( tunnelTracker == NULL )
+		return;
 
-	Object *obj;
-	ContainedItemsList::const_iterator it;
-	it = (*fullList).begin();
-	while( it != (*fullList).end() )
+	ContainedItemsList list;
+	tunnelTracker->swapContainedItemsList( list );
+
+	ContainedItemsList::iterator it = list.begin();
+	while( it != list.end() )
 	{
-		obj = *it;
-		it++;
+		Object *obj = *it++;
+		DEBUG_ASSERTCRASH( obj, ("Contain list must not contain NULL element") );
+
 		removeFromContain( obj, true );
-    obj->kill();
+		obj->kill();
 	}
 }
 //-------------------------------------------------------------------------------------------------
@@ -168,8 +188,11 @@ void TunnelContain::killAllContained( void )
 //-------------------------------------------------------------------------------------------------
 void TunnelContain::removeAllContained( Bool exposeStealthUnits )
 {
-	Player *owningPlayer = getObject()->getControllingPlayer();
-	const ContainedItemsList *fullList = owningPlayer->getTunnelSystem()->getContainedItemsList();
+	TunnelTracker *tunnelTracker = getTunnelTracker();
+	if( tunnelTracker == NULL )
+		return;
+
+	const ContainedItemsList *fullList = tunnelTracker->getContainedItemsList();
 
 	Object *obj;
 	ContainedItemsList::const_iterator it;
@@ -187,8 +210,11 @@ void TunnelContain::removeAllContained( Bool exposeStealthUnits )
 //-------------------------------------------------------------------------------------------------
 void TunnelContain::iterateContained( ContainIterateFunc func, void *userData, Bool reverse )
 {
-	Player *owningPlayer = getObject()->getControllingPlayer();
-	owningPlayer->getTunnelSystem()->iterateContained( func, userData, reverse );
+	TunnelTracker *tunnelTracker = getTunnelTracker();
+	if( tunnelTracker == NULL )
+		return;
+
+	tunnelTracker->iterateContained( func, userData, reverse );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -260,30 +286,44 @@ void TunnelContain::onSelling()
 //-------------------------------------------------------------------------------------------------
 Bool TunnelContain::isValidContainerFor(const Object* obj, Bool checkCapacity) const
 {
-	Player *owningPlayer = getObject()->getControllingPlayer();
-	return owningPlayer->getTunnelSystem()->isValidContainerFor( obj, checkCapacity );
+	TunnelTracker *tunnelTracker = getTunnelTracker();
+	return tunnelTracker ? tunnelTracker->isValidContainerFor( obj, checkCapacity ) : FALSE;
 }
 
 UnsignedInt TunnelContain::getContainCount() const
 {
-	Player *owningPlayer = getObject()->getControllingPlayer();
-	if( owningPlayer && owningPlayer->getTunnelSystem() )
-	{
-		return owningPlayer->getTunnelSystem()->getContainCount();
-	}
-	return 0;
+	TunnelTracker *tunnelTracker = getTunnelTracker();
+	return tunnelTracker ? tunnelTracker->getContainCount() : 0;
 }
 
 Int TunnelContain::getContainMax( void ) const 
 { 
-	Player *owningPlayer = getObject()->getControllingPlayer();
-	return owningPlayer->getTunnelSystem()->getContainMax();
+	TunnelTracker *tunnelTracker = getTunnelTracker();
+	return tunnelTracker ? tunnelTracker->getContainMax() : 0;
 }
 
 const ContainedItemsList* TunnelContain::getContainedItemsList() const
 {
-	Player *owningPlayer = getObject()->getControllingPlayer();
-	return owningPlayer->getTunnelSystem()->getContainedItemsList();
+	TunnelTracker *tunnelTracker = getTunnelTracker();
+	return tunnelTracker ? tunnelTracker->getContainedItemsList() : NULL;
+}
+
+//-------------------------------------------------------------------------------------------------
+void TunnelContain::orderAllPassengersToExit( CommandSourceType commandSource, Bool instantly )
+{
+	if( getTunnelTracker() == NULL )
+		return;
+
+	OpenContain::orderAllPassengersToExit( commandSource, instantly );
+}
+
+//-------------------------------------------------------------------------------------------------
+void TunnelContain::orderAllPassengersToIdle( CommandSourceType commandSource )
+{
+	if( getTunnelTracker() == NULL )
+		return;
+
+	OpenContain::orderAllPassengersToIdle( commandSource );
 }
 
 

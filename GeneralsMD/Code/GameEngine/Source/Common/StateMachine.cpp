@@ -414,6 +414,19 @@ StateReturnType StateMachine::resetToDefaultState()
 
 //-----------------------------------------------------------------------------
 /**
+ * Holds a reference on a state machine for the length of a scope.
+ */
+class StateMachineRefHolder
+{
+public:
+	StateMachineRefHolder( StateMachine *machine ) : m_machine(machine) { m_machine->Add_Ref(); }
+	~StateMachineRefHolder() { m_machine->Release_Ref(); }
+private:
+	StateMachine *m_machine;
+};
+
+//-----------------------------------------------------------------------------
+/**
  * Run one step of the machine
  */
 StateReturnType StateMachine::updateStateMachine()
@@ -433,6 +446,11 @@ StateReturnType StateMachine::updateStateMachine()
 
 	if (m_currentState)
 	{
+		// The state update below can destroy this machine's owner - a state that kills its own
+		// object, for instance - which drops the owner's reference to us.  Hold one of our own
+		// for the rest of this function so the machine outlives the update that ended it.
+		StateMachineRefHolder refThis( this );
+
 		// update() can change m_currentState, so save it for a moment...
 		State* stateBeforeUpdate = m_currentState;
 

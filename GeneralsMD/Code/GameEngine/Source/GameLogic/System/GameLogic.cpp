@@ -3590,6 +3590,17 @@ extern __int64 Total_Load_3D_Assets;
 /** Update all objects in the world by invoking their update() methods. */
 // ------------------------------------------------------------------------------------------------
 
+/** Milliseconds between two performance counter readings. */
+static Real logicElapsedMS( const Int64 &from, const Int64 &to )
+{
+	static Int64 freq = 0;
+	if( freq == 0 )
+		QueryPerformanceFrequency( (LARGE_INTEGER *)&freq );
+	if( freq == 0 )
+		return 0.0f;
+	return (Real)( (double)(to - from) * 1000.0 / (double)freq );
+}
+
 void GameLogic::update( void )
 {
 	USE_PERF_TIMER(GameLogic_update)
@@ -3641,10 +3652,19 @@ void GameLogic::update( void )
 	UnsignedInt now = TheGameLogic->getFrame();
 	TheGameClient->setFrame(now);
 
+	/* A logic frame that runs long is a hitch the player feels, and a release build has no
+		 profiler to ask about it.  Time the frame's own phases and, when the frame runs over
+		 budget, write down where the time went - a handful of performance counter reads a frame
+		 costs nothing next to the 33ms the frame is allowed. */
+	Int64 tFrameStart = 0, tScripts = 0, tObjects = 0, tAI = 0, tPartition = 0, tFrameEnd = 0;
+	QueryPerformanceCounter( (LARGE_INTEGER *)&tFrameStart );
+
 	// update (execute) scripts
 	{
 		TheScriptEngine->UPDATE();
 	}
+
+	QueryPerformanceCounter( (LARGE_INTEGER *)&tScripts );
 
 	Bool freezeTime = TheTacticalView->isTimeFrozen() && !TheTacticalView->isCameraMovementFinished();
 	freezeTime = freezeTime || TheScriptEngine->isTimeFrozenDebug() || TheScriptEngine->isTimeFrozenScript();
@@ -3785,10 +3805,14 @@ void GameLogic::update( void )
 
 	validateSleepyUpdate();
 
+	QueryPerformanceCounter( (LARGE_INTEGER *)&tObjects );
+
 	// update the Artificial Intelligence system
 	{
 		TheAI->UPDATE();
 	}
+
+	QueryPerformanceCounter( (LARGE_INTEGER *)&tAI );
 
 	// production updates
 	{
@@ -3799,6 +3823,8 @@ void GameLogic::update( void )
 	{
 		ThePartitionManager->UPDATE();
 	}
+
+	QueryPerformanceCounter( (LARGE_INTEGER *)&tPartition );
 
 	//
 	// End of frame clean-up
@@ -3840,6 +3866,23 @@ void GameLogic::update( void )
   
 
 
+
+	// how long did that take?  only a frame that ran over budget is worth a line in the log
+	QueryPerformanceCounter( (LARGE_INTEGER *)&tFrameEnd );
+	{
+		const Real SLOW_FRAME_MS = 20.0f;		// the logic gets 1/30th of a second, 33ms, per frame
+		const Real total = logicElapsedMS( tFrameStart, tFrameEnd );
+		if( total > SLOW_FRAME_MS && now > 60 && getGameMode() != GAME_SHELL && getGameMode() != GAME_NONE )
+		{
+			const Real scripts = logicElapsedMS( tFrameStart, tScripts );
+			const Real objects = logicElapsedMS( tScripts, tObjects );
+			const Real ai = logicElapsedMS( tObjects, tAI );
+			const Real partition = logicElapsedMS( tAI, tPartition );
+			const Real rest = total - scripts - objects - ai - partition;
+			DEBUG_LOG(("SLOW LOGIC FRAME %d: %.1fms | scripts %.1f | objects %.1f | ai %.1f (pathfind %.1f, players %.1f) | partition %.1f | rest %.1f\n",
+								 now, total, scripts, objects, ai, AI::getLastPathfindMS(), AI::getLastPlayerUpdateMS(), partition, rest));
+		}
+	}
 
 	// increment world time
 	if (!m_startNewGame)

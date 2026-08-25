@@ -3239,6 +3239,15 @@ void AIUpdateInterface::privateMoveAwayFromUnit( Object *unit, CommandSourceType
 	{
 		return;
 	}
+
+	//
+	// A queued AI command is re-issued a frame or more after it was made, and the object it names
+	// can be gone by then - a hacker told to step aside while it is coming out of its hacking state
+	// is the reproducible case.
+	//
+	if (unit == NULL)
+		return;
+
 	ObjectID id = unit->getID();
 	if (m_stateMachine->getTemporaryState() == AI_MOVE_OUT_OF_THE_WAY) {
 		if (m_moveOutOfWay1 == id) {

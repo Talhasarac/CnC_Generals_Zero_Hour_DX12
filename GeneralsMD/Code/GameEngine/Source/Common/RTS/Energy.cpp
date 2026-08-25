@@ -193,6 +193,14 @@ void Energy::addPowerBonus( Object *obj )
 	if( obj == NULL )
 		return;
 
+	//
+	// The mirror of removePowerBonus: a disabled producer contributes nothing, and the bonus of an
+	// upgrade completed while it is disabled is added by onDisabledEdge when it comes back.  Adding
+	// it here as well counts it twice.
+	//
+	if( obj->isDisabled() )
+		return;
+
 	addProduction(obj->getTemplate()->getEnergyBonus());
 
 	// sanity
@@ -210,6 +218,14 @@ void Energy::removePowerBonus( Object *obj )
 
 	// sanity
 	if( obj == NULL )
+		return;
+
+	//
+	// A disabled producer contributes nothing: onDisabledEdge already took its production and its
+	// bonus out of the pool.  Taking the bonus away a second time here drives the pool below what
+	// the player actually has and fakes a brownout.
+	//
+	if( obj->isDisabled() )
 		return;
 
 	addProduction( -obj->getTemplate()->getEnergyBonus() );
