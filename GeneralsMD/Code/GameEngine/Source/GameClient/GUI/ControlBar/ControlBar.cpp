@@ -173,7 +173,7 @@ void ControlBar::pressCommandButton( Int index )
 			if( index == CHORD_SLOT_Q || index == CHORD_SLOT_W )
 			{
 				m_chordGroup = ( index == CHORD_SLOT_Q ) ? 0 : 1;
-				m_chordFrame = TheGameClient ? TheGameClient->getFrame() : 0;
+				m_chordStartMs = timeGetTime();
 				markUIDirty();		// the group that is armed greys the other one out
 				return;
 			}
@@ -1098,7 +1098,7 @@ ControlBar::ControlBar( void )
 		m_buildPageButton[ i ] = NULL;
 	m_buildPageBackButton = NULL;
 	m_chordGroup = -1;
-	m_chordFrame = 0;
+	m_chordStartMs = 0;
 	m_standInBuilderID = INVALID_DRAWABLE_ID;
 	for( i = 0; i < MAX_MULTI_SELECT_GROUPS; i++ )
 	{
@@ -1603,8 +1603,7 @@ void ControlBar::update( void )
 	// a chord the player armed and then walked away from expires on its own, so it cannot be
 	// waiting to eat a keystroke a minute later
 	//
-	if( m_chordGroup >= 0 && TheGameClient &&
-			TheGameClient->getFrame() - m_chordFrame > CHORD_TIMEOUT_FRAMES )
+	if( m_chordGroup >= 0 && timeGetTime() - m_chordStartMs > CHORD_TIMEOUT_MS )
 	{
 		dropChord();
 	}

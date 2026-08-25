@@ -3141,10 +3141,40 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 
 		//-----------------------------------------------------------------------------------------
 		case GameMessage::MSG_META_OPTIONS:
-			
-			ToggleQuitMenu();
+		{
+
+			//
+			// Escape is "take that back" before it is "open the menu": a structure waiting to be
+			// placed, a targeting command armed off the command bar, or a half-typed builder chord
+			// are all dropped first, and the pause menu only comes up on a press with nothing
+			// pending.
+			//
+			Bool cancelledSomething = FALSE;
+
+			if( TheControlBar && TheControlBar->isChordArmed() )
+			{
+				TheControlBar->dropChord();
+				cancelledSomething = TRUE;
+			}
+
+			if( TheInGameUI->getPendingPlaceType() != NULL )
+			{
+				TheInGameUI->placeBuildAvailable( NULL, NULL );
+				cancelledSomething = TRUE;
+			}
+
+			if( TheInGameUI->getGUICommand() != NULL )
+			{
+				TheInGameUI->setGUICommand( NULL );
+				cancelledSomething = TRUE;
+			}
+
+			if( cancelledSomething == FALSE )
+				ToggleQuitMenu();
+
 			disp = DESTROY_MESSAGE;
 			break;
+		}
 
 		//-----------------------------------------------------------------------------------------
 		case GameMessage::MSG_META_TOGGLE_LOWER_DETAILS:

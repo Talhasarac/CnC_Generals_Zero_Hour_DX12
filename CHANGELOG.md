@@ -180,6 +180,13 @@ ground you cannot build on is a soft red wash instead of a scribble. Three more:
 - **A click clears a half-typed building shortcut.** With the structure grid armed and waiting for
   its second key, a click could leave it armed, and the next A or S you pressed became a building to
   place instead of an attack-move or a stop — which cancelled your selection.
+- **The building shortcut now waits the two seconds it promises.** It was counting drawn frames
+  rather than time, so on a fast machine it gave up in a third of a second — press Q, take a breath,
+  and the second key was an attack-move again. It waits two real seconds now, whatever your frame
+  rate.
+- **Escape takes back what you were doing before it opens the menu.** With a building on the cursor,
+  a targeting order armed, or a half-typed shortcut waiting, Escape drops that and nothing else.
+  Press it again with nothing pending and the pause menu comes up as always.
 
 **Health bars are in the owner's colour.** They used to run green to red by how damaged something
 was — which is what the length of the bar was already telling you — and told you nothing about whose

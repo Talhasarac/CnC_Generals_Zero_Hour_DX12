@@ -726,7 +726,7 @@ public:
 		(a click, a new selection, a key that is not part of the chord, or simply time passing)
 		must drop it. */
 	void dropChord( void );
-	enum { CHORD_TIMEOUT_FRAMES = 60 };		///< two seconds at 30Hz, then the chord expires
+	enum { CHORD_TIMEOUT_MS = 2000 };			///< real time, not frames: the client frame rate is uncapped
 
 	/// is the drawable the currently selected drawable for the context sensitive UI?
 	Bool isDrivingContextUI( Drawable *draw ) const { return draw == m_currentSelectedDrawable; }
@@ -1001,7 +1001,7 @@ protected:
 	Int m_buildPage;																			///< BUILD_PAGE_ROOT, or the page being shown
 	ObjectID m_buildPageObjectID;													///< builder the page belongs to; a new one starts at the menu
 	Int m_chordGroup;																			///< -1, or the structure group (0 = Q, 1 = W) armed by the first chord key
-	UnsignedInt m_chordFrame;															///< client frame the chord was armed on, for CHORD_TIMEOUT_FRAMES
+	UnsignedInt m_chordStartMs;														///< millisecond the chord was armed on, for CHORD_TIMEOUT_MS
 	DrawableID m_standInBuilderID;												///< with nothing selected, the builder whose command bar is shown (INVALID_DRAWABLE_ID otherwise)
 	Drawable *findStandInBuilder( Bool freeOnly );				///< the local player's free builder (or, unless freeOnly, any builder) to stand in for an empty selection
 
