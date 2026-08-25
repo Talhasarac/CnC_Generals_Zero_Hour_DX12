@@ -89,6 +89,10 @@ void Win32BIGFileSystem::init() {
     // Loaded second on purpose: loadIntoDirectoryTree does not overwrite, so the
     // Zero Hour bigs already in the tree win over the base game's copies.
     loadBigFilesFromDirectory(installPath, "*.big");
+
+    // ... except where that costs resolution: a number of the base game's textures were shipped
+    // downscaled in TexturesZH.big, and load order alone made those the ones the game uses.
+    prioritizeLargerFiles(TGA_DIR_PATH, "TexturesZH.big", "Textures.big");
 }
 
 void Win32BIGFileSystem::reset() {

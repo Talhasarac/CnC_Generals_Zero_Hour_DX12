@@ -325,8 +325,8 @@ Bool StealthUpdate::allowedToStealth( Object *stealthOwner ) const
 	
 	if( flags & STEALTH_NOT_WHILE_TAKING_DAMAGE && self->getBodyModule()->getLastDamageTimestamp() >= now - 1 )
 	{
-		//Only if it's not healing damage.
-		if( self->getBodyModule()->getLastDamageInfo()->in.m_damageType != DAMAGE_HEALING )
+		// the healing test that used to sit here is gone: a heal no longer stamps the damage
+		// timestamp at all, so getting patched up does not keep a unit visible.
 		{
 			//Can't stealth if we just took damage in the last frame or two.
 			if( self->getBodyModule()->getLastDamageTimestamp() != 0xffffffff )

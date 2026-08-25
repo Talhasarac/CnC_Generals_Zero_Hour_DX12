@@ -117,6 +117,123 @@ W vehicles, E aircraft — but Q was grabbing every armed thing you own, tanks a
 there was no way to pull just the foot soldiers out of a mixed army. Press it twice for the whole
 map. Ctrl+A is still everything at once.
 
+## Aircraft, guards, and orders that used to be ignored
+
+- **A pair of jets on a two-runway airfield could stop taking off.** Each one waited for the other
+  to finish taxiing, and neither ever decided that the wait was over: whoever taxied next restarted
+  the countdown, so two Raptors sat on a working airfield doing nothing while the battle went on
+  without them. They now wait for exactly one aircraft, once, and go.
+- **Losing the airfield used to leave its aircraft in limbo.** With the runway gone the game told
+  the plane it had permission to use it, so it went on flying a landing pattern for a building that
+  was rubble, and one destroyed mid-rearm left the aircraft parked on nothing. They now do what they
+  should when their base dies.
+- **Repaired aircraft come back to you.** A Comanche or a Chinook that finished patching itself up
+  used to lift off and hover over the pad. If the airfield has a rally point, it flies there.
+  Infantry walking out of a captured building follow the building's rally point too, instead of
+  standing in the doorway.
+- **A Chinook told to fly somewhere and unload no longer empties itself in a single frame.** Eight
+  passengers used to appear on top of each other. They get out one at a time now, unless you
+  actually ordered an evacuation.
+- **A guarding unit under fire stopped fighting itself.** Guard mode had a unit break off its move
+  to shoot back, then break off shooting to resume the move, over and over, so it did neither well.
+  The order to return to its post and the order to defend itself no longer fight.
+- **Clearing mines works on mines you cannot see.** Mines and booby traps are invisible by nature,
+  and the game refuses to let a unit walk up to something invisible. So an engineer ordered to clear
+  a minefield simply stood still. Ordering a disarm now overrides that rule — and only that.
+- **A helicopter no longer boards a transport from the air.** The check for "am I close enough to
+  get in" only asked whether the transport was off the ground, not whether the two were anywhere
+  near each other.
+
+## The same game on both screens, and the same game after loading
+
+- **A unit with nowhere to stand no longer appears somewhere else entirely.** When the game spawns
+  something — a crew bailing out, a garrison emptying, anything placed *near* a spot rather than on
+  it — and every nearby space is taken, it used to drop the new unit at a leftover position from
+  whatever ran before it: a random point on the map, or off it. It now appears where it was asked
+  for, crowded or not.
+- **Loading a save remembers what your guards were guarding.** The guard order was written to the
+  file one slot too far and overwrote the position it was guarding, so units restored from a save
+  could come back watching the wrong place.
+- **Two machines playing the same match drift apart less.** Defeating a player, playing a second
+  map without restarting, and the fingerprint the game uses to notice that two players have stopped
+  agreeing — all three had bugs that made one side quietly diverge from the other, and the
+  fingerprint itself was checking the same number 128 times instead of the wall it was supposed to
+  be checking. Fixed. This is groundwork: network play is still not something this build claims.
+
+## Sharper textures, for free
+
+Zero Hour shipped downscaled copies of a lot of the base game's textures, and because of the order
+the game loads its archives in, those small copies were the ones you saw — the full-size originals
+were sitting right there in the base game's files, unused. Where both exist, the bigger one wins now.
+On a standard install that is 481 textures, each of them four times the resolution you were getting:
+buildings, walls, vehicles.
+
+## Every replay, not just the last one
+
+The game overwrites the same replay file after every match, so the only way to keep a game was to go
+and rename the file before starting the next one. Turn on replay archiving and each game is also
+saved under its own date-and-time name, in its own folder, automatically.
+
+## Placing a building, then changing your mind
+
+Right-clicking to cancel a building you were about to place used to also deselect the builder, so
+putting down something else meant finding and clicking the dozer again. The cancel now cancels the
+placement and nothing else.
+
+## Bonuses that come and go when they should
+
+A squad of infantry standing over its own dead used to keep the horde bonus the dead were paying
+for. Nationalism and fanaticism were worse: once a unit had been in a horde with those upgrades
+bought, it kept the damage bonus for the rest of its life, alone in a corner of the map, and
+fanaticism refused to work at all unless nationalism had been bought first. All three bonuses now
+come and go with the horde. (If you make maps or mods and want the old rule, a horde module can ask
+for it by name — nothing that ships with the game changes.)
+
+The strategy center had the same disease from the other end. Running two battle plans told each of
+your units it was under the newest one only, undoing a plan scrambled the center's own record of
+what it had handed out, and capturing an enemy strategy center gave you nothing while its old owner
+kept the bonus. Plans now move with the building.
+
+## One crate, one collector
+
+Walk a five-man squad over a salvage crate and you used to get paid five times, because the crate is
+only cleared away at the end of the frame and everybody who touched it in that frame counted. Same
+frame, same crate, one payout now.
+
+A vehicle thrown onto a crowd had the mirror-image bug: the crash damage was an area weapon, fired
+once for every unit in the pile, so a group of five each took five hits. It hits what it lands on,
+once.
+
+A unit already on its way down could still be promoted by its last kill — new upgrades, new weapon
+bonuses, the promotion sound and the flash, on a corpse. And getting healed used to count as taking
+damage, which meant a stealth unit was dragged into view by its own medic.
+
+## Circles are round, and a tunnel is one tunnel
+
+Range checks against a circular area were really checks against the square around it, so the corners
+counted as inside. The bigger the radius, the more territory a unit was "in range" of without being
+anywhere near it. Now measured properly.
+
+Infantry hiding in a tunnel network healed once per tunnel per frame: five tunnels, five times the
+healing rate the data asks for. The network heals at its own rate now, however many entrances it
+has.
+
+## The power bar tells the truth
+
+A knocked-out power plant is supposed to count for nothing until it comes back. The original game
+kept two separate sets of books on that, and they disagreed with each other in four different ways.
+
+- **An EMP on a plant you had already upgraded took the upgrade off your grid twice** — once when
+  the plant went down, again when the plant was sold, captured or lost its upgrade while still
+  down. The bar showed a blackout your base was not actually in, and everything on it shut off.
+- **An EMP on a half-built plant moved power that did not exist yet.** A building site has never
+  produced anything; disabling and re-enabling one used to add and subtract its full output anyway.
+- **Loading a saved game brought disabled plants back as working ones**, so the power you loaded
+  into was not the power you saved.
+- **A Control Rods upgrade that finished while the plant was down was credited immediately and then
+  credited again when the plant came back up** — free power, permanently, for anyone whose plant got
+  hit at the right moment.
+
 ## Your whole base, on one strip
 
 The original showed you one factory at a time and made you click through the rest.

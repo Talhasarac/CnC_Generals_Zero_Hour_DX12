@@ -836,6 +836,15 @@ Bool OptionPreferences::getDetailedBuildTooltips(void)
 	return stricmp(it->second.str(), "yes") == 0;
 }
 
+Bool OptionPreferences::getArchiveReplays(void)
+{
+	OptionPreferences::const_iterator it = find("ArchiveReplays");
+	if (it == end())
+		return TheGlobalData->m_archiveReplays;
+
+	return stricmp(it->second.str(), "yes") == 0;
+}
+
 Int OptionPreferences::getBloomIntensity(void)
 {
 	// Not written by the options menu - a power-user Options.ini key.  Percent, 0 = off, which is

@@ -733,6 +733,10 @@ void Player::update()
 		onPowerBrownOutChange( !m_energy.hasSufficientPower() );
 	}
 
+	// heal what is inside the tunnel network, once for the whole network
+	if( m_tunnelSystem )
+		m_tunnelSystem->healObjects();
+
 	//Update the academy stats (this only checks applicable things that require a polling method)
 	getAcademyStats()->update();
 
@@ -2084,7 +2088,12 @@ void Player::killPlayer(void)
 	}
 	if (isLocalPlayer() && !TheGameLogic->isInShellGame())
 	{
-		becomingLocalPlayer(TRUE); // recalc disguises, etc
+		// becomingLocalPlayer(TRUE) used to run here to "recalc disguises, etc".  It calls
+		// recalcApparentControllingPlayer on every object with a contain, which resets the team of
+		// an empty one - and a container remembers the team its owner had *before* anyone got in,
+		// which is not updated when the player dies and the units change hands.  So this reset the
+		// team to neutral, and only on the client whose player it was.  The disguise recalculation
+		// it was there for does not work anyway.  Restore it once containers track their team.
 		if (TheControlBar )
 		{
 			if (isPlayerActive())
@@ -3006,7 +3015,7 @@ Upgrade *Player::findUpgrade( const UpgradeTemplate *upgradeTemplate )
 //=================================================================================================
 /** Does the player have this completed upgrade */
 //=================================================================================================
-Bool Player::hasUpgradeComplete( const UpgradeTemplate *upgradeTemplate )
+Bool Player::hasUpgradeComplete( const UpgradeTemplate *upgradeTemplate ) const
 {
 	UpgradeMaskType testMask = upgradeTemplate->getUpgradeMask();
 	return hasUpgradeComplete( testMask );
@@ -3017,7 +3026,7 @@ Bool Player::hasUpgradeComplete( const UpgradeTemplate *upgradeTemplate )
 	Does the player have this completed upgrade.  This form is exposed so Objects can do quick lookups.
 */
 //=================================================================================================
-Bool Player::hasUpgradeComplete( UpgradeMaskType testMask )
+Bool Player::hasUpgradeComplete( UpgradeMaskType testMask ) const
 {
 	return m_upgradesCompleted.testForAll( testMask );
 }
@@ -3423,8 +3432,7 @@ Bool Player::doesObjectQualifyForBattlePlan( Object *obj ) const
 }
 
 //-------------------------------------------------------------------------------------------------
-// note, bonus is an in-out parm.
-void Player::changeBattlePlan( BattlePlanStatus plan, Int delta, BattlePlanBonuses *bonus )
+void Player::changeBattlePlan( BattlePlanStatus plan, Int delta, const BattlePlanBonuses *bonus )
 {
 	DUMPBATTLEPLANBONUSES(bonus, this, NULL);
 	Bool addBonus = false;
@@ -3477,23 +3485,29 @@ void Player::changeBattlePlan( BattlePlanStatus plan, Int delta, BattlePlanBonus
 	}
 	else if( removeBonus )
 	{
-		//First, inverse the bonuses
-		bonus->m_armorScalar				= 1.0f / __max( bonus->m_armorScalar, 0.01f );
-		bonus->m_sightRangeScalar		= 1.0f / __max( bonus->m_sightRangeScalar, 0.01f );
-		if( bonus->m_bombardment > 0 )
+		// inverse the bonuses in a copy: this used to invert the caller's own data in place, which is
+		// the strategy center's m_bonuses, so the module's record of what it granted was destroyed by
+		// the act of taking it away.
+		BattlePlanBonuses *invertedBonus = newInstance(BattlePlanBonuses);
+		*invertedBonus = *bonus;
+
+		invertedBonus->m_armorScalar			= 1.0f / __max( bonus->m_armorScalar, 0.01f );
+		invertedBonus->m_sightRangeScalar	= 1.0f / __max( bonus->m_sightRangeScalar, 0.01f );
+		if( invertedBonus->m_bombardment > 0 )
 		{
-			bonus->m_bombardment			= -1;
+			invertedBonus->m_bombardment		= -1;
 		}
-		if( bonus->m_holdTheLine > 0 )
+		if( invertedBonus->m_holdTheLine > 0 )
 		{
-			bonus->m_holdTheLine			= -1;	
+			invertedBonus->m_holdTheLine		= -1;
 		}
-		if( bonus->m_searchAndDestroy > 0 )
+		if( invertedBonus->m_searchAndDestroy > 0 )
 		{
-			bonus->m_searchAndDestroy	= -1;
+			invertedBonus->m_searchAndDestroy	= -1;
 		}
 
-		applyBattlePlanBonusesForPlayerObjects( bonus );
+		applyBattlePlanBonusesForPlayerObjects( invertedBonus );
+		invertedBonus->deleteInstance();
 	}
 }
 
@@ -3655,7 +3669,18 @@ void Player::applyBattlePlanBonusesForPlayerObjects( const BattlePlanBonuses *bo
 	}
 
 	DUMPBATTLEPLANBONUSES(m_battlePlanBonuses, this, NULL);
-	iterateObjects( localApplyBattlePlanBonusesToObject, (void*)bonus );
+
+	// hand every object the whole set the player holds, not just the plan that changed: the counts
+	// and the kindof filters live in m_battlePlanBonuses, and passing only the newest one told a
+	// unit it was under that plan alone.  The scalars still come from the change itself, because
+	// they are applied multiplicatively, once per change.
+	BattlePlanBonuses *newBonus = newInstance(BattlePlanBonuses);
+	*newBonus = *m_battlePlanBonuses;
+	newBonus->m_armorScalar			= bonus->m_armorScalar;
+	newBonus->m_sightRangeScalar	= bonus->m_sightRangeScalar;
+
+	iterateObjects( localApplyBattlePlanBonusesToObject, newBonus );
+	newBonus->deleteInstance();
 }
 
 

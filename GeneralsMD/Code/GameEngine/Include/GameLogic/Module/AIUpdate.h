@@ -60,6 +60,7 @@ class AssaultTransportAIInterface;
 class JetAIUpdate;
 
 enum AIStateType;
+enum HordeActionType;
 enum ObjectID;
 
 
@@ -564,7 +565,11 @@ public:
 	void setAttitude( AttitudeType tude );	///< set the behavior modifier for this agent
 
 	// Common AI "status" effects -------------------------------------------------------------------
-	void evaluateMoraleBonus( void );
+	Bool hasNationalism() const;
+	Bool hasFanaticism() const;
+	void evaluateMoraleBonus( Bool inHorde, Bool allowNationalism, HordeActionType type );
+	void evaluateNationalismBonusClassic( Bool inHorde, Bool allowNationalism );
+	void evaluateNationalismBonus( Bool inHorde, Bool allowNationalism );
 
 #ifdef ALLOW_DEMORALIZE
 	// demoralization ... what a nifty word to write.

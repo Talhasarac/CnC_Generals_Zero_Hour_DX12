@@ -184,8 +184,11 @@ AIGuardMachine::AIGuardMachine( Object *owner ) :
 	//Kris: Except that guard return is more like an attack move, and will acquire targets while moving there.
 	//This breaks deployAI units because they have to completely unpack before realizing that there is a target in range.
 	//So I'm making AI_GUARD_INNER the first state.
-	defineState( AI_GUARD_INNER,						newInstance(AIGuardInnerState)( this ), AI_GUARD_OUTER, AI_GUARD_OUTER, attackAggressors );
-	defineState( AI_GUARD_RETURN,						newInstance(AIGuardReturnState)( this ), AI_GUARD_IDLE, AI_GUARD_INNER, attackAggressors );
+	// No attackAggressors condition on these two: while the unit is moving (inner sweep, or the
+	// walk back to its post) that condition fought the movement itself, so a guarding unit under
+	// fire stuttered between driving and shooting instead of doing either.
+	defineState( AI_GUARD_INNER,						newInstance(AIGuardInnerState)( this ), AI_GUARD_OUTER, AI_GUARD_OUTER );
+	defineState( AI_GUARD_RETURN,						newInstance(AIGuardReturnState)( this ), AI_GUARD_IDLE, AI_GUARD_INNER );
 	defineState( AI_GUARD_IDLE,							newInstance(AIGuardIdleState)( this ), AI_GUARD_INNER, AI_GUARD_RETURN, attackAggressors );
 	defineState( AI_GUARD_OUTER,						newInstance(AIGuardOuterState)( this ), AI_GUARD_GET_CRATE, AI_GUARD_GET_CRATE );
 	defineState( AI_GUARD_GET_CRATE,				newInstance(AIGuardPickUpCrateState)( this ), AI_GUARD_RETURN, AI_GUARD_RETURN );

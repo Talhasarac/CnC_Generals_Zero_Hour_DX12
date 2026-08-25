@@ -109,6 +109,7 @@ public:
 	void initControls();															///< Show or Hide the Replay controls
 
 	AsciiString getReplayDir();												///< Returns the directory that holds the replay files.
+	static AsciiString getReplayArchiveDir();					///< Returns the directory that holds the archived replay files.
 	AsciiString getReplayExtention();									///< Returns the file extention for replay files.
 	AsciiString getLastReplayFileName();							///< Returns the filename used for the default replay.
 
@@ -126,6 +127,7 @@ public:
 protected:
 	void startRecording(GameDifficulty diff, Int originalGameMode, Int rankPoints, Int maxFPS);					///< Start recording to m_file.
 	void writeToFile(GameMessage *msg);								///< Write this GameMessage to m_file.
+	void archiveReplay(const AsciiString& fileName);	///< Copy the given replay to the archive directory under a timestamped name.
 
 	void logGameStart(AsciiString options);
 	void logGameEnd( void );

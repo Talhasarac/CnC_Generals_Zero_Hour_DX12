@@ -44,17 +44,24 @@ class UpgradeTemplate;
 //-------------------------------------------------------------------------------------------------
 //-------------------------------------------------------------------------------------------------
 
+// the horde action picks which of the two bonus rules a horde module follows.  every horde module
+// the game ships names HORDE explicitly, so the default only affects new content.
 enum HordeActionType
 {
-	HORDEACTION_HORDE = 0,
+	HORDEACTION_HORDE = 0,	///< classic: nationalism and fanaticism are never taken away again once granted
+	HORDEACTION_HORDE_FIXED,	///< horde, nationalism and fanaticism all follow the horde status
 
-	HORDEACTION_COUNT
+	HORDEACTION_COUNT,
+
+	HORDEACTION_DEFAULT = HORDEACTION_HORDE_FIXED
 };
 
 #ifdef DEFINE_HORDEACTION_NAMES
 static const char *TheHordeActionTypeNames[] =
 {
 	"HORDE",
+	"HORDE_FIXED",
+
 	NULL
 };
 #endif
@@ -89,6 +96,7 @@ public:
 	virtual Bool hasFlag() const = 0;
 	virtual Bool isTrueHordeMember() const = 0; 
 	virtual Bool isAllowedNationalism() const = 0;
+	virtual HordeActionType getHordeActionType() const = 0;
 
 };
 
@@ -110,6 +118,7 @@ public:
 	virtual Bool isTrueHordeMember() const { return m_trueHordeMember && m_inHorde; } 
 	virtual Bool isAllowedNationalism() const;
 	virtual Bool hasFlag() const { return m_hasFlag; }
+	virtual HordeActionType getHordeActionType() const { return getHordeUpdateModuleData()->m_action; }
 	virtual UpdateSleepTime update();	///< update this object's AI
 
 protected:

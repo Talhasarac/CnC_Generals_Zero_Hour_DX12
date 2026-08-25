@@ -215,6 +215,21 @@ void BattlePlanUpdate::onDelete()
 }
 
 //-------------------------------------------------------------------------------------------------
+// A captured strategy center used to leave its plan running for the player that lost it, and give
+// the new owner nothing.
+//-------------------------------------------------------------------------------------------------
+void BattlePlanUpdate::onCapture( Player *oldOwner, Player *newOwner )
+{
+	if( m_planAffectingArmy == PLANSTATUS_NONE )
+		return;
+
+	if( oldOwner )
+		oldOwner->changeBattlePlan( m_planAffectingArmy, -1, m_bonuses );
+	if( newOwner )
+		newOwner->changeBattlePlan( m_planAffectingArmy, 1, m_bonuses );
+}
+
+//-------------------------------------------------------------------------------------------------
 // Validate that we have the necessary data from the ini file.
 //-------------------------------------------------------------------------------------------------
 void BattlePlanUpdate::onObjectCreated()

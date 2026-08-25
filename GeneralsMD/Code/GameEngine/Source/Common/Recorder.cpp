@@ -714,8 +714,36 @@ void RecorderClass::stopRecording() {
 	if (m_file != NULL) {
 		fclose(m_file);
 		m_file = NULL;
+
+		if (TheGlobalData->m_archiveReplays)
+			archiveReplay(m_fileName);
 	}
 	m_fileName.clear();
+}
+
+/**
+ * Copy the replay that was just written to the archive directory, under a timestamped name.
+ * Every game overwrites the same LastReplay file, so without this only the most recent one
+ * survives unless the player renames it by hand before starting the next match.
+ */
+void RecorderClass::archiveReplay(const AsciiString& fileName)
+{
+	SYSTEMTIME st;
+	GetLocalTime(&st);
+
+	AsciiString sourcePath = getReplayDir();
+	sourcePath.concat(fileName);
+
+	AsciiString destPath = getReplayArchiveDir();
+	TheFileSystem->createDirectory(destPath);
+
+	AsciiString stamp;
+	stamp.format("%04d%02d%02d_%02d%02d%02d", st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+	destPath.concat(stamp);
+	destPath.concat(getReplayExtention());
+
+	if (!CopyFile(sourcePath.str(), destPath.str(), FALSE))
+		DEBUG_LOG(("RecorderClass::archiveReplay - failed to copy %s to %s\n", sourcePath.str(), destPath.str()));
 }
 
 /**
@@ -1492,6 +1520,16 @@ AsciiString RecorderClass::getReplayDir()
 
 	AsciiString tmp = TheGlobalData->getPath_UserData();
 	tmp.concat(replayDir);
+	return tmp;
+}
+
+/**
+ * returns the directory that holds the archived replay files.
+ */
+AsciiString RecorderClass::getReplayArchiveDir()
+{
+	AsciiString tmp = TheGlobalData->getPath_UserData();
+	tmp.concat("ArchivedReplays\\");
 	return tmp;
 }
 

@@ -504,10 +504,10 @@ void TunnelContain::onCapture( Player *oldOwner, Player *newOwner )
 // ------------------------------------------------------------------------------------------------
 UpdateSleepTime TunnelContain::update( void )
 {
-	// extending functionality to heal the units within the tunnel system
+	// the healing of the units within the tunnel system is driven by the player, once a frame for
+	// the whole network - see TunnelTracker::healObjects.
 	OpenContain::update();
-	const TunnelContainModuleData *modData = getTunnelContainModuleData();
-	
+
 	Object *obj = getObject();
 	Player *controllingPlayer = NULL;
 	if (obj)
@@ -517,10 +517,6 @@ UpdateSleepTime TunnelContain::update( void )
 	if (controllingPlayer)
 	{
 		TunnelTracker *tunnelSystem = controllingPlayer->getTunnelSystem();
-		if (tunnelSystem)
-		{
-			tunnelSystem->healObjects(modData->m_framesForFullHeal);
-		}
 
 		// check for attacked.
 		BodyModuleInterface *body = obj->getBodyModule();

@@ -241,8 +241,10 @@ public:
 		ParkingPlaceBehaviorInterface* pp = getPP(jet->getProducerID());
 		if (pp == NULL)
 		{
-			// no producer? just skip this step.
-			return STATE_SUCCESS;
+			// No airfield left to wait for.  Succeeding here says "the runway is yours", and the
+			// aircraft then flies the rest of a landing that has nowhere to land, so fail instead
+			// and let the machine take the dead-airfield route.
+			return STATE_FAILURE;
 		}
 
 		// gotta reserve a space in order to reserve a runway
@@ -511,10 +513,9 @@ public:
 		jetAI->chooseLocomotorSet(LOCOMOTORSET_TAXIING);
 		DEBUG_ASSERTCRASH(jetAI->getCurLocomotor(), ("no loco"));
 
-		Object* airfield;
-		ParkingPlaceBehaviorInterface* pp = getPP(jet->getProducerID(), &airfield);
+		ParkingPlaceBehaviorInterface* pp = getPP(jet->getProducerID());
 		if (pp == NULL)
-			return STATE_SUCCESS;	// no airfield? just skip this step.
+			return STATE_FAILURE;	// no airfield left to taxi on
 		
 		ParkingPlaceBehaviorInterface::PPInfo ppinfo;
 		if (!pp->reserveSpace(jet->getID(), jetAI->friend_getParkingOffset(), &ppinfo))
@@ -753,7 +754,7 @@ public:
 
 		ParkingPlaceBehaviorInterface* pp = getPP(jet->getProducerID());
 		if (pp == NULL)
-			return STATE_SUCCESS;	// no airfield? just skip this step
+			return STATE_FAILURE;	// no airfield left to take off from or land on
 		
 		ParkingPlaceBehaviorInterface::PPInfo ppinfo;
 		if (!pp->reserveSpace(jet->getID(), jetAI->friend_getParkingOffset(), &ppinfo))
@@ -1001,10 +1002,9 @@ public:
 		loco->setUltraAccurate(true);
 		jetAI->ignoreObstacleID(jet->getProducerID());
 
-		Object* airfield;
-		ParkingPlaceBehaviorInterface* pp = getPP(jet->getProducerID(), &airfield);
+		ParkingPlaceBehaviorInterface* pp = getPP(jet->getProducerID());
 		if (pp == NULL)
-			return STATE_SUCCESS;	// no airfield? just skip this step
+			return STATE_FAILURE;	// no helipad left to take off from or land on
 		
 		Coord3D landingApproach;
 		if (jet->isKindOf(KINDOF_PRODUCED_AT_HELIPAD))
@@ -1252,15 +1252,23 @@ protected:
 	virtual void xfer( Xfer *xfer )
 	{
 		// version
-		XferVersion currentVersion = 1;
+		XferVersion currentVersion = 2;
 		XferVersion version = currentVersion;
 		xfer->xferVersion( &version, currentVersion );
 
 		// set on create. xfer->xferBool(&m_landing);
-		xfer->xferUnsignedInt(&m_when);
+		xfer->xferUnsignedInt(&m_whenTakeoff);
 		xfer->xferUnsignedInt(&m_whenTransfer);
-		xfer->xferBool(&m_afterburners);
-		xfer->xferBool(&m_resetTimer);
+
+		if (version <= 1)
+		{
+			// the pre-rewrite state kept two flags here; read past them and throw them away.
+			Bool afterburners = false;
+			Bool resetTimer = false;
+			xfer->xferBool(&afterburners);
+			xfer->xferBool(&resetTimer);
+		}
+
 		xfer->xferObjectID(&m_waitedForTaxiID);
 	}
 	virtual void loadPostProcess()
@@ -1269,50 +1277,53 @@ protected:
 	}
 
 private:
-	UnsignedInt		m_when;
+	UnsignedInt		m_whenTakeoff;
 	UnsignedInt		m_whenTransfer;
 	ObjectID			m_waitedForTaxiID;
-	Bool					m_resetTimer;
-	Bool					m_afterburners;
 
-	Bool findWaiter()
+	/**
+		The jet on the *other* runway that we have to let go first, or NULL if nobody is in our way.
+		The runway index is what makes this correct: our own runway's reservation is us, and a jet
+		still taxiing on it is the one behind us, which must wait for us, not the other way round.
+		(Written for two runways.  More than two would want another look.)
+	*/
+	Object* findJetToWaitFor() const
 	{
-		Object* jet = getMachineOwner();
-		ParkingPlaceBehaviorInterface* pp = getPP(getMachineOwner()->getProducerID());
+		const Object* thisJet = getMachineOwner();
+		ParkingPlaceBehaviorInterface* pp = getPP(thisJet->getProducerID());
 		if (pp)
 		{
-			Int count = pp->getRunwayCount();
-			for (Int i = 0; i < count; ++i)
+			const Int thisJetRunway = pp->getRunwayIndex(thisJet->getID());
+			const Int runwayCount = pp->getRunwayCount();
+
+			for (Int runway = 0; runway < runwayCount; ++runway)
 			{
-				Object* otherJet = TheGameLogic->findObjectByID( pp->getRunwayReservation( i, RESERVATION_TAKEOFF ) );
-				if (otherJet == NULL || otherJet == jet)
+				if (runway == thisJetRunway)
+					continue;
+
+				Object* otherJet = TheGameLogic->findObjectByID( pp->getRunwayReservation( runway, RESERVATION_TAKEOFF ) );
+				if (otherJet == NULL)
 					continue;
 
 				AIUpdateInterface* ai = otherJet->getAIUpdateInterface();
 				if (ai == NULL)
 					continue;
 
-				if (ai->getCurrentStateID() == TAXI_TO_TAKEOFF)
-				{
-					if (m_waitedForTaxiID == INVALID_ID)
-					{
-						m_waitedForTaxiID = otherJet->getID();
-					}
-					return true;
-				}
+				if (ai->getCurrentStateID() != TAXI_TO_TAKEOFF)
+					continue;
+
+				return otherJet;
 			}
 		}
-		return false;
+		return NULL;
 	}
 
 public:
 	JetPauseBeforeTakeoffState( StateMachine *machine ) : 
 		AIFaceState(machine, false), 
-		m_when(0), 
+		m_whenTakeoff(0), 
 		m_whenTransfer(0),
-		m_waitedForTaxiID(INVALID_ID), 
-		m_resetTimer(false),
-		m_afterburners(false) 
+		m_waitedForTaxiID(INVALID_ID)
 	{ 
 		// nothing
 	}
@@ -1327,11 +1338,9 @@ public:
 		jetAI->friend_setTakeoffInProgress(true);
 		jetAI->friend_setLandingInProgress(false);
 
-		m_when = 0;
+		m_whenTakeoff = 0;
 		m_whenTransfer = 0;
 		m_waitedForTaxiID = INVALID_ID;
-		m_resetTimer = false;
-		m_afterburners = false;
 
 		ParkingPlaceBehaviorInterface* pp = getPP(jet->getProducerID());
 		if (pp == NULL)
@@ -1355,45 +1364,59 @@ public:
 
 		// always call this.
 		StateReturnType superStatus = AIFaceState::update();
-		
-		if (findWaiter())
-			return STATE_CONTINUE;
 
-		UnsignedInt now = TheGameLogic->getFrame();
-		if (!m_resetTimer)
+		Object* otherJet = findJetToWaitFor();
+		if (otherJet != NULL)
 		{
-			// we had to wait, but now everyone else is ready, so restart our countdown.
-			m_when = now + jetAI->friend_getTakeoffPause();
+			if (m_waitedForTaxiID == INVALID_ID)
+			{
+				// remember who we are waiting for, so a jet that starts taxiing after we picked
+				// ours cannot make us wait a second time (that was the endless-wait bug).
+				m_waitedForTaxiID = otherJet->getID();
+			}
+
+			if (m_waitedForTaxiID == otherJet->getID())
+				return STATE_CONTINUE;
+		}
+
+		const UnsignedInt now = TheGameLogic->getFrame();
+
+		if (m_whenTakeoff == 0)
+		{
+			// whoever we were waiting for is out of the way: set the countdown, once.
 			if (m_waitedForTaxiID == INVALID_ID)
 			{
 				m_waitedForTaxiID = jet->getID();	// just so we don't pick up anyone else
-				m_whenTransfer = now + 1;	
+				m_whenTransfer = now + 1;
 			}
 			else
 			{
 				m_whenTransfer = now + 2;	// 2 seems odd, but is correct
 			}
-			m_resetTimer = true;
-		}
 
-		if (!m_afterburners)
-		{
+			// take off soon, but never before the runway has been handed on.
+			m_whenTakeoff = now + jetAI->friend_getTakeoffPause();
+			if (m_whenTakeoff < m_whenTransfer)
+				m_whenTakeoff = m_whenTransfer;
+
 			jetAI->friend_enableAfterburners(true);
-			m_afterburners = true;
 		}
-
-		DEBUG_ASSERTCRASH(m_when != 0, ("hmm"));
-		DEBUG_ASSERTCRASH(m_whenTransfer != 0, ("hmm"));
-
-			// once we start the final wait, release the runways for guys behind us, so they can start taxiing
-		ParkingPlaceBehaviorInterface* pp = getPP(jet->getProducerID());
-		if (pp && now >= m_whenTransfer)
+		else
 		{
-			pp->transferRunwayReservationToNextInLineForTakeoff(jet->getID());
-		}
+			// once we start the final wait, release the runways for guys behind us, so they can start taxiing
+			if (now >= m_whenTransfer)
+			{
+				ParkingPlaceBehaviorInterface* pp = getPP(jet->getProducerID());
+				if (pp)
+				{
+					pp->transferRunwayReservationToNextInLineForTakeoff(jet->getID());
+				}
+				m_whenTransfer = ~0u;	// hand it on once, not every frame afterwards
+			}
 
-		if (now >= m_when)
-			return superStatus;
+			if (now >= m_whenTakeoff)
+				return superStatus;
+		}
 
 		return STATE_CONTINUE;
 	}
@@ -1485,6 +1508,12 @@ public:
 	virtual StateReturnType update()
 	{
 		Object* jet = getMachineOwner();
+
+		// the pad can be destroyed while the aircraft is sitting on it, rearming
+		ParkingPlaceBehaviorInterface* pp = getPP(jet->getProducerID());
+		if (pp == NULL)
+			return STATE_FAILURE;
+
 		UnsignedInt now = TheGameLogic->getFrame();
 		Bool allDone = true;
 		for (Int i = 0; i < WEAPONSLOT_COUNT;	++i)
@@ -1633,8 +1662,8 @@ HeliAIStateMachine::HeliAIStateMachine(Object *owner, AsciiString name) : AIStat
 	defineState( TAKING_OFF, newInstance(HeliTakeoffOrLandingState)( this, false ), AI_IDLE, AI_IDLE );
 	defineState( LANDING_AWAIT_CLEARANCE, newInstance(SuccessState)( this ), ORIENT_FOR_PARKING_PLACE, AI_IDLE );
 	defineState( ORIENT_FOR_PARKING_PLACE, newInstance(JetOrHeliParkOrientState)( this ), LANDING, AI_IDLE );
-	defineState( LANDING, newInstance(HeliTakeoffOrLandingState)( this, true ), RELOAD_AMMO, AI_IDLE );
-	defineState( RELOAD_AMMO, newInstance(JetOrHeliReloadAmmoState)( this ), AI_IDLE, AI_IDLE );
+	defineState( LANDING, newInstance(HeliTakeoffOrLandingState)( this, true ), RELOAD_AMMO, TAKING_OFF );
+	defineState( RELOAD_AMMO, newInstance(JetOrHeliReloadAmmoState)( this ), AI_IDLE, TAKING_OFF );
 	defineState( RETURN_TO_DEAD_AIRFIELD, newInstance(JetOrHeliReturningToDeadAirfieldState)( this ), CIRCLING_DEAD_AIRFIELD, RETURN_TO_DEAD_AIRFIELD );
 	defineState( CIRCLING_DEAD_AIRFIELD, newInstance(JetOrHeliCirclingDeadAirfieldState)( this ), AI_IDLE, AI_IDLE );
 	defineState( TAXI_FROM_HANGAR, newInstance(JetOrHeliTaxiState)( this, FROM_HANGAR ), AI_IDLE, AI_IDLE );
@@ -1873,6 +1902,19 @@ UpdateSleepTime JetAIUpdate::update()
 				getStateMachine()->clear();
 				setLastCommandSource( CMD_FROM_AI );
 				getStateMachine()->setState( TAKING_OFF_AWAIT_CLEARANCE );
+
+				// and then go where the helipad's rally point says
+				Object *airfield = TheGameLogic->findObjectByID( jet->getProducerID() );
+				if (airfield)
+				{
+					ExitInterface *exitInterface = airfield->getObjectExitInterface();
+					if (exitInterface)
+					{
+						const Coord3D *rallyPoint = exitInterface->getRallyPoint();
+						if (rallyPoint)
+							aiMoveToPosition( rallyPoint, CMD_FROM_AI );
+					}
+				}
 			}
 			else
 			{

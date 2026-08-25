@@ -1396,7 +1396,9 @@ protected:
 			// longer be necessary and can be taken out -- amit
 			if (m_spreadFormation) 
 			{
-				Coord3D resultPos;
+				// findPositionAround leaves the result alone when it fails, and this used to be an
+				// uninitialised stack Coord3D: the debris then appeared at whatever was on the stack.
+				Coord3D resultPos = *pos;
 				FindPositionOptions fpOptions;
 				fpOptions.minRadius = GameLogicRandomValueReal(m_minDistanceAFormation, m_minDistanceBFormation);
 				fpOptions.maxRadius = m_maxDistanceFormation;

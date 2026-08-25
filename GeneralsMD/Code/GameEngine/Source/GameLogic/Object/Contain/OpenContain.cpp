@@ -1041,8 +1041,8 @@ void OpenContain::exitObjectViaDoor( Object *exitObj, ExitDoorType exitDoor )
 		std::vector<Coord3D> exitPath;
 		exitPath.push_back(endPosition);
 		exitPath.push_back(endPosition); // Do it twice, in case units stack up due to brief flying.  jba.
-		if (m_rallyPointExists) {
-			exitPath.push_back(m_rallyPoint);
+		if (const Coord3D *rallyPoint = getRallyPoint()) {
+			exitPath.push_back(*rallyPoint);
 		}
 
 		if( ai )
@@ -1554,6 +1554,12 @@ const Coord3D *OpenContain::getRallyPoint( void ) const
 {
 	if (m_rallyPointExists)
 		return &m_rallyPoint;
+
+	// A container that was never given a rally point of its own follows the building's, so the
+	// flag the player planted on the barracks also applies to whatever walks out of its hold.
+	ExitInterface *primaryExit = getObject()->getObjectExitInterface();
+	if (primaryExit && primaryExit != static_cast<const ExitInterface *>(this))
+		return primaryExit->getRallyPoint();
 
 	return NULL;
 }

@@ -1073,6 +1073,19 @@ UpdateSleepTime ChinookAIUpdate::update()
 			// we're completely healed, so take off again
 			pp->setHealee(getObject(), false);
 			setMyState(TAKING_OFF, NULL, NULL, CMD_FROM_AI);
+
+			// and then go where the airfield's rally point says, instead of hovering over the pad
+			Object *airfield = TheGameLogic->findObjectByID( m_airfieldForHealing );
+			if (airfield)
+			{
+				ExitInterface *exitInterface = airfield->getObjectExitInterface();
+				if (exitInterface)
+				{
+					const Coord3D *rallyPoint = exitInterface->getRallyPoint();
+					if (rallyPoint)
+						aiMoveToPosition( rallyPoint, CMD_FROM_AI );
+				}
+			}
 		}
 		else
 		{
@@ -1289,6 +1302,13 @@ void ChinookAIUpdate::aiDoCommand(const AICommandParms* parms)
 		{
 			const Real THRESH = 3.0f;
 			const Real THRESH_SQR = THRESH*THRESH;
+
+			// the evac state below unloads the whole hold in one frame.  Only take it when the
+			// container has somebody queued to get in or out; otherwise let the standard move
+			// command through, which unloads one passenger at a time.
+			const ContainModuleInterface* contain = getObject()->getContain();
+			const Bool allowExit = contain && contain->hasObjectsWantingToEnterOrExit();
+
 			if (calcDistSqr(*getObject()->getPosition(), parms->m_pos) > THRESH_SQR && 
 					m_flightStatus == CHINOOK_LANDED)
 			{
@@ -1299,7 +1319,7 @@ void ChinookAIUpdate::aiDoCommand(const AICommandParms* parms)
 				setMyState(TAKING_OFF, NULL, NULL, CMD_FROM_AI);
 				passItThru = false;
 			}
-			else
+			else if (allowExit)
 			{
 				// do this INSTEAD of the standard stuff
 				setMyState(

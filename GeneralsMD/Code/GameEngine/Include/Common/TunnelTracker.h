@@ -62,7 +62,7 @@ public:
 	static void destroyObject( Object *obj, void *userData ); ///< Callback for Iterate Contained system
 	static void healObject( Object *obj, void *frames ); ///< Callback for Iterate Contained system
 
-	void healObjects(Real frames);	///< heal all objects within the tunnel
+	void healObjects();	///< heal all objects within the tunnel network, once per frame
 	
 	UnsignedInt friend_getTunnelCount() const {return m_tunnelCount;}///< TunnelContains are allowed to ask if they are the last one ahead of deletion time
 
@@ -78,7 +78,9 @@ protected:
 	virtual void loadPostProcess( void );
 
 private:
-	
+
+	Real getFramesForFullHeal() const;			///< the fastest tunnel in the network sets the pace
+
 	std::list< ObjectID > m_tunnelIDs;			///< I have to try to keep track of these because Caves need to iterate on them.
 	ContainedItemsList m_containList;				///< the contained object pointers list
 	std::list< ObjectID > m_xferContainList;///< for loading of m_containList during post processing

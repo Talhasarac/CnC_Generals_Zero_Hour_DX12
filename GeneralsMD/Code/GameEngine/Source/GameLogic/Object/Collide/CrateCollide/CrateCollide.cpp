@@ -176,6 +176,11 @@ Bool CrateCollide::isValidToExecute( const Object *other ) const
 	if( getObject()->isAboveTerrain() && !validBuildingAttempt )
 		return FALSE;
 
+	// every unit that touches the crate in the same frame used to collect it: the crate is marked
+	// destroyed by the first one, but destruction does not happen until the end of the frame.
+	if( getObject()->isDestroyed() )
+		return FALSE;
+
 	if( md->m_isForbidOwnerPlayer  &&  (getObject()->getControllingPlayer() == other->getControllingPlayer()) )
 		return FALSE; // Design has decreed this to not be picked up by the dead guy's team.
 

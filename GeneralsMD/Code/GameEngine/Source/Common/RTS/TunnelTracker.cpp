@@ -252,10 +252,45 @@ void TunnelTracker::destroyObject( Object *obj, void * )
 }
 
 // ------------------------------------------------------------------------
-	// heal all the objects within the tunnel system using the iterateContained function
-void TunnelTracker::healObjects(Real frames)
+	// heal all the objects within the tunnel system using the iterateContained function.
+	// this used to be driven by every TunnelContain's own update, so a network of five tunnels
+	// healed everyone inside it five times a frame - the more tunnels you owned, the faster your
+	// units healed.  The player drives it now, once.
+void TunnelTracker::healObjects()
 {
-	iterateContained(healObject, &frames, FALSE);
+	if( m_containListSize == 0 )
+		return;
+
+	Real framesForFullHeal = getFramesForFullHeal();
+	if( framesForFullHeal <= 0.0f )
+		return;
+
+	iterateContained(healObject, &framesForFullHeal, FALSE);
+}
+
+// ------------------------------------------------------------------------
+	// the shortest full-heal time of the tunnels still standing
+Real TunnelTracker::getFramesForFullHeal() const
+{
+	Real minFrames = 0.0f;
+
+	for( std::list<ObjectID>::const_iterator it = m_tunnelIDs.begin(); it != m_tunnelIDs.end(); ++it )
+	{
+		const Object *tunnelObj = TheGameLogic->findObjectByID( *it );
+		if( tunnelObj == NULL )
+			continue;
+
+		const ContainModuleInterface *contain = tunnelObj->getContain();
+		DEBUG_ASSERTCRASH( contain != NULL, ("a tunnel with no contain module") );
+		if( !contain->isTunnelContain() )
+			continue;
+
+		const Real frames = ((const TunnelContain *)contain)->getFullTimeForHeal();
+		if( minFrames == 0.0f || frames < minFrames )
+			minFrames = frames;
+	}
+
+	return minFrames;
 }
 
 // ------------------------------------------------------------------------

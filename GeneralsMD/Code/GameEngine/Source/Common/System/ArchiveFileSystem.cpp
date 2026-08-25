@@ -264,6 +264,71 @@ Bool ArchiveFileSystem::getFileInfo(const AsciiString& filename, FileInfo *fileI
 	}
 }
 
+// Where two archives hold the same file, loadIntoDirectoryTree keeps whichever was loaded first.
+// That is the right rule for content, but Zero Hour ships downscaled copies of a number of the base
+// game's textures in TexturesZH.big, and those win over the full-size originals in the base game's
+// Textures.big purely because of load order.  For the named pair of archives, and only inside the
+// named directory, keep whichever copy is actually the larger file.
+void ArchiveFileSystem::prioritizeLargerFiles(const AsciiString& directory, const char *inferiorArchive, const char *superiorArchive)
+{
+	// walk down to the directory
+	AsciiString path = directory;
+	path.toLower();
+	AsciiString token;
+
+	ArchivedDirectoryInfo *dirInfo = &m_rootDirectory;
+	while (path.nextToken(&token, "\\/"))
+	{
+		ArchivedDirectoryInfoMap::iterator dirIt = dirInfo->m_directories.find(token);
+		if (dirIt == dirInfo->m_directories.end())
+			return;
+
+		dirInfo = &dirIt->second;
+	}
+
+	// find the archive that holds the bigger copies
+	ArchiveFile *superior = NULL;
+	AsciiString superiorName;
+	for (ArchiveFileMap::iterator archiveIt = m_archiveFileMap.begin(); archiveIt != m_archiveFileMap.end(); ++archiveIt)
+	{
+		if (archiveIt->first.endsWithNoCase(superiorArchive))
+		{
+			superior = archiveIt->second;
+			superiorName = archiveIt->first;
+			break;
+		}
+	}
+
+	if (superior == NULL)
+		return;
+
+	for (ArchivedFileLocationMap::iterator fileIt = dirInfo->m_files.begin(); fileIt != dirInfo->m_files.end(); ++fileIt)
+	{
+		if (!fileIt->second.endsWithNoCase(inferiorArchive))
+			continue;
+
+		ArchiveFileMap::iterator inferiorIt = m_archiveFileMap.find(fileIt->second);
+		if (inferiorIt == m_archiveFileMap.end())
+			continue;
+
+		AsciiString filePath = directory;
+		filePath.concat(fileIt->first);
+
+		FileInfo inferiorInfo, superiorInfo;
+		if (!inferiorIt->second->getFileInfo(filePath, &inferiorInfo))
+			continue;
+		if (!superior->getFileInfo(filePath, &superiorInfo))
+			continue;
+
+		if (superiorInfo.sizeLow > inferiorInfo.sizeLow)
+		{
+			DEBUG_LOG(("ArchiveFileSystem::prioritizeLargerFiles - %s (%d bytes) from %s wins over the %d byte copy in %s\n",
+								 filePath.str(), superiorInfo.sizeLow, superiorName.str(), inferiorInfo.sizeLow, fileIt->second.str()));
+			fileIt->second = superiorName;
+		}
+	}
+}
+
 AsciiString ArchiveFileSystem::getArchiveFilenameForFile(const AsciiString& filename) const
 {
 	AsciiString path;

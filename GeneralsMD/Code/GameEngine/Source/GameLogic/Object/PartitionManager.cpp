@@ -1874,6 +1874,46 @@ void PartitionData::doCircleFill(
 }
 
 // -----------------------------------------------------------------------------
+// The scanline circle above is a midpoint-circle outline with its spans filled in, in whole cells:
+// it claims cells the object does not reach and misses cells it does, most visibly for radii of
+// about 20 to 40 (one to two cells).  This one keeps a cell if the circle overlaps the cell's
+// square at all.
+void PartitionData::doCircleFillPrecise(Real centerX, Real centerY, Real radius)
+{
+	DEBUG_ASSERTCRASH(m_coiInUseCount == 0, ("expected no coi in use here"));
+
+	Int minCellX, minCellY, maxCellX, maxCellY;
+	ThePartitionManager->worldToCell(centerX - radius, centerY - radius, &minCellX, &minCellY);
+	ThePartitionManager->worldToCell(centerX + radius, centerY + radius, &maxCellX, &maxCellY);
+
+	const Real halfCell = ThePartitionManager->getCellSize() * 0.5f;
+
+	for (Int x = minCellX; x <= maxCellX; ++x)
+	{
+		for (Int y = minCellY; y <= maxCellY; ++y)
+		{
+			PartitionCell *cell = ThePartitionManager->getCellAt(x, y);
+			if (cell == NULL)
+				continue;
+
+			Real cellCenterX, cellCenterY;
+			ThePartitionManager->getCellCenterPos(x, y, cellCenterX, cellCenterY);
+
+			// distance from the circle's center to the closest point of the cell's square
+			Real dx = (Real)fabs(centerX - cellCenterX) - halfCell;
+			Real dy = (Real)fabs(centerY - cellCenterY) - halfCell;
+			if (dx < 0.0f)
+				dx = 0.0f;
+			if (dy < 0.0f)
+				dy = 0.0f;
+
+			if (sqr(dx) + sqr(dy) < sqr(radius))
+				addSubPixToCoverage(cell);
+		}
+	}
+}
+
+// -----------------------------------------------------------------------------
 void PartitionData::doSmallFill(
 	Real centerX,
 	Real centerY,
@@ -2070,7 +2110,7 @@ void PartitionData::updateCellsTouched()
 			case GEOMETRY_SPHERE:
 			case GEOMETRY_CYLINDER:
 			{
-				doCircleFill(pos.x, pos.y, majorRadius);
+				doCircleFillPrecise(pos.x, pos.y, majorRadius);
 				break;
 			}
 

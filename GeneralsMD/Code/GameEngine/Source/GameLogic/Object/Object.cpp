@@ -3137,6 +3137,11 @@ Bool Object::hasAnySpecialPower() const
 //-------------------------------------------------------------------------------------------------
 void Object::onVeterancyLevelChanged( VeterancyLevel oldLevel, VeterancyLevel newLevel, Bool provideFeedback )
 {
+	// a kill scored by a unit that is already dying used to promote the corpse: upgrades, weapon
+	// bonuses, the level-up animation and the sound.
+	if( isEffectivelyDead() )
+		return;
+
 	updateUpgradeModules();
 
 	const UpgradeTemplate* up = TheUpgradeCenter->findVeterancyUpgrade(newLevel);

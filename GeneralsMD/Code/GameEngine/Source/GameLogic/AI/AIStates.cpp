@@ -2691,7 +2691,14 @@ StateReturnType AIAttackApproachTargetState::updateInternal()
 		}	
 		if( victim->testStatus( OBJECT_STATUS_STEALTHED ) && !victim->testStatus( OBJECT_STATUS_DETECTED ) && !victim->testStatus( OBJECT_STATUS_DISGUISED ) ) 
 		{
-			return STATE_FAILURE;	// If obj is stealthed, can no longer approach.
+			// If obj is stealthed, can no longer approach - except to disarm it.  Mines and traps
+			// are stealthed by nature, so refusing the approach here left a unit ordered to clear
+			// one standing still.
+			const Bool isTargetingMine = weapon && weapon->getDamageType() == DAMAGE_DISARM &&
+				(victim->isKindOf(KINDOF_MINE) || victim->isKindOf(KINDOF_BOOBY_TRAP) || victim->isKindOf(KINDOF_DEMOTRAP));
+
+			if (!isTargetingMine)
+				return STATE_FAILURE;
 		}
 		ai->setCurrentVictim(victim);
 		// Attacking an object.
@@ -6656,6 +6663,17 @@ void AIEnterState::onExit( StateExitType status )
 }
 
 //----------------------------------------------------------------------------------------------------------
+/** Do the two objects' vertical extents touch at all? */
+static Bool hasVerticalOverlap( const Object* a, const Object* b )
+{
+	const Real aLower = a->getPosition()->z;
+	const Real aUpper = aLower + a->getGeometryInfo().getMaxHeightAbovePosition();
+	const Real bLower = b->getPosition()->z;
+	const Real bUpper = bLower + b->getGeometryInfo().getMaxHeightAbovePosition();
+	return aUpper >= bLower && aLower <= bUpper;
+}
+
+//----------------------------------------------------------------------------------------------------------
 StateReturnType AIEnterState::update()
 {
 
@@ -6717,8 +6735,10 @@ StateReturnType AIEnterState::update()
 
 	StateReturnType code = AIInternalMoveToState::update();
 
-	// if it's airborne, wait for it to land
-	if (code == STATE_SUCCESS && goal->isAboveTerrain() && !obj->isAboveTerrain())
+	// if it's airborne, wait for it to land.  Comparing the two vertical extents (rather than
+	// asking only whether the goal is off the ground and we are not) also stops a levitating or
+	// airborne rider from stepping into a transport it is nowhere near touching.
+	if (code == STATE_SUCCESS && !hasVerticalOverlap(goal, obj))
 	{
 		code = STATE_CONTINUE;
 	}

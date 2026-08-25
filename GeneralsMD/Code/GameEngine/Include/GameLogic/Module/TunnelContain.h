@@ -95,6 +95,7 @@ public:
 	virtual Bool isBustable() const { return TRUE; }	///< can this container get busted by a bunkerbuster
 	virtual Bool isHealContain() const { return false; } ///< true when container only contains units while healing (not a transport!)
 	virtual Bool isTunnelContain() const { return TRUE; }
+	Real getFullTimeForHeal() const { return getTunnelContainModuleData()->m_framesForFullHeal; } ///< frames until a contained object is fully healed
 	virtual Bool isImmuneToClearBuildingAttacks() const { return true; }
   virtual Bool isSpecialOverlordStyleContainer() const {return FALSE;}
 

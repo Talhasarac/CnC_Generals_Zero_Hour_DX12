@@ -462,6 +462,12 @@ private:
 		fill in the pixels covered by the given circular shape with the given
 		center and radius. Note that this is used for both spheres and cylinders.
 	*/
+	/**
+		The same fill, asking whether the circle actually reaches each cell rather than drawing a
+		midpoint-circle outline and filling between its spans.
+	*/
+	void doCircleFillPrecise(Real centerX, Real centerY, Real radius);
+
 	void doCircleFill(
 		Real centerX,
 		Real centerY,

@@ -241,6 +241,13 @@ void ThingFactory::reset( void )
 
 		t = nextT;
 	}
+
+	// The ids handed out above are what a network game and a save file identify templates by, so
+	// they must depend only on the data loaded, not on how many matches this process has played.
+	// m_nextTemplateID kept counting up across resets; it now goes back to just past the templates
+	// that survived.
+	DEBUG_ASSERTCRASH( m_firstTemplate != NULL, ("no templates left after deleting overrides") );
+	m_nextTemplateID = (UnsignedShort)(m_firstTemplate->getTemplateID() + 1);
 }  // end reset
 
 //-------------------------------------------------------------------------------------------------

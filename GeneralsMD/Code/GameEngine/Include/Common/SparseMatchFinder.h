@@ -189,6 +189,23 @@ private:
 public:
 
 	//-------------------------------------------------------------------------------------------------
+	/**
+		m_bestMatches holds pointers *into the vector that was handed to findBestInfo*, so a copy of
+		this finder would point at the original owner's vector - which is exactly what happened to a
+		ThingTemplate override: the copy answered with weapon and armor sets belonging to another
+		template, and freeing the original left the copy pointing at dead memory.  The map is only a
+		cache, so a copy simply starts empty and refills itself.
+	*/
+	SparseMatchFinder() { }
+	SparseMatchFinder(const SparseMatchFinder& other) { }
+	SparseMatchFinder& operator=(const SparseMatchFinder& other)
+	{
+		if (this != &other)
+			m_bestMatches.clear();
+		return *this;
+	}
+
+	//-------------------------------------------------------------------------------------------------
 	void clear()
 	{
 		m_bestMatches.clear();

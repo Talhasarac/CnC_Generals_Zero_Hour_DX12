@@ -176,6 +176,7 @@ class ArchiveFileSystem : public SubsystemInterface
 
 protected:
 	virtual void					loadIntoDirectoryTree(const ArchiveFile *archiveFile, const AsciiString& archiveFilename, Bool overwrite = FALSE );	///< load the archive file's header information and apply it to the global archive directory tree.
+	void									prioritizeLargerFiles(const AsciiString& directory, const char *inferiorArchive, const char *superiorArchive);	///< where two archives claim the same file in this directory, keep the bigger copy.
 
 	ArchiveFileMap m_archiveFileMap;
 	ArchivedDirectoryInfo m_rootDirectory;

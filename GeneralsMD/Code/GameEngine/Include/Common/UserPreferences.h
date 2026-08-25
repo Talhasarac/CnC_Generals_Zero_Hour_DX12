@@ -119,6 +119,7 @@ public:
 	Bool getShowPlacementRangeRing(void);
 	Bool getWorkersReturnToSupply(void);
 	Bool getDetailedBuildTooltips(void);
+	Bool getArchiveReplays(void);
 	Int	 getBloomIntensity(void);
 	Int	 getBloomThreshold(void);
 	Int	 getTextureReduction(void);

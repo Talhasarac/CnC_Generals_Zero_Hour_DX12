@@ -32,6 +32,7 @@
 #define NO_DEBUG_CRC
 
 #include "Common/PerfTimer.h"
+#include "Common/Player.h"
 #include "Common/ThingTemplate.h"
 #include "Common/Xfer.h"
 #include "GameLogic/GameLogic.h"
@@ -45,6 +46,7 @@
 #include "GameLogic/TerrainLogic.h"
 #include "GameLogic/Weapon.h"
 #include "GameLogic/LogicRandomValue.h"
+#include "GameClient/FXList.h"
 #include "GameClient/Statistics.h"		// MuLaw/NormalizeToRange, for the bounce sound volume
 
 const Real DEFAULT_MASS = 1.0f;
@@ -1391,7 +1393,25 @@ void PhysicsBehavior::onCollide( Object *other, const Coord3D *loc, const Coord3
 					// fall into a nonbuilding -- whatever. if we're a vehicle, quietly do a little damage.
 					if (obj->isKindOf(KINDOF_VEHICLE))
 					{
-						TheWeaponStore->createAndFireTempWeapon(getPhysicsBehaviorModuleData()->m_vehicleCrashesIntoNonBuildingWeaponTemplate, obj, obj->getPosition());
+						// this used to fire a temp weapon at the crash site, which hits everything in the
+						// weapon's radius - and the collision is re-evaluated for every object in the pile,
+						// so a vehicle landing among five units damaged all five, five times over.  Damage
+						// the thing actually collided with, once.
+						const WeaponTemplate *weaponTemplate = getPhysicsBehaviorModuleData()->m_vehicleCrashesIntoNonBuildingWeaponTemplate;
+						if (weaponTemplate)
+						{
+							WeaponBonus nullBonus;
+
+							DamageInfo damageInfo;
+							damageInfo.in.m_damageType = weaponTemplate->getDamageType();
+							damageInfo.in.m_deathType = weaponTemplate->getDeathType();
+							damageInfo.in.m_sourceID = obj->getID();
+							damageInfo.in.m_sourcePlayerMask = obj->getControllingPlayer() ? obj->getControllingPlayer()->getPlayerMask() : 0;
+							damageInfo.in.m_amount = weaponTemplate->getPrimaryDamage(nullBonus);
+
+							other->attemptDamage(&damageInfo);
+							FXList::doFXObj(weaponTemplate->getFireFX(obj->getVeterancyLevel()), obj);
+						}
 					}
 				}
 			}

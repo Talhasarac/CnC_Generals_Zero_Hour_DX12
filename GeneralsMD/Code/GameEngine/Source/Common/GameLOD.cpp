@@ -375,6 +375,7 @@ void GameLODManager::init(void)
 	TheWritableGlobalData->m_showPlacementRangeRing = optionPref.getShowPlacementRangeRing();
 	TheWritableGlobalData->m_workersReturnToSupply = optionPref.getWorkersReturnToSupply();
 	TheWritableGlobalData->m_detailedBuildTooltips = optionPref.getDetailedBuildTooltips();
+	TheWritableGlobalData->m_archiveReplays = optionPref.getArchiveReplays();
 
 	// Bloom is a look, not a detail level - it is honored at every preset, like the zoom ceiling.
 	TheWritableGlobalData->m_bloomIntensity = optionPref.getBloomIntensity();

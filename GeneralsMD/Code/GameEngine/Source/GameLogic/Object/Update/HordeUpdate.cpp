@@ -85,6 +85,10 @@ public:
 
 	virtual Bool allow(Object *objOther)
 	{
+		// a corpse still sitting in the partition is not a hordesman.
+		if (objOther->isEffectivelyDead())
+			return false;
+
 		// must be exact same type as us (well, maybe)
 		if (m_data->m_exactMatch && m_obj->getTemplate() != objOther->getTemplate())
 			return false;
@@ -126,7 +130,7 @@ HordeUpdateModuleData::HordeUpdateModuleData() :
 	m_alliesOnly(true),
 	m_exactMatch(false),
 	m_allowedNationalism(TRUE),
-	m_action(HORDEACTION_HORDE)
+	m_action(HORDEACTION_DEFAULT)
 {
 }
 
@@ -195,36 +199,21 @@ Bool HordeUpdate::isAllowedNationalism() const
 // ------------------------------------------------------------------------------------------------
 void HordeUpdate::joinOrLeaveHorde(SimpleObjectIterator *iter, Bool join)
 {
-	Bool prevInHorde = m_inHorde;
-
-	m_inHorde = join;
-
-
-
-
-	const HordeUpdateModuleData* d = getHordeUpdateModuleData();
-	switch (d->m_action)
+	// give/remove bonus effects
+	if( m_inHorde != join )
 	{
-		case HORDEACTION_HORDE:
-			{
+		m_inHorde = join;
 
-				// give/remove bonus effects
-				if( prevInHorde != m_inHorde )
-				{
-					AIUpdateInterface *ai = getObject()->getAIUpdateInterface();
-
-					if( ai )
-						ai->evaluateMoraleBonus();
-					else
-						DEBUG_CRASH(( "HordeUpdate::joinOrLeaveHorde - We (%s) must have an AI to benefit from horde\n",
-													getObject()->getTemplate()->getName().str() ));
-				}  // end if
-
-			}
-			break;
+		AIUpdateInterface *ai = getObject()->getAIUpdateInterface();
+		if( ai )
+		{
+			const HordeUpdateModuleData* md = getHordeUpdateModuleData();
+			ai->evaluateMoraleBonus( m_inHorde, md->m_allowedNationalism, md->m_action );
+		}
+		else
+			DEBUG_CRASH(( "HordeUpdate::joinOrLeaveHorde - We (%s) must have an AI to benefit from horde\n",
+										getObject()->getTemplate()->getName().str() ));
 	}
-
-
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -313,7 +302,7 @@ UpdateSleepTime HordeUpdate::update( void )
 
 		AIUpdateInterface *ai = getObject()->getAIUpdateInterface();
 		if( ai )
-			ai->evaluateMoraleBonus();
+			ai->evaluateMoraleBonus( m_inHorde, md->m_allowedNationalism, md->m_action );
 
 	}
 

@@ -196,6 +196,7 @@ GlobalData* GlobalData::m_theOriginal = NULL;
 	{ "ShowPlacementRangeRing",		INI::parseBool,				NULL,			offsetof( GlobalData, m_showPlacementRangeRing ) },
 	{ "WorkersReturnToSupply",		INI::parseBool,				NULL,			offsetof( GlobalData, m_workersReturnToSupply ) },
 	{ "DetailedBuildTooltips",		INI::parseBool,				NULL,			offsetof( GlobalData, m_detailedBuildTooltips ) },
+	{ "ArchiveReplays",						INI::parseBool,				NULL,			offsetof( GlobalData, m_archiveReplays ) },
 	{ "Bloom",										INI::parseInt,				NULL,			offsetof( GlobalData, m_bloomIntensity ) },
 	{ "BloomThreshold",						INI::parseInt,				NULL,			offsetof( GlobalData, m_bloomThreshold ) },
 	{ "MinCameraHeight",						INI::parseReal,				NULL,			offsetof( GlobalData, m_minCameraHeight ) },
@@ -1023,6 +1024,7 @@ GlobalData::GlobalData()
 	m_showPlacementRangeRing = TRUE;
 	m_workersReturnToSupply = TRUE;
 	m_detailedBuildTooltips = TRUE;
+	m_archiveReplays = FALSE;
 
 	// Bloom is the one that does NOT default on: it changes how the game looks rather than what it
 	// can do, and the artwork was painted in 2003 for a screen with no glow at all.  "Bloom = 60"

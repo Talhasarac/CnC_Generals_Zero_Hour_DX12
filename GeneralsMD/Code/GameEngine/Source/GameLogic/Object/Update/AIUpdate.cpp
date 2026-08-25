@@ -4737,122 +4737,137 @@ setTmpValue(now);
 
 // ------------------------------------------------------------------------------------------------
 // ------------------------------------------------------------------------------------------------
-void AIUpdateInterface::evaluateMoraleBonus( void )
+Bool AIUpdateInterface::hasNationalism() const
+{
+	const Player *player = getObject()->getControllingPlayer();
+	if( player )
+	{
+		///@todo Find a better way to represent nationalism without hardcoding here (CBD)
+		static const UpgradeTemplate *nationalismTemplate = TheUpgradeCenter->findUpgrade( "Upgrade_Nationalism" );
+		DEBUG_ASSERTCRASH( nationalismTemplate != NULL, ("AIUpdateInterface::hasNationalism - Nationalism upgrade not found\n") );
+		if( nationalismTemplate )
+			return player->hasUpgradeComplete( nationalismTemplate );
+	}
+	return FALSE;
+}
+
+// ------------------------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------------------------
+Bool AIUpdateInterface::hasFanaticism() const
+{
+	const Player *player = getObject()->getControllingPlayer();
+	if( player )
+	{
+		///@todo Find a better way to represent fanaticism without hardcoding here (MAL)
+		static const UpgradeTemplate *fanaticismTemplate = TheUpgradeCenter->findUpgrade( "Upgrade_Fanaticism" );
+		DEBUG_ASSERTCRASH( fanaticismTemplate != NULL, ("AIUpdateInterface::hasFanaticism - Fanaticism upgrade not found\n") );
+		if( fanaticismTemplate )
+			return player->hasUpgradeComplete( fanaticismTemplate );
+	}
+	return FALSE;
+}
+
+// ------------------------------------------------------------------------------------------------
+// the horde module that owns the bonus tells us what it sees, instead of us walking every behavior
+// module of the object to work it out again.
+// ------------------------------------------------------------------------------------------------
+void AIUpdateInterface::evaluateMoraleBonus( Bool inHorde, Bool allowNationalism, HordeActionType type )
+{
+#ifdef ALLOW_DEMORALIZE
+	if( isDemoralized() )
+	{
+		Object *us = getObject();
+
+		us->setWeaponBonusCondition( WEAPONBONUSCONDITION_DEMORALIZED );
+
+		// a demoralized unit gets none of the three bonuses
+		us->clearWeaponBonusCondition( WEAPONBONUSCONDITION_HORDE );
+		us->clearWeaponBonusCondition( WEAPONBONUSCONDITION_NATIONALISM );
+		us->clearWeaponBonusCondition( WEAPONBONUSCONDITION_FANATICISM );
+
+		Drawable *draw = us->getDrawable();
+		if( draw && !us->isKindOf( KINDOF_PORTABLE_STRUCTURE ) )
+			draw->setTerrainDecal( TERRAIN_DECAL_DEMORALIZED );
+
+		return;
+	}
+
+	getObject()->clearWeaponBonusCondition( WEAPONBONUSCONDITION_DEMORALIZED );
+#endif
+
+	//Lorenzen temporarily disabled, since it fights with the horde buff
+	//Drawable *draw = getObject()->getDrawable();
+	//if ( draw && !getObject()->isKindOf( KINDOF_PORTABLE_STRUCTURE ) )
+	//	draw->setTerrainDecal(TERRAIN_DECAL_NONE);
+
+	switch( type )
+	{
+		case HORDEACTION_HORDE:
+			evaluateNationalismBonusClassic( inHorde, allowNationalism );
+			break;
+
+		case HORDEACTION_HORDE_FIXED:
+			evaluateNationalismBonus( inHorde, allowNationalism );
+			break;
+	}
+}
+
+// ------------------------------------------------------------------------------------------------
+// the classic rule: nationalism and fanaticism are granted while the upgrades are owned and are
+// never taken away again, even when the horde breaks up.
+// ------------------------------------------------------------------------------------------------
+void AIUpdateInterface::evaluateNationalismBonusClassic( Bool inHorde, Bool allowNationalism )
 {
 	Object *us = getObject();
-#ifdef ALLOW_DEMORALIZE
-	Bool demoralized = isDemoralized();
-#endif
-	Bool horde = FALSE;
-	Bool nationalism = FALSE;
-	Bool fanaticism = FALSE;
 
-	// do we have nationalism
-	///@todo Find a better way to represent nationalism without hardcoding here (CBD)
-	static const UpgradeTemplate *nationalismTemplate = TheUpgradeCenter->findUpgrade( "Upgrade_Nationalism" );
-	DEBUG_ASSERTCRASH( nationalismTemplate != NULL, ("AIUpdateInterface::evaluateMoraleBonus - Nationalism upgrade not found\n") );
-	Player *player = us->getControllingPlayer();
-	if( player && player->hasUpgradeComplete( nationalismTemplate ) )
-		nationalism = TRUE;
+	if( inHorde )
+		us->setWeaponBonusCondition( WEAPONBONUSCONDITION_HORDE );
+	else
+		us->clearWeaponBonusCondition( WEAPONBONUSCONDITION_HORDE );
 
-	// do we have fanaticism
-	///@todo Find a better way to represent fanaticism without hardcoding here (MAL)
-	static const UpgradeTemplate *fanaticismTemplate = TheUpgradeCenter->findUpgrade( "Upgrade_Fanaticism" );
-	DEBUG_ASSERTCRASH( fanaticismTemplate != NULL, ("AIUpdateInterface::evaluateMoraleBonus - Fanaticism upgrade not found\n") );
-	if( player && player->hasUpgradeComplete( fanaticismTemplate ) )
-		fanaticism = TRUE;
-
-	// are we in a horde
-	HordeUpdateInterface *hui;
-	for( BehaviorModule** u = us->getBehaviorModules(); *u; ++u )
+	if( allowNationalism && hasNationalism() )
 	{
+		us->setWeaponBonusCondition( WEAPONBONUSCONDITION_NATIONALISM );
 
-		hui = (*u)->getHordeUpdateInterface();
-		if( hui && hui->isInHorde() )
-		{
-			horde = TRUE;
-
-			if( !hui->isAllowedNationalism() )
-			{
-				// Sorry CBD and MAL, but the cancer has spread to the lymph nodes.  After Alpha, just pump full of painkillers.
-				nationalism = FALSE;
-				fanaticism = FALSE;
-			}
-		}
-
-	}  // end for
-
-#ifdef ALLOW_DEMORALIZE
-	// if we are are not demoralized we can have horde and nationalism effects
-	if( demoralized == FALSE )
-#endif
-	{
-
-#ifdef ALLOW_DEMORALIZE
-		// demoralized
-		us->clearWeaponBonusCondition( WEAPONBONUSCONDITION_DEMORALIZED );
-#endif		
-		
-		//Lorenzen temporarily disabled, since it fights with the horde buff
-		//Drawable *draw = us->getDrawable();
-		//if ( draw && !us->isKindOf( KINDOF_PORTABLE_STRUCTURE ) )
-		//	draw->setTerrainDecal(TERRAIN_DECAL_NONE);
-
-		// horde
-		if( horde )
-		{
-			us->setWeaponBonusCondition( WEAPONBONUSCONDITION_HORDE );
-
-		}  // end if
+		// FOR THE NEW GC INFANTRY GENERAL
+		if( hasFanaticism() )
+			us->setWeaponBonusCondition( WEAPONBONUSCONDITION_FANATICISM );
 		else
-			us->clearWeaponBonusCondition( WEAPONBONUSCONDITION_HORDE );
+			us->clearWeaponBonusCondition( WEAPONBONUSCONDITION_FANATICISM );
+	}
+	else
+		us->clearWeaponBonusCondition( WEAPONBONUSCONDITION_NATIONALISM );
+}
 
-		// nationalism
-		if( nationalism )
-    {
+// ------------------------------------------------------------------------------------------------
+// the fixed rule: all three bonuses follow the horde status, and fanaticism no longer needs
+// nationalism to be owned as well.
+// ------------------------------------------------------------------------------------------------
+void AIUpdateInterface::evaluateNationalismBonus( Bool inHorde, Bool allowNationalism )
+{
+	Object *us = getObject();
+
+	if( inHorde )
+	{
+		us->setWeaponBonusCondition( WEAPONBONUSCONDITION_HORDE );
+
+		if( allowNationalism && hasNationalism() )
 			us->setWeaponBonusCondition( WEAPONBONUSCONDITION_NATIONALISM );
-      // fanaticism
-      if ( fanaticism )
-        us->setWeaponBonusCondition( WEAPONBONUSCONDITION_FANATICISM );// FOR THE NEW GC INFANTRY GENERAL
-      else 
-        us->clearWeaponBonusCondition( WEAPONBONUSCONDITION_FANATICISM );
-    }
 		else
 			us->clearWeaponBonusCondition( WEAPONBONUSCONDITION_NATIONALISM );
 
-
-
-	}  // end if
-#ifdef ALLOW_DEMORALIZE
+		if( allowNationalism && hasFanaticism() )
+			us->setWeaponBonusCondition( WEAPONBONUSCONDITION_FANATICISM );
+		else
+			us->clearWeaponBonusCondition( WEAPONBONUSCONDITION_FANATICISM );
+	}
 	else
 	{
-
-		// demoralized
-		us->setWeaponBonusCondition( WEAPONBONUSCONDITION_DEMORALIZED );
-
-		// we cannot have horde bonus condition
 		us->clearWeaponBonusCondition( WEAPONBONUSCONDITION_HORDE );
-		Drawable *draw = us->getDrawable();
-		if( draw && !us->isKindOf( KINDOF_PORTABLE_STRUCTURE ) )
-		{	
-			draw->setTerrainDecal(TERRAIN_DECAL_DEMORALIZED);
-		}
-				
-		// we cannot have nationalism bonus condition
 		us->clearWeaponBonusCondition( WEAPONBONUSCONDITION_NATIONALISM );
-    us->clearWeaponBonusCondition( WEAPONBONUSCONDITION_FANATICISM );
-
-	}  // end else
-#endif
-
-/*
-	UnicodeString msg;
-	msg.format( L"'%S' Horde=%d,Nationalism=%d,Demoralized=%d",
-							us->getTemplate()->getName().str(), horde, nationalism, demoralized );
-	TheInGameUI->message( msg );
-*/
-
-}  // end evaluateMoraleBonus
+		us->clearWeaponBonusCondition( WEAPONBONUSCONDITION_FANATICISM );
+	}
+}
 
 #ifdef ALLOW_DEMORALIZE
 // ------------------------------------------------------------------------------------------------
@@ -4870,7 +4885,13 @@ void AIUpdateInterface::setDemoralized( UnsignedInt durationInFrames )
 	{
 
 		// evaluate demoralization, nationalism, and horde effect as they are all intertwined
-		evaluateMoraleBonus();
+		Object *us = getObject();
+		for( BehaviorModule** u = us->getBehaviorModules(); *u; ++u )
+		{
+			HordeUpdateInterface *hui = (*u)->getHordeUpdateInterface();
+			if( hui )
+				evaluateMoraleBonus( hui->isInHorde(), hui->isAllowedNationalism(), hui->getHordeActionType() );
+		}
 
 	}  // end if
 
@@ -5077,12 +5098,14 @@ void AIUpdateInterface::crc( Xfer *x )
 // ------------------------------------------------------------------------------------------------
 /** Xfer method
 	* Version Info:
-	* 1: Initial version */
+	* 1: Initial version
+	* 5: the production rally point and its flag
+	* 6: the out-of-bounds xfer of m_guardTargetType is fixed */
 // ------------------------------------------------------------------------------------------------
 void AIUpdateInterface::xfer( Xfer *xfer )
 {
   // version
-  const XferVersion currentVersion = 5;
+  const XferVersion currentVersion = 6;
   XferVersion version = currentVersion;
   xfer->xferVersion( &version, currentVersion );
  
@@ -5099,8 +5122,20 @@ void AIUpdateInterface::xfer( Xfer *xfer )
 	xfer->xferObjectID(&m_currentVictimID);	
 	xfer->xferReal(&m_desiredSpeed);
 	xfer->xferUser(&m_lastCommandSource, sizeof(m_lastCommandSource));
-	xfer->xferUser(&m_guardTargetType[0], sizeof(m_guardTargetType));
-	xfer->xferUser(&m_guardTargetType[1], sizeof(m_guardTargetType));
+	if (version < 6)
+	{
+		// the original wrote m_guardTargetType[0] and [1], then [1] and [2] - and [2] is one past the
+		// end of a two-element array, landing on m_locationToGuard.  Read an old save exactly the way
+		// it was written, so it still loads.
+		xfer->xferUser(&m_guardTargetType[0], sizeof(m_guardTargetType));
+		xfer->xferUser(&m_guardTargetType[1], sizeof(m_guardTargetType[1]));
+		xfer->xferUser(&m_locationToGuard, sizeof(m_guardTargetType[1]));
+	}
+	else
+	{
+		xfer->xferUser(m_guardTargetType, sizeof(m_guardTargetType));
+	}
+
 	xfer->xferCoord3D(&m_locationToGuard);
 
 	xfer->xferObjectID(&m_objectToGuard);

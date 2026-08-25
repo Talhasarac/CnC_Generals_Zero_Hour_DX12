@@ -11310,10 +11310,10 @@ void Pathfinder::crc( Xfer *xfer )
 
 	xfer->xferInt(&m_numWallPieces);
 	CRCDEBUG_LOG(("m_numWallPieces: %8.8X\n", ((XferCRC *)xfer)->getCRC()));
-	for (Int i=0; i<MAX_WALL_PIECES; ++i)
-	{
-		xfer->xferObjectID(&m_wallPieces[MAX_WALL_PIECES]);
-	}
+	// this used to loop MAX_WALL_PIECES times over &m_wallPieces[MAX_WALL_PIECES], which is one past
+	// the end of the array and lands on m_numWallPieces - so the crc covered that member 128 times
+	// and the wall pieces not at all.
+	xfer->xferUser(m_wallPieces, sizeof(m_wallPieces));
 	CRCDEBUG_LOG(("m_wallPieces: %8.8X\n", ((XferCRC *)xfer)->getCRC()));
 
 	xfer->xferReal(&m_wallHeight);
