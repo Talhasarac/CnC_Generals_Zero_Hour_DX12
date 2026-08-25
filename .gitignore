@@ -7,3 +7,6 @@ build/
 # Python bytecode from Tools/
 __pycache__/
 *.pyc
+
+# Local copy of build.example.bat, tweaked per machine
+build.bat
