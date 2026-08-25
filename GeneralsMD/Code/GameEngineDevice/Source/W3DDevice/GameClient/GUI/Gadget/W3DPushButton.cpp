@@ -315,8 +315,7 @@ void W3DGadgetPushButtonDraw( GameWindow *window, WinInstanceData *instData )
 			{
 				TheDisplay->drawRemainingRectClock( origin.x, origin.y, size.x, size.y, pData->percentClock,pData->colorClock );
 			}
-			pData->drawClock = NO_CLOCK;
-			window->winSetUserData(pData);
+			// the clock is not consumed by drawing it - see GadgetButtonDrawClock
 		}
 		
 		if( pData->drawBorder && pData->colorBorder != GAME_COLOR_UNDEFINED )
@@ -487,8 +486,7 @@ void W3DGadgetPushButtonImageDrawOne( GameWindow *window,
 			{
 				TheDisplay->drawRemainingRectClock( start.x, start.y, size.x, size.y, pData->percentClock,pData->colorClock );
 			}
-			pData->drawClock = NO_CLOCK;
-			window->winSetUserData(pData);
+			// the clock is not consumed by drawing it - see GadgetButtonDrawClock
 		}
 		
 		if( pData->drawBorder && pData->colorBorder != GAME_COLOR_UNDEFINED )
@@ -749,8 +747,7 @@ void W3DGadgetPushButtonImageDrawThree(GameWindow *window, WinInstanceData *inst
 			{
 				TheDisplay->drawRemainingRectClock( start.x, start.y, size.x, size.y, pData->percentClock,pData->colorClock );
 			}
-			pData->drawClock = NO_CLOCK;
-			window->winSetUserData(pData);
+			// the clock is not consumed by drawing it - see GadgetButtonDrawClock
 		}
 		
 		if( pData->drawBorder && pData->colorBorder != GAME_COLOR_UNDEFINED )

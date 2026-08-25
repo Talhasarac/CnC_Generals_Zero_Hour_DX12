@@ -182,8 +182,8 @@ public:
 	virtual void setZoom(Real z) { }
 	virtual Real getHeightAboveGround() { return m_heightAboveGround; }
 	virtual void setHeightAboveGround(Real z) { m_heightAboveGround = z; }
-	virtual void zoomIn( void );																				///< Zoom in, closer to the ground, limit to min
-	virtual void zoomOut( void );																				///< Zoom out, farther away from the ground, limit to max
+	virtual void zoomIn( Real steps = 1.0f );														///< Zoom in, closer to the ground, limit to min
+	virtual void zoomOut( Real steps = 1.0f );													///< Zoom out, farther away from the ground, limit to max
 	virtual void setZoomToDefault( void ) { }														///< Set zoom to default value
 	virtual void setZoomToMax( void ) { }																///< Set zoom as far out as the player may zoom by hand
 	virtual Real getMaxZoom( void ) { return m_maxZoom; }								///< return max zoom value

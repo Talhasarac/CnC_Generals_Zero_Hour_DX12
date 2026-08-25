@@ -65,6 +65,7 @@
 #include "Common/GlobalData.h"
 #include "Common/PerfTimer.h"
 
+#include "GameClient/InGameUI.h"
 #include "GameClient/TerrainVisual.h"
 #include "GameClient/View.h"
 #include "GameClient/Water.h"
@@ -2184,6 +2185,12 @@ void HeightMapRenderObjClass::Render(RenderInfoClass & rinfo)
 	  m_waypointBuffer->drawWaypoints(rinfo);
 
 	m_bibBuffer->renderBibs();
+
+	// the build grid goes down with the ground it describes: drawn here it is depth tested against
+	// the terrain and covered by everything drawn after it, so it reads as paint on the map rather
+	// than as a wireframe floating over the scene
+	if( TheInGameUI )
+		TheInGameUI->drawBuildGrid();
 
 	// We do some custom blending, so tell the shader class to reset everything.
 	DX8Wrapper::Set_Texture(0,NULL);

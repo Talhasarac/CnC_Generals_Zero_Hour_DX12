@@ -649,6 +649,55 @@ CBCommandStatus ControlBar::processCommandUI( GameWindow *control,
 				}
 			}
 
+			//
+			// An object upgrade is bought per building, so with several selected the click is
+			// spread over all of them that still want it and that the player can pay for, in
+			// selection order. It used to go to one object only - and to the same one every
+			// time, since the bar cannot see the queue the previous click just filled until the
+			// next logic frame - so a click on four selected barracks upgraded one of them and
+			// the other three clicks were silently thrown away by the duplicate guard in
+			// ProductionUpdate::queueUpgrade.
+			//
+			if( m_currContext == CB_CONTEXT_MULTI_SELECT )
+			{
+				Player *player = ThePlayerList->getLocalPlayer();
+				Int purse = player->getMoney()->countMoney();
+				Int cost = upgradeT->calcCostToBuild( player );
+				Int sent = 0;
+
+				const DrawableList *selected = TheInGameUI->getAllSelectedDrawables();
+				for( DrawableListCIt it = selected->begin(); it != selected->end(); ++it )
+				{
+					Object *target = (*it)->getObject();
+					if( target == NULL || target->getControllingPlayer() != player )
+						continue;
+
+					ProductionUpdateInterface *tpu = target->getProductionUpdateInterface();
+					if( tpu == NULL || tpu->canQueueUpgrade( upgradeT ) != CANMAKE_OK )
+						continue;
+
+					if( target->hasUpgrade( upgradeT ) == TRUE ||
+							target->affectedByUpgrade( upgradeT ) == FALSE ||
+							tpu->isUpgradeInQueue( upgradeT ) == TRUE ||
+							target->canProduceUpgrade( upgradeT ) == FALSE )
+						continue;
+
+					// the logic charges each one as it queues it, so stop at what is in the bank
+					if( cost > 0 && purse < cost )
+						break;
+					purse -= cost;
+
+					GameMessage *msg = TheMessageStream->appendMessage( GameMessage::MSG_QUEUE_UPGRADE );
+					msg->appendObjectIDArgument( target->getID() );
+					msg->appendIntegerArgument( upgradeT->getUpgradeNameKey() );
+					sent++;
+				}
+
+				if( sent > 0 )
+					break;
+				// nobody in the selection could take it; fall through to the single-object path
+			}
+
 			ObjectID objID = INVALID_ID;
 			if (obj)
 				objID = obj->getID();

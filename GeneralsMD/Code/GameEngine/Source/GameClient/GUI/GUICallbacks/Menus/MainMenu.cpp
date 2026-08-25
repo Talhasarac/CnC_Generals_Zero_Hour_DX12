@@ -1044,7 +1044,6 @@ WindowMsgHandledType MainMenuInput( GameWindow *window, UnsignedInt msg,
 	return MSG_IGNORED;
 
 }  // end MainMenuInput
-void PrintOffsetsFromControlBarParent( void );
 //-------------------------------------------------------------------------------------------------
 /** Main menu window system callback */
 //-------------------------------------------------------------------------------------------------

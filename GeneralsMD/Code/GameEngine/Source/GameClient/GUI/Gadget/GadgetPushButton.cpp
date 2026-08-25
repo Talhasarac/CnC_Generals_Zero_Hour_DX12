@@ -277,9 +277,19 @@ WindowMsgHandledType GadgetPushButtonInput( GameWindow *window,
 				}  // end if
 				else
 				{
-					
-					// just select as normal
+
+					//
+					// Right clicks fire on the way down, like check-like buttons do. Waiting for the
+					// up click meant the message only went out if WIN_STATE_SELECTED survived until
+					// then, and it often did not: there is no grab window for right clicks, so a
+					// hair of mouse movement off the button raised GWM_MOUSE_LEAVING, which clears
+					// the bit, and the click was silently eaten. That is why cancelling a queued
+					// unit or upgrade took several tries.
+					//
 					BitSet( instData->m_state, WIN_STATE_SELECTED );
+
+					TheWindowManager->winSendSystemMsg( instData->getOwner(), GBM_SELECTED_RIGHT,
+																							(WindowMsgData)window, mData1 );
 
 				}  // end else
 
@@ -300,26 +310,12 @@ WindowMsgHandledType GadgetPushButtonInput( GameWindow *window,
 			{
 
 				//
-				// note check like selected messages aren't sent here ... they are sent
-				// on the down press
+				// The message already went out on the down press, for check-like and plain buttons
+				// alike. All that is left here is to drop the selected look. The up click is still
+				// consumed either way - it belongs to the button we pressed on, and letting it
+				// bubble would hand a stray right click to whatever is underneath.
 				//
-				if( BitTest( instData->getState(), WIN_STATE_SELECTED ) &&
-						BitTest( window->winGetStatus(), WIN_STATUS_CHECK_LIKE ) == FALSE )
-				{
-
-					TheWindowManager->winSendSystemMsg( instData->getOwner(), GBM_SELECTED_RIGHT,
-																							(WindowMsgData)window, mData1 );
-
-					BitClear( instData->m_state, WIN_STATE_SELECTED );
-
-				}
-				else
-				{
-
-					// this up click was not meant for this button
-					return MSG_IGNORED;
-
-				}
+				BitClear( instData->m_state, WIN_STATE_SELECTED );
 
 			}
 			else
@@ -648,7 +644,13 @@ void GadgetButtonSetBorder( GameWindow *g, Color color, Bool drawBorder = TRUE )
 }
 
 // GadgetButtonDrawClock ======================================================
-/** Set to draw a rectClock on the button */
+/** Set to draw a rectClock on the button.
+	*
+	* The flag stays set until somebody clears it - the draw used to eat it, one clock per
+	* frame drawn. That only worked while the frame rate matched the rate the flag was put
+	* back at, and it does not: the command bar re-arms the clock on a logic tick (30Hz) while
+	* the renderer runs free, so every frame in between drew a cameo with no radial fill on it
+	* and the production progress flickered. */
 //=============================================================================
 void GadgetButtonDrawClock( GameWindow *g, Int percent, Color color )
 {
@@ -686,6 +688,24 @@ void GadgetButtonDrawInverseClock( GameWindow *g, Int percent, Color color )
 	pData->percentClock = percent;
 	pData->colorClock = color;
 	g->winSetUserData(pData);
+
+}
+
+// GadgetButtonClearClock =====================================================
+/** Take the clock back off the button. Whoever draws a clock owns clearing it - see
+	* GadgetButtonDrawClock for why the draw no longer does. */
+//=============================================================================
+void GadgetButtonClearClock( GameWindow *g )
+{
+
+	if( g == NULL )
+		return;
+
+	PushButtonData *pData = (PushButtonData *)g->winGetUserData();
+	if( !pData )
+		return;
+
+	pData->drawClock = NO_CLOCK;
 
 }
 

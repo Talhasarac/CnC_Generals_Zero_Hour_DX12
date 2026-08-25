@@ -57,7 +57,6 @@ class PlayerTemplate;
 class AudioEventRTS;
 class ControlBarSchemeManager;
 class UpgradeTemplate;
-class ControlBarResizer;
 class GameWindowTransitionsHandler;
 class DisplayString;
 
@@ -722,6 +721,13 @@ public:
 	Bool handleChordKey( Int mappableKey );
 	Bool isChordArmed( void ) const { return m_chordGroup >= 0; }
 
+	/** forget a half-typed chord.  An armed chord swallows the next A S D F - attack move, stop -
+		and turns it into a structure to place, so anything that says the player has moved on
+		(a click, a new selection, a key that is not part of the chord, or simply time passing)
+		must drop it. */
+	void dropChord( void );
+	enum { CHORD_TIMEOUT_FRAMES = 60 };		///< two seconds at 30Hz, then the chord expires
+
 	/// is the drawable the currently selected drawable for the context sensitive UI?
 	Bool isDrivingContextUI( Drawable *draw ) const { return draw == m_currentSelectedDrawable; }
 
@@ -782,7 +788,6 @@ public:
 	void populateObserverList( void );
 	Bool isObserverControlBarOn( void ) { return m_isObserverCommandBar;}
 	
-//	ControlBarResizer *getControlBarResizer( void ) {return m_controlBarResizer;}
 
 	// Functions for repositioning/resizing the control bar
 	void switchControlBarStage( ControlBarStages stage );
@@ -996,6 +1001,7 @@ protected:
 	Int m_buildPage;																			///< BUILD_PAGE_ROOT, or the page being shown
 	ObjectID m_buildPageObjectID;													///< builder the page belongs to; a new one starts at the menu
 	Int m_chordGroup;																			///< -1, or the structure group (0 = Q, 1 = W) armed by the first chord key
+	UnsignedInt m_chordFrame;															///< client frame the chord was armed on, for CHORD_TIMEOUT_FRAMES
 	DrawableID m_standInBuilderID;												///< with nothing selected, the builder whose command bar is shown (INVALID_DRAWABLE_ID otherwise)
 	Drawable *findStandInBuilder( Bool freeOnly );				///< the local player's free builder (or, unless freeOnly, any builder) to stand in for an empty selection
 
@@ -1120,7 +1126,6 @@ private:
 	UnsignedInt m_lastFrameMarkedDirty;
 	UnsignedInt m_consecutiveDirtyFrames;
 #endif
-//	ControlBarResizer *m_controlBarResizer;
 
 }; 
 

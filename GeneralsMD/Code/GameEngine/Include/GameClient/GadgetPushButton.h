@@ -78,6 +78,7 @@ void GadgetButtonEnableCheckLike( GameWindow *g, Bool makeCheckLike, Bool initia
 
 void GadgetButtonSetText( GameWindow *g, UnicodeString text );
 void GadgetButtonDrawClock( GameWindow *g, Int percent, Color color ); //Darkens the progress
+void GadgetButtonClearClock( GameWindow *g );	//Takes the clock back off, see GadgetButtonDrawClock
 void GadgetButtonDrawInverseClock( GameWindow *g, Int percent, Color color ); //Darkens the remaining portion.
 void GadgetButtonDrawOverlayImage( GameWindow *g, const Image *image );
 void GadgetButtonSetBorder( GameWindow *g, Color color, Bool drawBorder = TRUE );

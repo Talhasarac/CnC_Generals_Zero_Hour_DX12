@@ -81,7 +81,6 @@ static Bool builderIsFree( AIUpdateInterface *ai, DozerAIInterface *dozer );	// 
 #include "GameClient/GadgetTextEntry.h"
 #include "GameClient/InGameUI.h"
 #include "GameClient/WindowVideoManager.h"
-#include "GameClient/ControlBarResizer.h"
 #include "GameClient/GadgetListBox.h"
 #include "GameClient/HotKey.h"
 #include "GameClient/Keyboard.h"
@@ -174,13 +173,15 @@ void ControlBar::pressCommandButton( Int index )
 			if( index == CHORD_SLOT_Q || index == CHORD_SLOT_W )
 			{
 				m_chordGroup = ( index == CHORD_SLOT_Q ) ? 0 : 1;
+				m_chordFrame = TheGameClient ? TheGameClient->getFrame() : 0;
+				markUIDirty();		// the group that is armed greys the other one out
 				return;
 			}
 		}
 		else
 		{
 			Int group = m_chordGroup;
-			m_chordGroup = -1;
+			dropChord();
 			if( index >= CHORD_GROUP_SIZE )
 				return;		// the second key must be one of the first group's cells (Q W E R A S D F)
 			index += group * CHORD_GROUP_SIZE;
@@ -235,11 +236,30 @@ Bool ControlBar::handleChordKey( Int mappableKey )
 		}
 	}
 
-	// any other key is not ours; a grid key of another cell drops the chord in
-	// pressCommandButton, a context change drops it in switchToContext
+	//
+	// Any other key means the player is done with the chord, so drop it and let the key through.
+	// It used to be left armed: nothing in the game cleared it except another grid key or a
+	// context change, so a Q pressed and thought better of stayed armed for the rest of the
+	// game and the next A or S - attack move, stop - silently became "place this structure",
+	// which took the selection away and looked like the click had been eaten.
+	//
+	dropChord();
 	return FALSE;
 
 }  // end handleChordKey
+
+//-------------------------------------------------------------------------------------------------
+/** Forget a half-typed structure chord. */
+//-------------------------------------------------------------------------------------------------
+void ControlBar::dropChord( void )
+{
+	if( m_chordGroup < 0 )
+		return;
+
+	m_chordGroup = -1;
+	markUIDirty();		// the greyed-out half of the structures comes back
+
+}  // end dropChord
 
 //-------------------------------------------------------------------------------------------------
 /** Build the menu and back buttons a paged builder shows.  They carry no thing template and no
@@ -1039,7 +1059,6 @@ ControlBar::ControlBar( void )
 	m_genStarOn  = NULL;
 	m_UIDirty    = FALSE;
 	//
-//	m_controlBarResizer = NULL;
 	m_buildUpClockColor = GameMakeColor(0,0,0,100);
 	m_commandBarBorderColor = GameMakeColor(0,0,0,100);
 	for( i = 0; i < NUM_CONTEXT_PARENTS; i++ )
@@ -1079,6 +1098,7 @@ ControlBar::ControlBar( void )
 		m_buildPageButton[ i ] = NULL;
 	m_buildPageBackButton = NULL;
 	m_chordGroup = -1;
+	m_chordFrame = 0;
 	m_standInBuilderID = INVALID_DRAWABLE_ID;
 	for( i = 0; i < MAX_MULTI_SELECT_GROUPS; i++ )
 	{
@@ -1159,9 +1179,6 @@ ControlBar::~ControlBar( void )
 		delete m_controlBarSchemeManager;
 	m_controlBarSchemeManager = NULL;
 
-//	if(m_controlBarResizer)
-//		delete m_controlBarResizer;
-//	m_controlBarResizer = NULL;
 	// destroy all the command set definitions
 	CommandSet *set;
 	while( m_commandSets )
@@ -1451,9 +1468,6 @@ void ControlBar::init( void )
 		m_rankHeroicIcon	= TheMappedImageCollection ? TheMappedImageCollection->findImageByName( "SSChevron3L" ) : NULL;
 
 
-//		if(!m_controlBarResizer)
-//			m_controlBarResizer = NEW ControlBarResizer;
-//		m_controlBarResizer->init();
 		
 
 
@@ -1563,8 +1577,37 @@ void ControlBar::reset( void )
 //-------------------------------------------------------------------------------------------------
 void ControlBar::update( void )
 {
-	getStarImage();
-	updateRadarAttackGlow();
+	//
+	// This is driven by the client, once per RENDER frame, but nearly everything it recomputes -
+	// button availability, build clocks, special power readiness, the general's star flash - is
+	// keyed to the LOGIC frame and cannot change twice inside one tick.  With the renderer
+	// uncapped that was several whole passes per tick for nothing, and updateRadarAttackGlow()
+	// was actively wrong: it burns one frame off its own countdown per call, so the "under
+	// attack" radar glow blinked (fps/30)x too fast and went dark early.  Latch that work to the
+	// logic frame.  The scheme/video/animation managers and the window runUpdate()s below really
+	// are per-render and stay outside the latch, and so does anything the UI marks dirty, which
+	// must still answer a selection change on the frame it happens.  See FINDINGS.md 7.4.
+	//
+	static UnsignedInt s_lastUpdateFrame = 0xffffffff;
+	const UnsignedInt logicNow = TheGameLogic->getFrame();
+	const Bool logicTick = (logicNow != s_lastUpdateFrame);
+	s_lastUpdateFrame = logicNow;
+
+	if( logicTick )
+	{
+		getStarImage();
+		updateRadarAttackGlow();
+	}
+
+	//
+	// a chord the player armed and then walked away from expires on its own, so it cannot be
+	// waiting to eat a keystroke a minute later
+	//
+	if( m_chordGroup >= 0 && TheGameClient &&
+			TheGameClient->getFrame() - m_chordFrame > CHORD_TIMEOUT_FRAMES )
+	{
+		dropChord();
+	}
 	if(m_controlBarSchemeManager)
 		m_controlBarSchemeManager->update();
 
@@ -1611,18 +1654,16 @@ void ControlBar::update( void )
 		hideBuildTooltipLayout();
 	}*/
 
-	updateSpecialPowerShortcut();
+	// walks every shortcut button and asks the player for its most ready special power object
+	if( logicTick )
+		updateSpecialPowerShortcut();
 	// if we're an observer, don't do the complete update
 	if( m_isObserverCommandBar)
 	{
-		// same per-render-frame retrigger as the flash above: once per logic frame is enough
-		static UnsignedInt s_lastObserverFrame = 0xffffffff;
-		const UnsignedInt observerNow = TheGameLogic->getFrame();
-		if( (observerNow % (LOGICFRAMES_PER_SECOND/2)) == 0 && observerNow != s_lastObserverFrame )
-		{
-			s_lastObserverFrame = observerNow;
+		// twice a second is plenty for the observer readouts, and only on a real logic tick -
+		// a bare "frame % n == 0" fires on every render frame that lands inside that one tick
+		if( logicTick && (logicNow % (LOGICFRAMES_PER_SECOND/2)) == 0 )
 			populateObserverInfoWindow();
-		}
 
 		Drawable *drawToEvaluateFor = NULL;
 		Bool multiSelect = FALSE;
@@ -1646,16 +1687,7 @@ void ControlBar::update( void )
 	}
 		
 
-	//
-	// ControlBar::update runs once per RENDER frame, so a bare "getFrame() % 10 == 0" fires on
-	// every render frame that lands inside that one logic frame - the flash count then burned
-	// down several times per tick and the button stopped flashing early. Latch it to the frame.
-	//
-	static UnsignedInt s_lastFlashFrame = 0xffffffff;
-	const UnsignedInt flashNow = TheGameClient->getFrame();
-	const Bool flashTick = (flashNow % 10 == 0) && (flashNow != s_lastFlashFrame);
-	if( flashTick )
-		s_lastFlashFrame = flashNow;
+	const Bool flashTick = logicTick && (logicNow % 10 == 0);
 
 	// check flashing
 	if( m_flash )
@@ -1730,6 +1762,7 @@ void ControlBar::update( void )
 	// first, if the UI is dirty repopulate the UI with what the user should see for all the
 	// selected drawables
 	//
+	const Bool wasUIDirty = m_UIDirty;
 	if( m_UIDirty )
 	{
 		evaluateContextUI();
@@ -1737,6 +1770,12 @@ void ControlBar::update( void )
 		// if we have a build tooltip layout, update it with the new data.
 		repopulateBuildTooltipLayout(); 
 	}
+
+	// nothing below here can change without either a logic tick or a rebuilt UI, and the rest
+	// of it is the expensive half: a full object count for the beacon cap and then a pass over
+	// every command button in the current context
+	if( !logicTick && !wasUIDirty )
+		return;
 
 	// enable/disable the beacon button depending on if the max has been reached
 	if (ThePlayerList && ThePlayerList->getLocalPlayer() && ThePlayerList->getLocalPlayer()->getPlayerTemplate())
@@ -2384,6 +2423,7 @@ Bool ControlBar::cancelQueuedUpgrade( const UpgradeTemplate *upgrade )
 	if( upgrade == NULL )
 		return FALSE;
 
+	Bool cancelled = FALSE;
 	const DrawableList *selected = TheInGameUI->getAllSelectedDrawables();
 	for( DrawableListCIt it = selected->begin(); it != selected->end(); ++it )
 	{
@@ -2399,10 +2439,12 @@ Bool ControlBar::cancelQueuedUpgrade( const UpgradeTemplate *upgrade )
 		GameMessage *msg = TheMessageStream->appendMessage( GameMessage::MSG_CANCEL_UPGRADE );
 		msg->appendIntegerArgument( upgrade->getUpgradeNameKey() );
 		msg->appendObjectIDArgument( candidate->getID() );
-		return TRUE;
+		cancelled = TRUE;
+		// an object upgrade is bought per building and one click buys it for the whole selection,
+		// so one click takes it back off the whole selection too - keep going
 	}
 
-	return FALSE;
+	return cancelled;
 
 }  // end cancelQueuedUpgrade
 
@@ -2590,7 +2632,7 @@ void ControlBar::switchToContext( ControlBarContext context, Drawable *draw )
 	m_currentSelectedDrawable = draw;
 
 	// a half-typed structure chord does not survive a context change
-	m_chordGroup = -1;
+	dropChord();
 
 	if (IsInGameChatActive() == FALSE && TheGameLogic && !TheGameLogic->isInShellGame()) {
 		TheWindowManager->winSetFocus( NULL );
@@ -3562,11 +3604,6 @@ void ControlBar::switchControlBarStage( ControlBarStages stage )
 }
 void ControlBar::setDefaultControlBarConfig( void )
 {
-//	if(m_currentControlBarStage == CONTROL_BAR_STAGE_SQUISHED)
-//	{
-//		m_controlBarResizer->sizeWindowsDefault();
-//		m_controlBarSchemeManager->setControlBarSchemeByPlayerTemplate(ThePlayerList->getLocalPlayer()->getPlayerTemplate(), FALSE);
-//	}
 	m_currentControlBarStage = CONTROL_BAR_STAGE_DEFAULT;
 	TheTacticalView->setHeight((Int)(TheDisplay->getHeight() * 0.80f)); 
 	m_contextParent[ CP_MASTER ]->winSetPosition(m_defaultControlBarPosition.x, m_defaultControlBarPosition.y);
@@ -3583,7 +3620,6 @@ void ControlBar::setSquishedControlBarConfig( void )
 	m_currentControlBarStage = CONTROL_BAR_STAGE_SQUISHED;
 	m_contextParent[ CP_MASTER ]->winSetPosition(m_defaultControlBarPosition.x, m_defaultControlBarPosition.y);
 	
-//	m_controlBarResizer->sizeWindowsAlt();
 	repopulateBuildTooltipLayout();	
 	TheTacticalView->setHeight((Int)(TheDisplay->getHeight())); 
 	m_controlBarSchemeManager->setControlBarSchemeByPlayerTemplate(ThePlayerList->getLocalPlayer()->getPlayerTemplate(), TRUE);
@@ -3591,11 +3627,6 @@ void ControlBar::setSquishedControlBarConfig( void )
 
 void ControlBar::setLowControlBarConfig( void )
 {
-//	if(m_currentControlBarStage == CONTROL_BAR_STAGE_SQUISHED)
-//	{
-//		m_controlBarResizer->sizeWindowsDefault();
-//		m_controlBarSchemeManager->setControlBarSchemeByPlayerTemplate(ThePlayerList->getLocalPlayer()->getPlayerTemplate(), FALSE);
-//	}
 	
 	m_currentControlBarStage = CONTROL_BAR_STAGE_LOW;
 	ICoord2D pos;
@@ -4136,6 +4167,8 @@ void ControlBar::updateSpecialPowerShortcut( void )
 		if( command == NULL )
 			continue;
 
+		// the clock is no longer eaten by the draw, so take last pass's off first
+		GadgetButtonClearClock( win );
 
 		win->winClearStatus( WIN_STATUS_NOT_READY );
 		win->winClearStatus( WIN_STATUS_ALWAYS_COLOR );

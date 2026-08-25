@@ -51,6 +51,11 @@
 #include "W3DDevice/Common/W3DConvert.h"
 #include "WW3D2/WW3D.h"
 #include "WW3D2/HAnim.h"
+#include "WW3D2/DX8Wrapper.h"
+#include "WW3D2/dx8vertexbuffer.h"
+#include "WW3D2/dx8indexbuffer.h"
+#include "WW3D2/vertmaterial.h"
+#include "WW3D2/shader.h"
 
 #include "Common/UnitTimings.h" //Contains the DO_UNIT_TIMINGS define jba.		 
 
@@ -284,7 +289,6 @@ W3DInGameUI::W3DInGameUI()
 
 	m_buildingPlacementAnchor = NULL;
 	m_buildingPlacementArrow = NULL;
-	m_buildGridRender = NULL;
 
 }  // end W3DInGameUI
 
@@ -305,13 +309,6 @@ W3DInGameUI::~W3DInGameUI()
 
 	REF_PTR_RELEASE( m_buildingPlacementAnchor );
 	REF_PTR_RELEASE( m_buildingPlacementArrow );
-
-	if( m_buildGridRender )
-	{
-		m_buildGridRender->Reset();
-		delete m_buildGridRender;
-		m_buildGridRender = NULL;
-	}
 
 }  // end ~W3DInGameUI
 
@@ -455,6 +452,115 @@ void W3DInGameUI::draw( void )
 }  // end draw
 
 //-------------------------------------------------------------------------------------------------
+// The build grid's own render state.  Alpha blended, untextured, depth tested but never depth
+// written, and PASS_ALWAYS: the grid is a sheet lying exactly on the terrain, so anything that
+// compared depth against the terrain would z-fight with it.  Drawing it in the terrain pass and
+// never writing depth means everything drawn after the terrain - buildings, units, trees, the
+// placement ghost itself - covers it, which is what makes it read as paint on the ground.
+// This is the bibs' shader with texturing off (see W3DBibBuffer).
+#define SC_BUILD_GRID ( SHADE_CNST(ShaderClass::PASS_ALWAYS, ShaderClass::DEPTH_WRITE_DISABLE, ShaderClass::COLOR_WRITE_ENABLE, ShaderClass::SRCBLEND_SRC_ALPHA, \
+	ShaderClass::DSTBLEND_ONE_MINUS_SRC_ALPHA, ShaderClass::FOG_DISABLE, ShaderClass::GRADIENT_MODULATE, ShaderClass::SECONDARY_GRADIENT_DISABLE, ShaderClass::TEXTURING_DISABLE, \
+	ShaderClass::ALPHATEST_DISABLE, ShaderClass::CULL_MODE_DISABLE, \
+	ShaderClass::DETAILCOLOR_DISABLE, ShaderClass::DETAILALPHA_DISABLE) )
+
+/** rgb plus an alpha given as a float 0..255, clamped - the grid's colours are all one colour at
+	* a per-vertex strength. */
+static UnsignedInt gridColor( UnsignedInt rgb, Real alpha )
+{
+	Int a = REAL_TO_INT( alpha );
+	if( a < 0 )
+		a = 0;
+	else if( a > 255 )
+		a = 255;
+	return rgb | ((UnsignedInt)a << 24);
+}
+
+/** Batches the grid's quads through the dynamic vertex buffer.  The patch is ~1700 line quads plus
+	* a fill for each blocked cell, which is more than one dynamic lock wants to hold, so it flushes
+	* in fixed chunks - the draw state is set once by the caller and holds across the flushes. */
+class BuildGridQuads
+{
+public:
+	BuildGridQuads( void ) : m_quads( 0 ) { }
+
+	void add( const Vector3 &p0, const Vector3 &p1, const Vector3 &p2, const Vector3 &p3,
+						UnsignedInt c0, UnsignedInt c1, UnsignedInt c2, UnsignedInt c3 )
+	{
+		if( m_quads >= MAX_QUADS )
+			flush();
+
+		Vert *v = &m_verts[ m_quads * 4 ];
+		v[ 0 ].pos = p0;  v[ 0 ].diffuse = c0;
+		v[ 1 ].pos = p1;  v[ 1 ].diffuse = c1;
+		v[ 2 ].pos = p2;  v[ 2 ].diffuse = c2;
+		v[ 3 ].pos = p3;  v[ 3 ].diffuse = c3;
+		++m_quads;
+	}
+
+	void flush( void );
+
+private:
+	enum { MAX_QUADS = 512 };
+	struct Vert
+	{
+		Vector3 pos;
+		UnsignedInt diffuse;
+	};
+	Vert m_verts[ MAX_QUADS * 4 ];
+	Int m_quads;
+};
+
+void BuildGridQuads::flush( void )
+{
+	if( m_quads == 0 )
+		return;
+
+	const Int quads = m_quads;
+	m_quads = 0;		// whatever happens below, this batch is spent
+
+	DynamicVBAccessClass vbAccess( BUFFER_TYPE_DYNAMIC_DX8, DX8_FVF_XYZNDUV2, quads * 4 );
+	DynamicIBAccessClass ibAccess( BUFFER_TYPE_DYNAMIC_DX8, quads * 6 );
+	{
+		DynamicVBAccessClass::WriteLockClass vbLock( &vbAccess );
+		DynamicIBAccessClass::WriteLockClass ibLock( &ibAccess );
+		VertexFormatXYZNDUV2 *vb = vbLock.Get_Formatted_Vertex_Array();
+		UnsignedShort *ib = ibLock.Get_Index_Array();
+		if( vb == NULL || ib == NULL )
+			return;
+
+		for( Int q = 0; q < quads; ++q )
+		{
+			for( Int i = 0; i < 4; ++i, ++vb )
+			{
+				const Vert &src = m_verts[ q * 4 + i ];
+				vb->x = src.pos.X;
+				vb->y = src.pos.Y;
+				vb->z = src.pos.Z;
+				vb->nx = 0.0f;
+				vb->ny = 0.0f;
+				vb->nz = 1.0f;
+				vb->diffuse = src.diffuse;
+				vb->u1 = 0.0f;
+				vb->v1 = 0.0f;
+				vb->u2 = 0.0f;
+				vb->v2 = 0.0f;
+			}
+
+			*ib++ = (UnsignedShort)(q * 4);
+			*ib++ = (UnsignedShort)(q * 4 + 1);
+			*ib++ = (UnsignedShort)(q * 4 + 2);
+			*ib++ = (UnsignedShort)(q * 4);
+			*ib++ = (UnsignedShort)(q * 4 + 2);
+			*ib++ = (UnsignedShort)(q * 4 + 3);
+		}
+	}
+
+	DX8Wrapper::Set_Index_Buffer( ibAccess, 0 );
+	DX8Wrapper::Set_Vertex_Buffer( vbAccess );
+	DX8Wrapper::Draw_Triangles( 0, quads * 2, 0, quads * 4 );
+}
+
+//-------------------------------------------------------------------------------------------------
 /** Draw the pathfinder's own cell grid under the structure sitting on the cursor, and cross out
 	* the cells it cannot go on.  GridBuildPlacement snaps a footprint's edges to these very lines
 	* (see snapPlacementToGrid), so being able to see them is the difference between guessing at a
@@ -463,6 +569,11 @@ void W3DInGameUI::draw( void )
 	* Only the cells around the cursor are drawn.  The whole map's worth would be a wall of lines,
 	* and the ones being aimed at are the ones worth seeing - so the lines also fade out towards the
 	* edge of the patch instead of ending on a hard square.
+	*
+	* It is drawn as quads lying on the terrain, from inside the terrain pass
+	* (HeightMapRenderObjClass::Render calls it right after the bibs), not as a screen space
+	* overlay: painted on the ground it is read at a glance, and everything drawn after the terrain
+	* covers it, so a building never has grid lines crawling over its roof.
 	*
 	* "Cannot build" here is the pathfinder cell's own type: water, a cliff, rubble, an existing
 	* structure, plain impassable.  It deliberately does not run the full isLocationLegalToBuild for
@@ -477,7 +588,7 @@ void W3DInGameUI::drawBuildGrid( void )
 		return;
 	if( m_placeIcon == NULL || m_placeIcon[ 0 ] == NULL )
 		return;
-	if( TheTacticalView == NULL || TheDisplay == NULL || TheTerrainLogic == NULL || TheAI == NULL )
+	if( TheTerrainLogic == NULL || TheAI == NULL )
 		return;
 
 	Pathfinder *pathfinder = TheAI->pathfinder();
@@ -492,68 +603,92 @@ void W3DInGameUI::drawBuildGrid( void )
 	enum { GRID_RADIUS = 14 };
 	enum { GRID_CELLS = GRID_RADIUS * 2 + 1, GRID_POINTS = GRID_CELLS + 1 };
 
+	// half the width of a painted line, in world units - a cell is PLACEMENT_CELL (10) across
+	const Real LINE_HALF_WIDTH = 0.45f;
+	// the ground is sampled at the line, so a line running across a slope would sink into the hill
+	// on one side; lifting the whole sheet a hair keeps it out of the dirt without floating
+	const Real GRID_LIFT = 0.35f;
+
 	// the pathfinder's own cell indexing, so the lines drawn are the lines it reasons about
 	const Int cellX = REAL_TO_INT_FLOOR( (center->x + 0.5f) / PATHFIND_CELL_SIZE_F ) - GRID_RADIUS;
 	const Int cellY = REAL_TO_INT_FLOOR( (center->y + 0.5f) / PATHFIND_CELL_SIZE_F ) - GRID_RADIUS;
 
-	// project every corner of the patch once, rather than four times per cell
-	ICoord2D screen[ GRID_POINTS ][ GRID_POINTS ];
-	Bool onScreen[ GRID_POINTS ][ GRID_POINTS ];
+	// sample the terrain once per grid corner, rather than once per quad corner
+	Real gx[ GRID_POINTS ], gy[ GRID_POINTS ];
+	Real gz[ GRID_POINTS ][ GRID_POINTS ];
+	Real fade[ GRID_POINTS ][ GRID_POINTS ];
 	Int ix, iy;
-	for( iy = 0; iy < GRID_POINTS; ++iy )
+
+	for( ix = 0; ix < GRID_POINTS; ++ix )
 	{
-		for( ix = 0; ix < GRID_POINTS; ++ix )
-		{
-			Coord3D world;
-			world.x = placementGridLine( cellX + ix );
-			world.y = placementGridLine( cellY + iy );
-			world.z = TheTerrainLogic->getGroundHeight( world.x, world.y );
-			onScreen[ iy ][ ix ] = TheTacticalView->worldToScreen( &world, &screen[ iy ][ ix ] );
-		}
+		gx[ ix ] = placementGridLine( cellX + ix );
+		gy[ ix ] = placementGridLine( cellY + ix );
 	}
 
-	if( m_buildGridRender == NULL )
-		m_buildGridRender = NEW Render2DClass;
-	if( m_buildGridRender == NULL )
-		return;
-
-	m_buildGridRender->Reset();
-	m_buildGridRender->Enable_Texturing( FALSE );
-	m_buildGridRender->Set_Coordinate_Range( RectClass( 0, 0, (Real)TheDisplay->getWidth(),
-																											(Real)TheDisplay->getHeight() ) );
-
-	// the lines fade to nothing at the edge of the patch, measured from the cursor's own cell
-	const Real fadeFrom = (Real)GRID_RADIUS;
-
-	// the grid itself
+	// the patch fades out to nothing at its edge, measured from the cursor's own cell, so it ends
+	// on a soft edge instead of a hard square
+	const Real mid = (Real)GRID_RADIUS + 0.5f;
 	for( iy = 0; iy < GRID_POINTS; ++iy )
 	{
 		for( ix = 0; ix < GRID_POINTS; ++ix )
 		{
-			// distance in cells from the middle, on the axis the segment runs along
-			const Real dx = (Real)fabs( ix - GRID_RADIUS - 0.5f );
-			const Real dy = (Real)fabs( iy - GRID_RADIUS - 0.5f );
+			gz[ iy ][ ix ] = TheTerrainLogic->getGroundHeight( gx[ ix ], gy[ iy ] ) + GRID_LIFT;
 
+			const Real dx = (Real)fabs( ix - mid );
+			const Real dy = (Real)fabs( iy - mid );
 			const Real d = ( dx > dy ) ? dx : dy;
-			const Int alpha = REAL_TO_INT( 0x50 * ( 1.0f - d / fadeFrom ) );
-			if( alpha <= 0 )
-				continue;
-
-			const UnsignedInt color = (alpha << 24) | 0x00FFFFFF;
-
-			if( ix + 1 < GRID_POINTS && onScreen[ iy ][ ix ] && onScreen[ iy ][ ix + 1 ] )
-				m_buildGridRender->Add_Line( Vector2( (Real)screen[ iy ][ ix ].x, (Real)screen[ iy ][ ix ].y ),
-																		 Vector2( (Real)screen[ iy ][ ix + 1 ].x, (Real)screen[ iy ][ ix + 1 ].y ),
-																		 1.0f, color );
-
-			if( iy + 1 < GRID_POINTS && onScreen[ iy ][ ix ] && onScreen[ iy + 1 ][ ix ] )
-				m_buildGridRender->Add_Line( Vector2( (Real)screen[ iy ][ ix ].x, (Real)screen[ iy ][ ix ].y ),
-																		 Vector2( (Real)screen[ iy + 1 ][ ix ].x, (Real)screen[ iy + 1 ][ ix ].y ),
-																		 1.0f, color );
+			const Real f = 1.0f - d / mid;
+			fade[ iy ][ ix ] = ( f > 0.0f ) ? f : 0.0f;
 		}
 	}
 
-	// and an X through every cell a structure cannot stand on
+	// the state the quads are drawn with: prelit (the colour is all in the vertices), untextured,
+	// alpha blended, depth tested but never depth written, and PASS_ALWAYS so a sheet lying on the
+	// terrain cannot z-fight with the terrain triangles underneath it.  This is the bibs' own
+	// shader, and the bibs are the proof it reads as paint rather than as decal geometry.
+	static ShaderClass gridShader( SC_BUILD_GRID );
+	VertexMaterialClass *material = VertexMaterialClass::Get_Preset( VertexMaterialClass::PRELIT_DIFFUSE );
+	DX8Wrapper::Set_Material( material );
+	REF_PTR_RELEASE( material );
+	DX8Wrapper::Set_Texture( 0, NULL );
+	DX8Wrapper::Set_Shader( gridShader );
+	DX8Wrapper::Apply_Render_State_Changes();
+
+	static BuildGridQuads quads;		// 32k of vertices; static so it is not a stack frame
+
+	// the lines themselves, one quad per cell edge so they follow the ground over every bump
+	const Real LINE_ALPHA = 0x58;
+	for( iy = 0; iy < GRID_POINTS; ++iy )
+	{
+		for( ix = 0; ix < GRID_POINTS; ++ix )
+		{
+			if( ix + 1 < GRID_POINTS && ( fade[ iy ][ ix ] > 0.0f || fade[ iy ][ ix + 1 ] > 0.0f ) )
+			{
+				const UnsignedInt c0 = gridColor( 0x00FFFFFF, LINE_ALPHA * fade[ iy ][ ix ] );
+				const UnsignedInt c1 = gridColor( 0x00FFFFFF, LINE_ALPHA * fade[ iy ][ ix + 1 ] );
+				quads.add( Vector3( gx[ ix ],     gy[ iy ] - LINE_HALF_WIDTH, gz[ iy ][ ix ] ),
+									 Vector3( gx[ ix + 1 ], gy[ iy ] - LINE_HALF_WIDTH, gz[ iy ][ ix + 1 ] ),
+									 Vector3( gx[ ix + 1 ], gy[ iy ] + LINE_HALF_WIDTH, gz[ iy ][ ix + 1 ] ),
+									 Vector3( gx[ ix ],     gy[ iy ] + LINE_HALF_WIDTH, gz[ iy ][ ix ] ),
+									 c0, c1, c1, c0 );
+			}
+
+			if( iy + 1 < GRID_POINTS && ( fade[ iy ][ ix ] > 0.0f || fade[ iy + 1 ][ ix ] > 0.0f ) )
+			{
+				const UnsignedInt c0 = gridColor( 0x00FFFFFF, LINE_ALPHA * fade[ iy ][ ix ] );
+				const UnsignedInt c1 = gridColor( 0x00FFFFFF, LINE_ALPHA * fade[ iy + 1 ][ ix ] );
+				quads.add( Vector3( gx[ ix ] - LINE_HALF_WIDTH, gy[ iy ],     gz[ iy ][ ix ] ),
+									 Vector3( gx[ ix ] + LINE_HALF_WIDTH, gy[ iy ],     gz[ iy ][ ix ] ),
+									 Vector3( gx[ ix ] + LINE_HALF_WIDTH, gy[ iy + 1 ], gz[ iy + 1 ][ ix ] ),
+									 Vector3( gx[ ix ] - LINE_HALF_WIDTH, gy[ iy + 1 ], gz[ iy + 1 ][ ix ] ),
+									 c0, c0, c1, c1 );
+			}
+		}
+	}
+
+	// and a red wash over every cell a structure cannot stand on.  Filling the cell reads at a
+	// glance where an X drawn in thin lines did not.
+	const Real BLOCKED_ALPHA = 0x44;
 	for( iy = 0; iy < GRID_CELLS; ++iy )
 	{
 		for( ix = 0; ix < GRID_CELLS; ++ix )
@@ -562,20 +697,21 @@ void W3DInGameUI::drawBuildGrid( void )
 			if( cell == NULL || cell->getType() == PathfindCell::CELL_CLEAR )
 				continue;
 
-			if( !onScreen[ iy ][ ix ] || !onScreen[ iy + 1 ][ ix + 1 ] ||
-					!onScreen[ iy ][ ix + 1 ] || !onScreen[ iy + 1 ][ ix ] )
+			if( fade[ iy ][ ix ] <= 0.0f && fade[ iy + 1 ][ ix + 1 ] <= 0.0f )
 				continue;
 
-			m_buildGridRender->Add_Line( Vector2( (Real)screen[ iy ][ ix ].x, (Real)screen[ iy ][ ix ].y ),
-																	 Vector2( (Real)screen[ iy + 1 ][ ix + 1 ].x, (Real)screen[ iy + 1 ][ ix + 1 ].y ),
-																	 1.0f, 0xAAFF3030 );
-			m_buildGridRender->Add_Line( Vector2( (Real)screen[ iy ][ ix + 1 ].x, (Real)screen[ iy ][ ix + 1 ].y ),
-																	 Vector2( (Real)screen[ iy + 1 ][ ix ].x, (Real)screen[ iy + 1 ][ ix ].y ),
-																	 1.0f, 0xAAFF3030 );
+			quads.add( Vector3( gx[ ix ],     gy[ iy ],     gz[ iy ][ ix ] ),
+								 Vector3( gx[ ix + 1 ], gy[ iy ],     gz[ iy ][ ix + 1 ] ),
+								 Vector3( gx[ ix + 1 ], gy[ iy + 1 ], gz[ iy + 1 ][ ix + 1 ] ),
+								 Vector3( gx[ ix ],     gy[ iy + 1 ], gz[ iy + 1 ][ ix ] ),
+								 gridColor( 0x00FF3030, BLOCKED_ALPHA * fade[ iy ][ ix ] ),
+								 gridColor( 0x00FF3030, BLOCKED_ALPHA * fade[ iy ][ ix + 1 ] ),
+								 gridColor( 0x00FF3030, BLOCKED_ALPHA * fade[ iy + 1 ][ ix + 1 ] ),
+								 gridColor( 0x00FF3030, BLOCKED_ALPHA * fade[ iy + 1 ][ ix ] ) );
 		}
 	}
 
-	m_buildGridRender->Render();
+	quads.flush();
 
 }  // end drawBuildGrid
 

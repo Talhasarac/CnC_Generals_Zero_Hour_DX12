@@ -89,6 +89,7 @@
 #include "GameLogic/Module/StealthUpdate.h"
 #include "GameLogic/Module/SupplyWarehouseDockUpdate.h"
 #include "GameLogic/Module/MobMemberSlavedUpdate.h"//ML
+#include "GameLogic/Module/SpawnBehavior.h"
 
 #include "Common/UnitTimings.h" //Contains the DO_UNIT_TIMINGS define jba.		 
 
@@ -1050,6 +1051,9 @@ InGameUI::InGameUI()
 	m_lastIncomeDisplayed = -1;
 	m_hudLastSampleFrame = 0;
 	m_hudLastSampleMs = 0;
+	m_cameraKeyLastMs = 0;
+	m_subtitleFreezeStartMs = 0;
+	m_subtitleFreezeSteps = 0;
 	m_hudFps = 0.0f;
 	for( Int incomeBucket = 0; incomeBucket < INCOME_SAMPLES; incomeBucket++ )
 		m_incomeSamples[ incomeBucket ] = 0;
@@ -1491,6 +1495,70 @@ void InGameUI::evaluateSoloNexus( Drawable *newlyAddedDrawable )
 }
 
 
+//-------------------------------------------------------------------------------------------------
+/** The longest weapon range anything in this template's weapon sets can reach.  Every set is
+	* walked, not just the one an empty condition mask happens to select: a defence whose gun lives
+	* in a conditional set (an upgrade, a garrisoned variant) would otherwise report no range. */
+//-------------------------------------------------------------------------------------------------
+static Real templateWeaponRange( const ThingTemplate *tmpl )
+{
+	if( tmpl == NULL )
+		return 0.0f;
+
+	Real range = 0.0f;
+	const WeaponTemplateSetVector& sets = tmpl->getWeaponTemplateSets();
+	for( WeaponTemplateSetVector::const_iterator si = sets.begin(); si != sets.end(); ++si )
+	{
+		for( Int ws = PRIMARY_WEAPON; ws < WEAPONSLOT_COUNT; ++ws )
+		{
+			const WeaponTemplate *wt = si->getNth( (WeaponSlotType)ws );
+			if( wt && wt->getUnmodifiedAttackRange() > range )
+				range = wt->getUnmodifiedAttackRange();
+		}
+	}
+
+	return range;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The radius to ring while this structure is being placed.
+	*
+	* Its own weapons first - and if it has none, the weapons of whatever it puts on the ground.
+	* Half the GLA's defences carry no gun at all: a stinger site is an empty shell with a
+	* SpawnBehavior that keeps three stinger soldiers alive next to it, and the soldiers own the
+	* missiles. Judged by its own template the site is unarmed, so no ring was ever drawn for the
+	* one faction whose defences most need siting. */
+//-------------------------------------------------------------------------------------------------
+static Real templatePlacementRange( const ThingTemplate *tmpl )
+{
+	Real range = templateWeaponRange( tmpl );
+	if( range > 0.0f || tmpl == NULL || TheThingFactory == NULL )
+		return range;
+
+	const ModuleInfo& modules = tmpl->getBehaviorModuleInfo();
+	for( Int i = 0; i < modules.getCount(); i++ )
+	{
+		if( modules.getNthName( i ) != "SpawnBehavior" )
+			continue;
+
+		const SpawnBehaviorModuleData *data =
+			(const SpawnBehaviorModuleData *)modules.getNthData( i );
+		if( data == NULL )
+			continue;
+
+		for( size_t s = 0; s < data->m_spawnTemplateNameData.size(); ++s )
+		{
+			const ThingTemplate *spawn =
+				TheThingFactory->findTemplate( data->m_spawnTemplateNameData[ s ] );
+			Real spawnRange = templateWeaponRange( spawn );
+			if( spawnRange > range )
+				range = spawnRange;
+		}
+	}
+
+	return range;
+}
+
 void InGameUI::handleBuildPlacements( void )
 {
 
@@ -1512,22 +1580,7 @@ void InGameUI::handleBuildPlacements( void )
 		//
 		if( TheGlobalData->m_showPlacementRangeRing )
 		{
-			//
-			// Walk every weapon set the template has, not just the one an empty condition mask
-			// happens to select: a defence whose gun lives in a conditional set (an upgrade, a
-			// garrisoned variant) would otherwise report no range at all and draw no ring.
-			//
-			Real placeRange = 0.0f;
-			const WeaponTemplateSetVector& sets = m_pendingPlaceType->getWeaponTemplateSets();
-			for( WeaponTemplateSetVector::const_iterator si = sets.begin(); si != sets.end(); ++si )
-			{
-				for( Int ws = PRIMARY_WEAPON; ws < WEAPONSLOT_COUNT; ++ws )
-				{
-					const WeaponTemplate *wt = si->getNth( (WeaponSlotType)ws );
-					if( wt && wt->getUnmodifiedAttackRange() > placeRange )
-						placeRange = wt->getUnmodifiedAttackRange();
-				}
-			}
+			Real placeRange = templatePlacementRange( m_pendingPlaceType );
 			setRadiusCursorForRadius( placeRange );
 			m_placementRangeRingUp = ( placeRange > 0.0f );
 		}
@@ -1715,8 +1768,8 @@ void InGameUI::preDraw( void )
 	// handle radius-cursors, if any
 	handleRadiusCursor();
 
-	// show the build grid under a structure waiting to be placed
-	drawBuildGrid();
+	// the build grid under a structure waiting to be placed is not drawn here: it is terrain
+	// geometry now, and HeightMapRenderObjClass::Render puts it down with the ground itself
 
 	// draw the floating text first;
 	drawFloatingText();
@@ -1816,15 +1869,31 @@ void InGameUI::update( void )
 		// if the timeis frozen by a script, then we still want the text to display
 		if(TheScriptEngine->isTimeFrozenScript())
 		{
-			// NOTE: these are LOGIC-frame counters decremented to fake time passing while the
-			// logic clock is frozen, but InGameUI::update runs once per RENDER frame - so with
-			// rendering uncapped they run down (fps/30)x too fast and cutscene subtitles expire
-			// early. Not gated on the logic frame here because the logic frame is exactly what is
-			// NOT advancing during a script freeze; the fix needs a wall-clock 30Hz source and an
-			// in-game cutscene to verify. See FINDINGS.md 7.2.
-			m_militarySubtitle->lifetime--;
-			m_militarySubtitle->blockBeginFrame--;
-			m_militarySubtitle->incrementOnFrame--;
+			//
+			// These are LOGIC-frame counters walked down by hand to fake time passing while the
+			// logic clock is frozen.  They cannot be gated on the logic frame - that is exactly
+			// what is not advancing - and one step per call was one step per RENDER frame, so
+			// with the renderer uncapped a cutscene's subtitles ran down (fps/30) times too fast.
+			// The wall clock supplies the missing 30Hz: count the frames the freeze has lasted
+			// so far and apply only the ones not applied yet, so nothing drifts however long it
+			// runs.  See FINDINGS.md 7.2.
+			//
+			const UnsignedInt nowMs = timeGetTime();
+			if( m_subtitleFreezeStartMs == 0 )
+			{
+				m_subtitleFreezeStartMs = nowMs;
+				m_subtitleFreezeSteps = 0;
+			}
+			const UnsignedInt elapsedFrames = (nowMs - m_subtitleFreezeStartMs) * LOGICFRAMES_PER_SECOND / 1000;
+			const UnsignedInt steps = elapsedFrames - m_subtitleFreezeSteps;
+			m_subtitleFreezeSteps = elapsedFrames;
+			m_militarySubtitle->lifetime -= min( steps, m_militarySubtitle->lifetime );
+			m_militarySubtitle->blockBeginFrame -= min( steps, m_militarySubtitle->blockBeginFrame );
+			m_militarySubtitle->incrementOnFrame -= min( steps, m_militarySubtitle->incrementOnFrame );
+		}
+		else
+		{
+			m_subtitleFreezeStartMs = 0;
 		}
 		// if it's time to remove the subtitle, Then remove it
 		if((Int)m_militarySubtitle->lifetime < (Int)currLogicFrame)
@@ -1995,26 +2064,42 @@ void InGameUI::update( void )
 		layout->runUpdate();
 	}
 
-	//Handle keyboard camera rotations
+	//
+	// Handle keyboard camera rotations.  These used to apply one whole step per call and this
+	// update runs once per RENDER frame, so with the renderer uncapped the camera swung as fast
+	// as the machine happened to draw - the same key held for the same time went a different
+	// distance on every PC, and on a fast one a tap threw the view right past what you wanted.
+	// The step sizes are written for the 30Hz logic rate, so scale them by how many of those
+	// frames the wall clock says went by.  Capped at four, so coming back from a hitch or an
+	// alt-tab does not fling the camera across the map on the first frame.  See FINDINGS.md 7.4.
+	//
+	const UnsignedInt cameraNowMs = timeGetTime();
+	Real cameraSteps = 1.0f;
+	if( m_cameraKeyLastMs != 0 )
+		cameraSteps = (Real)(cameraNowMs - m_cameraKeyLastMs) * (LOGICFRAMES_PER_SECOND / 1000.0f);
+	m_cameraKeyLastMs = cameraNowMs;
+	if( cameraSteps > 4.0f )
+		cameraSteps = 4.0f;
+
 	if( m_cameraRotatingLeft && !m_cameraRotatingRight )
 	{
 		//Keyboard rotate left
-		TheTacticalView->setAngle( TheTacticalView->getAngle() - TheGlobalData->m_keyboardCameraRotateSpeed );
+		TheTacticalView->setAngle( TheTacticalView->getAngle() - TheGlobalData->m_keyboardCameraRotateSpeed * cameraSteps );
 	}
 	if( m_cameraRotatingRight && !m_cameraRotatingLeft )
 	{
 		//Keyboard rotate right
-		TheTacticalView->setAngle( TheTacticalView->getAngle() + TheGlobalData->m_keyboardCameraRotateSpeed );
+		TheTacticalView->setAngle( TheTacticalView->getAngle() + TheGlobalData->m_keyboardCameraRotateSpeed * cameraSteps );
 	}
 	if( m_cameraZoomingIn && !m_cameraZoomingOut )
 	{
 		//Keyboard zoom in
-		TheTacticalView->zoomIn();
+		TheTacticalView->zoomIn( cameraSteps );
 	}
 	if( m_cameraZoomingOut && !m_cameraZoomingIn )
 	{
 		//Keyboard zoom out
-		TheTacticalView->zoomOut();
+		TheTacticalView->zoomOut( cameraSteps );
 	}
 
 
@@ -5576,7 +5661,7 @@ enum
 	PRODUCTION_STRIP_CAMEO	= 32,		///< cameo edge in pixels
 	PRODUCTION_STRIP_GAP		= 3,		///< space between cameos, and between the two rows
 	PRODUCTION_STRIP_LEFT		= 8,		///< inset from the left edge of the screen
-	PRODUCTION_STRIP_LIFT		= 6,		///< clearance above the control bar
+	PRODUCTION_STRIP_LIFT		= 24,		///< clearance above the control bar
 	PRODUCTION_STRIP_MORE		= 34		///< width kept for the "+N" that closes an overflowing row
 };
 

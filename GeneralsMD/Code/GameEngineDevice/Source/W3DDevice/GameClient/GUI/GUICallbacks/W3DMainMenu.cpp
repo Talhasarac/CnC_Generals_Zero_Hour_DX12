@@ -761,8 +761,7 @@ void W3DMainMenuButtonDropShadowDraw( GameWindow *window,
 			{
 				TheDisplay->drawRemainingRectClock( start.x, start.y, size.x, size.y, pData->percentClock,pData->colorClock );
 			}
-			pData->drawClock = NO_CLOCK;
-			window->winSetUserData(pData);
+			// the clock is not consumed by drawing it - see GadgetButtonDrawClock
 		}
 	
 		if( pData->drawBorder && pData->colorBorder != GAME_COLOR_UNDEFINED )

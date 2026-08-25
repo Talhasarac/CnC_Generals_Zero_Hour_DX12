@@ -125,14 +125,17 @@ View *View::prependViewToList( View *list )
 	return this;
 }
 
-void View::zoomIn( void )
+// One "step" is what a single mouse wheel notch does, and what one 30Hz frame of a held
+// zoom key does; a caller driving this from a render frame passes the fraction of a logic
+// frame that has actually gone by, so the zoom rate stops depending on the frame rate.
+void View::zoomIn( Real steps )
 {
-	setHeightAboveGround(getHeightAboveGround() - 10.0f);
+	setHeightAboveGround(getHeightAboveGround() - 10.0f * steps);
 }
 
-void View::zoomOut( void )
+void View::zoomOut( Real steps )
 {
-	setHeightAboveGround(getHeightAboveGround() + 10.0f);
+	setHeightAboveGround(getHeightAboveGround() + 10.0f * steps);
 }
 
 /**

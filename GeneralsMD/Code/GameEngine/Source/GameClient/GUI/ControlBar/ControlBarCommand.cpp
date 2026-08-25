@@ -71,6 +71,45 @@
 static GameWindow *commandWindows[ MAX_COMMANDS_PER_SET ];
 Bool commandWindowsInitialized = FALSE;
 static Color BuildClockColor = GameMakeColor(0,0,0,120);	///< translucent black radial fill drawn over the cameo as production progresses
+
+//-------------------------------------------------------------------------------------------------
+/** Is any selected building of the local player's researching or holding 'upgrade' in its queue?
+	* Hands back the queue entry when the upgrade is the one being worked on right now (that is the
+	* one that has progress to show), and NULL when it is merely waiting its turn. */
+//-------------------------------------------------------------------------------------------------
+static Bool findUpgradeInSelection( const UpgradeTemplate *upgrade, const ProductionEntry **head )
+{
+	if( head )
+		*head = NULL;
+
+	if( upgrade == NULL || TheInGameUI == NULL || ThePlayerList == NULL )
+		return FALSE;
+
+	Bool found = FALSE;
+	const DrawableList *selected = TheInGameUI->getAllSelectedDrawables();
+	for( DrawableListCIt it = selected->begin(); it != selected->end(); ++it )
+	{
+		Object *obj = (*it)->getObject();
+		if( obj == NULL || obj->getControllingPlayer() != ThePlayerList->getLocalPlayer() )
+			continue;
+
+		ProductionUpdateInterface *pu = obj->getProductionUpdateInterface();
+		if( pu == NULL || pu->isUpgradeInQueue( upgrade ) == FALSE )
+			continue;
+
+		found = TRUE;
+
+		const ProductionEntry *first = pu->firstProduction();
+		if( head && first && first->getProductionType() == PRODUCTION_UPGRADE &&
+				first->getProductionUpgrade() == upgrade )
+		{
+			*head = first;
+			break;			// this one is actually working on it, no better answer to be had
+		}
+	}
+
+	return found;
+}
 // STATIC DATA STORAGE ////////////////////////////////////////////////////////////////////////////
 ControlBar::ContainEntry ControlBar::m_containData[ MAX_COMMANDS_PER_SET ];
 
@@ -699,6 +738,12 @@ void ControlBar::updateContextCommand( void )
 			continue;
 
 		//
+		// the clock survives until it is taken off, so every pass starts with a clean button and
+		// whatever is still running below puts its own clock back on
+		//
+		GadgetButtonClearClock( win );
+
+		//
 		// a unit build button wears its own queue: a radial fill over the cameo while its unit
 		// is the one being built, and a corner badge with how many of it are queued
 		//
@@ -732,19 +777,23 @@ void ControlBar::updateContextCommand( void )
 		}
 
 		//
-		// an upgrade button wears the same radial fill while its upgrade is the one the building is
-		// researching. An upgrade is never queued twice, so there is no count badge to go with it.
-		// The button is disabled for the duration - getCommandAvailability refuses an upgrade that
-		// is already in production - and the clock draws over the disabled state too.
+		// an upgrade button wears the same radial fill while its upgrade is the one being
+		// researched. An upgrade is never queued twice on one building, so there is no count badge
+		// to go with it. The producer is looked for across the whole selection, not just on the
+		// representative: with four barracks selected the one actually paying for the upgrade is
+		// rarely the one the bar is drawn from, and the button showed no progress at all.
 		//
-		if( ( command->getCommandType() == GUI_COMMAND_PLAYER_UPGRADE ||
-					command->getCommandType() == GUI_COMMAND_OBJECT_UPGRADE ) &&
-				pu && m_currContext != CB_CONTEXT_MULTI_SELECT )
+		Bool upgradeQueuedHere = FALSE;
+		if( command->getCommandType() == GUI_COMMAND_PLAYER_UPGRADE ||
+				command->getCommandType() == GUI_COMMAND_OBJECT_UPGRADE )
 		{
-			const ProductionEntry *first = pu->firstProduction();
-			if( first && first->getProductionType() == PRODUCTION_UPGRADE &&
-					first->getProductionUpgrade() == command->getUpgradeTemplate() )
-				GadgetButtonDrawClock( win, first->getPercentComplete(), BuildClockColor );
+			const ProductionEntry *entry = NULL;
+			if( findUpgradeInSelection( command->getUpgradeTemplate(), &entry ) )
+			{
+				upgradeQueuedHere = TRUE;
+				if( entry )
+					GadgetButtonDrawClock( win, entry->getPercentComplete(), BuildClockColor );
+			}
 		}
 
 		// a structure outside the armed chord group greys out until the chord resolves
@@ -795,6 +844,19 @@ void ControlBar::updateContextCommand( void )
 			default:
 				win->winEnable( TRUE );
 				break;
+		}
+
+		//
+		// The button an upgrade is cancelled from is the button that upgrade is bought from, and a
+		// disabled window never sees a mouse message at all (GameWindow::winPointInChild skips it),
+		// so the one thing you could not right-click was the upgrade you wanted to take back.
+		// Leave it enabled and merely colourless while it is being researched; a left click on it
+		// costs nothing, ProductionUpdate::queueUpgrade refuses to queue the same upgrade twice.
+		//
+		if( upgradeQueuedHere && availability != COMMAND_HIDDEN )
+		{
+			win->winEnable( TRUE );
+			win->winSetStatus( WIN_STATUS_ALWAYS_COLOR );
 		}
 
 		// while a chord is armed, the structures of its group that can be built right now wear

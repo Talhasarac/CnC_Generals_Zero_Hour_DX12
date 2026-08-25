@@ -758,7 +758,12 @@ protected:
 	void drawFloatingText( void );							///< Draw all our floating text
 	void clearFloatingText( void );							///< clear the floating text list
 
-	virtual void drawBuildGrid( void ) { }				///< the pathfinder's build grid under a pending structure
+public:
+	/** The pathfinder's build grid under a pending structure.  Public and called from the terrain
+		* renderer rather than from preDraw: it is geometry lying on the ground, and it has to go down
+		* with the terrain so that everything drawn after the terrain covers it. */
+	virtual void drawBuildGrid( void ) { }
+protected:
 
 	void clearWorldAnimations( void );					///< delete all world animations
 	void updateAndDrawWorldAnimations( void );	///< update and draw visible world animations
@@ -834,6 +839,12 @@ protected:
 	UnsignedInt									m_hudLastSampleFrame;		///< client frame the fps sample was last refreshed on
 	UnsignedInt									m_hudLastSampleMs;			///< wall clock of that sample
 	Real												m_hudFps;								///< smoothed render rate
+	// A script time freeze stops the logic clock, and the military subtitle's counters are
+	// logic frames, so they have to be stepped by hand while it lasts.  These two turn the
+	// wall clock into that step without drift: every update works out how many 30Hz frames
+	// have passed since the freeze began and applies only the ones not applied yet.
+	UnsignedInt									m_subtitleFreezeStartMs;	///< wall clock the current freeze started on, 0 = not frozen
+	UnsignedInt									m_subtitleFreezeSteps;		///< frames already handed to the subtitle during it
 	// Income is sampled from the player's cumulative earnings every INCOME_SAMPLE_SECONDS and
 	// averaged over the whole ring, so a lumpy supply run reads as a rate instead of a spike.
 	enum { INCOME_SAMPLES = 16, INCOME_SAMPLE_SECONDS = 2 };	///< 16 buckets of 2s = a 30s window
@@ -944,6 +955,10 @@ protected:
 	Bool												m_forceMoveToMode;		///< are we in force move mode?
 	Bool												m_attackMoveToMode;	///< are we in attack move mode?
 	Bool												m_preferSelection;		///< the shift key has been depressed.
+
+	// wall clock of the previous update(), so a held camera key can be stepped by elapsed
+	// time instead of by render frames.  0 = no previous update yet.
+	UnsignedInt									m_cameraKeyLastMs;
 
 	Bool												m_cameraRotatingLeft; 
 	Bool 												m_cameraRotatingRight;

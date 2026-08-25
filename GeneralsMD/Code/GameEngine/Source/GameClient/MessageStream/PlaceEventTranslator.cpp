@@ -268,29 +268,42 @@ GameMessageDisposition PlaceEventTranslator::translateGameMessage(const GameMess
 				CanMakeType cmt = TheBuildAssistant->canMakeUnit( builderObj, build );
 				if( cmt != CANMAKE_OK )
 				{
+					//
+					// Whatever the reason, the click was spent on the attempt: unhook the anchor and
+					// eat the message. It used to just break out - the placement stayed anchored to
+					// the spot that had been clicked, so the ghost sat there stuck to the map with no
+					// way to place or aim it, and the click itself fell through to the world and
+					// became a move order on whatever was selected. Running out of money halfway
+					// through a shift-held row of structures hit this every time.
+					//
 					if (cmt == CANMAKE_NO_MONEY)
 					{
 						TheEva->setShouldPlay(EVA_InsufficientFunds);
 						TheInGameUI->message( "GUI:NotEnoughMoneyToBuild" );
-						break;
 					} 
 					else if (cmt == CANMAKE_QUEUE_FULL)
 					{
 						TheInGameUI->message( "GUI:ProductionQueueFull" );
-						break;
 					}
 					else if (cmt == CANMAKE_PARKING_PLACES_FULL)
 					{
 						TheInGameUI->message( "GUI:ParkingPlacesFull" );
-						break;
 					}
 					else if( cmt == CANMAKE_MAXED_OUT_FOR_PLAYER )
 					{
 						TheInGameUI->message( "GUI:UnitMaxedOut" );
-						break;
 					} 
-					// get out of pending placement mode, this will also clear the arrow anchor status
-					TheInGameUI->placeBuildAvailable( NULL, NULL );
+					else
+					{
+						// nothing to say about it, so drop out of placement mode altogether
+						TheInGameUI->placeBuildAvailable( NULL, NULL );
+					}
+
+					// the ghost keeps following the cursor for the cases that may pass (the money
+					// comes in, the queue drains), it just is not nailed to the map any more
+					TheInGameUI->setPlacementStart( NULL );
+					disp = DESTROY_MESSAGE;
+					m_frameOfUpButton = TheGameLogic->getFrame();
 					break;
 				} 
 

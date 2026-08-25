@@ -228,7 +228,6 @@ public:
 	static void parseSpecialPowerDefinition( INI *ini );
 	static void parseInGameUIDefinition( INI *ini );
 	static void parseControlBarSchemeDefinition( INI *ini );
-	static void parseControlBarResizerDefinition( INI *ini );
 	static void parseShellMenuSchemeDefinition( INI *ini );
 	static void parseCampaignDefinition( INI *ini );
 	static void parseAudioSettingsDefinition( INI *ini );

@@ -455,6 +455,17 @@ GameMessageDisposition MetaEventTranslator::translateGameMessage(const GameMessa
 	GameMessageDisposition disp = KEEP_MESSAGE;
 	GameMessage::Type t = msg->getType();
 
+	//
+	// a click is the player saying what they want with the mouse, so whatever half-typed
+	// structure chord is still armed from the keyboard is stale - drop it before it can eat
+	// the next A or S and turn it into a building to place
+	//
+	if( ( t == GameMessage::MSG_RAW_MOUSE_LEFT_BUTTON_DOWN ||
+				t == GameMessage::MSG_RAW_MOUSE_RIGHT_BUTTON_DOWN ) && TheControlBar )
+	{
+		TheControlBar->dropChord();
+	}
+
 	if (t == GameMessage::MSG_RAW_KEY_DOWN || t == GameMessage::MSG_RAW_KEY_UP)
 	{
 		MappableKeyType key = (MappableKeyType)msg->getArgument(0)->integer;
