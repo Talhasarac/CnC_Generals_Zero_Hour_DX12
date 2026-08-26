@@ -3962,7 +3962,7 @@ void InGameUI::postDraw( void )
  								if( module->getReadyFrame() < TheGameLogic->getFrame() )
 									readySecs = 0;
  								else 
- 									readySecs = (module->getReadyFrame() - TheGameLogic->getFrame()) / LOGICFRAMES_PER_SECOND;
+ 									readySecs = ControlBar_secondsFromFrames( (Real)(module->getReadyFrame() - TheGameLogic->getFrame()) );
 								// Yes, integer math.  We can't have float imprecision display 4:01 on a disabled superweapon.
  
                 // Only if we actually changed the ready status do we want to play an Eva event.

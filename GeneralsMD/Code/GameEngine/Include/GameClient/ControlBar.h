@@ -1148,5 +1148,13 @@ private:
 // EXTERNALS //////////////////////////////////////////////////////////////////////////////////////
 extern ControlBar *TheControlBar;
 
+//-------------------------------------------------------------------------------------------------
+/** Logic frames as the whole seconds they will really take at the current logic rate, rounded up
+	* and never down to zero. Defined in ControlBarCommand.cpp; every countdown and build time the
+	* UI prints goes through it, so they all answer the game speed the same way. */
+//-------------------------------------------------------------------------------------------------
+extern Int ControlBar_secondsFromFrames( Real frames );
+extern Int ControlBar_secondsFromFramesAt( Real frames, Int logicFps );	///< ...at a rate you name
+
 #endif  // end __CONTROLBAR_H_
 

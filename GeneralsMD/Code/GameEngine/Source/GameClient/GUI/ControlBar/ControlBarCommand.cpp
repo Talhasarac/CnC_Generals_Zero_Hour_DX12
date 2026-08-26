@@ -39,6 +39,7 @@
 #include "Common/SpecialPower.h"
 #include "Common/Upgrade.h"
 #include "Common/BuildAssistant.h"
+#include "Common/GameEngine.h"
 #include "GameLogic/GameLogic.h"
 #include "GameLogic/Module/BattlePlanUpdate.h"
 #include "GameLogic/Module/DozerAIUpdate.h"
@@ -81,16 +82,30 @@ Bool commandWindowsInitialized = FALSE;
 static Color BuildClockColor = GameMakeColor(0,0,0,120);
 
 //-------------------------------------------------------------------------------------------------
-/** Logic frames to whole seconds, rounded up and never down to zero: a button that still has work
-	* left on it must not read "0s". */
+/** Logic frames to the whole seconds they will really take, rounded up and never down to zero: a
+	* button that still has work left on it must not read "0s".
+	*
+	* Real seconds, not "logic frames over thirty". The logic rate is a knob in this fork (the game
+	* speed keys move it between 5 and 200), and a build time is a promise about how long you will
+	* be waiting - so at double speed a 20s barracks has to read 10s. `LOGICFRAMES_PER_SECOND` is
+	* only the fallback for the frames before the engine has a rate at all. */
 //-------------------------------------------------------------------------------------------------
-Int ControlBar_secondsFromFrames( Real frames )
+Int ControlBar_secondsFromFramesAt( Real frames, Int logicFps )
 {
 	if( frames <= 0.0f )
 		return 0;
 
-	Int seconds = (Int)( frames / LOGICFRAMES_PER_SECOND + 0.999f );
+	if( logicFps <= 0 )
+		logicFps = LOGICFRAMES_PER_SECOND;
+
+	Int seconds = (Int)( frames / logicFps + 0.999f );
 	return seconds < 1 ? 1 : seconds;
+}
+
+Int ControlBar_secondsFromFrames( Real frames )
+{
+	return ControlBar_secondsFromFramesAt( frames,
+										TheGameEngine ? TheGameEngine->getFramesPerSecondLimit() : 0 );
 }
 
 //-------------------------------------------------------------------------------------------------

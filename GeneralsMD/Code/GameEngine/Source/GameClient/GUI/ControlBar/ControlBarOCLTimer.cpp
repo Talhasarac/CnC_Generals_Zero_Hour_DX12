@@ -145,7 +145,7 @@ void ControlBar::updateContextOCLTimer( void )
 	OCLUpdate *update = (OCLUpdate*)obj->findUpdateModule( key_OCLUpdate );
 
 	UnsignedInt frames = update->getRemainingFrames();
-	UnsignedInt seconds = frames / LOGICFRAMES_PER_SECOND;
+	UnsignedInt seconds = ControlBar_secondsFromFrames( (Real)frames );
 
 	Real percent = update->getCountdownPercent();
 	

@@ -1746,6 +1746,7 @@ TEST(pathfind_zone_flatten_collapses_a_deep_chain_in_one_pass)
    including ControlBar.h for them: they are free functions in the ControlBar sources, and the
    header carries the class, not these. */
 extern Int ControlBar_secondsFromFrames( Real frames );
+extern Int ControlBar_secondsFromFramesAt( Real frames, Int logicFps );
 extern Int ControlBar_experiencePercent( Int currentExp, Int levelExp, Int nextLevelExp );
 
 TEST(controlbar_seconds_round_up_and_never_reach_zero_early)
@@ -1765,6 +1766,28 @@ TEST(controlbar_seconds_round_up_and_never_reach_zero_early)
 	/* the one that matters - a single frame of work left still says 1s, because a button with
 	   work left on it reading 0s looks finished when it is not */
 	CHECK_EQ( ControlBar_secondsFromFrames( 1.0f ), 1 );
+}
+
+TEST(controlbar_seconds_are_real_seconds_at_the_current_game_speed)
+{
+	/* The number on a build button is a promise about how long you will be waiting, and the logic
+	   rate is a knob in this fork (the game speed keys move it between 5 and 200). The same 600
+	   frames of work is 20 seconds at the nominal rate and 10 at double speed. */
+	const Real frames = 600.0f;
+	CHECK_EQ( ControlBar_secondsFromFramesAt( frames, LOGICFRAMES_PER_SECOND ), 20 );
+	CHECK_EQ( ControlBar_secondsFromFramesAt( frames, LOGICFRAMES_PER_SECOND * 2 ), 10 );
+	CHECK_EQ( ControlBar_secondsFromFramesAt( frames, LOGICFRAMES_PER_SECOND / 2 ), 40 );
+
+	/* A rate of zero is the engine before it has one, not a division to attempt: fall back to the
+	   nominal rate. This is also the path the whole suite runs on - the test binary has no
+	   GameEngine, so ControlBar_secondsFromFrames() above resolves the rate to 0. */
+	CHECK_EQ( ControlBar_secondsFromFramesAt( frames, 0 ), 20 );
+	CHECK_EQ( ControlBar_secondsFromFramesAt( frames, -5 ), 20 );
+
+	/* and the round-up and the never-zero floor hold at any rate */
+	CHECK_EQ( ControlBar_secondsFromFramesAt( 61.0f, 60 ), 2 );
+	CHECK_EQ( ControlBar_secondsFromFramesAt( 1.0f, 200 ), 1 );
+	CHECK_EQ( ControlBar_secondsFromFramesAt( 0.0f, 200 ), 0 );
 }
 
 TEST(controlbar_experience_percent_fills_the_rank_and_clamps)

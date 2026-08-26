@@ -297,6 +297,10 @@ Around it, the whole production loop got tightened:
   interrupting a busy one when every worker you own is busy. Same for the build list you get with
   nothing selected — it stays usable when the whole crew is out working.
 - **Workers go back to collecting supplies** after they finish, instead of standing there.
+- **The times on the buttons are real seconds, not "seconds at normal speed".** Speed the game up
+  and a 20 second barracks reads 10, because that is how long you are going to be waiting. Every
+  countdown the interface prints now answers the speed the same way: build and research times,
+  general's power cooldowns, the supply drop timer, the superweapon clock and the build tooltip.
 - **The clock and frame-rate readout is smaller, bolder, and drawn on top of everything.** It used
   to be painted before the interface, so any panel or dialog covered the one number you look at
   when something is going wrong.

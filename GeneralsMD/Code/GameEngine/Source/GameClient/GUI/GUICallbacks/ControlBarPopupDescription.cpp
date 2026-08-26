@@ -422,7 +422,7 @@ void ControlBar::populateBuildTooltipLayout( const CommandButton *commandButton,
 			if( TheGlobalData->m_detailedBuildTooltips )
 			{
 				UnicodeString stats;
-				Int buildSecs = thingTemplate->calcTimeToBuild( player ) / LOGICFRAMES_PER_SECOND;
+				Int buildSecs = ControlBar_secondsFromFrames( (Real)thingTemplate->calcTimeToBuild( player ) );
 				stats.format( L"\nTime %ds", buildSecs );
 
 				// no bonuses: these are the template's own numbers, before veterancy or upgrades
