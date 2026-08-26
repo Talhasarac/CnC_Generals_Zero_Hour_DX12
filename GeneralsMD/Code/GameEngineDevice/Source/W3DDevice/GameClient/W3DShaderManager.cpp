@@ -2985,6 +2985,22 @@ Bool W3DShaderManager::filterSetup(FilterTypes filter, enum FilterModes mode)
 	return FALSE;
 }
 
+//=============================================================================
+/** Render-to-texture is how the smudge (heat haze) and bloom passes get the scene, and every way
+	* it can go wrong ends the same way on screen: a black world under a perfectly good UI, because
+	* the scene went into a texture that never got blitted back. None of these paths said anything,
+	* so the only evidence was the player's eyes. Rate limited - a broken frame usually repeats. */
+//=============================================================================
+static void rttComplain( const char *why )
+{
+	static UnsignedInt lastComplaintMs = 0;
+	const UnsignedInt now = timeGetTime();
+	if( lastComplaintMs != 0 && now - lastComplaintMs < 1000 )
+		return;
+	lastComplaintMs = now;
+	DEBUG_LOG(( "RenderToTexture: %s\n", why ));
+}
+
 /*Draws 2 triangles covering the viewport given the current render states*/
 void W3DShaderManager::drawViewport(Int color)
 {
@@ -3035,7 +3051,15 @@ void W3DShaderManager::startRenderToTexture(void)
 {	
 	DEBUG_ASSERTCRASH(!m_renderingToTexture, ("Already rendering to texture - cannot nest calls."));
 
-	if (m_renderingToTexture || m_newRenderSurface==NULL || m_oldDepthSurface==NULL) return;
+	if (m_renderingToTexture || m_newRenderSurface==NULL || m_oldDepthSurface==NULL)
+	{
+		// One of these leaves the scene going somewhere other than where the blit below expects
+		// it, which is what a black world with a live UI looks like. Say which, at most once a
+		// second, so a report of "the screen went black" has something behind it.
+		rttComplain( m_renderingToTexture ? "already rendering to texture"
+					: (m_newRenderSurface==NULL ? "no render target texture" : "no depth surface") );
+		return;
+	}
 	//m_oldDepthSurface is the back buffer's depth surface, which is multisampled when the back
 	//buffer is; D3D wants the depth buffer to match the render target, and ours is a plain
 	//texture.  Ask the wrapper for a matching one (NULL = not multisampling, nothing to do).
@@ -3044,7 +3068,10 @@ void W3DShaderManager::startRenderToTexture(void)
 	HRESULT hr = DX8Wrapper::_Get_D3D_Device8()->SetRenderTarget(m_newRenderSurface,depthSurface);
 	DEBUG_ASSERTCRASH(hr==S_OK, ("Set target failed unexpectedly."));
 	if (hr != S_OK)
+	{
+		rttComplain( "SetRenderTarget(texture) failed" );
 		return;
+	}
 	m_renderingToTexture = true;
 	if (TheGlobalData->m_showSoftWaterEdge)
 	{	//Soft water edges use frame buffer destination alpha so we must clear it to a known value.
@@ -3076,9 +3103,15 @@ void W3DShaderManager::startRenderToTexture(void)
 IDirect3DTexture8 *W3DShaderManager::endRenderToTexture(void)
 {	
 	DEBUG_ASSERTCRASH(m_renderingToTexture, ("Not rendering to texture."));
-	if (!m_renderingToTexture) return NULL;
+	if (!m_renderingToTexture)
+	{
+		rttComplain( "end without a start" );
+		return NULL;
+	}
 	HRESULT hr = DX8Wrapper::_Get_D3D_Device8()->SetRenderTarget(m_oldRenderSurface,m_oldDepthSurface);	//restore original render target
 	DEBUG_ASSERTCRASH(hr==S_OK, ("Set target failed unexpectedly."));
+	if (hr != S_OK)
+		rttComplain( "SetRenderTarget(back buffer) failed - the frame is stuck in the texture" );
 	if (hr == S_OK)
 	{
 		//assume render target texure will be in stage 0.  Most hardware has "conditional" support for

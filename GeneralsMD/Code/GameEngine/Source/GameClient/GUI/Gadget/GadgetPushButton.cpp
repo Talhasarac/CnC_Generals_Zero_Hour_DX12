@@ -604,6 +604,9 @@ PushButtonData * getNewPushButtonData( void )
 	p->drawBorder = FALSE;
 	p->drawClock = NO_CLOCK;
 	p->drawCount = 0;
+	p->drawSeconds = 0;
+	p->barPercent = -1;
+	p->barColor = GAME_COLOR_UNDEFINED;
 	p->overlayImage = NULL;
 	return p;
 }
@@ -706,7 +709,50 @@ void GadgetButtonClearClock( GameWindow *g )
 		return;
 
 	pData->drawClock = NO_CLOCK;
+	// the seconds label is the same per-frame overlay as the clock, and everyone who puts one on
+	// puts a clock on with it, so it comes off here too
+	pData->drawSeconds = 0;
 
+}
+
+// GadgetButtonSetSeconds =====================================================
+/** Set the seconds label drawn in the button's bottom left corner, 0 for none.
+	* Cleared by GadgetButtonClearClock, so it must be re-set every frame. */
+//=============================================================================
+void GadgetButtonSetSeconds( GameWindow *g, Int seconds )
+{
+	if( g == NULL )
+		return;
+
+	PushButtonData *pData = (PushButtonData *)g->winGetUserData();
+	if(!pData)
+	{
+		pData = getNewPushButtonData();
+		if(!pData)
+			return;
+	}
+	pData->drawSeconds = seconds;
+	g->winSetUserData(pData);
+}
+
+// GadgetButtonSetBar =========================================================
+/** Set a thin progress bar along the button's bottom edge, percent < 0 for none */
+//=============================================================================
+void GadgetButtonSetBar( GameWindow *g, Int percent, Color color )
+{
+	if( g == NULL )
+		return;
+
+	PushButtonData *pData = (PushButtonData *)g->winGetUserData();
+	if(!pData)
+	{
+		pData = getNewPushButtonData();
+		if(!pData)
+			return;
+	}
+	pData->barPercent = percent;
+	pData->barColor = color;
+	g->winSetUserData(pData);
 }
 
 void GadgetButtonDrawOverlayImage( GameWindow *g, const Image *image )

@@ -1656,6 +1656,24 @@ void W3DView::draw( void )
 		Bool continueTheEffect = false;
 		if (preRenderResult)	//if prerender passed, do the post render.
 			continueTheEffect = W3DShaderManager::filterPostRender(m_viewFilter, m_viewFilterMode, deltaScroll,doExtraRender);
+
+		//
+		// A filter that took the scene into a texture and then failed to put it back leaves the
+		// world black under a live UI - the smudge/bloom filter runs on any frame with heat haze
+		// in it, so this is a frame the player sees, not a corner case. Name the filter, rate
+		// limited, so the log says what the eyes only saw.
+		//
+		if (preRenderResult && !continueTheEffect && !skipRender)
+		{
+			static UnsignedInt lastFilterComplaintMs = 0;
+			const UnsignedInt nowMs = timeGetTime();
+			if (lastFilterComplaintMs == 0 || nowMs - lastFilterComplaintMs >= 1000)
+			{
+				lastFilterComplaintMs = nowMs;
+				DEBUG_LOG(("ViewFilter %d mode %d: postRender failed, the scene may not have reached the screen\n",
+									 (Int)m_viewFilter, (Int)m_viewFilterMode));
+			}
+		}
 		if (!skipRender && getCameraLock()) 
 		{
 			Object* cameraLockObj = TheGameLogic->findObjectByID(getCameraLock());

@@ -81,6 +81,19 @@ Bool commandWindowsInitialized = FALSE;
 static Color BuildClockColor = GameMakeColor(0,0,0,120);
 
 //-------------------------------------------------------------------------------------------------
+/** Logic frames to whole seconds, rounded up and never down to zero: a button that still has work
+	* left on it must not read "0s". */
+//-------------------------------------------------------------------------------------------------
+Int ControlBar_secondsFromFrames( Real frames )
+{
+	if( frames <= 0.0f )
+		return 0;
+
+	Int seconds = (Int)( frames / LOGICFRAMES_PER_SECOND + 0.999f );
+	return seconds < 1 ? 1 : seconds;
+}
+
+//-------------------------------------------------------------------------------------------------
 /** Is any selected building of the local player's researching or holding 'upgrade' in its queue?
 	* Hands back the queue entry when the upgrade is the one being worked on right now (that is the
 	* one that has progress to show), and NULL when it is merely waiting its turn. */
@@ -785,6 +798,26 @@ void ControlBar::updateContextCommand( void )
 		}
 
 		//
+		// what this button costs in seconds. The radial fill says "some of the way there" and
+		// nothing about how long that is, which is the one number a build decision needs.
+		//
+		// It stays the build time while the thing is being built rather than counting down to it:
+		// the number on the button answers "what does one of these cost me", and that question does
+		// not stop being asked because one is already on the way - a counting number turns the one
+		// stable figure on the bar into something you cannot read off at a glance, and the queue's
+		// own progress is already on the cameo (the radial fill and the count badge) and over the
+		// producer itself.
+		//
+		if( command->getCommandType() == GUI_COMMAND_UNIT_BUILD ||
+				command->getCommandType() == GUI_COMMAND_DOZER_CONSTRUCT )
+		{
+			const ThingTemplate *tmpl = command->getThingTemplate();
+			Player *localPlayer = ThePlayerList ? ThePlayerList->getLocalPlayer() : NULL;
+			if( tmpl && localPlayer )
+				GadgetButtonSetSeconds( win, ControlBar_secondsFromFrames( (Real)tmpl->calcTimeToBuild( localPlayer ) ) );
+		}
+
+		//
 		// an upgrade button wears the same radial fill while its upgrade is the one being
 		// researched. An upgrade is never queued twice on one building, so there is no count badge
 		// to go with it. The producer is looked for across the whole selection, not just on the
@@ -796,7 +829,14 @@ void ControlBar::updateContextCommand( void )
 				command->getCommandType() == GUI_COMMAND_OBJECT_UPGRADE )
 		{
 			const ProductionEntry *entry = NULL;
-			if( findUpgradeInSelection( command->getUpgradeTemplate(), &entry ) )
+			Bool queuedHere = findUpgradeInSelection( command->getUpgradeTemplate(), &entry );
+
+			const UpgradeTemplate *ut = command->getUpgradeTemplate();
+			Player *localPlayer = ThePlayerList ? ThePlayerList->getLocalPlayer() : NULL;
+			if( ut && localPlayer )
+				GadgetButtonSetSeconds( win, ControlBar_secondsFromFrames( (Real)ut->calcTimeToBuild( localPlayer ) ) );
+
+			if( queuedHere )
 			{
 				upgradeQueuedHere = TRUE;
 				if( entry )
@@ -1509,7 +1549,24 @@ CommandAvailability ControlBar::getCommandAvailability( const CommandButton *com
 				// perform was drawn ready to fire. There is nothing behind it, so hide it.
 				return COMMAND_HIDDEN;
 			} 
-			else if( mod->isReady() == FALSE )
+			//
+			// the cooldown in seconds: what is left of it while the power charges, and the whole
+			// of it while the power is ready, so you can see what firing it will cost you
+			//
+			{
+				const SpecialPowerTemplate *spTemplate = command->getSpecialPowerTemplate();
+				UnsignedInt now = TheGameLogic->getFrame();
+				UnsignedInt readyFrame = mod->getReadyFrame();
+
+				// frame numbers are unsigned - a ready frame already behind us wraps if subtracted
+				Real frames = ( readyFrame > now ) ? (Real)( readyFrame - now ) : 0.0f;
+				if( frames <= 0.0f && spTemplate )
+					frames = (Real)spTemplate->getReloadTime();
+
+				GadgetButtonSetSeconds( applyToWin, ControlBar_secondsFromFrames( frames ) );
+			}
+
+			if( mod->isReady() == FALSE )
 			{
 				Int percent =  mod->getPercentReady() * 100;
 

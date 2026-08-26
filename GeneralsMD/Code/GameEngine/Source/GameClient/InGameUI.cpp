@@ -1831,7 +1831,25 @@ void InGameUI::update( void )
 	// ms -> logic frames. This used to divide by LOGICFRAMES_PER_SECOND instead of multiplying and
 	// then divide by 1000 again, so with the shipped MessageDelayMS (~5000) it was 5000/30 = 166,
 	// 166/1000 = 0 - every UI message started fading on the frame it was posted.
-	const int messageTimeout = m_messageDelayMS * LOGICFRAMES_PER_SECOND / 1000;
+	//
+	// ...and the shipped value holds a message for five whole seconds before the fade even
+	// starts, on top of a fade that took three more: the corner was still showing what you did
+	// eight seconds ago, stacked under what you have done since. Cap the hold at MESSAGE_HOLD_MS
+	// and take the fade down at a fixed rate, which is about a second.
+	//
+	// That rate is per LOGIC frame, not per call: this runs once per render frame, so a fixed
+	// step per call would empty the alpha (fps/30) times too fast - the same trap the military
+	// subtitle countdown below fell into.
+	//
+	const int MESSAGE_HOLD_MS = 2500;
+	const int MESSAGE_FADE_PER_FRAME = 8;
+	static UnsignedInt s_lastMessageFadeFrame = 0xffffffff;
+	const Bool fadeThisPass = ( currLogicFrame != s_lastMessageFadeFrame );
+	s_lastMessageFadeFrame = currLogicFrame;
+	int messageDelayMS = m_messageDelayMS;
+	if( messageDelayMS > MESSAGE_HOLD_MS )
+		messageDelayMS = MESSAGE_HOLD_MS;
+	const int messageTimeout = messageDelayMS * LOGICFRAMES_PER_SECOND / 1000;
 	UnsignedByte r, g, b, a;
 	Int amount;
 	for( i = MAX_UI_MESSAGES - 1; i >= 0; i-- )
@@ -1841,14 +1859,14 @@ void InGameUI::update( void )
 		if( m_uiMessages[ i ].displayString == NULL )
 			continue;
 
-		if( currLogicFrame - m_uiMessages[ i ].timestamp > messageTimeout )
+		if( fadeThisPass && currLogicFrame - m_uiMessages[ i ].timestamp > messageTimeout )
 		{
 
 			// get the current color of this text
 			GameGetColorComponents( m_uiMessages[ i ].color, &r, &g, &b, &a );
 
 			// start fading the alpha on this color down
-			amount = REAL_TO_INT( ((currLogicFrame - m_uiMessages[ i ].timestamp) * 0.01f) );
+			amount = MESSAGE_FADE_PER_FRAME;
 			if( a - amount < 0 )
 				a = 0;
 			else

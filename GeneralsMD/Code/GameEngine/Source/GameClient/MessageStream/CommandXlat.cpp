@@ -903,6 +903,11 @@ GameMessage::Type CommandTranslator::issueMoveToLocationCommand( const Coord3D *
 			else
 				movemsg->appendLocationArgument( *pos );
 
+			// ctrl on an attack move click asks for one shared pace - the force attack modifier is
+			// the ctrl key, and it means nothing else while the attack move cursor is up
+			if (msgType == GameMessage::MSG_DO_ATTACKMOVETO)
+				movemsg->appendBooleanArgument( TheInGameUI->isInForceAttackMode() );
+
 		}  // end if
 	} 
 	

@@ -1741,3 +1741,50 @@ TEST(pathfind_zone_flatten_collapses_a_deep_chain_in_one_pass)
 	CHECK_EQ( notOne, 0 );
 	CHECK_EQ( (Int)zones[ 0 ], 0 );
 }
+
+/* The two bits of arithmetic behind the command bar's new numbers.  Declared here rather than by
+   including ControlBar.h for them: they are free functions in the ControlBar sources, and the
+   header carries the class, not these. */
+extern Int ControlBar_secondsFromFrames( Real frames );
+extern Int ControlBar_experiencePercent( Int currentExp, Int levelExp, Int nextLevelExp );
+
+TEST(controlbar_seconds_round_up_and_never_reach_zero_early)
+{
+	/* nothing left is the only thing that reads as no number at all */
+	CHECK_EQ( ControlBar_secondsFromFrames( 0.0f ), 0 );
+	CHECK_EQ( ControlBar_secondsFromFrames( -5.0f ), 0 );
+
+	/* a whole second is a whole second, at LOGICFRAMES_PER_SECOND to the second */
+	CHECK_EQ( ControlBar_secondsFromFrames( (Real)LOGICFRAMES_PER_SECOND ), 1 );
+	CHECK_EQ( ControlBar_secondsFromFrames( (Real)LOGICFRAMES_PER_SECOND * 6.0f ), 6 );
+	CHECK_EQ( ControlBar_secondsFromFrames( (Real)LOGICFRAMES_PER_SECOND * 120.0f ), 120 );
+
+	/* and anything in between rounds up: 1.1s must not print as 1s and then sit there */
+	CHECK_EQ( ControlBar_secondsFromFrames( (Real)LOGICFRAMES_PER_SECOND + 1.0f ), 2 );
+
+	/* the one that matters - a single frame of work left still says 1s, because a button with
+	   work left on it reading 0s looks finished when it is not */
+	CHECK_EQ( ControlBar_secondsFromFrames( 1.0f ), 1 );
+}
+
+TEST(controlbar_experience_percent_fills_the_rank_and_clamps)
+{
+	/* a fresh unit at the bottom of its rank */
+	CHECK_EQ( ControlBar_experiencePercent( 0, 0, 100 ), 0 );
+	CHECK_EQ( ControlBar_experiencePercent( 50, 0, 100 ), 50 );
+	CHECK_EQ( ControlBar_experiencePercent( 99, 0, 100 ), 99 );
+
+	/* the window is between two thresholds, not from zero: half way from 100 to 300 is 50% */
+	CHECK_EQ( ControlBar_experiencePercent( 200, 100, 300 ), 50 );
+
+	/* experience past the next threshold (the level has not been applied yet) pins the bar full
+	   rather than overflowing it, and a sink that took points away pins it empty */
+	CHECK_EQ( ControlBar_experiencePercent( 400, 100, 300 ), 100 );
+	CHECK_EQ( ControlBar_experiencePercent( 50, 100, 300 ), 0 );
+
+	/* no next rank to fill towards - top rank, or a template with no thresholds at all - is the
+	   "draw no bar" answer, and must not be a division by zero */
+	CHECK_EQ( ControlBar_experiencePercent( 500, 300, 300 ), -1 );
+	CHECK_EQ( ControlBar_experiencePercent( 0, 0, 0 ), -1 );
+	CHECK_EQ( ControlBar_experiencePercent( 10, 300, 100 ), -1 );
+}

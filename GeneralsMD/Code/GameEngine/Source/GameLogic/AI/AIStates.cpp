@@ -3619,12 +3619,13 @@ StateReturnType AIAttackMoveToState::onEnter()
 	// spread the scans of a group that was all ordered on the same frame over the scan interval.
 	m_frameToScanOn = TheGameLogic->getFrame() + ((UnsignedInt)owner->getID() % ATTACK_MOVE_SCAN_RATE);
 
-	// An attack move arrives as a group or it arrives as a queue of single units, so the ground
-	// units go at the pace of the slowest one.  The order is still running inside the AIGroup that
-	// issued it, so the group is still reachable here; it is gone by the next update.
+	// An attack move can arrive as a group or as a queue of single units, and which one you want
+	// is the player's call: ctrl on the click asks for one shared pace, the slowest member's. The
+	// order is still running inside the AIGroup that issued it, so the group - and the flag it
+	// carries - is still reachable here; it is gone by the next update.
 	m_groupSpeed = FAST_AS_POSSIBLE;
 	AIGroup *group = ai->getGroup();
-	if (group != NULL && ai->isDoingGroundMovement())
+	if (group != NULL && group->getMatchSpeeds() && ai->isDoingGroundMovement())
 	{
 		Real speed = group->getSpeed();
 		if (speed > 0.0f && speed < FAST_AS_POSSIBLE)

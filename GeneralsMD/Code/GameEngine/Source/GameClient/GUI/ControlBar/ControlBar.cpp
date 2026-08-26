@@ -52,6 +52,7 @@
 #include "Common/Recorder.h"
 
 #include "GameLogic/GameLogic.h"
+#include "GameLogic/ExperienceTracker.h"
 #include "GameLogic/Object.h"
 #include "GameLogic/Module/AIUpdate.h"
 #include "GameLogic/Module/DozerAIUpdate.h"
@@ -1583,6 +1584,19 @@ void ControlBar::reset( void )
 }  // end reset
 
 //-------------------------------------------------------------------------------------------------
+/** How far a unit is into its current veterancy rank, 0..100, or -1 when there is no next rank to
+	* fill towards (top rank, or a template with no thresholds - both mean "draw no bar"). */
+//-------------------------------------------------------------------------------------------------
+Int ControlBar_experiencePercent( Int currentExp, Int levelExp, Int nextLevelExp )
+{
+	if( nextLevelExp <= levelExp )
+		return -1;
+
+	Int percent = ( currentExp - levelExp ) * 100 / ( nextLevelExp - levelExp );
+	return min( 100, max( 0, percent ) );
+}
+
+//-------------------------------------------------------------------------------------------------
 /** Update phase, we can track if our selected object is destroyed, update button
 	* percentages, status, enabled status etc */
 //-------------------------------------------------------------------------------------------------
@@ -1802,6 +1816,32 @@ void ControlBar::update( void )
 				win->winEnable(FALSE);
 			}
 		}
+	}
+
+	//
+	// the experience bar under the portrait. The rank chevron on the cameo says which rank a
+	// unit holds and nothing about how close the next one is, and that is the half of it you
+	// decide with - whether this tank is one kill off veteran or has just got there. Only for a
+	// single selection: with a group selected the portrait is one member standing in for all of
+	// them, and its experience would be read as the group's.
+	//
+	if( m_rightHUDCameoWindow )
+	{
+		Int xpPercent = -1;
+		Object *portraitObj = ( TheInGameUI && TheInGameUI->getSelectCount() == 1 &&
+														m_currentSelectedDrawable ) ? m_currentSelectedDrawable->getObject()
+																												: NULL;
+		const ExperienceTracker *xp = portraitObj ? portraitObj->getExperienceTracker() : NULL;
+		if( xp && portraitObj->isLocallyControlled() && xp->isTrainable() &&
+				xp->getVeterancyLevel() < LEVEL_LAST )
+		{
+			const ThingTemplate *tmpl = portraitObj->getTemplate();
+			xpPercent = ControlBar_experiencePercent( xp->getCurrentExperience(),
+																							 tmpl->getExperienceRequired( xp->getVeterancyLevel() ),
+																							 tmpl->getExperienceRequired( xp->getVeterancyLevel() + 1 ) );
+		}
+
+		GadgetButtonSetBar( m_rightHUDCameoWindow, xpPercent, GameMakeColor( 255, 200, 40, 255 ) );
 	}
 
 	//
@@ -3036,8 +3076,12 @@ void ControlBar::setControlCommand( GameWindow *button, const CommandButton *com
 	GadgetButtonSetData(button, (void*)commandButton);
 	//button->winSetUserData( commandButton );
 
-	// a recycled button must not keep the previous occupant's count badge
+	// a recycled button must not keep the previous occupant's count badge, nor its seconds label:
+	// only the command context re-stamps those every frame, so a button that ends up in any other
+	// context (a garrisoned building's exit cameos, a beacon, an OCL timer) would wear the build
+	// time of whatever used to live in that window.
 	GadgetButtonSetCount( button, 0 );
+	GadgetButtonSetSeconds( button, 0 );
 
 	setCommandBarBorder(button, commandButton->getCommandButtonMappedBorderType());
 	

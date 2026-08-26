@@ -16,6 +16,7 @@
 **	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+
 ////////////////////////////////////////////////////////////////////////////////
 //																																						//
 //  (c) 2001-2003 Electronic Arts Inc.																				//
@@ -191,6 +192,71 @@ static void drawCountBadge( GameWindow *window, Int count )
 
 }  // end drawCountBadge
 
+// drawSecondsBadge ===========================================================
+/** Draw a small "12s" label in the button's bottom left corner - how long the
+	* thing on this button takes to build, or how long is left on it. */
+//=============================================================================
+static void drawSecondsBadge( GameWindow *window, Int seconds )
+{
+	static DisplayString *label = NULL;
+	ICoord2D origin, size, textPos;
+	Int width, height;
+
+	if( label == NULL )
+	{
+		label = TheDisplayStringManager->newDisplayString();
+		if( label == NULL )
+			return;
+	}
+
+	UnicodeString text;
+	text.format( L"%ds", seconds );
+	label->setText( text );
+
+	if( label->getFont() != window->winGetFont() )
+		label->setFont( window->winGetFont() );
+
+	window->winGetScreenPosition( &origin.x, &origin.y );
+	window->winGetSize( &size.x, &size.y );
+	label->getSize( &width, &height );
+
+	textPos.x = origin.x + 3;
+	textPos.y = origin.y + size.y - height - 1;
+
+	// same translucent plate the count badge wears - button art can be any colour
+	TheDisplay->drawFillRect( textPos.x - 2, textPos.y, width + 4, height,
+														GameMakeColor( 0, 0, 0, 160 ) );
+	label->draw( textPos.x, textPos.y, GameMakeColor( 255, 255, 255, 255 ),
+							 GameMakeColor( 0, 0, 0, 255 ) );
+
+}  // end drawSecondsBadge
+
+// drawButtonBar ==============================================================
+/** Draw a thin progress bar along the button's bottom edge (experience) */
+//=============================================================================
+static void drawButtonBar( GameWindow *window, Int percent, Color color )
+{
+	ICoord2D origin, size;
+
+	window->winGetScreenPosition( &origin.x, &origin.y );
+	window->winGetSize( &size.x, &size.y );
+
+	if( percent > 100 )
+		percent = 100;
+
+	const Int barHeight = 4;
+	Int x = origin.x + 2;
+	Int y = origin.y + size.y - barHeight - 2;
+	Int w = size.x - 4;
+	if( w <= 0 )
+		return;
+
+	TheDisplay->drawFillRect( x, y, w, barHeight, GameMakeColor( 0, 0, 0, 180 ) );
+	TheDisplay->drawFillRect( x, y, w * percent / 100, barHeight, color );
+	TheDisplay->drawOpenRect( x, y, w, barHeight, 1.0f, GameMakeColor( 0, 0, 0, 255 ) );
+
+}  // end drawButtonBar
+
 
 ///////////////////////////////////////////////////////////////////////////////
 // PUBLIC FUNCTIONS ///////////////////////////////////////////////////////////
@@ -325,6 +391,12 @@ void W3DGadgetPushButtonDraw( GameWindow *window, WinInstanceData *instData )
 
 		if( pData->drawCount > 0 )
 			drawCountBadge( window, pData->drawCount );
+
+		if( pData->drawSeconds > 0 )
+			drawSecondsBadge( window, pData->drawSeconds );
+
+		if( pData->barPercent >= 0 )
+			drawButtonBar( window, pData->barPercent, pData->barColor );
 	}
 
 }  // end W3DGadgetPushButtonDraw
@@ -498,6 +570,12 @@ void W3DGadgetPushButtonImageDrawOne( GameWindow *window,
 
 		if( pData->drawCount > 0 )
 			drawCountBadge( window, pData->drawCount );
+
+		if( pData->drawSeconds > 0 )
+			drawSecondsBadge( window, pData->drawSeconds );
+
+		if( pData->barPercent >= 0 )
+			drawButtonBar( window, pData->barPercent, pData->barColor );
 	}
 
 	//Now render overlays that pertain to the correct state.
@@ -757,5 +835,11 @@ void W3DGadgetPushButtonImageDrawThree(GameWindow *window, WinInstanceData *inst
 
 		if( pData->drawCount > 0 )
 			drawCountBadge( window, pData->drawCount );
+
+		if( pData->drawSeconds > 0 )
+			drawSecondsBadge( window, pData->drawSeconds );
+
+		if( pData->barPercent >= 0 )
+			drawButtonBar( window, pData->barPercent, pData->barColor );
 	}
 }

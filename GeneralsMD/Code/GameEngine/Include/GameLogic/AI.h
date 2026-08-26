@@ -920,7 +920,8 @@ public:
 	}
 	void groupAttackTeam( const Team *team, Int maxShotsToFire, CommandSourceType cmdSource );							///< attack the given team
 	void groupAttackPosition( const Coord3D *pos, Int maxShotsToFire, CommandSourceType cmdSource );						///< attack given spot
-	void groupAttackMoveToPosition( const Coord3D *pos, Int maxShotsToFire, CommandSourceType cmdSource );	///< Attack move to the location
+	void groupAttackMoveToPosition( const Coord3D *pos, Int maxShotsToFire, CommandSourceType cmdSource, Bool matchSpeeds = TRUE );	///< Attack move to the location
+	Bool getMatchSpeeds( void ) const { return m_matchSpeeds; }		///< does the last attack move hold everyone to the slowest member?
 	void groupHunt( CommandSourceType cmdSource );														///< begin "seek and destroy"
 	void groupRepair( Object *obj, CommandSourceType cmdSource );						///< repair the given object
 	void groupResumeConstruction( Object *obj, CommandSourceType cmdSource );	///< resume construction on the object
@@ -1028,6 +1029,7 @@ private:
 	UnsignedInt	m_memberListSize;	 					///< the size of the list of member Objects
 
 	Real m_speed;														///< maximum speed of group (slowest member)
+	Bool m_matchSpeeds;											///< last attack move asked for one shared speed (see groupAttackMoveToPosition)
 	Bool m_dirty;														///< "dirty bit" - if true then group speed, leader, needs recompute
 
 	UnsignedInt m_id;												///< the unique ID of this group

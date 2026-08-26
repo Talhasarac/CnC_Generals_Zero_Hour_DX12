@@ -2714,6 +2714,25 @@ void Drawable::draw( View *view )
 /** Compute the health bar region based on the health of the object and the
 	* zoom level of the camera */
 // ------------------------------------------------------------------------------------------------
+//-------------------------------------------------------------------------------------------------
+/** How far above `getHealthBoxPosition` a bar has to sit to clear the object's own art.
+	*
+	* A building's geometry box is its walls: the pitched roof of a civilian house, the mast on a
+	* radar dome and the tower on a barracks are not in the logical height at all, so the bar landed
+	* on the roof of its own building - and, side on, inside the one in front of it. Lift a structure
+	* by a share of its own height rather than by a fixed amount, so it scales from a low bunker to a
+	* four storey apartment block and a flat faction building barely moves. Everything that can move
+	* keeps its bar where it was: a unit's geometry is its model. */
+//-------------------------------------------------------------------------------------------------
+static Real healthBarArtLift( const Object *obj )
+{
+	if( obj == NULL || !obj->isKindOf( KINDOF_STRUCTURE ) )
+		return 0.0f;
+
+	return obj->getGeometryInfo().getMaxHeightAbovePosition() * 0.35f;
+}
+
+//-------------------------------------------------------------------------------------------------
 static Bool computeHealthRegion( const Drawable *draw, IRegion2D& region )
 {
 
@@ -2727,6 +2746,7 @@ static Bool computeHealthRegion( const Drawable *draw, IRegion2D& region )
 
 	Coord3D p;
 	obj->getHealthBoxPosition(p);
+	p.z += healthBarArtLift( obj );
 	ICoord2D screenCenter;
 	if( !TheTacticalView->worldToScreen( &p, &screenCenter ) )
 		return FALSE;
@@ -2975,6 +2995,11 @@ void Drawable::drawAmmo( const IRegion2D *healthBarRegion )
 // ------------------------------------------------------------------------------------------------
 void Drawable::drawContained( const IRegion2D *healthBarRegion )
 {
+	// the pips are left-justified on the health bar, and this is the only thing that reads it -
+	// an object with no health region (off screen, or ignored in the GUI) would deref a NULL below
+	if (!healthBarRegion)
+		return;
+
 	const Object *obj = getObject();			
 
 	ContainModuleInterface* container = obj->getContain();
@@ -2986,10 +3011,18 @@ void Drawable::drawContained( const IRegion2D *healthBarRegion )
 		return;
 
 	// container pips are always on for own objects (was: only when selected or moused over)
-	if (!(
-				TheGlobalData->m_showObjectHealth &&
-				obj->getControllingPlayer() == ThePlayerList->getLocalPlayer()
-			))
+	if (!TheGlobalData->m_showObjectHealth)
+		return;
+
+	//
+	// ...and a building you can garrison shows them whoever holds it. How many rooms are left in
+	// that civilian block is the question you ask before sending a squad at it, and how many are
+	// occupied is the question you ask before shooting at it - both were answerable only by
+	// garrisoning it yourself. A vehicle's load stays private: an enemy transport's contents are
+	// real intelligence, a building's occupancy is what you can already see out of its windows.
+	//
+	if (obj->getControllingPlayer() != ThePlayerList->getLocalPlayer() &&
+			!(obj->isKindOf( KINDOF_STRUCTURE ) && container->isGarrisonable()))
 		return;
 
 	Int numTotal;
@@ -3025,6 +3058,7 @@ void Drawable::drawContained( const IRegion2D *healthBarRegion )
 	pos.x += TheGlobalData->m_containerPipWorldOffset.x;
 	pos.y += TheGlobalData->m_containerPipWorldOffset.y;
 	pos.z += TheGlobalData->m_containerPipWorldOffset.z + obj->getGeometryInfo().getMaxHeightAbovePosition();
+	pos.z += healthBarArtLift( obj );	// the pips ride at the bar's height, see computeHealthRegion
 	if( !TheTacticalView->worldToScreen( &pos, &screenCenter ) )
 		return;
 
@@ -3905,13 +3939,27 @@ void Drawable::drawHealthBar(const IRegion2D* healthBarRegion)
 		// wrecked hulks, subobject turrets) are not things the player commands or targets, so
 		// their bars are pure clutter.
 		//
+		// So is the scenery: street lamps, phone boxes, barrels, planters, fire hydrants, rocks,
+		// bushes and the odd tree all carry a BodyModule and so all drew a bar, and a built-up map
+		// came up wearing hundreds of them over things nobody fights.
+		//
+		// The rule is fixed-in-place-and-not-a-building, not a list of scenery kinds: the shipped
+		// data does not tag that furniture as PROP or SHRUBBERY at all (`KindOf = IMMOBILE
+		// CLEARED_BY_BUILD` is the whole of a street lamp, and `IMMOBILE` the whole of a rock), so
+		// a kind list catches almost none of it, while every real target is either mobile or a
+		// STRUCTURE. Buildings keep their bars - a civilian building is cover to garrison, a tech
+		// building is worth capturing, bridges are STRUCTURE too - and so does anything that can
+		// move.
+		//
 		if( obj->isKindOf( KINDOF_PROJECTILE ) ||
 				obj->isKindOf( KINDOF_INERT ) ||
 				obj->isKindOf( KINDOF_CLEANUP_HAZARD ) ||
 				obj->isKindOf( KINDOF_UNATTACKABLE ) ||
 				obj->isKindOf( KINDOF_PARACHUTE ) ||
 				obj->isKindOf( KINDOF_HULK ) ||
-				obj->isKindOf( KINDOF_CLICK_THROUGH ) )
+				obj->isKindOf( KINDOF_CLICK_THROUGH ) ||
+				obj->isKindOf( KINDOF_CRATE ) ||
+				( obj->isKindOf( KINDOF_IMMOBILE ) && !obj->isKindOf( KINDOF_STRUCTURE ) ) )
 			return;
 
 		if( obj->isKindOf( KINDOF_FORCEATTACKABLE ) )

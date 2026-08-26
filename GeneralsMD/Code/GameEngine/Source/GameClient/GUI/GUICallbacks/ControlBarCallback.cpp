@@ -290,6 +290,7 @@ WindowMsgHandledType LeftHUDInput( GameWindow *window, UnsignedInt msg,
 
 					GameMessage *msg = TheMessageStream->appendMessage( GameMessage::MSG_DO_ATTACKMOVETO );
 					msg->appendLocationArgument( world );
+					msg->appendBooleanArgument( TheInGameUI->isInForceAttackMode() );	// ctrl: arrive together
 
 					// Play the unit voice response
 					pickAndPlayUnitVoiceResponse(TheInGameUI->getAllSelectedDrawables(), GameMessage::MSG_DO_ATTACKMOVETO);

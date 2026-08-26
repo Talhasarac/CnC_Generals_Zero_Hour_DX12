@@ -78,7 +78,11 @@ being punished for doing exactly what aircraft do.
 
 What you get now:
 
-- **Groups arrive as a group**, at the pace of the slowest unit, instead of trickling in one by one.
+- **Groups arrive as a group when you ask them to.** Hold Ctrl on the attack-move click and every
+  ground unit in the selection goes at the pace of the slowest one, so they hit the line together.
+  Click it plainly and each unit runs at its own speed — which is what you want when the group is a
+  scout screen, or when one damaged truck would otherwise walk your tanks in at a crawl. It used to
+  be one shared pace, always, with no way to say otherwise.
 - **Artillery, rocket infantry and Scud launchers find targets again.** They used to search only as
   far as they could see, which is far shorter than they can shoot.
 - **Attack-moving through a base shoots the base.** Buildings were being filtered out entirely.
@@ -293,6 +297,19 @@ Around it, the whole production loop got tightened:
   interrupting a busy one when every worker you own is busy. Same for the build list you get with
   nothing selected — it stays usable when the whole crew is out working.
 - **Workers go back to collecting supplies** after they finish, instead of standing there.
+- **`S` stops your units again.** The key was simply not bound: the stop button on the command bar
+  worked, so nobody noticed that the key every RTS player reaches for did nothing at all.
+- **Every button says how long it takes.** Each picture in the command bar carries its time in the
+  corner: six seconds for a worker, twenty for a barracks, a hundred and twenty for a Scud storm.
+  It is the price in seconds, and it stays put while the thing is being built — what one costs is
+  still the question you are asking when one is already on the way, and the progress is on the
+  cameo anyway. Upgrades carry their research time the same way. A general's power or special
+  ability carries its cooldown, and that one does count down: how long until you can fire it, and
+  once it is ready, how long the next one will make you wait.
+- **A single selected unit shows its experience.** The portrait wears a gold bar filling toward the
+  next rank. The chevron on the cameo already said which rank a unit holds and nothing about how
+  close the next one is, which is the half of it you actually decide with — one more kill, or half
+  a career away.
 - **Timings everywhere**: seconds left on a building going up, the current unit and the whole queue
   behind it, a charge bar on superweapons, a progress clock on upgrades being researched. A bar only
   appears while something is really happening: your command centre used to wear a yellow bar from
@@ -344,6 +361,24 @@ was — which is what the length of the bar was already telling you — and told
 it was. In the middle of a fight that is the question you actually have. They now match the colour
 the minimap and the selection rings use, so you can read a brawl without clicking anything.
 
+**Health bars sit above the roof, not on it.** A building's hit box is its walls, so the bar was
+placed at the top of the *walls* - which on a steep civilian roof is halfway up the picture, and from
+the side is inside the building in front. Buildings now carry their bar clear of their own art, and
+the garrison squares ride with it.
+
+**A building you can garrison shows how full it is.** The little squares over a building — one per
+room, filled for each soldier inside — used to appear only on buildings you already held, which is
+exactly when you least need them. Every garrisonable building shows them now, whoever is in it: how
+many rooms are left is the question you ask before sending a squad, and how many are occupied is the
+question you ask before shooting at it. A vehicle's load stays private — what is inside an enemy
+transport is real intelligence; what is inside a building is what you can see out of its windows.
+
+**And the scenery does not wear one.** Street lamps, phone boxes, barrels, planters, fire hydrants,
+rocks and bushes all have hit points in this engine, so with health bars always on, a town map came
+up with hundreds of little lines over things nobody fights. Buildings keep theirs — a civilian
+building is cover to garrison, a tech building is worth capturing, and both are worth shooting — and
+so does anything that can move.
+
 ## Twenty-two-year-old bugs, found by testing
 
 Nothing here was guessed at. Every fix in this section came out of a test written against the
@@ -365,7 +400,10 @@ original code, and each one was proved by putting the bug back and watching the 
   in that code reads *"Empirically, in release the code can loop forever. So we limit to 100
   passes."* — they knew something was wrong there and capped the symptom.
 - **On-screen messages disappeared the instant they appeared.** The designed reading time never
-  worked, in the retail game either.
+  worked, in the retail game either. Fixed — and then shortened: the corner used to hold each line
+  for five seconds and take another three to fade it, so what you did eight seconds ago was still
+  sitting there under everything you had done since. It reads for two and a half seconds and fades
+  in about one.
 - **The mouse wheel cancelled whatever camera move was in progress** — zoom while panning, the most
   common camera gesture there is, fought you every time.
 
