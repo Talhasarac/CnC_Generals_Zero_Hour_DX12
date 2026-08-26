@@ -178,6 +178,7 @@ static const LookupListRec GameMessageMetaTypeNames[] =
 	{ "SCATTER",																	GameMessage::MSG_META_SCATTER },
 	{ "STOP",																			GameMessage::MSG_META_STOP },
 	{ "TOGGLE_ATTACKMOVE",											GameMessage::MSG_META_TOGGLE_ATTACKMOVE },
+	{ "TOGGLE_PURCHASE_SCIENCE",								GameMessage::MSG_META_TOGGLE_PURCHASE_SCIENCE },
 	{ "HOLD_POSITION",													GameMessage::MSG_META_HOLD_POSITION },
 	{ "TOGGLE_PAUSE",														GameMessage::MSG_META_TOGGLE_PAUSE },
 	{ "GAME_SPEED_UP",													GameMessage::MSG_META_GAME_SPEED_UP },

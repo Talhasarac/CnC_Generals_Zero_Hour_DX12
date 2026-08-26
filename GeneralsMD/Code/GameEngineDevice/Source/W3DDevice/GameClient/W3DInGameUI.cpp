@@ -444,6 +444,14 @@ void W3DInGameUI::draw( void )
 	postDraw();
 
 	TheWindowManager->winRepaint();
+
+	//
+	// The clock/rate plate goes on last, after every window has painted. In postDraw with the rest
+	// of the world overlays it was drawn before the window manager, so anything the manager put on
+	// top of it - a dialog, the menu, the control bar's own art at the top of the screen - covered
+	// the one reading you want visible exactly when something is going wrong.
+	//
+	drawHudOverlay();
 	
 #ifdef EXTENDED_STATS
 	}

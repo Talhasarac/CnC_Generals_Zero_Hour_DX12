@@ -297,6 +297,15 @@ Around it, the whole production loop got tightened:
   interrupting a busy one when every worker you own is busy. Same for the build list you get with
   nothing selected — it stays usable when the whole crew is out working.
 - **Workers go back to collecting supplies** after they finish, instead of standing there.
+- **The clock and frame-rate readout is smaller, bolder, and drawn on top of everything.** It used
+  to be painted before the interface, so any panel or dialog covered the one number you look at
+  when something is going wrong.
+- **A game opens with nothing selected.** It used to start with your command centre picked, so your
+  first click on the ground moved its rally point and the command bar opened on a menu you were not
+  looking at.
+- **The tilde key opens the general's promotions.** The panel was a click away on the stars button
+  and nowhere on the keyboard, which is the wrong way round for something you want open the second
+  a promotion lands.
 - **`S` stops your units again.** The key was simply not bound: the stop button on the command bar
   worked, so nobody noticed that the key every RTS player reaches for did nothing at all.
 - **Every button says how long it takes.** Each picture in the command bar carries its time in the

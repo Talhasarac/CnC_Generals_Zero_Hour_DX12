@@ -3265,6 +3265,16 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 			TheInGameUI->toggleAttackMoveToMode( );
 			break;
 
+		//-----------------------------------------------------------------------------------------
+		// the general's promotion screen. It is one click away on the stars button and nowhere on
+		// the keyboard, which is the wrong way round for something you open the moment a promotion
+		// lands - and the star only flashes until you look at it.
+		case GameMessage::MSG_META_TOGGLE_PURCHASE_SCIENCE:
+			if( TheControlBar )
+				TheControlBar->togglePurchaseScience();
+			disp = DESTROY_MESSAGE;
+			break;
+
 		//
 		// Pause and game speed. Both are local-only: they change how fast THIS machine steps its
 		// logic, so they are refused outright in a network game where every peer has to agree.

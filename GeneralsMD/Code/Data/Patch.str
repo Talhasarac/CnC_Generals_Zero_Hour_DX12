@@ -137,6 +137,22 @@ GUI:CommandSlot14Description
 "Presses command bar slot 14 (column 7, bottom row, 'M' in the default grid layout)."
 END
 
+GUI:TogglePurchaseScience
+"Generals Promotions"
+END
+
+GUI:TogglePurchaseScienceDescription
+"Opens and closes the general's promotion screen."
+END
+
+GUI:Stop
+"Stop"
+END
+
+GUI:StopDescription
+"Stops what the selected units are doing."
+END
+
 GUI:ToggleAttackMove
 "Attack Move"
 END

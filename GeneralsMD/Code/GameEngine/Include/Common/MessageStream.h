@@ -296,6 +296,7 @@ public:
 		MSG_META_GAME_SPEED_UP,											///< raise the logic rate (fork)
 		MSG_META_GAME_SPEED_DOWN,										///< lower the logic rate (fork)
 		MSG_META_GAME_SPEED_RESET,									///< back to the default logic rate (fork)
+		MSG_META_TOGGLE_PURCHASE_SCIENCE,						///< open/close the general's promotion screen (fork)
 		
 		MSG_META_BEGIN_CAMERA_ROTATE_LEFT,
 		MSG_META_END_CAMERA_ROTATE_LEFT,

@@ -823,6 +823,7 @@ protected:
 	// superweapon timer data
 	SuperweaponMap							m_superweapons[MAX_PLAYER_COUNT];
 	enum { HUD_OVERLAY_POINT_SIZE = 9 };	///< small: this sits over the battlefield, not in a panel
+	enum { HUD_CLOCK_POINT_SIZE = 7 };		///< smaller still, and bold: the clock/rate plate is a glance, not a read
 
 	void drawHudOverlay( void );					///< the small elapsed-time / fps plate (ShowHudOverlay)
 	void drawIncomeRate( void );					///< income per minute, drawn beside the money window

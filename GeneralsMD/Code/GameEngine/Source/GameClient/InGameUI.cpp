@@ -3836,7 +3836,7 @@ void InGameUI::disregardDrawable( Drawable *draw )
 //-------------------------------------------------------------------------------------------------
 void InGameUI::postDraw( void )
 {
-	drawHudOverlay();
+	// drawHudOverlay is NOT called here - it goes on top of everything, see W3DInGameUI::draw
 	drawIncomeRate();
 	drawProductionStrip();
 
@@ -5669,10 +5669,11 @@ void InGameUI::drawHudOverlay( void )
 
 	if( m_hudDisplayString == NULL )
 	{
+		// bold at a small point size, because this plate is read at a glance rather than read
 		m_hudDisplayString = TheDisplayStringManager->newDisplayString();
 		m_hudDisplayString->setFont( TheFontLibrary->getFont( m_superweaponNormalFont,
-										TheGlobalLanguageData->adjustFontSize( HUD_OVERLAY_POINT_SIZE ),
-										FALSE ) );
+										TheGlobalLanguageData->adjustFontSize( HUD_CLOCK_POINT_SIZE ),
+										TRUE ) );
 	}
 	m_hudDisplayString->setText( text );
 

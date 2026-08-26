@@ -145,7 +145,6 @@ enum { OBJ_HASH_SIZE	= 8192 };
 /// The GameLogic singleton instance
 GameLogic *TheGameLogic = NULL;
 
-static void findAndSelectCommandCenter(Object *obj, void* alreadyFound);
 
 
 // ------------------------------------------------------------------------------------------------
@@ -2298,23 +2297,16 @@ void GameLogic::startNewGame( Bool loadingSaveGame )
 	// @todo remove this hack
 //	TheGlobalData->m_inGame = TRUE;
 
-	// If we are now starting a multiplayer or skirmish game, let us set the local players selectionto be the command center
-	// We'll ask the Recorder, so we survive replays
-	if( TheRecorder->isMultiplayer() )
-	{
-		// Iterate through each player's objects, and ask if the object 
-		//is a command center, and if so, select it for that player
-		for (Int i = 0; i < MAX_PLAYER_COUNT; ++i) 
-		{
-			Player *player = ThePlayerList->getNthPlayer(i);
-			if (player && player->isPlayerActive())
-			{
-				// we need to iterate their objects, and select the first Command Center we find
-				Bool alreadyFound = FALSE;
-				player->iterateObjects(findAndSelectCommandCenter, &alreadyFound);
-			}
-		}
-	}
+	//
+	// A skirmish used to open with everyone's command centre selected (findAndSelectCommandCenter,
+	// run for every active player so the state stayed identical on every machine). Nothing is
+	// selected now: the first thing you do in a game is pick what you want, and starting with a
+	// building selected means the first click on the ground is a rally point you did not ask for -
+	// and the command bar opens on a menu you were not looking at.
+	//
+	// Still done for everyone or for no one: the selection is logic state (it builds an AIGroup),
+	// so it has to be the same decision on every peer.
+	//
 	TheControlBar->initSpecialPowershortcutBar(ThePlayerList->getLocalPlayer());
 
 	if(m_gameMode == GAME_SHELL)
@@ -2381,16 +2373,6 @@ void GameLogic::startNewGame( Bool loadingSaveGame )
 
 }  // end startNewGame
 
-//-----------------------------------------------------------------------------------------
-static void findAndSelectCommandCenter(Object *obj, void* alreadyFound)
-{
-	if (!((*(Bool*)alreadyFound)) && obj && obj->isKindOf(KINDOF_COMMANDCENTER) )
-	{
-		((*(Bool*)alreadyFound)) = TRUE;
-		TheGameLogic->selectObject(obj, TRUE, obj->getControllingPlayer()->getPlayerMask(), obj->isLocallyControlled());
-
-	}
-}
 //-----------------------------------------------------------------------------------------
 //-----------------------------------------------------------------------------------------
 
