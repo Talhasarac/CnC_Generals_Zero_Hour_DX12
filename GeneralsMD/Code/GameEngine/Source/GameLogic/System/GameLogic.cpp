@@ -3758,6 +3758,10 @@ void GameLogic::update( void )
 		 budget, write down where the time went - a handful of performance counter reads a frame
 		 costs nothing next to the 33ms the frame is allowed. */
 	Int64 tFrameStart = 0, tScripts = 0, tObjects = 0, tAI = 0, tPartition = 0, tFrameEnd = 0;
+	/* "rest" - everything after the partition update - turned out to be the largest phase on the
+		 worst frames (101 of 115 ms on one), and it is five unrelated pieces of end-of-frame cleanup.
+		 Split so the log names which one. */
+	Int64 tDestroy = 0, tCommandList = 0, tStores = 0, tVictory = 0;
 	QueryPerformanceCounter( (LARGE_INTEGER *)&tFrameStart );
 	Pathfinder::resetProfile();
 #ifdef DEBUG_LOGGING
@@ -3975,12 +3979,21 @@ void GameLogic::update( void )
 	// destroy all pending objects
 	processDestroyList();
 
+	QueryPerformanceCounter( (LARGE_INTEGER *)&tDestroy );
+
 	// reset the command list, destroying all messages
 	TheCommandList->reset();
 
+	QueryPerformanceCounter( (LARGE_INTEGER *)&tCommandList );
+
 	TheWeaponStore->UPDATE();	
 	TheLocomotorStore->UPDATE();	
+
+	QueryPerformanceCounter( (LARGE_INTEGER *)&tStores );
+
 	TheVictoryConditions->UPDATE();
+
+	QueryPerformanceCounter( (LARGE_INTEGER *)&tVictory );
 
 #ifdef DO_COPY_PROTECTION
 	if (!isInShellGame() && isInGame())
@@ -4021,8 +4034,14 @@ void GameLogic::update( void )
 			const Real ai = logicElapsedMS( tObjects, tAI );
 			const Real partition = logicElapsedMS( tAI, tPartition );
 			const Real rest = total - scripts - objects - ai - partition;
-			DEBUG_LOG(("SLOW LOGIC FRAME %d: %.1fms | scripts %.1f | objects %.1f | ai %.1f (pathfind %.1f, players %.1f) | partition %.1f | rest %.1f\n  sc: %s\n  ob: %s\n  pf: %s\n",
+			const Real destroy = logicElapsedMS( tPartition, tDestroy );
+			const Real cmdlist = logicElapsedMS( tDestroy, tCommandList );
+			const Real stores = logicElapsedMS( tCommandList, tStores );
+			const Real victory = logicElapsedMS( tStores, tVictory );
+			const Real disabled = logicElapsedMS( tVictory, tFrameEnd );
+			DEBUG_LOG(("SLOW LOGIC FRAME %d: %.1fms | scripts %.1f | objects %.1f | ai %.1f (pathfind %.1f, players %.1f) | partition %.1f | rest %.1f (destroy %.1f, cmdlist %.1f, stores %.1f, victory %.1f, disabled %.1f)\n  sc: %s\n  ob: %s\n  pf: %s\n",
 								 now, total, scripts, objects, ai, AI::getLastPathfindMS(), AI::getLastPlayerUpdateMS(), partition, rest,
+								 destroy, cmdlist, stores, victory, disabled,
 								 TheScriptEngine->getProfileReport(),
 								 getModuleProfileReport(),
 								 Pathfinder::getProfileReport()));
