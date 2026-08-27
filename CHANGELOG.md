@@ -278,6 +278,15 @@ map. Ctrl+A is still everything at once.
   worst moment in a match — right after someone has already dropped. The list is now read properly,
   and when it genuinely runs out the game says so instead of inventing somebody.
 
+- **A dropped order used to make the game wait longer each time it went missing — up to two full
+  seconds.** When a packet goes astray it is sent again, and the wait before each attempt was
+  doubling: the third and fourth time the same order went missing, everybody sat there for a second
+  and then two. Doubling like that is what you do to a connection that has gone away, but the
+  connection has not gone away — it dropped one packet, and the whole game is standing still waiting
+  for that one packet, with nothing else to send. The wait now stops growing after two steps, so the
+  longest anyone stands still is well under a second, and the game still backs off enough to be
+  polite to a connection that really has died — which it has its own, separate way of noticing.
+
 ## Sharper textures, for free
 
 Zero Hour shipped downscaled copies of a lot of the base game's textures, and because of the order

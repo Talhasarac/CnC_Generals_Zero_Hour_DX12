@@ -69,6 +69,17 @@ void Connection_updateRetryTimeout( Real sampleMS, Real &srtt, Real &rttvar, tim
  * Exponential backoff on top of the connection's timeout, capped at the ceiling.  numTimesSent is
  * how many times the command has already gone out, so 1 (a single transmission awaiting its first
  * retry) is the un-backed-off case.
+ *
+ * The number of doublings is deliberately small.  Backoff exists so that a link which is genuinely
+ * down is not hammered at the floor rate for as long as the disconnect timer runs, and two
+ * doublings already cut that rate to a quarter.  Paying for more than that is not free: this is a
+ * lockstep game, so the command being retried is one the whole room is stopped on, and the delay
+ * before the next attempt *is* the length of the freeze everybody sees.  Four doublings put that at
+ * 1.2 and then 2 seconds after only three and four losses of the same command - which a couple of
+ * percent of packet loss produces routinely over a long game with eight players - and there is
+ * nothing else in flight to congest with anyway, because a blocked machine has stopped generating
+ * frames.  Deciding that a link is actually dead is the disconnect manager's job, on its own ping
+ * and its own timers, not the retry timer's.
  */
 time_t Connection_retryDelayFor( time_t baseRetryMS, Int numTimesSent )
 {
@@ -76,8 +87,8 @@ time_t Connection_retryDelayFor( time_t baseRetryMS, Int numTimesSent )
 	if (backoff < 0) {
 		backoff = 0;
 	}
-	if (backoff > 4) {
-		backoff = 4;
+	if (backoff > CONNECTION_MAX_RETRY_BACKOFF_SHIFTS) {
+		backoff = CONNECTION_MAX_RETRY_BACKOFF_SHIFTS;
 	}
 
 	time_t delay = baseRetryMS << backoff;

@@ -1972,12 +1972,36 @@ TEST(connection_retry_backs_off_when_a_command_keeps_going_unacked)
 	   floor rate for as long as the disconnect timer runs. */
 	CHECK_EQ( (Int)Connection_retryDelayFor( 200, 2 ), 400 );
 	CHECK_EQ( (Int)Connection_retryDelayFor( 200, 3 ), 800 );
-	CHECK_EQ( (Int)Connection_retryDelayFor( 200, 4 ), 1600 );
 
-	/* ...but never past the ceiling, however long it stays down. */
-	CHECK_EQ( (Int)Connection_retryDelayFor( 200, 5 ), CONNECTION_MAX_RETRY_TIME );
-	CHECK_EQ( (Int)Connection_retryDelayFor( 200, 50 ), CONNECTION_MAX_RETRY_TIME );
+	/* ...but the doubling stops there.  This is a lockstep game: the command being retried is one
+	   the whole room is stopped on, so this delay is the length of the freeze, and it used to reach
+	   1.2 and then 2 seconds after three and four losses of the same command.  Quartering the retry
+	   rate is all the protection a dead link needs from here; deciding a link is dead belongs to the
+	   disconnect manager. */
+	CHECK_EQ( (Int)Connection_retryDelayFor( 200, 4 ), 800 );
+	CHECK_EQ( (Int)Connection_retryDelayFor( 200, 5 ), 800 );
+	CHECK_EQ( (Int)Connection_retryDelayFor( 200, 50 ), 800 );
+
+	/* The freeze a command can cost on a link fast enough to sit on the retry floor, however many
+	   times in a row it is lost. */
+	CHECK_EQ( (Int)Connection_retryDelayFor( CONNECTION_MIN_RETRY_TIME, 50 ),
+						CONNECTION_MIN_RETRY_TIME << CONNECTION_MAX_RETRY_BACKOFF_SHIFTS );
+	CHECK( (Connection_retryDelayFor( CONNECTION_MIN_RETRY_TIME, 50 ) * 1000) <
+				 (CONNECTION_MAX_RETRY_TIME * 1000) );
+
+	/* A slow link still reaches the ceiling honestly - its own round trip put it there, not the
+	   backoff - and the ceiling still holds. */
+	CHECK_EQ( (Int)Connection_retryDelayFor( 600, 3 ), 2000 );
 	CHECK_EQ( (Int)Connection_retryDelayFor( CONNECTION_MAX_RETRY_TIME, 3 ), CONNECTION_MAX_RETRY_TIME );
+
+	/* Monotonic, and never below the connection's own timeout. */
+	for( Int sent = 0; sent < 20; ++sent )
+	{
+		time_t here = Connection_retryDelayFor( 200, sent );
+		time_t next = Connection_retryDelayFor( 200, sent + 1 );
+		CHECK( here >= 200 );
+		CHECK( next >= here );
+	}
 
 	/* A command that has never been sent is not a retry, and must not read as a negative shift. */
 	CHECK_EQ( (Int)Connection_retryDelayFor( 200, 0 ), 200 );

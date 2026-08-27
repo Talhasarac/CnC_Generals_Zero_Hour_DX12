@@ -62,6 +62,10 @@
 #define CONNECTION_MIN_RETRY_TIME 150
 #define CONNECTION_MAX_RETRY_TIME 2000
 
+// How many times the per-command retry wait may double while a command goes unacked.  See
+// Connection_retryDelayFor - in a lockstep game this delay is the length of the freeze.
+#define CONNECTION_MAX_RETRY_BACKOFF_SHIFTS 2
+
 /**
  * Fold one round-trip sample into the smoothed estimate and rewrite the timeout.  Jacobson/Karels:
  * srtt tracks the mean, rttvar the mean deviation, and the timeout sits four deviations out so
