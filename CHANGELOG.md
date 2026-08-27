@@ -260,6 +260,15 @@ map. Ctrl+A is still everything at once.
   on its own — from twelve frames a second to thirty in about six seconds. A room held down by a
   machine that really is that slow settles just above it and stays there instead of surging and
   falling back.
+- **The repair for a corrupted order was turned off for the first two seconds of every game.** When
+  a player's orders for a moment arrive damaged rather than late, the game throws them away and asks
+  that player to send them again — and that request is answered only if the moment in question is
+  still recent enough to be worth resending. The check for "recent enough" counted backwards from
+  the start of the match, which for the first couple of seconds gave an answer of roughly four
+  billion, so every request was turned down as ancient history. Those first seconds are precisely
+  when it matters: connections are still settling and everybody is giving their opening orders at
+  once. A stall there had to sit through the retry and then the disconnect screen instead of being
+  repaired on the spot. It counts properly now.
 
 ## Sharper textures, for free
 

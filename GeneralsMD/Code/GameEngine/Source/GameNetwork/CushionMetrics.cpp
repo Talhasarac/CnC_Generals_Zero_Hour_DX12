@@ -38,6 +38,21 @@ Int frameCushion( UnsignedInt executionFrame, UnsignedInt currentFrame )
 	return diff;
 }
 
+Bool frameIsTooOldToResend( UnsignedInt currentFrame, UnsignedInt requestedFrame, Int framesToKeep )
+{
+	/* EA wrote this as `if ((TheGameLogic->getFrame() - FRAMES_TO_KEEP) > frame)`, an UnsignedInt
+		 subtraction with nothing under it: for the first FRAMES_TO_KEEP frames of a match it wraps to
+		 around four billion, which is greater than any frame anyone can ask for, so every resend
+		 request in the opening seconds was answered with "this is too far in the past" and dropped.
+		 A stall at the start of a game therefore could not be repaired by the mechanism that exists
+		 to repair it, and had to wait for the retry and then the disconnect screen instead. */
+	Int age = (Int)(currentFrame - requestedFrame);		// signed difference, wraparound-safe
+	if( age < 0 )
+		return FALSE;
+
+	return age > framesToKeep;
+}
+
 Bool shouldSelfSlug( Int minimumCushion, Int runAhead, UnsignedInt slackPercent )
 {
 	/* Negative is FrameMetrics' "nothing measured yet", set by init() and never produced by a real

@@ -2572,6 +2572,42 @@ TEST(room_frame_rate_still_pins_to_a_genuinely_slow_player_without_oscillating)
 						probeRoomFrameRate( ROOM_FRAME_RATE_FLOOR, fpsLimit ) );
 }
 
+TEST(resend_window_is_measured_from_the_start_of_the_match_not_four_billion)
+{
+	/* ConnectionManager::sendSingleFrameToPlayer refuses to resend a frame older than
+		 FRAMES_TO_KEEP, which is (MAX_FRAMES_AHEAD / 2) + 1 = 65 - about two seconds at 30 Hz, and
+		 exactly the window a stalled player can be behind by, since nobody advances while the room
+		 is waiting for them. */
+	const Int KEEP = 65;
+
+	// the frame we are on, and everything inside the window, is resendable
+	CHECK( !frameIsTooOldToResend( 1000, 1000, KEEP ) );
+	CHECK( !frameIsTooOldToResend( 1000, 999, KEEP ) );
+	CHECK( !frameIsTooOldToResend( 1000, 1000 - KEEP, KEEP ) );
+
+	// one frame past the window is not
+	CHECK( frameIsTooOldToResend( 1000, 1000 - KEEP - 1, KEEP ) );
+	CHECK( frameIsTooOldToResend( 1000, 0, KEEP ) );
+
+	/* The defect: EA computed `(currentFrame - FRAMES_TO_KEEP) > requestedFrame` on UnsignedInts,
+		 so for the first 65 frames of every match the left side wrapped to about four billion and
+		 every request was refused.  A stall in the opening two seconds could not be repaired by the
+		 resend at all - it had to wait for the retry and then the disconnect screen. */
+	CHECK( !frameIsTooOldToResend( 0, 0, KEEP ) );
+	CHECK( !frameIsTooOldToResend( 1, 0, KEEP ) );
+	CHECK( !frameIsTooOldToResend( 10, 3, KEEP ) );
+	CHECK( !frameIsTooOldToResend( KEEP, 0, KEEP ) );
+	CHECK( frameIsTooOldToResend( KEEP + 1, 0, KEEP ) );
+
+	// a frame we have not reached is not old; we simply have nothing for it yet
+	CHECK( !frameIsTooOldToResend( 100, 101, KEEP ) );
+	CHECK( !frameIsTooOldToResend( 100, 1000000, KEEP ) );
+
+	// and the frame counter itself wrapping does not reopen or close the window by accident
+	CHECK( !frameIsTooOldToResend( 5, 0xFFFFFFFEu, KEEP ) );
+	CHECK( frameIsTooOldToResend( 5, 0xFFFFFF00u, KEEP ) );
+}
+
 TEST(selfslug_is_monotonic_in_the_cushion)
 {
 	// once there is enough margin the answer must stay no, or the frame rate would oscillate

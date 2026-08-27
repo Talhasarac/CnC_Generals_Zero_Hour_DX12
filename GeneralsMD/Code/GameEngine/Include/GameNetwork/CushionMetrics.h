@@ -38,6 +38,15 @@
 	  negative: a command whose frame has already gone by is no margin at all, not a negative one. */
 Int frameCushion( UnsignedInt executionFrame, UnsignedInt currentFrame );
 
+/* Frame numbers are UnsignedInt, so every "how far apart are these two frames" question in the
+	 network layer is one subtraction away from four billion.  The helpers here take the difference
+	 as a signed Int, which is the same bit pattern read the way the question meant it. */
+
+/** Whether a frame is too far in the past to still be resendable.  A frame we have not reached
+	  yet is not old - we simply have nothing for it.  "Past" means within half the frame counter's
+	  range, which at 30 Hz is over four hundred days of play. */
+Bool frameIsTooOldToResend( UnsignedInt currentFrame, UnsignedInt requestedFrame, Int framesToKeep );
+
 /** Whether to slow our own logic rate.  A negative minimumCushion means no sample has been taken
 	  yet, which is not the same as no margin - see the sentinel note in CushionMetrics.cpp. */
 Bool shouldSelfSlug( Int minimumCushion, Int runAhead, UnsignedInt slackPercent );
