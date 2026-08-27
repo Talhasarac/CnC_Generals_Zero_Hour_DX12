@@ -231,6 +231,15 @@ map. Ctrl+A is still everything at once.
   whenever an order arrived for a moment that had already passed — and the answer it produced was
   read as the largest margin possible, so the brake stayed off at precisely the moment it was
   needed. It is measured properly now.
+- **And that brake now comes on early enough to be worth having.** It was set to wait until the
+  margin was down to a single frame — a thirtieth of a second, less time than it takes to tell the
+  other machines anything at all. By then the freeze it exists to prevent has already happened.
+  Working out why turned up something worth knowing: the amount the game runs ahead of what you see
+  is supposed to scale with how bad your connection is, but the formula only ever exceeds its own
+  minimum once the two worst connections in the room add up to well over half a second of lag — a
+  game nobody finishes. So every match anyone actually plays runs at that minimum, and the safety
+  margin it was given works out to that one frame. The brake starts twice as early now, which is
+  the difference between easing off and lurching.
 
 ## Sharper textures, for free
 

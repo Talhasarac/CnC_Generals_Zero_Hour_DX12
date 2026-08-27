@@ -2361,10 +2361,46 @@ TEST(selfslug_fires_once_the_margin_eats_into_the_slack)
 	CHECK( shouldSelfSlug( 5, 60, 10 ) );
 	CHECK( !shouldSelfSlug( 6, 60, 10 ) );
 
-	// and a run-ahead too small for the slack to round to a frame never slugs, which is right:
-	// there is no margin to protect
-	CHECK( !shouldSelfSlug( 0, 9, 10 ) );
-	CHECK( shouldSelfSlug( 0, 10, 10 ) );
+	// a run-ahead too small for the slack to round to a whole frame still gets the brake: see
+	// selfslug_threshold_has_a_floor_the_shipped_run_ahead_cannot_undercut
+	CHECK( shouldSelfSlug( 0, 9, 10 ) );
+	CHECK( shouldSelfSlug( 1, 9, 10 ) );
+	CHECK( !shouldSelfSlug( 2, 9, 10 ) );
+}
+
+TEST(selfslug_threshold_has_a_floor_the_shipped_run_ahead_cannot_undercut)
+{
+	/* ConnectionManager::updateRunAhead computes (lat1 + lat2) / 2 * minFps, adds
+		 NetworkRunAheadSlack percent, and clamps to at least MIN_RUNAHEAD (10).  Run the numbers at
+		 the shipped 30 fps and the clamp is not an edge case, it is the answer: two players at 100 ms
+		 average round trip give 1.6 frames, eight players at 300 ms give 9.9 - the formula does not
+		 clear 10 until the two worst round trips add up to about 600 ms.  So the run-ahead every real
+		 game plays on is 10, its 10 % slack is one frame, and a brake that waits until one frame of
+		 margin is left has already lost: at 30 Hz that is 33 ms of warning for a hitch that takes
+		 longer than that to signal, let alone correct. */
+	CHECK_EQ( selfSlugThreshold( 10, 10 ), SELFSLUG_MIN_THRESHOLD_FRAMES );
+
+	// the floor holds wherever the arithmetic would land under it, including at zero slack
+	CHECK_EQ( selfSlugThreshold( 10, 0 ), SELFSLUG_MIN_THRESHOLD_FRAMES );
+	CHECK_EQ( selfSlugThreshold( 1, 10 ), SELFSLUG_MIN_THRESHOLD_FRAMES );
+	CHECK_EQ( selfSlugThreshold( 19, 10 ), SELFSLUG_MIN_THRESHOLD_FRAMES );
+
+	// and gets out of the way as soon as the configured slack is worth more than it
+	CHECK_EQ( selfSlugThreshold( 30, 10 ), 3 );
+	CHECK_EQ( selfSlugThreshold( 64, 10 ), 6 );
+	CHECK_EQ( selfSlugThreshold( 20, 50 ), 10 );
+
+	// the floor is what shouldSelfSlug actually uses - no second copy of the arithmetic
+	for( Int runAhead = 1; runAhead <= 64; ++runAhead )
+	{
+		Int threshold = selfSlugThreshold( runAhead, 10 );
+		CHECK( threshold >= SELFSLUG_MIN_THRESHOLD_FRAMES );
+		CHECK( shouldSelfSlug( threshold - 1, runAhead, 10 ) );
+		CHECK( !shouldSelfSlug( threshold, runAhead, 10 ) );
+	}
+
+	// a floor is a floor, not a slug-always: the brake still lets go
+	CHECK( !shouldSelfSlug( SELFSLUG_MIN_THRESHOLD_FRAMES, 10, 10 ) );
 }
 
 TEST(selfslug_is_monotonic_in_the_cushion)

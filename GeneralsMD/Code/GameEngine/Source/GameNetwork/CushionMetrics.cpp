@@ -50,9 +50,18 @@ Bool shouldSelfSlug( Int minimumCushion, Int runAhead, UnsignedInt slackPercent 
 	if( runAhead <= 0 )
 		return FALSE;
 
-	/* The threshold is the slack the run-ahead was given: once the margin has eaten into that, the
-		 next hiccup is a stall rather than a wobble. */
-	Int threshold = (Int)((runAhead * (Int)slackPercent) / 100);
+	return minimumCushion < selfSlugThreshold( runAhead, slackPercent );
+}
 
-	return minimumCushion < threshold;
+Int selfSlugThreshold( Int runAhead, UnsignedInt slackPercent )
+{
+	/* The threshold is the slack the run-ahead was given: once the margin has eaten into that, the
+		 next hiccup is a stall rather than a wobble.  With a floor, because the slack is a
+		 percentage of a run-ahead that is pinned to MIN_RUNAHEAD for every link in practice - see
+		 SELFSLUG_MIN_THRESHOLD_FRAMES. */
+	Int threshold = (Int)((runAhead * (Int)slackPercent) / 100);
+	if( threshold < SELFSLUG_MIN_THRESHOLD_FRAMES )
+		threshold = SELFSLUG_MIN_THRESHOLD_FRAMES;
+
+	return threshold;
 }

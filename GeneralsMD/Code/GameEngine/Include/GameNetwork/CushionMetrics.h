@@ -42,4 +42,18 @@ Int frameCushion( UnsignedInt executionFrame, UnsignedInt currentFrame );
 	  yet, which is not the same as no margin - see the sentinel note in CushionMetrics.cpp. */
 Bool shouldSelfSlug( Int minimumCushion, Int runAhead, UnsignedInt slackPercent );
 
+/** The cushion, in frames, below which the self-slug engages. */
+Int selfSlugThreshold( Int runAhead, UnsignedInt slackPercent );
+
+enum
+{
+	/* The brake needs room to work.  NetworkRunAheadSlack is 10 %, and MIN_RUNAHEAD is 10 frames -
+		 and that floor is what the run-ahead actually is for every link anyone plays on: the formula
+		 in ConnectionManager::updateRunAhead is (lat1 + lat2) / 2 * minFps * 1.1, which at 30 fps
+		 does not clear 10 until the two worst average round trips add up to about 600 ms.  So the
+		 threshold was 10 * 10 % = one frame, and a brake that engages with one frame of margin left
+		 is not a brake, it is the stall it was meant to prevent.  Two frames is 66 ms at 30 Hz. */
+	SELFSLUG_MIN_THRESHOLD_FRAMES = 2,
+};
+
 #endif // _CUSHION_METRICS_H_
