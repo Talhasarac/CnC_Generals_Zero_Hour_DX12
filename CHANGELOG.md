@@ -164,6 +164,19 @@ map. Ctrl+A is still everything at once.
   fingerprint itself was checking the same number 128 times instead of the wall it was supposed to
   be checking. Fixed. This is groundwork: network play is still not something this build claims.
 
+- **A network game runs at the speed it says it does.** Playing against other people, the
+  simulation was gated by two separate clocks at once — the network's and the game's own — and a
+  tick only happened when both agreed. Two free-running clocks of the same speed agree less often
+  than either one alone, so a multiplayer match quietly ran slower than the identical skirmish
+  offline, and drifted further the longer it went. There is one clock now.
+- **Your input delay is no longer set by your graphics card.** The game decides how far ahead of
+  itself everyone has to play from the slowest machine in the room — but it was measuring "slowest"
+  by how many frames each player *drew*, not how many the simulation actually stepped. Since this
+  build lets the picture run free of the simulation, someone with a modest graphics card and a
+  perfectly healthy processor reported a third of their real speed, got a window too small to
+  deliver their orders in, and stalled on almost every frame — and the game's response to one
+  player stalling is to slow everyone down. It measures the simulation now.
+
 ## Sharper textures, for free
 
 Zero Hour shipped downscaled copies of a lot of the base game's textures, and because of the order

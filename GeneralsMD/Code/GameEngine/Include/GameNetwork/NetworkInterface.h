@@ -68,6 +68,7 @@ public:
 
 	virtual void setLocalAddress(UnsignedInt ip, UnsignedInt port) = 0;	///< Tell the network what local ip and port to bind to.
 	virtual Bool isFrameDataReady( void ) = 0;												///< Are the commands for the next frame available?
+	virtual Bool isPacingLogicFrames( void ) = 0;											///< Is the network deciding when a logic frame runs?  (See GameEngine::update.)
 	virtual void parseUserList( const GameInfo *game ) = 0;						///< Parse a userlist, creating connections
 	virtual void startGame(void) = 0;																	///< Sets the network game frame counter to -1
 	virtual UnsignedInt getRunAhead(void) = 0;												///< Get the current RunAhead value

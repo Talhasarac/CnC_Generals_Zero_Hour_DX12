@@ -1225,13 +1225,16 @@ void ConnectionManager::updateRunAhead(Int oldRunAhead, Int frameRate, Bool didS
 			// We are the packet router, time to compute a new run ahead for this game.
 			m_latencyAverages[m_localSlot] = m_frameMetrics.getAverageLatency();
 
-			// since we are now using the display frame rate rather than the logic frame rate to get our average FPS,
-			// it doesn't make sense to send the desired logic frame rate if we "slugged" ourself.
-//			if (didSelfSlug) {
-//				m_fpsAverages[m_localSlot] = frameRate;
-//			} else {
+			// FrameMetrics measures the logic frame rate again (it briefly measured the display rate,
+			// see FrameMetrics::doPerFrameMetrics), so EA's original rule applies once more: a
+			// self-slug is a *voluntary* slowdown to let the room catch up, not this machine running
+			// out of capacity.  Reporting the slugged rate as our capability would feed the slowdown
+			// back into minFps and shrink the run-ahead that the slug was buying margin for.
+			if (didSelfSlug) {
+				m_fpsAverages[m_localSlot] = frameRate;
+			} else {
 				m_fpsAverages[m_localSlot] = m_frameMetrics.getAverageFPS();
-//			}
+			}
 			if (didSelfSlug) {
 				//DEBUG_LOG(("ConnectionManager::updateRunAhead - local player run ahead metrics, fps = %d, actual fps = %d, latency = %f, didSelfSlug = true\n", m_fpsAverages[m_localSlot], m_frameMetrics.getAverageFPS(), m_latencyAverages[m_localSlot]));
 			} else {

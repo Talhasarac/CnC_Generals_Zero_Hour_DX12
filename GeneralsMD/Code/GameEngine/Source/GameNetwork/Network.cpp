@@ -121,6 +121,7 @@ public:
 	inline UnsignedInt getFrameRate(void) { return m_frameRate; }
 	UnsignedInt getPacketArrivalCushion(void);								///< Returns the smallest packet arrival cushion since this was last called.
 	Bool isFrameDataReady( void );
+	Bool isPacingLogicFrames( void );
 	void parseUserList( const GameInfo *game );
 	void startGame(void);																			///< Sets the network game frame counter to -1
 
@@ -806,6 +807,17 @@ Bool Network::timeForNewFrame() {
  */
 Bool Network::isFrameDataReady() {
 	return (m_frameDataReady || (m_localStatus == NETLOCALSTATUS_LEFT));
+}
+
+/**
+ * True while timeForNewFrame() above is the thing deciding when a logic frame runs, which is any
+ * time isFrameDataReady() is answering from m_frameDataReady rather than short-circuiting on
+ * NETLOCALSTATUS_LEFT.  GameEngine::update asks so it can stand its own wall-clock pacing down and
+ * leave the network holding the only clock - two independent gates on the same tick multiply, and
+ * the simulation ends up slower than either of them alone.
+ */
+Bool Network::isPacingLogicFrames() {
+	return (m_localStatus != NETLOCALSTATUS_LEFT);
 }
 
 /**

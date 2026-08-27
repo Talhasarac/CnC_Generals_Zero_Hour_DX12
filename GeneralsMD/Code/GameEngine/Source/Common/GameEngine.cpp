@@ -853,6 +853,17 @@ void GameEngine::update( void )
 			logicAccumMs = 0.0f;
 			logicFrameDue = TRUE;
 		}
+		else if (TheNetwork != NULL && TheNetwork->isPacingLogicFrames())
+		{
+			// A network game already has a clock: Network::timeForNewFrame() paces the tick against
+			// the negotiated frame rate and only then publishes the frame's commands.  Gating a
+			// second time here against m_maxFPS beats two independent clocks against each other -
+			// a frame needs both to say yes, so the effective rate settles *below* either one and
+			// drifts, which is a systematic multiplayer-only slowdown.  Let the network own it and
+			// keep the accumulator clean for when the game drops back to single player.
+			logicAccumMs = 0.0f;
+			logicFrameDue = TRUE;
+		}
 		else
 		{
 			logicFrameDue = GameEngine_isLogicFrameDue(logicAccumMs, elapsedMs, m_maxFPS);

@@ -1811,3 +1811,39 @@ TEST(controlbar_experience_percent_fills_the_rank_and_clamps)
 	CHECK_EQ( ControlBar_experiencePercent( 0, 0, 0 ), -1 );
 	CHECK_EQ( ControlBar_experiencePercent( 10, 300, 100 ), -1 );
 }
+
+/* ---------------------------------------------------------------------------------------------
+   Multiplayer pacing.
+
+   FrameMetrics feeds ConnectionManager::updateRunAhead the answer to "how fast can this machine
+   advance the simulation", and that number becomes the input delay everyone in the room lives
+   with. It used to be sampled from TheDisplay->getAverageFPS(), which was the same number as the
+   logic rate only while EA's renderer was locked to the logic tick. This fork uncapped the
+   renderer, so the two came apart and the run-ahead started being sized off a GPU measurement.
+   --------------------------------------------------------------------------------------------- */
+extern Real FrameMetrics_logicFpsSample( UnsignedInt frame, UnsignedInt windowStartFrame, time_t windowMS );
+
+TEST(network_fps_metric_measures_logic_frames_not_rendered_ones)
+{
+	/* The case that broke: a weak GPU drawing 12fps while the CPU still steps logic 30 times a
+	   second must report 30, because 30 is what the run-ahead has to cover. Nothing in the sample
+	   can see the render rate - the only inputs are logic frame numbers and a wall-clock window. */
+	CHECK_NEAR( FrameMetrics_logicFpsSample( 1030, 1000, 1000 ), 30.0f, 0.001f );
+
+	/* A machine that genuinely cannot keep up reports what it managed, so the run-ahead grows to
+	   cover it. */
+	CHECK_NEAR( FrameMetrics_logicFpsSample( 1012, 1000, 1000 ), 12.0f, 0.001f );
+
+	/* The window is whatever it turned out to be, not an assumed 1000ms: the sampler fires on the
+	   first logic frame at or past a second, which on a stuttering machine can be well past it.
+	   30 frames spread over 1500ms is 20fps, not 30. */
+	CHECK_NEAR( FrameMetrics_logicFpsSample( 1030, 1000, 1500 ), 20.0f, 0.001f );
+	CHECK_NEAR( FrameMetrics_logicFpsSample( 1030, 1000,  500 ), 60.0f, 0.001f );
+
+	/* A window with no time in it is not a division to attempt. */
+	CHECK_NEAR( FrameMetrics_logicFpsSample( 1030, 1000, 0 ), 0.0f, 0.001f );
+
+	/* A window with no frames in it is a real answer - the simulation did not advance at all -
+	   and must read zero rather than wrapping the unsigned subtraction. */
+	CHECK_NEAR( FrameMetrics_logicFpsSample( 1000, 1000, 1000 ), 0.0f, 0.001f );
+}

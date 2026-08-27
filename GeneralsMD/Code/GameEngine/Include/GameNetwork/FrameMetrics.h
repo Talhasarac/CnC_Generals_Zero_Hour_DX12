@@ -53,6 +53,7 @@ protected:
 	// frames per second history variables.
 	Real *m_fpsList;								///< A record of how many game logic frames per second there were for the last 60 seconds.
 	time_t m_lastFpsTimeThing;																///< The time when the last fps entry started being recorded.
+	UnsignedInt m_fpsStartingFrame;														///< The logic frame the window above opened on, so the sample is a logic rate.
 	Int m_fpsListIndex;																				///< Index into the array of the current fps list entry being measured.
 	Real m_averageFps;																				///< The current average logic fps, computed just like m_averageLatency below but with the fps numbers.
 
