@@ -44,6 +44,7 @@
 #include "GameNetwork/ConnectionManager.h"
 #include "GameNetwork/StallJudgement.h"
 #include "GameNetwork/KeepAliveSchedule.h"
+#include "GameNetwork/CushionMetrics.h"
 #include "GameNetwork/LANAPICallbacks.h"
 #include "GameNetwork/NAT.h"
 #include "GameNetwork/NetCommandWrapperList.h"
@@ -1165,8 +1166,8 @@ void ConnectionManager::sendRemoteCommand(NetCommandRef *msg) {
 	if (IsCommandSynchronized(msg->getCommand()->getNetCommandType())) {
 //		DEBUG_LOG(("ConnectionManager::sendRemoteCommand - about to call allCommandsReady\n"));
 		if (allCommandsReady(msg->getCommand()->getExecutionFrame(), TRUE)) {
-			UnsignedInt cushion = msg->getCommand()->getExecutionFrame() - TheGameLogic->getFrame();
-			if ((cushion < m_smallestPacketArrivalCushion) || (m_smallestPacketArrivalCushion == -1)) {
+			Int cushion = frameCushion(msg->getCommand()->getExecutionFrame(), TheGameLogic->getFrame());
+			if (((UnsignedInt)cushion < m_smallestPacketArrivalCushion) || (m_smallestPacketArrivalCushion == -1)) {
 				m_smallestPacketArrivalCushion = cushion;
 			}
 			m_frameMetrics.addCushion(cushion);
@@ -1422,7 +1423,12 @@ void ConnectionManager::getMinimumFps(Int &minFps, Int &minFpsPlayer) {
 //	DEBUG_LOG(("\n"));
 }
 
-UnsignedInt ConnectionManager::getMinimumCushion() {
+/**
+ * The smallest cushion measured over the current window, or a negative number if nothing has been
+ * measured yet.  This used to return UnsignedInt while FrameMetrics returns Int, so the "no sample
+ * yet" sentinel came out the other side as four billion frames of margin - see CushionMetrics.h.
+ */
+Int ConnectionManager::getMinimumCushion() {
 	return m_frameMetrics.getMinimumCushion();
 }
 

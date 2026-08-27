@@ -37,6 +37,7 @@
 #include "Common/Player.h"
 #include "Common/PlayerList.h"
 #include "GameNetwork/NetworkInterface.h"
+#include "GameNetwork/CushionMetrics.h"
 #include "GameNetwork/Udp.h"
 #include "GameNetwork/Transport.h"
 #include "strtok_r.h"
@@ -771,9 +772,7 @@ Bool Network::timeForNewFrame() {
 	 * running too far behind us, so we need to slow down to let them catch up.
 	 */
 	if (m_conMgr != NULL) {
-		Real cushion = m_conMgr->getMinimumCushion();
-		Real runAheadPercentage = m_runAhead * (TheGlobalData->m_networkRunAheadSlack / (Real)100.0); // If we are at least 50% into our slack, we need to slow down.
-		if (cushion < runAheadPercentage) {
+		if (shouldSelfSlug(m_conMgr->getMinimumCushion(), m_runAhead, TheGlobalData->m_networkRunAheadSlack)) {
 //			DEBUG_LOG(("Average cushion = %f, run ahead percentage = %f.  Adjusting frameDelay from %I64d to ", cushion, runAheadPercentage, frameDelay));
 			frameDelay += frameDelay / 10; // temporarily decrease the frame rate by 20%.
 //			DEBUG_LOG(("%I64d\n", frameDelay));

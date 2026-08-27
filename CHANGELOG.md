@@ -224,6 +224,13 @@ map. Ctrl+A is still everything at once.
   that the game printed at startup and then ignored. It is a real setting now, and it is kept inside
   the range that actually keeps the door open — a game can ask for these packets more often on a
   fussy connection, but nothing can set it so far apart that the connection lapses between them.
+- **The brake that stops an online game freezing was being switched off by the very thing it
+  watches for.** When your machine is running out of the margin it keeps between the network and
+  the simulation, it eases off its own speed for a moment so everyone catches up smoothly instead
+  of the game locking solid. That margin was measured with a subtraction that ran backwards
+  whenever an order arrived for a moment that had already passed — and the answer it produced was
+  read as the largest margin possible, so the brake stayed off at precisely the moment it was
+  needed. It is measured properly now.
 
 ## Sharper textures, for free
 

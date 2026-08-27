@@ -116,7 +116,7 @@ public:
 	Real getUnknownPacketsPerSecond( void );
 	UnsignedInt getPacketArrivalCushion( void );
 
-	UnsignedInt getMinimumCushion();
+	Int getMinimumCushion();
 
 	void flushConnections();
 

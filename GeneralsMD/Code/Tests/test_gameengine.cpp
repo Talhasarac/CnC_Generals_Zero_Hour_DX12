@@ -33,6 +33,7 @@
 #include "GameLogic/FPUControl.h"
 #include "GameNetwork/StallJudgement.h"
 #include "GameNetwork/KeepAliveSchedule.h"
+#include "GameNetwork/CushionMetrics.h"
 #include <float.h>
 #include "GameClient/Water.h"
 #include "GameLogic/Module/PhysicsUpdate.h"
@@ -2309,4 +2310,74 @@ TEST(keepalive_every_player_gets_one_within_the_round)
 	// the last slot is due strictly before the round ends, so it is never skipped by the restart
 	CHECK_EQ( keepAliveSlotsDue( roundMS - 1, roundMS, 8 ), 8 );
 	CHECK( roundMS <= 15000 );		// under the shortest NAT UDP timeouts seen in the wild
+}
+
+// ---------------------------------------------------------------------------------------------
+// The cushion, and the self-slug it drives (MULTIPLAYER 3.3).  Two type defects met in the
+// middle here: an unsigned frame subtraction that could wrap, and an Int sentinel returned
+// through an UnsignedInt.
+// ---------------------------------------------------------------------------------------------
+
+TEST(framecushion_is_the_margin_and_never_negative)
+{
+	CHECK_EQ( frameCushion( 100, 100 ), 0 );
+	CHECK_EQ( frameCushion( 130, 100 ), 30 );
+	CHECK_EQ( frameCushion( 100, 99 ), 1 );
+
+	// the defect: a command for a frame that has already run.  EA's unsigned subtraction made this
+	// 4294967295, which arrives at FrameMetrics::addCushion(Int) as -1 - that class's "no sample
+	// yet" sentinel - and wiped the minimum cushion for the window.
+	CHECK_EQ( frameCushion( 99, 100 ), 0 );
+	CHECK_EQ( frameCushion( 0, 1 ), 0 );
+	CHECK_EQ( frameCushion( 100, 5000 ), 0 );
+
+	// and the frame counter is unsigned, so the difference has to survive its wraparound too
+	CHECK_EQ( frameCushion( 5, 0xFFFFFFFEu ), 7 );
+	CHECK_EQ( frameCushion( 0xFFFFFFFEu, 5 ), 0 );
+}
+
+TEST(selfslug_does_not_fire_on_a_cushion_nobody_has_measured)
+{
+	// FrameMetrics::init leaves the minimum cushion at -1.  ConnectionManager::getMinimumCushion
+	// returned UnsignedInt, so that reached Network::timeForNewFrame as four billion frames of
+	// margin: the largest cushion representable, produced by the state that knows the least.
+	CHECK( !shouldSelfSlug( -1, 20, 10 ) );
+	CHECK( !shouldSelfSlug( -100, 20, 10 ) );
+
+	// nor on a run-ahead that has not been established
+	CHECK( !shouldSelfSlug( 0, 0, 10 ) );
+	CHECK( !shouldSelfSlug( 0, -1, 10 ) );
+}
+
+TEST(selfslug_fires_once_the_margin_eats_into_the_slack)
+{
+	// run-ahead 20, slack 10% -> the threshold is 2 frames of margin
+	CHECK( shouldSelfSlug( 0, 20, 10 ) );
+	CHECK( shouldSelfSlug( 1, 20, 10 ) );
+	CHECK( !shouldSelfSlug( 2, 20, 10 ) );
+	CHECK( !shouldSelfSlug( 19, 20, 10 ) );
+
+	// a bigger run-ahead is given proportionally more margin before it worries
+	CHECK( shouldSelfSlug( 5, 60, 10 ) );
+	CHECK( !shouldSelfSlug( 6, 60, 10 ) );
+
+	// and a run-ahead too small for the slack to round to a frame never slugs, which is right:
+	// there is no margin to protect
+	CHECK( !shouldSelfSlug( 0, 9, 10 ) );
+	CHECK( shouldSelfSlug( 0, 10, 10 ) );
+}
+
+TEST(selfslug_is_monotonic_in_the_cushion)
+{
+	// once there is enough margin the answer must stay no, or the frame rate would oscillate
+	Bool seenNo = FALSE;
+	for( Int cushion = 0; cushion <= 200; ++cushion )
+	{
+		Bool slug = shouldSelfSlug( cushion, 60, 10 );
+		if( !slug )
+			seenNo = TRUE;
+		else
+			CHECK( !seenNo );
+	}
+	CHECK( seenNo );
 }
