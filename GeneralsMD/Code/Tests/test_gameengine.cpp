@@ -627,6 +627,51 @@ TEST(attack_move_leashes_ground_units_but_never_aircraft)
 	CHECK( !AIAttackMove_leashBroken( false, true,  500.0f*cell, 0.0f, LEASH ) );
 }
 
+/* AIStates.cpp: telling a firing pass from a failed approach when the attack move
+   disengages.  A fight the unit spent rounds on was real however short; only one it
+   never fired in is charged the re-acquire delay.  The ammunition count is the state
+   that was left uninitialized and unsaved - see the zero cases below. */
+extern Bool AIAttackMove_engageWasADud( Bool victimStillAlive, Int ammoAtEngage, Int ammoNow,
+																				UnsignedInt engageStartFrame, UnsignedInt now, Int dudFrames );
+
+TEST(attack_move_charges_the_reacquire_delay_only_for_a_fight_that_never_happened)
+{
+	const Int DUD = 15;		/* ATTACK_MOVE_DUD_ENGAGE_FRAMES, protected on the state */
+
+	/* stood next to it for a moment, fired nothing, it is still alive: a dud. */
+	CHECK( AIAttackMove_engageWasADud( true, 8, 8, 1000, 1000, DUD ) );
+	CHECK( AIAttackMove_engageWasADud( true, 8, 8, 1000, 1014, DUD ) );
+
+	/* the same non-fight, but long enough that it was a real attempt, not a bounce. */
+	CHECK( !AIAttackMove_engageWasADud( true, 8, 8, 1000, 1015, DUD ) );
+	CHECK( !AIAttackMove_engageWasADud( true, 8, 8, 1000, 9999, DUD ) );
+
+	/* it died. whatever we did worked, so go straight back to scanning. */
+	CHECK( !AIAttackMove_engageWasADud( false, 8, 8, 1000, 1000, DUD ) );
+
+	/* one round spent inside two frames is the aircraft firing pass: a real fight,
+	   and charging it a re-acquire delay is exactly backwards - the load is what
+	   sends the aircraft home, so it should be spent as fast as it can be. */
+	CHECK( !AIAttackMove_engageWasADud( true, 8, 7, 1000, 1002, DUD ) );
+	CHECK( !AIAttackMove_engageWasADud( true, 8, 0, 1000, 1001, DUD ) );
+
+	/* an ammunition count of zero at engage time can never read as "we fired": the
+	   count now is a sum of remaining rounds and is never negative.  That is what a
+	   save written before the count existed, and the constructor, both load as - so
+	   the answer there is the conservative "dud", not whatever was in the block. */
+	CHECK( AIAttackMove_engageWasADud( true, 0, 0, 1000, 1000, DUD ) );
+	CHECK( AIAttackMove_engageWasADud( true, 0, 12, 1000, 1000, DUD ) );
+	CHECK( !AIAttackMove_engageWasADud( true, 0, 12, 1000, 1015, DUD ) );
+
+	/* a unit with no ammunition at all on either side of a fight it could not start. */
+	CHECK( AIAttackMove_engageWasADud( true, 0, 0, 0, 0, DUD ) );
+
+	/* both frames are unsigned: an engage stamped after 'now' must not wrap the
+	   subtraction into a small number and read as a fresh dud. */
+	CHECK( !AIAttackMove_engageWasADud( true, 8, 8, 1000, 999, DUD ) );
+	CHECK( !AIAttackMove_engageWasADud( true, 8, 8, 0xffffffff, 0, DUD ) );
+}
+
 /* AIStates.cpp: on attack move, whoever is shooting us wins the target selection
    over whatever the scan would otherwise have picked. */
 extern Bool AIAttackMove_shouldRetaliate( UnsignedInt lastDamageFrame, UnsignedInt now, Int windowFrames,

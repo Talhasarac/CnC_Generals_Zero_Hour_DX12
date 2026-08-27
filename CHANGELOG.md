@@ -93,6 +93,11 @@ What you get now:
   whatever it happened to pick — usually the nearest thing — while something else emptied a magazine
   into its flank. It now turns onto whatever is actually hurting it, as long as it can reach it, and
   goes back to the advance once that is dealt with.
+- **Loading a save does not scramble what your attack-moving units do next.** The count of rounds a
+  unit had spent on its current fight — which is how the game tells a real firing pass from a failed
+  approach — was not among the things written into a save file, and on load it came back as whatever
+  happened to be sitting in memory. Units resuming an attack-move from a save could pause a second
+  before finding their next target, or not, at random. It is saved now.
 
 ## Your units stop shooting corpses
 

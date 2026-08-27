@@ -3526,6 +3526,7 @@ AIAttackMoveToState::AIAttackMoveToState( StateMachine *machine ) : AIMoveToStat
 	m_engageOrigin.zero();
 	m_victimID = INVALID_ID;
 	m_engageStartFrame = 0;
+	m_ammoAtEngage = 0;
 	m_frameToScanOn = 0;
 	m_reengageGoalDistSqr = 0.0f;
 	m_groupSpeed = FAST_AS_POSSIBLE;
@@ -3554,7 +3555,7 @@ void AIAttackMoveToState::crc( Xfer *xfer )
 void AIAttackMoveToState::xfer( Xfer *xfer )
 {
   // version
-  XferVersion currentVersion = 4;
+  XferVersion currentVersion = 5;
   XferVersion version = currentVersion;
   xfer->xferVersion( &version, currentVersion );
 
@@ -3576,6 +3577,12 @@ void AIAttackMoveToState::xfer( Xfer *xfer )
 	if (version>=4) {
 		xfer->xferReal(&m_reengageGoalDistSqr);
 		xfer->xferReal(&m_groupSpeed);
+	}
+	if (version>=5) {
+		// m_isEngaging has been saved since version 3, so a load could resume a fight with this
+		// still holding whatever was in the block - and stopEngaging reads it to decide whether the
+		// fight was real, which sets m_frameToScanOn.  Uninitialized memory driving a logic clock.
+		xfer->xferInt(&m_ammoAtEngage);
 	}
 	xfer->xferSnapshot(m_attackMoveMachine);
 }  // end xfer
@@ -3725,6 +3732,38 @@ void AIAttackMoveToState::startEngaging( Object *victim )
 
 //----------------------------------------------------------------------------------------------------------
 /**
+ * Did that fight ever really start?  With no Object involved so test_gameengine can link straight
+ * to it - the same trick as AIAttackMove_leashBroken above.
+ *
+ * A fight that ended quickly with the victim still standing is normally one we could not touch -
+ * unreachable, unattackable, out of ammo - and the caller moves on for a moment rather than pick
+ * the same target straight back up.  But "quickly" is a ground unit's measure.  An aircraft's whole
+ * firing pass takes a handful of frames and routinely leaves the target alive, so every successful
+ * pass was being read as a failure and charged a re-acquire delay, which is exactly backwards when
+ * what you want is the load spent as fast as possible.  So ask whether we actually shot, and only
+ * fall back on the clock when we did not.
+ *
+ * Spending rounds is the only positive evidence: an ammoAtEngage of zero therefore reads as "never
+ * fired", which is what a save written before the count was recorded loads as.  That is the
+ * conservative answer - a re-acquire delay of a second - not an uninitialized one.
+ */
+Bool AIAttackMove_engageWasADud( Bool victimStillAlive, Int ammoAtEngage, Int ammoNow,
+																 UnsignedInt engageStartFrame, UnsignedInt now, Int dudFrames )
+{
+	if (!victimStillAlive)
+		return FALSE;					// it died: whatever we did to it worked
+
+	if (ammoNow < ammoAtEngage)
+		return FALSE;					// we spent rounds on it, so the fight was real however short
+
+	if (now < engageStartFrame)
+		return FALSE;					// engaged in the future: not a dud, and never wrap the subtraction
+
+	return (now - engageStartFrame) < (UnsignedInt)dudFrames;
+}
+
+//----------------------------------------------------------------------------------------------------------
+/**
  * The fight is over (victim dead, out of reach, or leashed off).  Put back what startEngaging
  * changed, and if the fight never really started, keep moving for a moment instead of picking the
  * same untouchable target again on the next scan.
@@ -3749,19 +3788,9 @@ void AIAttackMoveToState::stopEngaging( void )
 	Object *victim = TheGameLogic->findObjectByID(m_victimID);
 
 
-	//
-	// A fight that ended quickly with the victim still standing is normally one we could not touch
-	// - unreachable, unattackable, out of ammo - and we move on for a moment rather than pick the
-	// same target straight back up. But "quickly" is a ground unit's measure. An aircraft's whole
-	// firing pass takes a handful of frames and routinely leaves the target alive, so every
-	// successful pass was being read as a failure and charged a re-acquire delay, which is exactly
-	// backwards when what you want is the load spent as fast as possible.
-	//
-	// So ask whether we actually shot instead of how long we stood there.
-	//
-	Bool firedAtIt = countRemainingAmmo( owner ) < m_ammoAtEngage;
-	if (victim && !victim->isEffectivelyDead() && !firedAtIt &&
-			now - m_engageStartFrame < ATTACK_MOVE_DUD_ENGAGE_FRAMES)
+	if (AIAttackMove_engageWasADud( victim != NULL && !victim->isEffectivelyDead(),
+																 m_ammoAtEngage, countRemainingAmmo( owner ),
+																 m_engageStartFrame, now, ATTACK_MOVE_DUD_ENGAGE_FRAMES ))
 	{
 		// we could not touch it (unreachable, cannot attack it, out of ammo) - move on for a second.
 		m_frameToScanOn = now + ATTACK_MOVE_REACQUIRE_DELAY;
