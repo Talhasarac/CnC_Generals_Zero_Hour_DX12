@@ -36,6 +36,7 @@
 #include "Common/GlobalData.h"
 #include "Common/QuotedPrintable.h"
 #include "Common/UserPreferences.h"
+#include "GameNetwork/GameDataMatch.h"
 #include "GameNetwork/LANAPI.h"
 #include "GameNetwork/LANAPICallbacks.h"
 #include "GameClient/MapUtil.h"
@@ -231,14 +232,21 @@ void LANAPI::handleRequestJoin( LANMessage *msg, UnsignedInt senderIP )
 			int player;
 			Bool canJoin = true;
 
-			// see if the CRCs match
+			/* See if the CRCs match.  EA wrote this check and then commented it out, so a LAN game
+				 between two machines with different data started happily and desynced a few minutes in,
+				 with nothing to tell either player why.  It is back: the join request already carries
+				 both CRCs, RET_CRC_MISMATCH already exists, and the string it maps to is already
+				 translated.  A dev build with -netMinPlayers still skips it, the way EA left it. */
 #if defined(_DEBUG) || defined(_INTERNAL)
 			if (TheGlobalData->m_netMinPlayers > 0) {
 #endif
-/*			if (msg->GameToJoin.iniCRC != TheGlobalData->m_iniCRC ||
-					msg->GameToJoin.exeCRC != TheGlobalData->m_exeCRC)
+			GameDataMatchResult dataMatch = compareGameData(
+				msg->GameToJoin.exeCRC, msg->GameToJoin.iniCRC,
+				TheGlobalData->m_exeCRC, TheGlobalData->m_iniCRC );
+			if (dataMatch != GAMEDATA_MATCHES)
 			{
-				DEBUG_LOG(("LANAPI::handleRequestJoin - join denied because of CRC mismatch. CRCs are them/us INI:%X/%X exe:%X/%X\n",
+				DEBUG_LOG(("LANAPI::handleRequestJoin - join denied, %s. CRCs are them/us INI:%X/%X exe:%X/%X\n",
+					gameDataMatchName(dataMatch),
 					msg->GameToJoin.iniCRC, TheGlobalData->m_iniCRC,
 					msg->GameToJoin.exeCRC, TheGlobalData->m_exeCRC));
 				reply.LANMessageType = LANMessage::MSG_JOIN_DENY;
@@ -247,7 +255,6 @@ void LANAPI::handleRequestJoin( LANMessage *msg, UnsignedInt senderIP )
 				reply.GameNotJoined.playerIP = senderIP;
 				canJoin = false;
 			}
-*/
 #if defined(_DEBUG) || defined(_INTERNAL)
 			}
 #endif

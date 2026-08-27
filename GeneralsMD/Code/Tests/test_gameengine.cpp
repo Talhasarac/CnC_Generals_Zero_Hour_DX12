@@ -29,6 +29,7 @@
 #include "Common/StackDump.h"
 #include "GameNetwork/Connection.h"
 #include "GameLogic/CRCSnapshotRing.h"
+#include "GameNetwork/GameDataMatch.h"
 #include "GameClient/Water.h"
 #include "GameLogic/Module/PhysicsUpdate.h"
 #include "GameClient/ParticleSys.h"
@@ -2035,4 +2036,48 @@ TEST(crcsnapshotring_never_hands_back_a_half_written_frame)
 	// addObject with no snapshot open is a no-op, not a write through a bad index
 	ring.addObject( 1, 2, 0.0f, 0.0f, 0.0f, 0.0f );
 	CHECK_EQ( ring.getNumSnapshots(), 0 );
+}
+
+/* --------------------------------------------------------------------------------------------
+	 A lockstep game only stays in step if both machines feed the same numbers into it, and the
+	 join request is the last moment at which that is a refused join instead of a desynced match.
+	 EA wrote the LAN check and left it commented out; it is back, and this pins what it decides. */
+
+TEST(gamedatamatch_lets_identical_data_through_and_stops_everything_else)
+{
+	// same build, same INI set: the only case that may start a game
+	CHECK_EQ( compareGameData( 0xAABBCCDD, 0x11223344, 0xAABBCCDD, 0x11223344 ), GAMEDATA_MATCHES );
+
+	// a different INI set is the usual case, and the one a player can go and fix
+	CHECK_EQ( compareGameData( 0xAABBCCDD, 0x11223345, 0xAABBCCDD, 0x11223344 ), GAMEDATA_INI_DIFFERS );
+
+	// a different build reads the same INI files into different code
+	CHECK_EQ( compareGameData( 0xAABBCCDE, 0x11223344, 0xAABBCCDD, 0x11223344 ), GAMEDATA_EXE_DIFFERS );
+
+	// one bit is a mismatch: this is a data check, not a similarity score
+	CHECK_EQ( compareGameData( 0x11223344, 0x00000001, 0x11223344, 0x00000003 ), GAMEDATA_INI_DIFFERS );
+}
+
+TEST(gamedatamatch_blames_the_executable_when_both_differ)
+{
+	/* Both CRCs differ.  Saying "different INI set" would send the player off to compare data
+		 files that their build would read differently anyway. */
+	CHECK_EQ( compareGameData( 1, 2, 3, 4 ), GAMEDATA_EXE_DIFFERS );
+}
+
+TEST(gamedatamatch_refuses_a_machine_that_reports_no_data_at_all)
+{
+	/* Nothing computes zero - the executable CRC always folds in the version number and the INI
+		 CRC always folds in megabytes of text.  Zero means the other machine never checked. */
+	CHECK_EQ( compareGameData( 0, 0x11223344, 0xAABBCCDD, 0x11223344 ), GAMEDATA_UNKNOWN );
+	CHECK_EQ( compareGameData( 0xAABBCCDD, 0, 0xAABBCCDD, 0x11223344 ), GAMEDATA_UNKNOWN );
+
+	// and it outranks the CRCs that do match, rather than being reported as a plain match
+	CHECK_EQ( compareGameData( 0, 0, 0, 0 ), GAMEDATA_UNKNOWN );
+
+	// every result names itself for the log
+	CHECK_STR( gameDataMatchName( GAMEDATA_MATCHES ), "same data" );
+	CHECK_STR( gameDataMatchName( GAMEDATA_EXE_DIFFERS ), "different executable or multiplayer scripts" );
+	CHECK_STR( gameDataMatchName( GAMEDATA_INI_DIFFERS ), "different INI set" );
+	CHECK_STR( gameDataMatchName( GAMEDATA_UNKNOWN ), "data not reported" );
 }

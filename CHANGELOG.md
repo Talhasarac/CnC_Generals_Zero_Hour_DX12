@@ -200,6 +200,11 @@ map. Ctrl+A is still everything at once.
   and writes it out on both machines when the check fails. Lining up the two files points at the
   single unit, building or projectile that went its own way, which is the difference between fixing
   a desync and guessing at it.
+- **A LAN game refuses to start between two machines with different game files.** Two people whose
+  data files differ cannot play the same match, however well the connection behaves — one hand-edited
+  file and the two simulations part company a few minutes in, with nothing on screen to say why. The
+  check for this was written and then switched off before release; it is back on, so a mismatched
+  join is turned away in the lobby with a reason, instead of becoming a ruined game.
 
 ## Sharper textures, for free
 
