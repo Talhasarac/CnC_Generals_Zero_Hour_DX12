@@ -45,6 +45,39 @@
 
 #define CONNECTION_LATENCY_HISTORY_LENGTH 200
 
+/**
+ * Retransmit timeout bounds, in milliseconds.
+ *
+ * EA shipped a flat 2000ms retry (Connection::Connection), so on a 40ms link one lost command
+ * packet cost every player in the game a two-second stall before it was even tried again.  Their
+ * own intent is commented out in doRetryMetrics(): "m_retryTime = m_averageLatency * 1.5".  It
+ * could not be switched on as written - m_averageLatency is a 200-slot rolling mean over an array
+ * that starts full of zeroes, so early in a game it reads near zero and a 1.5x multiple of that is
+ * a packet storm.  What is used instead is the standard Jacobson/Karels estimator, which carries
+ * its own variance term and therefore widens on a jittery link instead of hugging the mean.
+ *
+ * The floor keeps a LAN game from retransmitting faster than the ack can physically come back.
+ * The ceiling is EA's old constant, so no link is ever served worse than the shipped behaviour.
+ */
+#define CONNECTION_MIN_RETRY_TIME 150
+#define CONNECTION_MAX_RETRY_TIME 2000
+
+/**
+ * Fold one round-trip sample into the smoothed estimate and rewrite the timeout.  Jacobson/Karels:
+ * srtt tracks the mean, rttvar the mean deviation, and the timeout sits four deviations out so
+ * ordinary jitter does not trigger a retransmit.  srtt < 0 means "no samples yet" and seeds both.
+ * Free function (not a member, not static) so test_gameengine can link straight to it.
+ */
+void Connection_updateRetryTimeout( Real sampleMS, Real &srtt, Real &rttvar, time_t &retryMS );
+
+/**
+ * How long to wait before sending this particular command again, given the connection's current
+ * timeout and how many times the command has already gone out.  Repeated failures back off
+ * exponentially up to the ceiling, so a link that is genuinely down is not hammered.
+ * Free function (not a member, not static) so test_gameengine can link straight to it.
+ */
+time_t Connection_retryDelayFor( time_t baseRetryMS, Int numTimesSent );
+
 class Connection : public MemoryPoolObject
 {
 	MEMORY_POOL_GLUE_WITH_USERLOOKUP_CREATE(Connection, "Connection")		
@@ -93,8 +126,10 @@ protected:
 	User *m_user;
 
 	NetCommandList *m_netCommandList;
-	time_t m_retryTime;						///< The time between sending retry packets for this connection.  Time is in milliseconds.
-	Real m_averageLatency;			///< The average time between sending a command and receiving an ACK.
+	time_t m_retryTime;						///< The time between sending retry packets for this connection.  Time is in milliseconds.  Derived from the two estimators below, never a constant.
+	Real m_smoothedLatency;			///< Jacobson/Karels srtt, in milliseconds.  Negative until the first untainted round-trip sample arrives.
+	Real m_latencyVariance;			///< Jacobson/Karels rttvar (mean deviation), in milliseconds.
+	Real m_averageLatency;			///< The average time between sending a command and receiving an ACK.  Reporting only - the timeout is driven by m_smoothedLatency.
 	Real m_latencies[CONNECTION_LATENCY_HISTORY_LENGTH];	///< List of the last 100 latencies.
 
 	time_t m_frameGrouping;				///< The minimum time between packet sends.

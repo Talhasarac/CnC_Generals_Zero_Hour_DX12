@@ -177,6 +177,14 @@ map. Ctrl+A is still everything at once.
   deliver their orders in, and stalled on almost every frame — and the game's response to one
   player stalling is to slow everyone down. It measures the simulation now.
 
+- **One lost packet no longer freezes the game for two seconds.** Nobody's next frame can happen
+  until everyone's orders for it have arrived, so a single dropped packet stalls the whole match
+  until it is sent again — and the game always waited a flat two seconds before trying. It now
+  measures the round trip to each player and waits about that long instead, which on a normal
+  connection is under a fifth of a second. It keeps a little extra room for connections that swing
+  around, backs off when a link is genuinely down rather than hammering it, and never waits longer
+  than the two seconds it used to, so nobody ends up worse off than before.
+
 ## Sharper textures, for free
 
 Zero Hour shipped downscaled copies of a lot of the base game's textures, and because of the order

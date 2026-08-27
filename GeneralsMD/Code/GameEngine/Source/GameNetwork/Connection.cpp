@@ -32,13 +32,74 @@
 enum { MaxQuitFlushTime = 30000 }; // wait this many milliseconds at most to retry things before quitting
 
 /**
+ * Jacobson/Karels.  See the comment on CONNECTION_MIN_RETRY_TIME in Connection.h for why the flat
+ * 2000ms it replaces had to go, and why EA's own commented-out mean-times-1.5 could not be it.
+ */
+void Connection_updateRetryTimeout( Real sampleMS, Real &srtt, Real &rttvar, time_t &retryMS )
+{
+	if (sampleMS < 0.0f) {
+		sampleMS = 0.0f;
+	}
+
+	if (srtt < 0.0f) {
+		// First sample: the mean is the sample and the deviation is half of it, which is the
+		// conventional seed and keeps the first timeout from being absurdly tight.
+		srtt = sampleMS;
+		rttvar = sampleMS / 2.0f;
+	} else {
+		Real deviation = srtt - sampleMS;
+		if (deviation < 0.0f) {
+			deviation = -deviation;
+		}
+		rttvar = (0.75f * rttvar) + (0.25f * deviation);
+		srtt = (0.875f * srtt) + (0.125f * sampleMS);
+	}
+
+	Real timeout = srtt + (4.0f * rttvar);
+	if (timeout < (Real)CONNECTION_MIN_RETRY_TIME) {
+		timeout = (Real)CONNECTION_MIN_RETRY_TIME;
+	}
+	if (timeout > (Real)CONNECTION_MAX_RETRY_TIME) {
+		timeout = (Real)CONNECTION_MAX_RETRY_TIME;
+	}
+	retryMS = (time_t)timeout;
+}
+
+/**
+ * Exponential backoff on top of the connection's timeout, capped at the ceiling.  numTimesSent is
+ * how many times the command has already gone out, so 1 (a single transmission awaiting its first
+ * retry) is the un-backed-off case.
+ */
+time_t Connection_retryDelayFor( time_t baseRetryMS, Int numTimesSent )
+{
+	Int backoff = numTimesSent - 1;
+	if (backoff < 0) {
+		backoff = 0;
+	}
+	if (backoff > 4) {
+		backoff = 4;
+	}
+
+	time_t delay = baseRetryMS << backoff;
+	if (delay > CONNECTION_MAX_RETRY_TIME) {
+		delay = CONNECTION_MAX_RETRY_TIME;
+	}
+	return delay;
+}
+
+/**
  * The constructor.
  */
 Connection::Connection() {
 	m_transport = NULL;
 	m_user = NULL;
 	m_netCommandList = NULL;
-	m_retryTime = 2000; // set retry time to 2 seconds.
+	// Start at the ceiling - EA's old flat constant - and let the first acks pull it down to what
+	// the link actually is.  Starting low would mean retransmitting before the very first ack of
+	// the game had a chance to arrive.
+	m_retryTime = CONNECTION_MAX_RETRY_TIME;
+	m_smoothedLatency = -1.0f;
+	m_latencyVariance = 0.0f;
 	m_lastTimeSent = 0;
 	m_frameGrouping = 1;
 	m_isQuitting = false;
@@ -90,6 +151,11 @@ void Connection::init() {
 	m_frameGrouping = 1;
 	m_numRetries = 0;
 	m_retryMetricsTime = 0;
+
+	// A reset connection knows nothing about the link again: back to the ceiling, no samples.
+	m_retryTime = CONNECTION_MAX_RETRY_TIME;
+	m_smoothedLatency = -1.0f;
+	m_latencyVariance = 0.0f;
 
 	for (Int i = 0; i < CONNECTION_LATENCY_HISTORY_LENGTH; ++i) {
 		m_latencies[i] = 0;
@@ -293,7 +359,9 @@ UnsignedInt Connection::doSend() {
 
 			time_t timeLastSent = msg->getTimeLastSent();
 
-			if (((curtime - timeLastSent) > m_retryTime) || (timeLastSent == -1)) {
+			time_t retryDelay = Connection_retryDelayFor(m_retryTime, msg->getNumTimesSent());
+
+			if (((curtime - timeLastSent) > retryDelay) || (timeLastSent == -1)) {
 				notDone = packet->addCommand(msg);
 				if (notDone) {
 					// the msg command was added to the packet.
@@ -302,7 +370,7 @@ UnsignedInt Connection::doSend() {
 							++m_numRetries;
 						}
 						doRetryMetrics();
-						msg->setTimeLastSent(curtime);
+						msg->markSent(curtime);
 					} else {
 						m_netCommandList->removeMessage(msg);
 						msg->deleteInstance();
@@ -384,6 +452,13 @@ NetCommandRef * Connection::processAck(UnsignedShort commandID, UnsignedByte ori
 	m_averageLatency += lat / CONNECTION_LATENCY_HISTORY_LENGTH;
 	m_latencies[index] = lat;
 
+	// Karn's rule: an ack for a command that went out more than once cannot be timed, because
+	// there is no way to tell which of the sends it is acking.  Timing it against the last send
+	// reads far too short and would drag the timeout down exactly when the link is losing packets.
+	if (temp->getNumTimesSent() <= 1) {
+		Connection_updateRetryTimeout(lat, m_smoothedLatency, m_latencyVariance, m_retryTime);
+	}
+
 #if defined(_DEBUG) || defined(_INTERNAL)
 	if (doDebug == TRUE) {
 		DEBUG_LOG(("Connection::processAck - disconnect frame command %d found, removing from command list.\n", commandID));
@@ -395,7 +470,8 @@ NetCommandRef * Connection::processAck(UnsignedShort commandID, UnsignedByte ori
 
 void Connection::setFrameGrouping(time_t frameGrouping) {
 	m_frameGrouping = frameGrouping;
-//	m_retryTime = frameGrouping * 4;
+	// (EA had "m_retryTime = frameGrouping * 4" here.  The timeout is measured from acks now -
+	// see Connection_updateRetryTimeout - so the send cadence no longer dictates it.)
 }
 
 void Connection::doRetryMetrics() {
@@ -405,9 +481,9 @@ void Connection::doRetryMetrics() {
 	if ((curTime - m_retryMetricsTime) > 10000) {
 		m_retryMetricsTime = curTime;
 		++numSeconds;
-//		DEBUG_LOG(("Retries in the last 10 seconds = %d, average latency = %fms\n", m_numRetries, m_averageLatency));
+		DEBUG_LOG(("Connection::doRetryMetrics - retries in the last 10s = %d, average latency = %.1fms, srtt = %.1fms, rttvar = %.1fms, retry timeout = %dms\n",
+			m_numRetries, m_averageLatency, m_smoothedLatency, m_latencyVariance, (Int)m_retryTime));
 		m_numRetries = 0;
-//		m_retryTime = m_averageLatency * 1.5;
 	}
 }
 

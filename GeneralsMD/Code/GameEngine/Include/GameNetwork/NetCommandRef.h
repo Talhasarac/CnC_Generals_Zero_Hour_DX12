@@ -65,12 +65,16 @@ public:
 	time_t getTimeLastSent() const;
 	void setTimeLastSent(time_t timeLastSent);
 
+	Int getNumTimesSent() const;
+	void markSent(time_t when);
+
 protected:
 	NetCommandMsg *m_msg;
 	NetCommandRef *m_next;
 	NetCommandRef *m_prev;
 	UnsignedByte m_relay; ///< Need this in the command reference since the relay value will be different depending on where this particular reference is being sent.
 	time_t m_timeLastSent;
+	Int m_numTimesSent;		///< How many times this reference has gone out.  An ack for a command sent more than once cannot be timed (which send is it acking?), so it is not used as a latency sample - Karn's rule.
 
 #ifdef DEBUG_NETCOMMANDREF
 	UnsignedInt m_id;
@@ -131,6 +135,24 @@ inline time_t NetCommandRef::getTimeLastSent() const
 inline void NetCommandRef::setTimeLastSent(time_t timeLastSent) 
 {
 	m_timeLastSent = timeLastSent;
+}
+
+/**
+ * How many times this reference has been put on the wire.  1 is a first transmission, more is a
+ * retransmission and its ack is ambiguous.
+ */
+inline Int NetCommandRef::getNumTimesSent() const
+{
+	return m_numTimesSent;
+}
+
+/**
+ * Record a send: stamp the time and count it.
+ */
+inline void NetCommandRef::markSent(time_t when) 
+{
+	m_timeLastSent = when;
+	++m_numTimesSent;
 }
 
 /**

@@ -27,6 +27,7 @@
 #include "Common/INIException.h"
 #include "Common/STLTypedefs.h"
 #include "Common/StackDump.h"
+#include "GameNetwork/Connection.h"
 #include "GameClient/Water.h"
 #include "GameLogic/Module/PhysicsUpdate.h"
 #include "GameClient/ParticleSys.h"
@@ -1846,4 +1847,86 @@ TEST(network_fps_metric_measures_logic_frames_not_rendered_ones)
 	/* A window with no frames in it is a real answer - the simulation did not advance at all -
 	   and must read zero rather than wrapping the unsigned subtraction. */
 	CHECK_NEAR( FrameMetrics_logicFpsSample( 1000, 1000, 1000 ), 0.0f, 0.001f );
+}
+
+/* ---------------------------------------------------------------------------------------------
+   Adaptive retransmit. EA shipped a flat 2000ms retry, so on a fast link one lost command packet
+   cost the whole room a two-second stall. Their own commented-out intent (average latency * 1.5)
+   could not be switched on as written - the average is a rolling mean over an array that starts
+   full of zeroes - so this is Jacobson/Karels instead, which carries a variance term and widens on
+   a jittery link rather than hugging the mean.
+   --------------------------------------------------------------------------------------------- */
+extern void Connection_updateRetryTimeout( Real sampleMS, Real &srtt, Real &rttvar, time_t &retryMS );
+extern time_t Connection_retryDelayFor( time_t baseRetryMS, Int numTimesSent );
+
+TEST(connection_retry_timeout_follows_the_link_and_never_leaves_its_bounds)
+{
+	/* A steady 40ms LAN link: the first sample seeds srtt=40, rttvar=20, so the timeout starts at
+	   40+80=120 and is lifted to the 150ms floor. Feeding the same number repeatedly drives the
+	   deviation to zero, so it settles on the floor - which is the whole point: a lost packet on
+	   this link is retried in 150ms, not 2000. */
+	Real srtt = -1.0f, rttvar = 0.0f;
+	time_t retry = CONNECTION_MAX_RETRY_TIME;
+	Connection_updateRetryTimeout( 40.0f, srtt, rttvar, retry );
+	CHECK_EQ( (Int)retry, CONNECTION_MIN_RETRY_TIME );
+	for( Int i = 0; i < 100; ++i )
+		Connection_updateRetryTimeout( 40.0f, srtt, rttvar, retry );
+	CHECK_NEAR( srtt, 40.0f, 0.5f );
+	CHECK( rttvar < 1.0f );
+	CHECK_EQ( (Int)retry, CONNECTION_MIN_RETRY_TIME );
+
+	/* A steady 300ms link settles above the floor, at about the mean, because the deviation
+	   collapses. It must not sit at EA's ceiling. */
+	srtt = -1.0f; rttvar = 0.0f; retry = CONNECTION_MAX_RETRY_TIME;
+	for( Int i = 0; i < 200; ++i )
+		Connection_updateRetryTimeout( 300.0f, srtt, rttvar, retry );
+	CHECK( retry > CONNECTION_MIN_RETRY_TIME );
+	CHECK( retry < CONNECTION_MAX_RETRY_TIME );
+	CHECK_NEAR( (Real)retry, 300.0f, 30.0f );
+
+	/* The reason the variance term exists: a link whose mean is 100ms but which swings between
+	   40 and 160 must be given more room than a rock-steady 100ms link, or every swing is read as
+	   a loss and retransmitted. */
+	Real steadySrtt = -1.0f, steadyVar = 0.0f;
+	time_t steadyRetry = CONNECTION_MAX_RETRY_TIME;
+	Real jumpySrtt = -1.0f, jumpyVar = 0.0f;
+	time_t jumpyRetry = CONNECTION_MAX_RETRY_TIME;
+	for( Int i = 0; i < 200; ++i )
+	{
+		Connection_updateRetryTimeout( 100.0f, steadySrtt, steadyVar, steadyRetry );
+		Connection_updateRetryTimeout( (i & 1) ? 160.0f : 40.0f, jumpySrtt, jumpyVar, jumpyRetry );
+	}
+	CHECK( jumpyRetry > steadyRetry );
+
+	/* Neither bound can be crossed: a satellite link is capped at EA's old constant so nobody is
+	   served worse than the shipped behaviour, and a zero-latency loopback still waits the floor. */
+	srtt = -1.0f; rttvar = 0.0f; retry = 0;
+	for( Int i = 0; i < 50; ++i )
+		Connection_updateRetryTimeout( 5000.0f, srtt, rttvar, retry );
+	CHECK_EQ( (Int)retry, CONNECTION_MAX_RETRY_TIME );
+
+	srtt = -1.0f; rttvar = 0.0f; retry = 0;
+	for( Int i = 0; i < 50; ++i )
+		Connection_updateRetryTimeout( 0.0f, srtt, rttvar, retry );
+	CHECK_EQ( (Int)retry, CONNECTION_MIN_RETRY_TIME );
+}
+
+TEST(connection_retry_backs_off_when_a_command_keeps_going_unacked)
+{
+	/* A command that has gone out once waits the connection's plain timeout. */
+	CHECK_EQ( (Int)Connection_retryDelayFor( 200, 1 ), 200 );
+
+	/* Each further attempt doubles, so a link that is genuinely down is not hammered at the
+	   floor rate for as long as the disconnect timer runs. */
+	CHECK_EQ( (Int)Connection_retryDelayFor( 200, 2 ), 400 );
+	CHECK_EQ( (Int)Connection_retryDelayFor( 200, 3 ), 800 );
+	CHECK_EQ( (Int)Connection_retryDelayFor( 200, 4 ), 1600 );
+
+	/* ...but never past the ceiling, however long it stays down. */
+	CHECK_EQ( (Int)Connection_retryDelayFor( 200, 5 ), CONNECTION_MAX_RETRY_TIME );
+	CHECK_EQ( (Int)Connection_retryDelayFor( 200, 50 ), CONNECTION_MAX_RETRY_TIME );
+	CHECK_EQ( (Int)Connection_retryDelayFor( CONNECTION_MAX_RETRY_TIME, 3 ), CONNECTION_MAX_RETRY_TIME );
+
+	/* A command that has never been sent is not a retry, and must not read as a negative shift. */
+	CHECK_EQ( (Int)Connection_retryDelayFor( 200, 0 ), 200 );
 }
