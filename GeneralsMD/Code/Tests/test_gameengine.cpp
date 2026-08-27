@@ -31,6 +31,7 @@
 #include "GameLogic/CRCSnapshotRing.h"
 #include "GameNetwork/GameDataMatch.h"
 #include "GameLogic/FPUControl.h"
+#include "GameNetwork/StallJudgement.h"
 #include <float.h>
 #include "GameClient/Water.h"
 #include "GameLogic/Module/PhysicsUpdate.h"
@@ -2137,4 +2138,97 @@ TEST(setfpmode_leaves_the_exception_mask_in_a_known_state)
 	CHECK_EQ( getFPMode(), expectedFPMode() );
 
 	_controlfp( entry, _MCW_PC | _MCW_RC | _MCW_EM );
+}
+
+// ---------------------------------------------------------------------------------------------
+// The disconnect screen's decision (MULTIPLAYER 2.3).  DisconnectManager::update used to bring
+// the screen up on stall duration alone, which cannot tell a slow game from a broken one.
+// ---------------------------------------------------------------------------------------------
+
+// the thresholds the shipped GlobalData defaults use, so the witnesses below describe the game
+static const UnsignedInt DISCONNECT_MS = 8000;
+static const UnsignedInt SILENCE_MS    = 12000;
+static const UnsignedInt WEDGED_MS     = 20000;
+
+static StallVerdict judge( UnsignedInt stallMS, UnsignedInt silenceMS )
+{
+	return judgeStall( stallMS, silenceMS, DISCONNECT_MS, SILENCE_MS, WEDGED_MS );
+}
+
+TEST(judgestall_a_short_stall_is_not_a_disconnect)
+{
+	// the common case: the game is waiting on a frame and everybody is still sending
+	CHECK_EQ( (int)judge( 0, 0 ), (int)STALL_RUNNING );
+	CHECK_EQ( (int)judge( 4000, 500 ), (int)STALL_RUNNING );
+	CHECK_EQ( (int)judge( DISCONNECT_MS, 500 ), (int)STALL_RUNNING );	// boundary is exclusive
+
+	// and a short stall stays running even if somebody has been quiet a while: below the
+	// disconnect time we do not look at silence at all, because we are not stalled yet
+	CHECK_EQ( (int)judge( 1000, 30000 ), (int)STALL_RUNNING );
+
+	CHECK( !stallNeedsDisconnectScreen( STALL_RUNNING ) );
+}
+
+TEST(judgestall_a_long_stall_with_everyone_talking_is_only_slow)
+{
+	// this is the case EA got wrong: 5s of no frame progress, but packets are still arriving from
+	// every player, so the game is behind and will catch up.  No screen, no vote, no drop.
+	CHECK_EQ( (int)judge( DISCONNECT_MS + 1, 0 ), (int)STALL_WAITING );
+	CHECK_EQ( (int)judge( 15000, 3000 ), (int)STALL_WAITING );
+	CHECK_EQ( (int)judge( WEDGED_MS - 1, SILENCE_MS - 1 ), (int)STALL_WAITING );
+
+	CHECK( !stallNeedsDisconnectScreen( STALL_WAITING ) );
+}
+
+TEST(judgestall_silence_from_a_player_is_a_disconnect)
+{
+	// stalled, and somebody has stopped sending entirely - that is what the screen is for
+	CHECK_EQ( (int)judge( DISCONNECT_MS + 1, SILENCE_MS ), (int)STALL_SILENT );
+	CHECK_EQ( (int)judge( 9000, 60000 ), (int)STALL_SILENT );
+
+	CHECK( stallNeedsDisconnectScreen( STALL_SILENT ) );
+}
+
+TEST(judgestall_silence_shorter_than_the_keepalive_round_is_not_silence)
+{
+	// ConnectionManager::doKeepAlive walks one slot per second and resets at MAX_SLOTS, so a
+	// player who is merely stalled themselves still only reaches us every 8s.  The silence
+	// threshold has to sit above that or the fix would call a slow player a disconnected one.
+	CHECK( SILENCE_MS > 8000 );
+	CHECK_EQ( (int)judge( 19000, 8000 ), (int)STALL_WAITING );
+	CHECK_EQ( (int)judge( 19000, 11999 ), (int)STALL_WAITING );
+}
+
+TEST(judgestall_a_stall_past_the_ceiling_gives_up_anyway)
+{
+	// packets are arriving but the frame has not moved in 20 seconds: whatever is wrong, it is
+	// not going to fix itself, and refusing to ever show the screen would hang the game forever
+	CHECK_EQ( (int)judge( WEDGED_MS, 0 ), (int)STALL_WEDGED );
+	CHECK_EQ( (int)judge( 120000, 0 ), (int)STALL_WEDGED );
+
+	CHECK( stallNeedsDisconnectScreen( STALL_WEDGED ) );
+
+	// silence still wins over the ceiling: the report should name the real cause
+	CHECK_EQ( (int)judge( 120000, SILENCE_MS ), (int)STALL_SILENT );
+}
+
+TEST(judgestall_the_verdict_is_monotonic_in_the_stall_time)
+{
+	// once the screen is warranted, waiting longer must never take it back away again
+	Bool seenScreen = FALSE;
+	for( UnsignedInt ms = 0; ms <= 40000; ms += 250 )
+	{
+		Bool needs = stallNeedsDisconnectScreen( judge( ms, 30000 ) );
+		if( needs )
+			seenScreen = TRUE;
+		else
+			CHECK( !seenScreen );
+	}
+	CHECK( seenScreen );
+
+	// every verdict has a name for the log
+	CHECK( strlen( stallVerdictName( STALL_RUNNING ) ) > 0 );
+	CHECK( strlen( stallVerdictName( STALL_WAITING ) ) > 0 );
+	CHECK( strlen( stallVerdictName( STALL_SILENT ) ) > 0 );
+	CHECK( strlen( stallVerdictName( STALL_WEDGED ) ) > 0 );
 }

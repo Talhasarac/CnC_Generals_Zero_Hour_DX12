@@ -211,6 +211,13 @@ map. Ctrl+A is still everything at once.
   back. The game already reset it every frame, but the reset read the wrong register to decide what
   to write. It now reads the right one, and there are tests that break the machine's maths on
   purpose and prove the reset puts it back.
+- **The disconnect screen stops interrupting games that are merely slow.** In a big eight-player
+  match the game routinely waits a few seconds for everyone's orders, and five seconds of that used
+  to be enough to throw the disconnect screen over the top of the battle — with a vote attached that
+  could end with somebody kicked out of a game nobody had left. The game now checks whether anyone
+  has actually stopped talking before it does that. If everybody is still sending, it waits and
+  catches up. If a player really has gone quiet, the screen comes up as before, and there is a
+  hard limit so a genuinely wedged game still gives you the screen rather than hanging forever.
 
 ## Sharper textures, for free
 

@@ -144,6 +144,12 @@ public:
 	void debugPrintConnectionCommands();
 #endif
 
+	/* How long since anything at all arrived that originated with this player - a command, an ack,
+		 a keep-alive.  A stalled game where this is small for everyone is slow; one where it is large
+		 for somebody is a disconnect.  See StallJudgement.h. */
+	UnsignedInt getTimeSinceLastPacketFrom( Int slot ) const;
+	UnsignedInt getWorstSilenceMS( void ) const;
+
 	// For disconnect blame assignment
 	UnsignedInt getPingFrame();
 	Int getPingsSent();
@@ -206,6 +212,9 @@ private:
 	// yup.
 	Real m_latencyAverages[MAX_SLOTS];
 	Int  m_fpsAverages[MAX_SLOTS];
+
+	/* Wall clock of the last thing we heard from each player, zero for "nothing yet". */
+	time_t m_lastHeardFrom[MAX_SLOTS];
 	Int  m_minFpsPlayer;
 	Int  m_minFps;
 	UnsignedInt m_smallestPacketArrivalCushion;

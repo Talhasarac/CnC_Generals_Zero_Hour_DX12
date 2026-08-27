@@ -463,6 +463,8 @@ public:
 	UnsignedInt m_networkKeepAliveDelay;			      	///< The number of seconds between when the connections to each player send a keep-alive packet.
 	UnsignedInt m_networkRunAheadSlack;				      	///< The amount of slack in the run ahead value. This is the percentage of the calculated run ahead that is added.
 	UnsignedInt m_networkDisconnectTime;			      	///< The number of milliseconds between when the game gets stuck on a frame for a network stall and when the disconnect dialog comes up.
+	UnsignedInt m_networkPlayerSilenceTime;		      	///< The number of milliseconds we can go without hearing anything at all from a player before a stall is treated as a disconnect rather than a slow game.
+	UnsignedInt m_networkStallCeilingTime;		      	///< The number of milliseconds a stall can last with everyone still talking before we bring up the disconnect screen anyway.
 	UnsignedInt m_networkPlayerTimeoutTime;		      	///< The number of milliseconds between when a player's last keep alive command was recieved and when they are considered disconnected from the game.
 	UnsignedInt	m_networkDisconnectScreenNotifyTime;  ///< The number of milliseconds between when the disconnect screen comes up and when the other players are notified that we are on the disconnect screen.
 	

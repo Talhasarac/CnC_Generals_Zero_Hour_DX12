@@ -30,6 +30,7 @@
 #include "GameClient/InGameUI.h"
 #include "GameLogic/GameLogic.h"
 #include "GameNetwork/DisconnectManager.h"
+#include "GameNetwork/StallJudgement.h"
 #include "GameNetwork/NetworkInterface.h"
 #include "GameNetwork/NetworkUtil.h"
 #include "GameNetwork/GameSpy/PingThread.h"
@@ -111,8 +112,24 @@ void DisconnectManager::update(ConnectionManager *conMgr) {
 	// the last one we had the commands ready for.
 	if (TheGameLogic->getFrame() == m_lastFrame) {
 		time_t curTime = timeGetTime();
-		if ((curTime - m_lastFrameTime) > TheGlobalData->m_networkDisconnectTime) {
-			if (m_disconnectState == DISCONNECTSTATETYPE_SCREENOFF) {
+		UnsignedInt stallMS = (UnsignedInt)(curTime - m_lastFrameTime);
+
+		/* EA popped the disconnect screen on stall duration alone, so a slow machine or a jittery
+			 link produced the same interruption as a player pulling their cable out.  Ask whether
+			 anyone has actually gone quiet before taking over the screen; when everybody is still
+			 sending, the game is behind, not broken, and it will catch up.  See StallJudgement.h. */
+		StallVerdict verdict = judgeStall( stallMS, conMgr->getWorstSilenceMS(),
+																			 TheGlobalData->m_networkDisconnectTime,
+																			 TheGlobalData->m_networkPlayerSilenceTime,
+																			 TheGlobalData->m_networkStallCeilingTime );
+
+		if (verdict != STALL_RUNNING) {
+			/* Keep-alives go out for every kind of stall: they are how the other machines learn that
+				 we are still here, and holding them back while we wait would make our own silence the
+				 thing that triggers their disconnect screen. */
+			if (stallNeedsDisconnectScreen( verdict ) && m_disconnectState == DISCONNECTSTATETYPE_SCREENOFF) {
+				DEBUG_LOG(("DisconnectManager::update - disconnect screen on after %d ms stalled, %d ms of silence: %s\n",
+					stallMS, conMgr->getWorstSilenceMS(), stallVerdictName( verdict ) ));
 				turnOnScreen(conMgr);
 			}
 			sendKeepAlive(conMgr);

@@ -42,6 +42,7 @@
 #include "GameClient/GameText.h"
 #include "GameClient/MessageBox.h"
 #include "GameNetwork/ConnectionManager.h"
+#include "GameNetwork/StallJudgement.h"
 #include "GameNetwork/LANAPICallbacks.h"
 #include "GameNetwork/NAT.h"
 #include "GameNetwork/NetCommandWrapperList.h"
@@ -131,6 +132,7 @@ ConnectionManager::ConnectionManager(void)
 {
 	for (Int i = 0; i < MAX_SLOTS; ++i) {
 		m_frameData[i] = NULL;
+		m_lastHeardFrom[i] = 0;
 	}
 	m_transport = NULL;
 	m_disconnectManager = NULL;
@@ -170,6 +172,12 @@ void ConnectionManager::init()
 		m_relayedCommands->init();
 	}
 	m_relayedCommands->reset();
+
+	/* A new game starts with nobody having been heard from yet, or the silence carried over from
+		 the last one would be counted against them. */
+	for (i = 0; i < MAX_SLOTS; ++i) {
+		m_lastHeardFrom[i] = 0;
+	}
 
 	m_localSlot = -1;
 #ifdef MEMORYPOOL_DEBUG
@@ -373,6 +381,14 @@ void ConnectionManager::doRelay() {
 			while (cmd != NULL) {
 				//DEBUG_LOG(("ConnectionManager::doRelay() - Looking at a command of type %s\n",
 					//GetAsciiNetCommandType(cmd->getCommand()->getNetCommandType()).str()));
+
+				/* Note that we have heard from whoever originated this, relayed or not.  Any command
+					 will do - the point is only that the player still exists.  See StallJudgement.h. */
+				UnsignedInt fromSlot = cmd->getCommand()->getPlayerID();
+				if (fromSlot < MAX_SLOTS) {
+					m_lastHeardFrom[fromSlot] = timeGetTime();
+				}
+
 				if (CommandRequiresAck(cmd->getCommand())) {
 					ackCommand(cmd, m_localSlot);
 				}
@@ -2320,6 +2336,46 @@ Int ConnectionManager::getSlotAverageFPS(Int slot) {
 		return -1;
 	}
 	return m_fpsAverages[slot];
+}
+
+/**
+ * How long since anything at all arrived that originated with this player.  Zero for a slot we
+ * have no connection to, and for one we have never heard from - in both cases there is nothing
+ * to hold against them.
+ */
+UnsignedInt ConnectionManager::getTimeSinceLastPacketFrom( Int slot ) const
+{
+	if ((slot < 0) || (slot >= MAX_SLOTS))
+		return 0;
+	if (m_connections[slot] == NULL)
+		return 0;
+	if (m_lastHeardFrom[slot] == 0)
+		return 0;
+
+	time_t now = timeGetTime();
+	if (now <= m_lastHeardFrom[slot])
+		return 0;
+
+	return (UnsignedInt)(now - m_lastHeardFrom[slot]);
+}
+
+/**
+ * The longest any connected player has gone without sending us anything.  This is the number that
+ * separates "the game is slow" from "somebody has gone away" - see StallJudgement.h.
+ */
+UnsignedInt ConnectionManager::getWorstSilenceMS( void ) const
+{
+	UnsignedInt worst = 0;
+	for (Int i = 0; i < MAX_SLOTS; ++i)
+	{
+		if (i == (Int)m_localSlot)
+			continue;					// we always hear ourselves
+
+		UnsignedInt silence = getTimeSinceLastPacketFrom( i );
+		if (silence > worst)
+			worst = silence;
+	}
+	return worst;
 }
 
 #if defined(_DEBUG) || defined(_INTERNAL)

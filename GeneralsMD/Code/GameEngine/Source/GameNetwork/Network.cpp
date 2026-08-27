@@ -356,6 +356,8 @@ void Network::init()
 	DEBUG_LOG(("NetworkRunAheadSlack: %d\n", TheGlobalData->m_networkRunAheadSlack));
 	DEBUG_LOG(("NetworkKeepAliveDelay: %d\n", TheGlobalData->m_networkKeepAliveDelay));
 	DEBUG_LOG(("NetworkDisconnectTime: %d\n", TheGlobalData->m_networkDisconnectTime));
+	DEBUG_LOG(("NetworkPlayerSilenceTime: %d\n", TheGlobalData->m_networkPlayerSilenceTime));
+	DEBUG_LOG(("NetworkStallCeilingTime: %d\n", TheGlobalData->m_networkStallCeilingTime));
 	DEBUG_LOG(("NetworkPlayerTimeoutTime: %d\n", TheGlobalData->m_networkPlayerTimeoutTime));
 	DEBUG_LOG(("NetworkDisconnectScreenNotifyTime: %d\n", TheGlobalData->m_networkDisconnectScreenNotifyTime));
 	DEBUG_LOG(("Other network stuff:\n"));

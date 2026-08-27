@@ -501,6 +501,8 @@ GlobalData* GlobalData::m_theOriginal = NULL;
 	{ "NetworkRunAheadSlack", INI::parseInt, NULL, offsetof(GlobalData, m_networkRunAheadSlack) },
 	{ "NetworkKeepAliveDelay", INI::parseInt, NULL, offsetof(GlobalData, m_networkKeepAliveDelay) },
 	{ "NetworkDisconnectTime", INI::parseInt, NULL, offsetof(GlobalData, m_networkDisconnectTime) },
+	{ "NetworkPlayerSilenceTime", INI::parseInt, NULL, offsetof(GlobalData, m_networkPlayerSilenceTime) },
+	{ "NetworkStallCeilingTime", INI::parseInt, NULL, offsetof(GlobalData, m_networkStallCeilingTime) },
 	{ "NetworkPlayerTimeoutTime", INI::parseInt, NULL, offsetof(GlobalData, m_networkPlayerTimeoutTime) },
 	{ "NetworkDisconnectScreenNotifyTime", INI::parseInt, NULL, offsetof(GlobalData, m_networkDisconnectScreenNotifyTime) },
 	
@@ -962,7 +964,15 @@ GlobalData::GlobalData()
 	m_networkCushionHistoryLength = 10;
 	m_networkRunAheadSlack = 10;
 	m_networkKeepAliveDelay = 20;
-	m_networkDisconnectTime = 5000;
+	/* 5000 was EA's.  With the stall judgement in DisconnectManager::update the screen no longer
+		 comes up on duration alone, so this is now only the point at which we start asking whether
+		 anybody has gone quiet - and 5s of stall is common on a loaded machine in an eight player
+		 game.  8s costs nothing when the link really is dead, because the silence test decides. */
+	m_networkDisconnectTime = 8000;
+	/* Longer than the 8s keep-alive round: a player who is merely stalled still answers on that
+		 schedule, so anything under it would call a slow player a disconnected one. */
+	m_networkPlayerSilenceTime = 12000;
+	m_networkStallCeilingTime = 20000;
 	m_networkPlayerTimeoutTime = 60000;
 	m_networkDisconnectScreenNotifyTime = 15000;
 
