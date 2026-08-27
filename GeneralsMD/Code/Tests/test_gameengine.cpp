@@ -30,6 +30,8 @@
 #include "GameNetwork/Connection.h"
 #include "GameLogic/CRCSnapshotRing.h"
 #include "GameNetwork/GameDataMatch.h"
+#include "GameLogic/FPUControl.h"
+#include <float.h>
 #include "GameClient/Water.h"
 #include "GameLogic/Module/PhysicsUpdate.h"
 #include "GameClient/ParticleSys.h"
@@ -2080,4 +2082,59 @@ TEST(gamedatamatch_refuses_a_machine_that_reports_no_data_at_all)
 	CHECK_STR( gameDataMatchName( GAMEDATA_EXE_DIFFERS ), "different executable or multiplayer scripts" );
 	CHECK_STR( gameDataMatchName( GAMEDATA_INI_DIFFERS ), "different INI set" );
 	CHECK_STR( gameDataMatchName( GAMEDATA_UNKNOWN ), "data not reported" );
+}
+
+/* --------------------------------------------------------------------------------------------
+	 Two machines only compute the same floats if the FPU control word says the same thing on both.
+	 Nothing in the process guarantees that - Direct3D sets it when it creates a device, and any DLL
+	 in the process can set it and never put it back - so GameLogic::update re-asserts it at the top
+	 of every logic frame.  These pin what "asserts it" means. */
+
+TEST(setfpmode_pins_the_control_word_from_whatever_it_finds)
+{
+	UnsignedInt entry = _controlfp( 0, 0 );		// leave the process the way we found it
+
+	// the mode the simulation runs in: 24-bit precision, round to nearest
+	setFPMode();
+	CHECK_EQ( getFPMode(), expectedFPMode() );
+	CHECK_EQ( getFPMode() & _MCW_PC, (UnsignedInt)(_PC_24 & _MCW_PC) );
+	CHECK_EQ( getFPMode() & _MCW_RC, (UnsignedInt)(_RC_NEAR & _MCW_RC) );
+
+	// what a driver that grabbed the FPU and never gave it back looks like
+	_controlfp( _PC_64 | _RC_CHOP, _MCW_PC | _MCW_RC );
+	CHECK_NE( getFPMode(), expectedFPMode() );
+	setFPMode();
+	CHECK_EQ( getFPMode(), expectedFPMode() );
+
+	// and the other direction, so this is not just "setFPMode lowers the precision"
+	_controlfp( _PC_53 | _RC_UP, _MCW_PC | _MCW_RC );
+	CHECK_NE( getFPMode(), expectedFPMode() );
+	setFPMode();
+	CHECK_EQ( getFPMode(), expectedFPMode() );
+
+	// it is idempotent - a second logic frame does not move it
+	setFPMode();
+	CHECK_EQ( getFPMode(), expectedFPMode() );
+
+	_controlfp( entry, _MCW_PC | _MCW_RC );
+}
+
+TEST(setfpmode_leaves_the_exception_mask_in_a_known_state)
+{
+	UnsignedInt entry = _controlfp( 0, 0 );
+
+	/* setFPMode writes only the precision and rounding fields, but it calls _fpreset() first, so
+		 the rest of the word - the exception masks above all - lands in the same known state on
+		 every machine rather than wherever the last DLL left it.  An unmasked invalid-operation
+		 exception on one machine and a masked one on another is a crash on one side and a quiet NaN
+		 on the other. */
+	_controlfp( 0, _MCW_EM );		// unmask everything: the state a debugger or a bad DLL can leave
+	setFPMode();
+	CHECK_EQ( _controlfp( 0, 0 ) & _MCW_EM, (UnsignedInt)_MCW_EM );
+
+	// and the x87 stack is reset with it, so an __asm block that pushed and forgot to pop is
+	// not carried into the next logic frame
+	CHECK_EQ( getFPMode(), expectedFPMode() );
+
+	_controlfp( entry, _MCW_PC | _MCW_RC | _MCW_EM );
 }

@@ -32,11 +32,19 @@
 #ifndef __FPUCONTROL_H__
 #define __FPUCONTROL_H__
 
+#include "Lib/BaseType.h"
+
 /**
   * setFPMode sets the FPU internal precision and rounding mode.  As DirectX is not guaranteed to
 	* leave the FPU in a good state, we must call this at the start of GameLogic::update() and
 	* anywhere that touches DirectX inside GameLogic loops (LoadScreen).
 	*/
 void setFPMode( void );
+
+/** The precision and rounding fields of the FPU control word, as they are right now. */
+UnsignedInt getFPMode( void );
+
+/** What getFPMode() must read back after setFPMode(): 24-bit precision, round to nearest. */
+UnsignedInt expectedFPMode( void );
 
 #endif // __FPUCONTROL_H__

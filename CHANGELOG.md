@@ -205,6 +205,12 @@ map. Ctrl+A is still everything at once.
   file and the two simulations part company a few minutes in, with nothing on screen to say why. The
   check for this was written and then switched off before release; it is back on, so a mismatched
   join is turned away in the lobby with a reason, instead of becoming a ruined game.
+- **The maths is nailed down to the same setting on every machine.** Two computers only agree on
+  where a shell lands if their processors are rounding numbers the same way, and that setting is a
+  shared one: a graphics or sound driver can change it out from under the game and never put it
+  back. The game already reset it every frame, but the reset read the wrong register to decide what
+  to write. It now reads the right one, and there are tests that break the machine's maths on
+  purpose and prove the reset puts it back.
 
 ## Sharper textures, for free
 
