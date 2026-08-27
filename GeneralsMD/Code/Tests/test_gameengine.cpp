@@ -32,6 +32,7 @@
 #include "GameNetwork/GameDataMatch.h"
 #include "GameLogic/FPUControl.h"
 #include "GameNetwork/StallJudgement.h"
+#include "GameNetwork/KeepAliveSchedule.h"
 #include <float.h>
 #include "GameClient/Water.h"
 #include "GameLogic/Module/PhysicsUpdate.h"
@@ -2231,4 +2232,81 @@ TEST(judgestall_the_verdict_is_monotonic_in_the_stall_time)
 	CHECK( strlen( stallVerdictName( STALL_WAITING ) ) > 0 );
 	CHECK( strlen( stallVerdictName( STALL_SILENT ) ) > 0 );
 	CHECK( strlen( stallVerdictName( STALL_WEDGED ) ) > 0 );
+}
+
+// ---------------------------------------------------------------------------------------------
+// The keep-alive round (MULTIPLAYER 2.4).  NetworkKeepAliveDelay was parsed, logged and never
+// read; doKeepAlive counted whole seconds against MAX_SLOTS in two function statics instead.
+// ---------------------------------------------------------------------------------------------
+
+TEST(keepalive_the_round_is_bounded_whatever_the_ini_says)
+{
+	// the shipped GameData.ini asks for 20 s, which is exactly where consumer NAT mappings of the
+	// era expired - refreshing the hole at the moment it closes is no refresh at all
+	CHECK_EQ( keepAliveRoundMS( 20 ), (UnsignedInt)KEEPALIVE_MAX_ROUND_SECONDS * 1000 );
+	CHECK_EQ( keepAliveRoundMS( 3600 ), (UnsignedInt)KEEPALIVE_MAX_ROUND_SECONDS * 1000 );
+
+	// and a zero would be a divide by zero one function along
+	CHECK_EQ( keepAliveRoundMS( 0 ), (UnsignedInt)KEEPALIVE_MIN_ROUND_SECONDS * 1000 );
+	CHECK_EQ( keepAliveRoundMS( 1 ), (UnsignedInt)KEEPALIVE_MIN_ROUND_SECONDS * 1000 );
+
+	// in between, the knob is the knob
+	CHECK_EQ( keepAliveRoundMS( 4 ), (UnsignedInt)4000 );
+	CHECK_EQ( keepAliveRoundMS( 8 ), (UnsignedInt)8000 );
+
+	// the ceiling is what EA's counting loop actually produced, so the default behaviour is the
+	// behaviour the game shipped with
+	CHECK_EQ( (int)KEEPALIVE_MAX_ROUND_SECONDS, 8 );
+	CHECK( KEEPALIVE_MIN_ROUND_SECONDS < KEEPALIVE_MAX_ROUND_SECONDS );
+}
+
+TEST(keepalive_slots_are_staggered_across_the_round)
+{
+	// eight slots over an eight second round: one per second, which is what EA's loop did
+	CHECK_EQ( keepAliveSlotsDue( 0, 8000, 8 ), 1 );
+	CHECK_EQ( keepAliveSlotsDue( 999, 8000, 8 ), 1 );
+	CHECK_EQ( keepAliveSlotsDue( 1000, 8000, 8 ), 2 );
+	CHECK_EQ( keepAliveSlotsDue( 6999, 8000, 8 ), 7 );
+	CHECK_EQ( keepAliveSlotsDue( 7000, 8000, 8 ), 8 );
+
+	// past the end of the round nothing more comes due - the round restarts instead
+	CHECK_EQ( keepAliveSlotsDue( 8000, 8000, 8 ), 8 );
+	CHECK_EQ( keepAliveSlotsDue( 100000, 8000, 8 ), 8 );
+
+	// a shorter round packs the same eight into less time rather than dropping any
+	CHECK_EQ( keepAliveSlotsDue( 0, 2000, 8 ), 1 );
+	CHECK_EQ( keepAliveSlotsDue( 250, 2000, 8 ), 2 );
+	CHECK_EQ( keepAliveSlotsDue( 1750, 2000, 8 ), 8 );
+}
+
+TEST(keepalive_the_count_never_goes_backwards_and_never_overruns)
+{
+	// doKeepAlive walks m_keepAliveNextSlot up to this number and indexes m_connections with it,
+	// so a value outside [0, MAX_SLOTS] would be an out of bounds write in a network path
+	Int last = 0;
+	for( UnsignedInt ms = 0; ms <= 20000; ms += 17 )
+	{
+		Int due = keepAliveSlotsDue( ms, 8000, 8 );
+		CHECK( due >= last );
+		CHECK( due >= 0 && due <= 8 );
+		last = due;
+	}
+	CHECK_EQ( last, 8 );
+
+	// degenerate inputs cannot produce an index either
+	CHECK_EQ( keepAliveSlotsDue( 0, 8000, 0 ), 0 );
+	CHECK_EQ( keepAliveSlotsDue( 0, 0, 8 ), 8 );			// round shorter than a slot: all at once
+	CHECK_EQ( keepAliveSlotsDue( 0, 4, 8 ), 8 );
+}
+
+TEST(keepalive_every_player_gets_one_within_the_round)
+{
+	// the property that matters to a NAT: no slot waits longer than the round for its packet
+	UnsignedInt roundMS = keepAliveRoundMS( 20 );		// what the shipped INI produces
+	CHECK( !keepAliveRoundIsOver( roundMS - 1, roundMS ) );
+	CHECK( keepAliveRoundIsOver( roundMS, roundMS ) );
+
+	// the last slot is due strictly before the round ends, so it is never skipped by the restart
+	CHECK_EQ( keepAliveSlotsDue( roundMS - 1, roundMS, 8 ), 8 );
+	CHECK( roundMS <= 15000 );		// under the shortest NAT UDP timeouts seen in the wild
 }

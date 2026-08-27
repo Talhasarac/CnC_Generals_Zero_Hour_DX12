@@ -215,6 +215,11 @@ private:
 
 	/* Wall clock of the last thing we heard from each player, zero for "nothing yet". */
 	time_t m_lastHeardFrom[MAX_SLOTS];
+
+	/* Where the keep-alive round has got to.  These were function statics in doKeepAlive, so they
+		 survived across games and across ConnectionManager instances. */
+	time_t m_keepAliveRoundStart;
+	Int m_keepAliveNextSlot;
 	Int  m_minFpsPlayer;
 	Int  m_minFps;
 	UnsignedInt m_smallestPacketArrivalCushion;

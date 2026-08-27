@@ -218,6 +218,12 @@ map. Ctrl+A is still everything at once.
   has actually stopped talking before it does that. If everybody is still sending, it waits and
   catches up. If a player really has gone quiet, the screen comes up as before, and there is a
   hard limit so a genuinely wedged game still gives you the screen rather than hanging forever.
+- **The setting that keeps your connection alive through a router was never being read.** Every
+  online game sends a small packet to each player now and then purely so the router in between does
+  not quietly close the door it opened for them. How often that happens was a configurable number
+  that the game printed at startup and then ignored. It is a real setting now, and it is kept inside
+  the range that actually keeps the door open — a game can ask for these packets more often on a
+  fussy connection, but nothing can set it so far apart that the connection lapses between them.
 
 ## Sharper textures, for free
 

@@ -43,6 +43,7 @@
 #include "GameClient/MessageBox.h"
 #include "GameNetwork/ConnectionManager.h"
 #include "GameNetwork/StallJudgement.h"
+#include "GameNetwork/KeepAliveSchedule.h"
 #include "GameNetwork/LANAPICallbacks.h"
 #include "GameNetwork/NAT.h"
 #include "GameNetwork/NetCommandWrapperList.h"
@@ -134,6 +135,8 @@ ConnectionManager::ConnectionManager(void)
 		m_frameData[i] = NULL;
 		m_lastHeardFrom[i] = 0;
 	}
+	m_keepAliveRoundStart = 0;
+	m_keepAliveNextSlot = 0;
 	m_transport = NULL;
 	m_disconnectManager = NULL;
 	m_pendingCommands = NULL;
@@ -178,6 +181,8 @@ void ConnectionManager::init()
 	for (i = 0; i < MAX_SLOTS; ++i) {
 		m_lastHeardFrom[i] = 0;
 	}
+	m_keepAliveRoundStart = 0;
+	m_keepAliveNextSlot = 0;
 
 	m_localSlot = -1;
 #ifdef MEMORYPOOL_DEBUG
@@ -1689,35 +1694,37 @@ void ConnectionManager::determineRouterFallbackPlan() {
 */
 
 void ConnectionManager::doKeepAlive() {
-	static Int nextIndex = 0;
-	static time_t startTime = 0;
-
 	time_t curTime = timeGetTime();
 
-	if (startTime == 0) {
-		startTime = curTime;
-		return;
+	if (m_keepAliveRoundStart == 0) {
+		m_keepAliveRoundStart = curTime;
+		m_keepAliveNextSlot = 0;
 	}
 
-	time_t numSeconds = (curTime - startTime) / 1000;
+	/* EA counted whole seconds against MAX_SLOTS here, in two function statics, which made the
+		 interval a hardcoded 7-8 s and left NetworkKeepAliveDelay parsed, logged and never read.
+		 The round is the knob now, bounded - see KeepAliveSchedule.h. */
+	UnsignedInt roundMS = keepAliveRoundMS( TheGlobalData->m_networkKeepAliveDelay );
+	UnsignedInt elapsedMS = (UnsignedInt)(curTime - m_keepAliveRoundStart);
+	Int due = keepAliveSlotsDue( elapsedMS, roundMS, MAX_SLOTS );
 
-	while ((nextIndex <= numSeconds) && (nextIndex < MAX_SLOTS)) {
-//		DEBUG_LOG(("ConnectionManager::doKeepAlive - trying to send keep alive message to player %d\n", nextIndex));
-		if (m_connections[nextIndex] != NULL) {
+	while (m_keepAliveNextSlot < due) {
+		if (m_connections[m_keepAliveNextSlot] != NULL) {
 			NetKeepAliveCommandMsg *msg = newInstance(NetKeepAliveCommandMsg);
 			msg->setPlayerID(m_localSlot);
 			if (DoesCommandRequireACommandID(msg->getNetCommandType()) == TRUE) {
 				msg->setID(GenerateNextCommandID());
 			}
-//			DEBUG_LOG(("ConnectionManager::doKeepAlive - sending keep alive message to player %d\n", nextIndex));
-			sendLocalCommandDirect(msg, 1 << nextIndex);
+//			DEBUG_LOG(("ConnectionManager::doKeepAlive - sending keep alive message to player %d\n", m_keepAliveNextSlot));
+			sendLocalCommandDirect(msg, 1 << m_keepAliveNextSlot);
 			msg->detach();
 		}
-		++nextIndex;
+		++m_keepAliveNextSlot;
 	}
-	if (nextIndex == MAX_SLOTS) {
-		nextIndex = 0;
-		startTime = curTime;
+
+	if (keepAliveRoundIsOver( elapsedMS, roundMS )) {
+		m_keepAliveNextSlot = 0;
+		m_keepAliveRoundStart = curTime;
 	}
 }
 
