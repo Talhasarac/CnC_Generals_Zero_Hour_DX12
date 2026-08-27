@@ -2608,6 +2608,64 @@ TEST(resend_window_is_measured_from_the_start_of_the_match_not_four_billion)
 	CHECK( frameIsTooOldToResend( 5, 0xFFFFFF00u, KEEP ) );
 }
 
+/* The packet router fallback plan: who relays for everybody, and in what order they take over.
+	 Walked in two places, both of which used to be able to read one entry past the end of it. */
+TEST(packet_router_succession_never_walks_off_the_end_of_the_plan)
+{
+	const Int SLOTS = 8;
+	const UnsignedInt NONE = (UnsignedInt)SLOTS;		// the "plan is exhausted" answer
+	const UnsignedInt EMPTY = (UnsignedInt)-1;			// what an emptied entry is left holding
+
+	/* A full eight player game.  The last entry is the case EA's walk got wrong: the loop stopped at
+		 MAX_SLOTS-1 whether it matched or not, the unconditional ++ then made the index MAX_SLOTS, and
+		 the read landed on the member after the array. */
+	const UnsignedInt full[8] = { 0, 1, 2, 3, 4, 5, 6, 7 };
+	CHECK_EQ( nextPacketRouterSlot( full, SLOTS, 0 ), 1u );
+	CHECK_EQ( nextPacketRouterSlot( full, SLOTS, 5 ), 6u );
+	CHECK_EQ( nextPacketRouterSlot( full, SLOTS, 6 ), 7u );
+	CHECK_EQ( nextPacketRouterSlot( full, SLOTS, 7 ), NONE );
+
+	/* A four player game leaves the rest of the plan as -1.  Reading that as a slot number gives
+		 four billion, which is the same wrong answer by a different route. */
+	const UnsignedInt four[8] = { 0, 1, 2, 3, EMPTY, EMPTY, EMPTY, EMPTY };
+	CHECK_EQ( nextPacketRouterSlot( four, SLOTS, 0 ), 1u );
+	CHECK_EQ( nextPacketRouterSlot( four, SLOTS, 2 ), 3u );
+	CHECK_EQ( nextPacketRouterSlot( four, SLOTS, 3 ), NONE );
+
+	/* Every leave compacts the plan, so the entries are slot numbers with gaps and the tail fills
+		 with -1 from the end. */
+	const UnsignedInt compacted[8] = { 1, 2, 4, 5, 6, 7, EMPTY, EMPTY };
+	CHECK_EQ( nextPacketRouterSlot( compacted, SLOTS, 1 ), 2u );
+	CHECK_EQ( nextPacketRouterSlot( compacted, SLOTS, 2 ), 4u );
+	CHECK_EQ( nextPacketRouterSlot( compacted, SLOTS, 7 ), NONE );
+
+	/* Asking about a slot that is not in the plan at all - the state the hardcoded initial router
+		 could produce when slot 0 held no human player. */
+	CHECK_EQ( nextPacketRouterSlot( compacted, SLOTS, 0 ), NONE );
+	CHECK_EQ( nextPacketRouterSlot( compacted, SLOTS, 3 ), NONE );
+
+	/* Last player standing. */
+	const UnsignedInt alone[8] = { 3, EMPTY, EMPTY, EMPTY, EMPTY, EMPTY, EMPTY, EMPTY };
+	CHECK_EQ( nextPacketRouterSlot( alone, SLOTS, 3 ), NONE );
+
+	/* The succession is a walk of the plan, never a re-election: repeated calls march down the plan
+		 in order and stop, so two machines running it on the same plan cannot end up disagreeing
+		 about who is relaying.  That property is why the plan is not reordered from local latency
+		 measurements - see MULTIPLAYER.md 2.5. */
+	UnsignedInt router = compacted[0];
+	Int steps = 0;
+	while( router < (UnsignedInt)SLOTS )
+	{
+		UnsignedInt next = nextPacketRouterSlot( compacted, SLOTS, router );
+		CHECK( next == NONE || next > router );
+		router = next;
+		++steps;
+		CHECK( steps <= SLOTS );
+	}
+	CHECK_EQ( steps, 6 );		// six live entries, then the plan is out
+
+}
+
 TEST(selfslug_is_monotonic_in_the_cushion)
 {
 	// once there is enough margin the answer must stay no, or the frame rate would oscillate

@@ -89,4 +89,14 @@ Int settleRoomFrameRate( Int minFps, Int fpsLimit );
 /** The rate to actually command: one probe step above the settled rate, never above the limit. */
 Int probeRoomFrameRate( Int settledFps, Int fpsLimit );
 
+/* Every machine keeps the same packet router fallback plan - the list of who relays for everybody,
+	 in the order they take over - built from the shared slot list, so the succession is identical on
+	 every machine without anyone having to agree about it at run time.  Walking that list is the one
+	 place a disagreement would be fatal, and it is also where the walk ran off the end. */
+
+/** The slot that takes over relaying after currentSlot, or maxSlots when there is nobody left.
+	  fallback holds maxSlots entries, valid slots are below maxSlots, and anything else (the -1
+	  padding an emptied entry is left with) ends the list. */
+UnsignedInt nextPacketRouterSlot( const UnsignedInt *fallback, Int maxSlots, UnsignedInt currentSlot );
+
 #endif // _CUSHION_METRICS_H_

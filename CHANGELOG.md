@@ -270,6 +270,14 @@ map. Ctrl+A is still everything at once.
   once. A stall there had to sit through the retry and then the disconnect screen instead of being
   repaired on the spot. It counts properly now.
 
+- **When the player relaying everyone's orders left, the game could pick a relay that does not
+  exist.** One player in every online game quietly carries the traffic for everybody, and there is a
+  standing order of who takes over when they drop out. Reading the next name off that list could
+  read past the end of it and come back with a number that was never a player at all, and the game
+  then tried to talk to them twice a second. That is a crash rather than a stall, and it lands at the
+  worst moment in a match — right after someone has already dropped. The list is now read properly,
+  and when it genuinely runs out the game says so instead of inventing somebody.
+
 ## Sharper textures, for free
 
 Zero Hour shipped downscaled copies of a lot of the base game's textures, and because of the order

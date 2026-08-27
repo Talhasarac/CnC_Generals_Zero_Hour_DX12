@@ -106,3 +106,31 @@ Int probeRoomFrameRate( Int settledFps, Int fpsLimit )
 
 	return probed;
 }
+
+UnsignedInt nextPacketRouterSlot( const UnsignedInt *fallback, Int maxSlots, UnsignedInt currentSlot )
+{
+	/* EA wrote this as `while ((index < (MAX_SLOTS-1)) && (fallback[index] != playerID)) ++index;`
+		 followed by `++index; return fallback[index];`.  The loop stops at MAX_SLOTS-1 whether it found
+		 anything or not, so the increment can leave index at MAX_SLOTS and the return reads one entry
+		 past the end of the array.  In ConnectionManager that entry is m_localAddr, the local IP: the
+		 "new packet router" comes out as a number around three billion, and the next metrics send
+		 indexes m_connections[] with it.  Two ways in - the current router sitting in the last entry
+		 of a full eight player plan, or not being in the plan at all - and the same walk is written
+		 out twice, in getNextPacketRouterSlot and in disconnectPlayer. */
+	Int index = 0;
+	while( (index < maxSlots) && (fallback[index] != currentSlot) )
+		++index;
+
+	if( index >= maxSlots )
+		return (UnsignedInt)maxSlots;		// not in the plan, so nothing follows it
+
+	++index;
+	if( index >= maxSlots )
+		return (UnsignedInt)maxSlots;		// last in the plan, nobody left to take over
+
+	UnsignedInt next = fallback[index];
+	if( next >= (UnsignedInt)maxSlots )
+		return (UnsignedInt)maxSlots;		// the -1 padding an emptied entry carries
+
+	return next;
+}

@@ -1379,7 +1379,12 @@ void ConnectionManager::updateRunAhead(Int oldRunAhead, Int frameRate, Bool didS
 			} else {
 				//DEBUG_LOG(("ConnectionManager::updateRunAhead - average latency = %f, average fps = %d, didSelfSlug = false\n", m_frameMetrics.getAverageLatency(), m_frameMetrics.getAverageFPS()));
 			}
-			m_connections[m_packetRouterSlot]->sendNetCommandMsg(msg, 1 << m_packetRouterSlot);
+			// Every other m_connections[m_packetRouterSlot] in this file is bounds tested first; this one
+			// was not, and it is the one that runs twice a second.  m_packetRouterSlot is MAX_SLOTS when
+			// the fallback plan has run out, and used to be able to hold a whole IP address.
+			if ((m_packetRouterSlot < MAX_SLOTS) && (m_connections[m_packetRouterSlot] != NULL)) {
+				m_connections[m_packetRouterSlot]->sendNetCommandMsg(msg, 1 << m_packetRouterSlot);
+			}
 			msg->detach();
 		}
 		lasttimesent = curTime;
@@ -1783,12 +1788,10 @@ PlayerLeaveCode ConnectionManager::disconnectPlayer(Int slot) {
 //	}
 
 	if (slot == m_packetRouterSlot) {
-		Int index = 0;
-		while ((index < (MAX_SLOTS-1)) && (m_packetRouterFallback[index] != m_packetRouterSlot)) {
-			++index;
-		}
-		++index;
-		m_packetRouterSlot = m_packetRouterFallback[index];
+		// The same walk as getNextPacketRouterSlot, and it used to run off the end of the plan in the
+		// same way - see nextPacketRouterSlot in CushionMetrics.cpp.  MAX_SLOTS out means the plan is
+		// exhausted, which every reader of m_packetRouterSlot already tests for.
+		m_packetRouterSlot = nextPacketRouterSlot(m_packetRouterFallback, MAX_SLOTS, m_packetRouterSlot);
 		DEBUG_LOG(("Packet router left.  New packet router is slot %d\n", m_packetRouterSlot));
 		retval = PLAYERLEAVECODE_PACKETROUTER;
 	}
@@ -1939,6 +1942,13 @@ void ConnectionManager::parseUserList(const GameInfo *game)
 
 		}
 	}
+
+	// The router is the head of the fallback plan, which is what EA's own commented-out
+	// determineRouterFallbackPlan did.  init() hardcodes slot 0 instead, and slot 0 is only in the
+	// plan at all if slot 0 holds a human player - otherwise the router was a slot nobody relays for,
+	// and the first succession then walked a plan the router was not in.  Built from the shared slot
+	// list, so every machine computes the same head without exchanging anything.
+	m_packetRouterSlot = m_packetRouterFallback[0];
 #ifdef MEMORYPOOL_DEBUG
 	TheMemoryPoolFactory->debugSetInitFillerIndex(m_localSlot);
 #endif
@@ -2492,12 +2502,7 @@ void ConnectionManager::sendSingleFrameToPlayer(UnsignedInt playerID, UnsignedIn
 }
 
 UnsignedInt ConnectionManager::getNextPacketRouterSlot(UnsignedInt playerID) {
-	Int index = 0;
-	while ((index < (MAX_SLOTS-1)) && (m_packetRouterFallback[index] != playerID)) {
-		++index;
-	}
-	++index;
-	return m_packetRouterFallback[index];
+	return nextPacketRouterSlot(m_packetRouterFallback, MAX_SLOTS, playerID);
 }
 
 void ConnectionManager::requestFrameDataResend(Int playerID, UnsignedInt frame) {
