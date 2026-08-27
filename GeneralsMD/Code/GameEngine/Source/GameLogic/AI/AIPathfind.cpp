@@ -122,13 +122,13 @@ enum { PF_QUEUE, PF_FIND, PF_CLOSEST, PF_ATTACK, PF_SAFE, PF_PATCH, PF_MOVEAWAY,
 			 PF_ZONES, PF_ZONEMOD,
 			 // count-only from here down: these sit in the innermost loops, where two
 			 // QueryPerformanceCounter calls each would cost more than the thing being measured
-			 PF_EXPAND, PF_MC_EXPAND, PF_MC_LINE, PF_MC_LINEPASS, PF_OPENWALK, PF_ZONEMERGE,
+			 PF_EXPAND, PF_MC_EXPAND, PF_MC_LINE, PF_MC_LINEPASS, PF_NEWBUCKET, PF_ZONEMERGE,
 			 PF_SLOTS };
 static const char *thePFSlotName[ PF_SLOTS ] =
 { "queue", "find", "closest", "attack", "safe", "patch", "moveaway",
 	"adjust", "goal", "pos", "footprint", "exist", "hier", "movecheck",
 	"zones", "zonemod",
-	"expand", "mc.expand", "mc.line", "mc.linepass", "openwalk", "zone.merge" };
+	"expand", "mc.expand", "mc.line", "mc.linepass", "newbucket", "zone.merge" };
 static __int64 thePFTicks[ PF_SLOTS ];
 static Int thePFCalls[ PF_SLOTS ];
 static Int thePFDepth = 0;
@@ -1250,6 +1250,7 @@ PathfindCellInfo *PathfindCellInfo::getACellInfo(PathfindCell *cell,const ICoord
 		info->m_totalCost = 0;
 		info->m_open = 0;
 		info->m_closed = 0;
+		info->m_openBucket = 0;
 		info->m_goalUnitID = INVALID_ID;
 		info->m_posUnitID = INVALID_ID;
 		info->m_goalAircraftID = INVALID_ID;
@@ -1604,24 +1605,151 @@ Bool PathfindCell::removeObstacle( Object *obstacle )
 /* EA walked this list from the head on every insert and stopped only past the last cell of equal
 	 cost, so a search with a wide frontier paid O(open list) per cell it expanded.  Measured with the
 	 `openwalk` counter on a 1-human / 7-AI skirmish: 62,490,219 walk steps over 108 slow frames, with
-	 8,871,712 of them in a single frame - about 400 steps per insert.  The list is doubly linked, so
-	 keep a tail pointer and walk in from whichever end is nearer the new cell's cost, taking the two
-	 common cases (cheaper than everything, dearer than everything) in constant time.  The insertion
-	 point is unchanged - still after every cell of equal cost - so the search expands exactly the
-	 cells it did before and lockstep holds. */
+	 8,871,712 of them in a single frame - about 400 steps per insert.  Walking in from whichever end
+	 of the doubly linked list was nearer took that to ~80 steps per expanded cell, which was still
+	 the largest single cost in the search: 434,496 walk steps against 5,463 expansions on one slow
+	 frame.
+
+	 So index the list instead of walking it.  A* keys on m_totalCost and that is an UnsignedShort,
+	 so the whole key space fits in an array - this is Dial's bucket queue laid over the list EA
+	 already had.  theOpenBucketTail[c] is the last cell of cost c currently on the list, so an
+	 insert is "link in after theOpenBucketTail[c]" and touches nothing else.  The only search left
+	 is finding the nearest occupied bucket below c the first time a cost appears, and that is a
+	 three level bit index - 65536 bits, 2048 bits of summary over those, 64 bits over those - not a
+	 scan.
+
+	 The list itself is untouched: same cells, same order, still inserted after every cell of equal
+	 cost.  The search therefore expands exactly the cells it expanded before, which is what lockstep
+	 depends on - a different expansion order is a different path on one machine and a mismatch.
+
+	 The `openwalk` counter in the pathfinder profile line is gone with the walk it counted; the slot
+	 is now `newbucket` and counts inserts that were the first at their cost, which is the only work
+	 the index still does per insert. */
 static PathfindCellInfo *theOpenListTail = NULL;
+
+enum { OPEN_BUCKET_COUNT = 65536 };								// m_totalCost is an UnsignedShort
+
+static PathfindCellInfo *theOpenBucketTail[OPEN_BUCKET_COUNT];		// last cell of each cost, or NULL
+static UnsignedInt theOpenBucketBits0[OPEN_BUCKET_COUNT/32];		// bit c: bucket c is not empty
+static UnsignedInt theOpenBucketBits1[OPEN_BUCKET_COUNT/1024];		// bit w: bits0[w] is not zero
+static UnsignedInt theOpenBucketBits2[OPEN_BUCKET_COUNT/32768];		// bit w: bits1[w] is not zero
+
+/// index of the most significant set bit; the word must not be zero
+static Int openBucketHighestBit( UnsignedInt word )
+{
+	Int bit = 0;
+	if (word & 0xFFFF0000) { bit += 16; word >>= 16; }
+	if (word & 0x0000FF00) { bit += 8; word >>= 8; }
+	if (word & 0x000000F0) { bit += 4; word >>= 4; }
+	if (word & 0x0000000C) { bit += 2; word >>= 2; }
+	if (word & 0x00000002) { bit += 1; }
+	return bit;
+}
+
+static void openBucketMark( UnsignedInt cost )
+{
+	theOpenBucketBits0[cost>>5] |= 1U << (cost & 31);
+	theOpenBucketBits1[cost>>10] |= 1U << ((cost>>5) & 31);
+	theOpenBucketBits2[cost>>15] |= 1U << ((cost>>10) & 31);
+}
+
+static void openBucketClear( UnsignedInt cost )
+{
+	UnsignedInt w0 = cost >> 5;
+	theOpenBucketBits0[w0] &= ~(1U << (cost & 31));
+	if (theOpenBucketBits0[w0] == 0) {
+		UnsignedInt w1 = w0 >> 5;
+		theOpenBucketBits1[w1] &= ~(1U << (w0 & 31));
+		if (theOpenBucketBits1[w1] == 0) {
+			theOpenBucketBits2[w1>>5] &= ~(1U << (w1 & 31));
+		}
+	}
+}
+
+/// the highest occupied bucket strictly below cost, or -1 when there is none
+static Int openBucketBelow( UnsignedInt cost )
+{
+	UnsignedInt w0 = cost >> 5;
+	UnsignedInt mask = (cost & 31) ? ((1U << (cost & 31)) - 1) : 0;
+	UnsignedInt bits = theOpenBucketBits0[w0] & mask;
+	if (bits)
+		return (Int)((w0 << 5) | openBucketHighestBit(bits));
+
+	// nothing lower in our own word - find the last non-empty word below it, through the summaries
+	UnsignedInt w1 = w0 >> 5;
+	mask = (w0 & 31) ? ((1U << (w0 & 31)) - 1) : 0;
+	bits = theOpenBucketBits1[w1] & mask;
+	if (bits == 0) {
+		UnsignedInt w2 = w1 >> 5;
+		mask = (w1 & 31) ? ((1U << (w1 & 31)) - 1) : 0;
+		UnsignedInt top = theOpenBucketBits2[w2] & mask;
+		while (top == 0) {
+			if (w2 == 0)
+				return -1;								// nothing anywhere below us
+			--w2;
+			top = theOpenBucketBits2[w2];
+		}
+		w1 = (w2 << 5) | openBucketHighestBit(top);
+		bits = theOpenBucketBits1[w1];
+	}
+	w0 = (w1 << 5) | openBucketHighestBit(bits);
+	return (Int)((w0 << 5) | openBucketHighestBit(theOpenBucketBits0[w0]));
+}
+
+/// empty the index; walks the occupied buckets, not the 65536 the array can hold
+static void openBucketReset( void )
+{
+	UnsignedInt w2;
+	for (w2 = 0; w2 < OPEN_BUCKET_COUNT/32768; w2++) {
+		UnsignedInt top = theOpenBucketBits2[w2];
+		while (top) {
+			Int b2 = openBucketHighestBit(top);
+			top &= ~(1U << b2);
+			UnsignedInt w1 = (w2 << 5) | b2;
+			UnsignedInt mid = theOpenBucketBits1[w1];
+			while (mid) {
+				Int b1 = openBucketHighestBit(mid);
+				mid &= ~(1U << b1);
+				UnsignedInt w0 = (w1 << 5) | b1;
+				UnsignedInt low = theOpenBucketBits0[w0];
+				while (low) {
+					Int b0 = openBucketHighestBit(low);
+					low &= ~(1U << b0);
+					theOpenBucketTail[(w0 << 5) | b0] = NULL;
+				}
+				theOpenBucketBits0[w0] = 0;
+			}
+			theOpenBucketBits1[w1] = 0;
+		}
+		theOpenBucketBits2[w2] = 0;
+	}
+}
 
 void PathfindCell::setOpenListSeed( PathfindCell *cell )
 {
+	// a search starts by assigning its start cell to m_openList by hand rather than inserting it,
+	// so the index has to be told about that cell here - otherwise the first real insert files
+	// itself against an index that does not know the list has anything in it
+	openBucketReset();
 	theOpenListTail = cell ? cell->m_info : NULL;
+	if (theOpenListTail) {
+		theOpenListTail->m_openBucket = theOpenListTail->m_totalCost;
+		theOpenBucketTail[theOpenListTail->m_openBucket] = theOpenListTail;
+		openBucketMark( theOpenListTail->m_openBucket );
+	}
 }
 
 PathfindCell *PathfindCell::putOnSortedOpenList( PathfindCell *list )
 {
 	DEBUG_ASSERTCRASH(m_info, ("Has to have info."));
 	DEBUG_ASSERTCRASH(m_info->m_closed==FALSE && m_info->m_open==FALSE, ("Serious error - Invalid flags. jba"));
+	const UnsignedInt cost = m_info->m_totalCost;
+	m_info->m_openBucket = cost;
+
 	if (list == NULL)
 	{
+		// an empty list means an empty index - nothing can still be holding a bucket
+		openBucketReset();
 		list = this;
 		m_info->m_prevOpen = NULL;
 		m_info->m_nextOpen = NULL;
@@ -1630,40 +1758,13 @@ PathfindCell *PathfindCell::putOnSortedOpenList( PathfindCell *list )
 	else
 	{
 		DEBUG_ASSERTCRASH(theOpenListTail && theOpenListTail->m_nextOpen==NULL, ("Open list tail is stale."));
-		const UnsignedInt cost = m_info->m_totalCost;
-		PathfindCellInfo *tail = theOpenListTail;
-		PathfindCellInfo *before;		// insert after this one, NULL means at the head
-
-		if (cost >= tail->m_totalCost)
+		PathfindCellInfo *before = theOpenBucketTail[cost];		// after the last cell of our own cost
+		if (before == NULL)
 		{
-			before = tail;												// dearer than everything - append
-		}
-		else if (cost < list->m_info->m_totalCost)
-		{
-			before = NULL;												// cheaper than everything - prepend
-		}
-		else if (cost - list->m_info->m_totalCost <= tail->m_totalCost - cost)
-		{
-			// nearer the cheap end - walk forward to the first cell that costs more than us
-			PathfindCellInfo *c;
-			before = NULL;
-			for( c = list->m_info; c; c = c->m_nextOpen )
-			{
-				pfBump( PF_OPENWALK );
-				if (c->m_totalCost > cost)
-					break;
-				before = c;
-			}
-		}
-		else
-		{
-			// nearer the dear end - walk back to the last cell that does not cost more than us
-			before = tail;
-			while (before && before->m_totalCost > cost)
-			{
-				pfBump( PF_OPENWALK );
-				before = before->m_prevOpen;
-			}
+			// first cell at this cost - go in after the dearest cell that is still cheaper than us
+			pfBump( PF_NEWBUCKET );
+			Int below = openBucketBelow( cost );
+			before = (below < 0) ? NULL : theOpenBucketTail[below];
 		}
 
 		if (before)
@@ -1685,6 +1786,10 @@ PathfindCell *PathfindCell::putOnSortedOpenList( PathfindCell *list )
 		}
 	}
 
+	// we went in after every other cell of our cost, so we are that bucket's tail now
+	theOpenBucketTail[cost] = m_info;
+	openBucketMark( cost );
+
 	// mark newCell as being on open list
 	m_info->m_open = true;
 	m_info->m_closed = false;
@@ -1698,6 +1803,20 @@ PathfindCell *PathfindCell::removeFromOpenList( PathfindCell *list )
 {
 	DEBUG_ASSERTCRASH(m_info, ("Has to have info."));
 	DEBUG_ASSERTCRASH(m_info->m_closed==FALSE && m_info->m_open==TRUE, ("Serious error - Invalid flags. jba"));
+	/* By the bucket we were filed under, not by m_totalCost: callers raise a cell's cost while it
+		 is still linked and only then take it off, and filing the removal by the new cost would
+		 leave the old bucket pointing at a cell that is no longer on the list. */
+	const UnsignedInt bucket = m_info->m_openBucket;
+	if (theOpenBucketTail[bucket] == m_info)
+	{
+		if (m_info->m_prevOpen && m_info->m_prevOpen->m_openBucket == bucket) {
+			theOpenBucketTail[bucket] = m_info->m_prevOpen;		// the cell in front of us holds it now
+		} else {
+			theOpenBucketTail[bucket] = NULL;					// we were the only one at this cost
+			openBucketClear( bucket );
+		}
+	}
+
 	if (theOpenListTail == m_info)
 		theOpenListTail = m_info->m_prevOpen;
 	if (m_info->m_nextOpen)
@@ -1718,6 +1837,8 @@ PathfindCell *PathfindCell::removeFromOpenList( PathfindCell *list )
 /// remove all cells from "open" list
 Int PathfindCell::releaseOpenList( PathfindCell *list )
 {
+	// the cells are about to hand their infos back, so nothing may still be filed against them
+	openBucketReset();
 	theOpenListTail = NULL;
 	Int count = 0;
 	while (list) {

@@ -827,6 +827,13 @@ about four hundred steps every time, eight times for every square examined. The 
 so it now comes in from whichever end is closer, and the two ordinary cases — cheaper than
 everything, dearer than everything — take no steps at all. Same order out, same routes, less work.
 
+**Then the queue itself, properly.** Coming in from the nearer end still cost about eighty steps
+for every square the search looked at — four hundred and thirty thousand steps in a single turn on
+a busy map, more work than the searching. So the list is not read at all any more. The game keeps a
+direct pointer to where each price belongs, so adding a square to the queue is one step instead of
+eighty, however long the queue has grown. What comes out is in exactly the same order, which is the
+point: same queue, same routes, same game on every machine — without the reading.
+
 **And the ten-second hiccup.** Every ten seconds or so the game redraws its map of which areas
 connect to which — it has to, because you and seven opponents keep putting buildings in the way.
 Joining two areas together meant rewriting the entire table, once per join, and on a big map that

@@ -297,6 +297,12 @@ protected:
 	/// @todo Do we need both mark values in this cell?  Can't store a single value and compare it?
 	UnsignedInt m_open:1;													///< place for marking this cell as on the open list
 	UnsignedInt m_closed:1;												///< place for marking this cell as on the closed list
+	/* The open list is indexed by cost (see the bucket queue in AIPathfind.cpp).  This is the
+		 bucket the cell was filed under, which is not always m_totalCost any more: callers change
+		 the cost of a cell that is still linked into the list and only then take it off, so the
+		 cell has to remember where it actually went.  Sixteen bits, the width of m_totalCost, and
+		 it rides in the spare room of this bitfield word so PathfindCellInfo does not grow. */
+	UnsignedInt m_openBucket:16;
 };
 
 /**

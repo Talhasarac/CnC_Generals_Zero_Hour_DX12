@@ -1692,6 +1692,152 @@ TEST(pathfind_open_list_insert_keeps_ascending_cost_and_insertion_order_on_ties)
 }
 
 
+/* The open list is not walked any more, it is indexed by cost: a bucket per possible m_totalCost,
+	 with a three level bit index over the occupied ones.  That index is the part that can be wrong
+	 in ways the previous test would not notice, because its costs all live inside one 32 bit word of
+	 the bottom level.  This one spreads them across the whole 16 bit key space, so finding the
+	 nearest occupied bucket below a new cost has to climb the summaries and come back down, and it
+	 empties buckets from both ends so the clear paths run too.
+
+	 It also reproduces the one thing the game does that the index cannot see coming: raising a
+	 cell's cost while it is still linked into the list, and only then taking it off.  That is
+	 findAttackPath's decrease-key, and it is why a cell remembers which bucket it went into. */
+TEST(pathfind_open_list_bucket_index_finds_the_right_neighbour_across_the_whole_cost_range)
+{
+	CHECK(bootOnce());
+	PathfindCellInfo::allocateCellInfos();
+
+	const Int count = 300;
+	const Int spares = 8;												// held back, to be inserted at costs that were vacated
+	PathfindCell *cells = MSGNEW("PathfindCellInfo") PathfindCell[ count + spares ];
+	theOpenTestCells = cells;
+
+	std::vector<Int> expected;
+	PathfindCell *list = NULL;
+	Int seed = 987654321;
+	Int i;
+
+	/* costs spread over the whole UnsignedShort range, including both ends, with enough repeats to
+		 keep the tie order under test as well */
+	for( i = 0; i < count; i++ )
+	{
+		seed = seed * 1103515245 + 12345;
+		UnsignedInt cost;
+		switch( i % 10 )
+		{
+			case 0:  cost = 0; break;											// the very bottom bucket
+			case 1:  cost = 65535; break;									// the very top one
+			case 2:  cost = 31; break;										// last bit of word 0
+			case 3:  cost = 32; break;										// first bit of word 1
+			case 4:  cost = 1023; break;									// last bucket under summary word 0
+			case 5:  cost = 1024; break;									// first bucket over it
+			case 6:  cost = 32767; break;									// last bucket under the top word 0
+			case 7:  cost = 32768; break;									// first bucket in top word 1
+			default: cost = (UnsignedInt)((seed >> 8) & 0xFFFF); break;
+		}
+		ICoord2D pos;
+		pos.x = (UnsignedShort)(i % 64);
+		pos.y = (UnsignedShort)(i / 64);
+		CHECK(cells[ i ].allocateInfo( pos ));
+		cells[ i ].setTotalCost( cost );
+
+		std::vector<Int>::iterator it = expected.begin();
+		while( it != expected.end() && cells[ *it ].getTotalCost() <= cost )
+			++it;
+		expected.insert( it, i );
+
+		list = cells[ i ].putOnSortedOpenList( list );
+	}
+	CHECK(openListOrderMatches( list, expected ));
+
+	/* the game's decrease-key, in the game's order: change the cost first, take the cell off
+		 second.  If the removal is filed under the new cost instead of the bucket the cell is
+		 actually in, the old bucket is left pointing at a cell that is no longer on the list and
+		 the next insert at that cost links itself into nothing. */
+	Int rekeyed[ 6 ];
+	rekeyed[ 0 ] = expected.front();
+	rekeyed[ 1 ] = expected.back();
+	rekeyed[ 2 ] = expected[ expected.size() / 3 ];
+	rekeyed[ 3 ] = expected[ expected.size() / 2 ];
+	rekeyed[ 4 ] = expected[ 1 ];
+	rekeyed[ 5 ] = expected[ expected.size() - 2 ];
+	for( i = 0; i < 6; i++ )
+	{
+		Int c = rekeyed[ i ];
+		UnsignedInt was = cells[ c ].getTotalCost();
+		UnsignedInt cost = (UnsignedInt)(i * 9973) & 0xFFFF;
+		cells[ c ].setTotalCost( cost );										// cost changes while still linked
+		list = cells[ c ].removeFromOpenList( list );
+		expected.erase( std::find( expected.begin(), expected.end(), c ) );
+
+		std::vector<Int>::iterator it = expected.begin();
+		while( it != expected.end() && cells[ *it ].getTotalCost() <= cost )
+			++it;
+		expected.insert( it, c );
+		list = cells[ c ].putOnSortedOpenList( list );
+		CHECK(openListOrderMatches( list, expected ));
+
+		/* and now a fresh cell at the cost the rekeyed one used to have.  This is what makes the
+			 stale bucket visible: if the removal was filed under the new cost, the old cost still
+			 points at the rekeyed cell, which has since moved somewhere else entirely, and this
+			 insert lands next to it instead of where its own cost belongs. */
+		Int spare = count + i;
+		ICoord2D spos;
+		spos.x = (UnsignedShort)(spare % 64);
+		spos.y = (UnsignedShort)(spare / 64);
+		CHECK(cells[ spare ].allocateInfo( spos ));
+		cells[ spare ].setTotalCost( was );
+		it = expected.begin();
+		while( it != expected.end() && cells[ *it ].getTotalCost() <= was )
+			++it;
+		expected.insert( it, spare );
+		list = cells[ spare ].putOnSortedOpenList( list );
+		CHECK(openListOrderMatches( list, expected ));
+	}
+
+	/* empty it from the cheap end - an A* pop loop - and check after every pop, because a bucket
+		 left marked occupied after its last cell leaves is exactly the failure that would send the
+		 next insert to a freed cell */
+	while( expected.size() > 100 )
+	{
+		Int c = expected.front();
+		expected.erase( expected.begin() );
+		list = cells[ c ].removeFromOpenList( list );
+		CHECK(openListOrderMatches( list, expected ));
+	}
+
+	/* and the rest from the dear end, which drains the top summary word */
+	while( !expected.empty() )
+	{
+		Int c = expected.back();
+		expected.pop_back();
+		list = cells[ c ].removeFromOpenList( list );
+		CHECK(openListOrderMatches( list, expected ));
+	}
+	CHECK(list == NULL);
+
+	/* an emptied index must be empty: two cells at costs that were both heavily used above, in
+		 the wrong order, still come out sorted */
+	cells[ 0 ].setTotalCost( 65535 );
+	list = cells[ 0 ].putOnSortedOpenList( NULL );
+	cells[ 1 ].setTotalCost( 0 );
+	list = cells[ 1 ].putOnSortedOpenList( list );
+	cells[ 2 ].setTotalCost( 32768 );
+	list = cells[ 2 ].putOnSortedOpenList( list );
+	CHECK(list == &cells[ 1 ]);
+	CHECK(list->getNextOpen() == &cells[ 2 ]);
+	CHECK(list->getNextOpen()->getNextOpen() == &cells[ 0 ]);
+	CHECK(list->getNextOpen()->getNextOpen()->getNextOpen() == NULL);
+
+	PathfindCell::releaseOpenList( list );
+	for( i = 0; i < count + spares; i++ )
+		cells[ i ].releaseInfo();
+	delete [] cells;
+	theOpenTestCells = NULL;
+	PathfindCellInfo::releaseCellInfos();
+}
+
+
 //-------------------------------------------------------------------------------------------------
 // Zone equivalency sets (pathfindZoneFind / pathfindZoneUnion / pathfindZoneFlatten).
 //
