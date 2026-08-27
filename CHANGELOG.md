@@ -185,6 +185,22 @@ map. Ctrl+A is still everything at once.
   around, backs off when a link is genuinely down rather than hammering it, and never waits longer
   than the two seconds it used to, so nobody ends up worse off than before.
 
+- **A desynced match stops, instead of playing on as two different games.** The game already
+  noticed when two machines stopped agreeing about the world — and then kept going anyway, letting
+  both sides play out a match that had already stopped being the same match, and telling you at the
+  score screen. Every order given after that point lands somewhere different on each screen. It now
+  stops the moment it notices, on every machine at once.
+- **A player leaving is no longer reported as a desync.** Someone quitting stays listed as present
+  for a few moments longer than their last heartbeat survives, and the game read that gap — a
+  packet that is not here yet — as proof that the two sides disagreed. Losing a player is now
+  losing a player.
+- **When a match does desync, the game writes down what happened.** Until now the whole report was
+  one number per player: they differ. The game now keeps a rolling record of every object in the
+  world — where it was, how hurt it was, and its own fingerprint — for the last several checkpoints,
+  and writes it out on both machines when the check fails. Lining up the two files points at the
+  single unit, building or projectile that went its own way, which is the difference between fixing
+  a desync and guessing at it.
+
 ## Sharper textures, for free
 
 Zero Hour shipped downscaled copies of a lot of the base game's textures, and because of the order

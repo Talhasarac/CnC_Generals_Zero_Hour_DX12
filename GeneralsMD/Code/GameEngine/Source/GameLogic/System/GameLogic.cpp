@@ -406,6 +406,7 @@ void GameLogic::init( void )
 	//ThePlayerList->setLocalPlayer(0);
 
 	m_CRC = 0;
+	m_crcSnapshots.clear();
 	m_gamePaused = FALSE;
 	m_inputEnabledMemory = TRUE;
 	m_mouseVisibleMemory = TRUE;
@@ -460,6 +461,7 @@ void GameLogic::reset( void )
 	TheScriptEngine->reset();
 
 	m_CRC = 0;
+	m_crcSnapshots.clear();
 	for(Int i = 0; i < MAX_SLOTS; ++i)
 	{
 		m_progressComplete[i] = FALSE;
@@ -2567,10 +2569,15 @@ void GameLogic::processCommandList( CommandList *list )
 					++numPlayers;
 			}
 
-			if (m_cachedCRCs.size() < numPlayers)
+			/* A player who leaves stays "connected" for a few more frames than their last CRC
+				 message survives, and at a short CRC interval that gap is hit routinely.  Missing CRCs
+				 are not evidence that anybody computed anything differently - they are evidence that a
+				 packet is not here yet.  Say so and let the next CRC frame decide, instead of blaming
+				 the leaver for a desync that never happened. */
+			if (m_cachedCRCs.size() < (size_t)numPlayers)
 			{
-				DEBUG_CRASH(("Not enough CRCs!"));
-				sawCRCMismatch = TRUE;
+				DEBUG_LOG(("Only %d CRCs from %d connected players on frame %d - not comparing\n",
+					m_cachedCRCs.size(), numPlayers, m_frame));
 			}
 			else
 			{
@@ -2603,10 +2610,101 @@ void GameLogic::processCommandList( CommandList *list )
 			}
 #endif DEBUG_LOGGING
 			TheNetwork->setSawCRCMismatch();
+
+			// write down what the world looked like on the frame that diverged, while we still have it
+			writeMismatchDump( numPlayers );
+
+			/* Playing on is the worst of the options: two worlds that already disagree keep diverging
+				 for the rest of the match, every order after this point lands somewhere different on
+				 each machine, and the players only find out at the score screen.  Stop here instead -
+				 every machine detects the same mismatch on the same frame, so everyone stops together. */
+			TheMessageStream->appendMessage( GameMessage::MSG_CLEAR_GAME_DATA );
 		}
 	}
 
 }  // end processCommandList
+
+// ------------------------------------------------------------------------------------------------
+/** A mismatch says the worlds diverged; it does not say where.  This writes down everything we
+	* kept about the frame that diverged, so that two players' dumps can be diffed: the first object
+	* whose running CRC differs is the object whose state differs, and the fields printed next to it
+	* usually say how.  Every machine writes its own file at the same frame. */
+// ------------------------------------------------------------------------------------------------
+void GameLogic::writeMismatchDump( Int numPlayers )
+{
+	/* The CRCs just compared were computed the run-ahead's worth of frames ago.  Ours is one of
+		 them, so whichever retained snapshot carries one of these values names that frame exactly. */
+	Int slot = -1;
+	for( std::map<Int, UnsignedInt>::const_iterator crcIt = m_cachedCRCs.begin();
+			 crcIt != m_cachedCRCs.end() && slot < 0; ++crcIt )
+	{
+		slot = m_crcSnapshots.findSlotByCRC( crcIt->second );
+	}
+	if( slot < 0 )
+		slot = m_crcSnapshots.getNewestSlot();
+
+	AsciiString fname = TheGlobalData->getPath_UserData();
+	fname.concat( "MismatchDump.txt" );
+
+	// a file the user's disk may refuse to give us - the one place a guard is earned
+	FILE *fp = fopen( fname.str(), "w" );
+	if( fp == NULL )
+	{
+		DEBUG_LOG(( "writeMismatchDump - could not open %s\n", fname.str() ));
+		return;
+	}
+
+	fprintf( fp, "Mismatch detected on frame %d\n", m_frame );
+	fprintf( fp, "Local player is slot %d of %d connected players; %d CRCs were compared\n\n",
+		TheNetwork ? TheNetwork->getLocalPlayerID() : 0, numPlayers, m_cachedCRCs.size() );
+
+	for( std::map<Int, UnsignedInt>::const_iterator crcIt = m_cachedCRCs.begin();
+			 crcIt != m_cachedCRCs.end(); ++crcIt )
+	{
+		Player *player = ThePlayerList->getNthPlayer( crcIt->first );
+		AsciiString name;
+		if( player )
+			name.translate( player->getPlayerDisplayName() );
+		fprintf( fp, "  player %d (%s) CRC 0x%8.8X\n", crcIt->first, name.str(), crcIt->second );
+	}
+
+	const CRCSnapshot *snap = m_crcSnapshots.getSlot( slot );
+	if( snap == NULL )
+	{
+		fprintf( fp, "\nNo CRC snapshot was retained for this frame.\n" );
+		fclose( fp );
+		return;
+	}
+
+	fprintf( fp, "\nDiverging frame is %d (world CRC 0x%8.8X, logic random seed CRC 0x%8.8X, %d objects)\n",
+		snap->m_frame, snap->m_totalCRC, snap->m_randomSeed, snap->m_objects.size() );
+	fprintf( fp, "Diff this section against another player's file; the first differing running CRC is the object that diverged.\n\n" );
+	fprintf( fp, "%6s %8s %10s %12s %12s %12s %10s  %s\n",
+		"index", "objectID", "runningCRC", "x", "y", "z", "health", "template" );
+
+	for( size_t i = 0; i < snap->m_objects.size(); ++i )
+	{
+		const CRCObjectEntry &e = snap->m_objects[i];
+		Object *obj = findObjectByID( (ObjectID)e.m_id );
+		const char *templateName = obj ? obj->getTemplate()->getName().str() : "<destroyed since>";
+		fprintf( fp, "%6d %8d 0x%8.8X %12.4f %12.4f %12.4f %10.3f  %s\n",
+			i, e.m_id, e.m_runningCRC, e.m_x, e.m_y, e.m_z, e.m_health, templateName );
+	}
+
+	fprintf( fp, "\nOther retained CRC frames:\n" );
+	for( Int n = 0; n < m_crcSnapshots.getNumSnapshots(); ++n )
+	{
+		const CRCSnapshot *other = m_crcSnapshots.getSlot( m_crcSnapshots.getNthNewestSlot( n ) );
+		if( other == NULL || other == snap )
+			continue;
+		fprintf( fp, "  frame %d: world CRC 0x%8.8X, %d objects\n",
+			other->m_frame, other->m_totalCRC, other->m_objects.size() );
+	}
+
+	fclose( fp );
+
+	DEBUG_LOG(( "Mismatch on frame %d (diverging frame %d) - wrote %s\n", m_frame, snap->m_frame, fname.str() ));
+}
 
 // ------------------------------------------------------------------------------------------------
 // ------------------------------------------------------------------------------------------------
@@ -4183,11 +4281,26 @@ UnsignedInt GameLogic::getCRC( Int mode, AsciiString deepCRCFileName )
 		CRCGEN_LOG(("CRC at start of frame %d is 0x%8.8X\n", m_frame, xferCRC->getCRC()));
 	}
 
+	/* Keep the evidence for a mismatch nobody knows about yet: the running CRC after each object,
+		 for the last few CRC frames.  It costs one vector fill on the frames the game already CRCs
+		 itself on, and it is the difference between "the world diverged" and "this object diverged".
+		 See CRCSnapshotRing.h. */
+	Bool recordSnapshot = isInGameLogicUpdate() && TheRecorder && TheRecorder->isMultiplayer();
+	if (recordSnapshot)
+		m_crcSnapshots.beginSnapshot( m_frame );
+
 	marker = "MARKER:Objects";
 	xferCRC->xferAsciiString(&marker);
 	for( obj = m_objList; obj; obj=obj->getNextObject() )
 	{
 		xferCRC->xferSnapshot( obj );
+		if (recordSnapshot)
+		{
+			const Coord3D *pos = obj->getPosition();
+			BodyModuleInterface *body = obj->getBodyModule();
+			m_crcSnapshots.addObject( (UnsignedInt)obj->getID(), xferCRC->getCRC(),
+																pos->x, pos->y, pos->z, body->getHealth() );
+		}
 	}
 	UnsignedInt seed = GetGameLogicRandomSeedCRC();
 	if (isInGameLogicUpdate())
@@ -4254,6 +4367,9 @@ UnsignedInt GameLogic::getCRC( Int mode, AsciiString deepCRCFileName )
 
 	delete xferCRC;
 	xferCRC = NULL;
+
+	if (recordSnapshot)
+		m_crcSnapshots.endSnapshot( theCRC, seed );
 
 	if (isInGameLogicUpdate())
 	{

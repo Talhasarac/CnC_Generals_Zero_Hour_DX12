@@ -38,6 +38,7 @@
 #include "Common/STLTypedefs.h"
 #include "Common/ObjectStatusTypes.h"
 #include "GameNetwork/NetworkDefs.h"
+#include "GameLogic/CRCSnapshotRing.h"
 #include "Common/STLTypedefs.h"
 #include "GameLogic/Module/UpdateModule.h"	// needed for DIRECT_UPDATEMODULE_ACCESS
 
@@ -296,6 +297,8 @@ private:
 	UnsignedInt	m_CRC;																			///< Cache of previous CRC value
 	std::map<Int, UnsignedInt> m_cachedCRCs;								///< CRCs we've seen this frame
 	Bool m_shouldValidateCRCs;															///< Should we validate CRCs this frame?
+	CRCSnapshotRing m_crcSnapshots;													///< per object CRCs for the last few CRC frames, for mismatch diagnosis
+	void writeMismatchDump( Int numPlayers );								///< write down what the world looked like on the mismatching frame
 	//-----------------------------------------------------------------------------------------------
 
 	//Added By Sadullah Nader

@@ -28,6 +28,7 @@
 #include "Common/STLTypedefs.h"
 #include "Common/StackDump.h"
 #include "GameNetwork/Connection.h"
+#include "GameLogic/CRCSnapshotRing.h"
 #include "GameClient/Water.h"
 #include "GameLogic/Module/PhysicsUpdate.h"
 #include "GameClient/ParticleSys.h"
@@ -1929,4 +1930,109 @@ TEST(connection_retry_backs_off_when_a_command_keeps_going_unacked)
 
 	/* A command that has never been sent is not a retry, and must not read as a negative shift. */
 	CHECK_EQ( (Int)Connection_retryDelayFor( 200, 0 ), 200 );
+}
+
+// ------------------------------------------------------------------------------------------------
+// CRCSnapshotRing - the evidence a mismatch report is missing.  A mismatch is detected several
+// frames after the frame it happened on, so the ring has to still hold that frame when asked, and
+// it has to be able to name it from nothing but a CRC value.
+// ------------------------------------------------------------------------------------------------
+
+static void fillSnapshot( CRCSnapshotRing &ring, UnsignedInt frame, UnsignedInt totalCRC, Int numObjects )
+{
+	ring.beginSnapshot( frame );
+	for( Int i = 0; i < numObjects; ++i )
+		ring.addObject( 100 + i, 0xAB000000 + frame * 1000 + i, (Real)i, (Real)(i * 2), 0.0f, 50.0f + i );
+	ring.endSnapshot( totalCRC, 0xF00D0000 + frame );
+}
+
+TEST(crcsnapshotring_names_the_diverging_frame_from_a_crc_value)
+{
+	CRCSnapshotRing ring;
+	CHECK_EQ( ring.getNewestSlot(), -1 );
+	CHECK_EQ( ring.getNumSnapshots(), 0 );
+
+	fillSnapshot( ring, 30, 0x11111111, 3 );
+	fillSnapshot( ring, 60, 0x22222222, 4 );
+	fillSnapshot( ring, 90, 0x33333333, 5 );
+
+	CHECK_EQ( ring.getNumSnapshots(), 3 );
+
+	// the mismatch is reported on a later frame; all we have to go on is our own CRC for that frame
+	Int slot = ring.findSlotByCRC( 0x22222222 );
+	CHECK( slot >= 0 );
+
+	const CRCSnapshot *snap = ring.getSlot( slot );
+	CHECK( snap != NULL );
+	if( snap == NULL )
+		return;
+	CHECK_EQ( (Int)snap->m_frame, 60 );
+	CHECK_EQ( (Int)snap->m_objects.size(), 4 );
+	CHECK_EQ( (Int)snap->m_randomSeed, (Int)(0xF00D0000 + 60) );
+
+	// the per object running CRCs are what a diff between two players' dumps compares
+	CHECK_EQ( (Int)snap->m_objects[0].m_id, 100 );
+	CHECK_EQ( (Int)snap->m_objects[3].m_id, 103 );
+	CHECK_EQ( (Int)snap->m_objects[2].m_runningCRC, (Int)(0xAB000000 + 60 * 1000 + 2) );
+	CHECK_NEAR( snap->m_objects[3].m_health, 53.0f, 0.001f );
+
+	// a CRC nobody recorded names no frame at all, rather than the wrong one
+	CHECK_EQ( ring.findSlotByCRC( 0x44444444 ), -1 );
+}
+
+TEST(crcsnapshotring_still_holds_the_frame_a_late_mismatch_report_asks_for)
+{
+	CRCSnapshotRing ring;
+
+	// the run ahead can be 64 frames; at the default CRC interval the ring has to outlive that
+	for( Int i = 1; i <= CRC_SNAPSHOT_RING_SIZE; ++i )
+		fillSnapshot( ring, i * 10, 0x1000 + i, 2 );
+
+	CHECK_EQ( ring.getNumSnapshots(), CRC_SNAPSHOT_RING_SIZE );
+	CHECK( ring.findSlotByCRC( 0x1000 + 1 ) >= 0 );
+
+	// one more frame pushes the oldest out, and nothing else
+	fillSnapshot( ring, (CRC_SNAPSHOT_RING_SIZE + 1) * 10, 0x2000, 2 );
+	CHECK_EQ( ring.getNumSnapshots(), CRC_SNAPSHOT_RING_SIZE );
+	CHECK_EQ( ring.findSlotByCRC( 0x1000 + 1 ), -1 );
+	CHECK( ring.findSlotByCRC( 0x1000 + 2 ) >= 0 );
+	CHECK( ring.findSlotByCRC( 0x2000 ) >= 0 );
+
+	// newest first ordering survives the wrap
+	const CRCSnapshot *newest = ring.getSlot( ring.getNthNewestSlot( 0 ) );
+	const CRCSnapshot *older  = ring.getSlot( ring.getNthNewestSlot( 1 ) );
+	CHECK( newest != NULL && older != NULL );
+	if( newest == NULL || older == NULL )
+		return;
+	CHECK_EQ( (Int)newest->m_frame, (CRC_SNAPSHOT_RING_SIZE + 1) * 10 );
+	CHECK_EQ( (Int)older->m_frame, CRC_SNAPSHOT_RING_SIZE * 10 );
+	CHECK_EQ( ring.getNthNewestSlot( CRC_SNAPSHOT_RING_SIZE ), -1 );
+	CHECK_EQ( ring.getNthNewestSlot( -1 ), -1 );
+}
+
+TEST(crcsnapshotring_never_hands_back_a_half_written_frame)
+{
+	CRCSnapshotRing ring;
+	fillSnapshot( ring, 30, 0x11111111, 3 );
+
+	// a CRC pass that starts but does not finish must not become the newest snapshot
+	ring.beginSnapshot( 60 );
+	ring.addObject( 100, 0xDEADBEEF, 0.0f, 0.0f, 0.0f, 1.0f );
+
+	CHECK_EQ( ring.getNumSnapshots(), 1 );
+	const CRCSnapshot *snap = ring.getSlot( ring.getNewestSlot() );
+	CHECK( snap != NULL );
+	if( snap == NULL )
+		return;
+	CHECK_EQ( (Int)snap->m_frame, 30 );
+	CHECK_EQ( ring.findSlotByCRC( 0x11111111 ), ring.getNewestSlot() );
+
+	ring.clear();
+	CHECK_EQ( ring.getNumSnapshots(), 0 );
+	CHECK_EQ( ring.getNewestSlot(), -1 );
+	CHECK_EQ( ring.findSlotByCRC( 0x11111111 ), -1 );
+
+	// addObject with no snapshot open is a no-op, not a write through a bad index
+	ring.addObject( 1, 2, 0.0f, 0.0f, 0.0f, 0.0f );
+	CHECK_EQ( ring.getNumSnapshots(), 0 );
 }
