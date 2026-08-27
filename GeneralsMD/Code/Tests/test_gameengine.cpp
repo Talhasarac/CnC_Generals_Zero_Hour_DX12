@@ -2448,6 +2448,130 @@ TEST(selfslug_threshold_has_a_floor_the_shipped_run_ahead_cannot_undercut)
 	CHECK( !shouldSelfSlug( SELFSLUG_MIN_THRESHOLD_FRAMES, 10, 10 ) );
 }
 
+/* The room's logic rate.  ConnectionManager::updateRunAhead runs on the packet router: it takes
+	 the slowest frame rate any player reported, settles it into the allowed range, and broadcasts
+	 the result as the rate every machine paces its logic on.  The reported rate is the rate a
+	 player *achieved*, so a player who is keeping up reports back exactly the rate they were told
+	 to run at - which is why the broadcast rate has to be a step above the measured minimum or it
+	 can never rise again.  simulateRoom below is that whole loop, with each player achieving the
+	 smaller of their own capability and the rate they were commanded. */
+
+static Int simulateRoom( const Int *capability, Int numPlayers, Int startRate, Int rounds,
+												 Int fpsLimit )
+{
+	Int rate = startRate;
+	for( Int round = 0; round < rounds; ++round )
+	{
+		Int minFps = -1;
+		for( Int player = 0; player < numPlayers; ++player )
+		{
+			Int reported = capability[player] < rate ? capability[player] : rate;
+			if( minFps == -1 || reported < minFps )
+				minFps = reported;
+		}
+		rate = probeRoomFrameRate( settleRoomFrameRate( minFps, fpsLimit ), fpsLimit );
+	}
+	return rate;
+}
+
+TEST(room_frame_rate_settles_into_the_allowed_range)
+{
+	CHECK_EQ( settleRoomFrameRate( 30, 30 ), 30 );
+	CHECK_EQ( settleRoomFrameRate( 17, 30 ), 17 );
+
+	// nobody plays at two frames a second, whatever the metrics claim
+	CHECK_EQ( settleRoomFrameRate( 2, 30 ), ROOM_FRAME_RATE_FLOOR );
+	CHECK_EQ( settleRoomFrameRate( 0, 30 ), ROOM_FRAME_RATE_FLOOR );
+	CHECK_EQ( settleRoomFrameRate( -1, 30 ), ROOM_FRAME_RATE_FLOOR );
+
+	// and the room never runs faster than the game is configured to
+	CHECK_EQ( settleRoomFrameRate( 100, 30 ), 30 );
+	CHECK_EQ( settleRoomFrameRate( 100, 60 ), 60 );
+	CHECK_EQ( settleRoomFrameRate( 45, 60 ), 45 );
+}
+
+TEST(room_frame_rate_probe_always_moves_by_at_least_one_frame)
+{
+	/* The step is what breaks the latch, so a step of zero is the bug.  Integer division eats it
+		 below ten frames a second: (9 * 110) / 100 is 9. */
+	for( Int settled = ROOM_FRAME_RATE_FLOOR; settled < 30; ++settled )
+		CHECK( probeRoomFrameRate( settled, 30 ) > settled );
+
+	CHECK_EQ( probeRoomFrameRate( 5, 30 ), 6 );
+	CHECK_EQ( probeRoomFrameRate( 9, 30 ), 10 );
+	CHECK_EQ( probeRoomFrameRate( 10, 30 ), 11 );
+	CHECK_EQ( probeRoomFrameRate( 20, 30 ), 22 );
+
+	// but never past the limit, and at the limit it is a no-op rather than an overshoot
+	CHECK_EQ( probeRoomFrameRate( 30, 30 ), 30 );
+	CHECK_EQ( probeRoomFrameRate( 29, 30 ), 30 );
+	CHECK_EQ( probeRoomFrameRate( 28, 30 ), 30 );
+	CHECK_EQ( probeRoomFrameRate( 55, 60 ), 60 );
+
+	/* EA capped this step at a hardcoded 30 while the settled rate was capped at
+		 FramesPerSecondLimit, so a room configured above 30 told its slowest player to slow down. */
+	CHECK_EQ( probeRoomFrameRate( 40, 60 ), 44 );
+}
+
+TEST(room_frame_rate_climbs_back_after_one_player_hitches)
+{
+	/* The defect this pins: every machine paces its logic on the broadcast rate, so a machine that
+		 is keeping up measures exactly that rate and reports it back.  With the room commanded at
+		 the reported minimum, the minimum is then whatever it already was - for ever.  One player's
+		 two second hitch dropped the room to 12 and the whole match stayed in slow motion. */
+	const Int fpsLimit = 30;
+	Int capable[4] = { 30, 30, 30, 30 };
+
+	// the room is at 12 because somebody hitched; they have recovered, everyone can do 30 now
+	Int rate = simulateRoom( capable, 4, 12, 1, fpsLimit );
+	CHECK( rate > 12 );
+
+	// and it keeps climbing, round after round, until it is back at the limit
+	Int previous = 12;
+	for( Int round = 1; round <= 20; ++round )
+	{
+		rate = simulateRoom( capable, 4, 12, round, fpsLimit );
+		CHECK( rate >= previous );
+		previous = rate;
+	}
+	CHECK_EQ( simulateRoom( capable, 4, 12, 20, fpsLimit ), 30 );
+
+	// from the floor as well, and from a two player room, and with a raised limit
+	CHECK_EQ( simulateRoom( capable, 4, ROOM_FRAME_RATE_FLOOR, 40, fpsLimit ), 30 );
+	CHECK_EQ( simulateRoom( capable, 2, 6, 40, fpsLimit ), 30 );
+
+	Int capable60[2] = { 60, 60 };
+	CHECK_EQ( simulateRoom( capable60, 2, 10, 40, 60 ), 60 );
+}
+
+TEST(room_frame_rate_still_pins_to_a_genuinely_slow_player_without_oscillating)
+{
+	/* The step must not turn into a speed wobble: a player who really cannot do better than 12
+		 has to hold the room near 12 and hold it *steady*.  EA's "keep the current rate if the
+		 minimum is within 10 % of it" band is what would break this - it ignores the slow player
+		 for exactly as long as the step keeps the rate within 10 % of them, so the room walks
+		 12-13-14-15 and falls back to 12.  The band is gone; the step does its job alone. */
+	const Int fpsLimit = 30;
+	Int mixed[3] = { 30, 30, 12 };
+
+	Int rate = simulateRoom( mixed, 3, 30, 30, fpsLimit );
+	CHECK( rate >= 12 );
+	CHECK( rate <= 14 );
+
+	// settled means settled: over the last twenty rounds the rate must not move at all
+	Int settledRate = simulateRoom( mixed, 3, 30, 10, fpsLimit );
+	for( Int round = 10; round <= 30; ++round )
+		CHECK_EQ( simulateRoom( mixed, 3, 30, round, fpsLimit ), settledRate );
+
+	// the room does slow down for them, though - that part is the point of the mechanism
+	CHECK( settledRate < 30 );
+
+	// a machine below the floor cannot drag the room under it either
+	Int hopeless[2] = { 30, 1 };
+	CHECK_EQ( simulateRoom( hopeless, 2, 30, 30, fpsLimit ),
+						probeRoomFrameRate( ROOM_FRAME_RATE_FLOOR, fpsLimit ) );
+}
+
 TEST(selfslug_is_monotonic_in_the_cushion)
 {
 	// once there is enough margin the answer must stay no, or the frame rate would oscillate

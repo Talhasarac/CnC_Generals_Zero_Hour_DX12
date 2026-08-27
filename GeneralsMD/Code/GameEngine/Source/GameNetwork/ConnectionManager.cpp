@@ -1266,17 +1266,22 @@ void ConnectionManager::updateRunAhead(Int oldRunAhead, Int frameRate, Bool didS
 			Int minFpsPlayer;
 			getMinimumFps(minFps, minFpsPlayer);
 			DEBUG_LOG(("ConnectionManager::updateRunAhead - max latency = %f, min fps = %d, min fps player = %d old FPS = %d\n", getMaximumLatency(), minFps, minFpsPlayer, frameRate));
-			if ((minFps >= ((frameRate * 9) / 10)) && (minFps < frameRate)) {
-				// if the minimum fps is within 10% of the desired framerate, then keep the current minimum fps.
-				minFps = frameRate;
-			}
-			if (minFps < 5) {
-				minFps = 5; // Absolutely do not run below 5 fps.
-			}
-			if (minFps > TheGlobalData->m_framesPerSecondLimit) {
-				minFps = TheGlobalData->m_framesPerSecondLimit; // Cap to 30 FPS.
-			}
+			/* EA kept the current rate whenever the reported minimum was within 10 % below it, to stop
+				 the measurement's own rounding from ratcheting the room down a frame at a time.  The
+				 probe below does that job (a reported 29 is probed straight back to 30) and the two
+				 together oscillate: the band swallows a genuinely slow player for as long as the probe
+				 keeps the rate within 10 % of them, so a room held at 12 by one machine walked
+				 12-13-14-15-12 for ever.  One mechanism, not two. */
+			minFps = settleRoomFrameRate(minFps, TheGlobalData->m_framesPerSecondLimit);
 			DEBUG_LOG(("ConnectionManager::updateRunAhead - minFps after adjustment is %d\n", minFps));
+
+			/* The rate everybody is actually told to run at.  Deliberately a step above the slowest
+				 reported rate: a machine pinned at the room's rate reports exactly that rate back, so
+				 without the step the reported minimum can never rise and one player's hitch pins the
+				 room for the rest of the match - see CushionMetrics.h.  The run-ahead below is left on
+				 the settled rate rather than this one: it is the room's honest measured speed, and the
+				 formula's result is clamped to MIN_RUNAHEAD for every real link anyway. */
+			Int commandedFps = probeRoomFrameRate(minFps, TheGlobalData->m_framesPerSecondLimit);
 			Int newRunAhead = (Int)((getMaximumLatency() / 2.0) * (Real)minFps);
 			newRunAhead += (newRunAhead * TheGlobalData->m_networkRunAheadSlack) / 100; // Add in 10% of slack to the run ahead in case of network hiccups.
 			if (newRunAhead < MIN_RUNAHEAD) {
@@ -1310,7 +1315,7 @@ void ConnectionManager::updateRunAhead(Int oldRunAhead, Int frameRate, Bool didS
 			}
 
 			msg->setRunAhead(newRunAhead);
-			msg->setFrameRate(minFps);
+			msg->setFrameRate(commandedFps);
 			//DEBUG_LOG(("ConnectionManager::updateRunAhead - new run ahead = %d, new frame rate = %d, execution frame %d\n", newRunAhead, minFps, msg->getExecutionFrame()));
 			sendLocalCommand(msg, 0xff ^ (1 << minFpsPlayer)); // Send the packet to everyone but the lowest FPS player.
 
@@ -1341,17 +1346,14 @@ void ConnectionManager::updateRunAhead(Int oldRunAhead, Int frameRate, Bool didS
 				msg2->setExecutionFrame(TheGameLogic->getFrame() + oldRunAhead);
 			}
 
-			// Let the player with the slowest FPS run a little faster than the other computers...
-			// just in case they are able to.  Then we might be able to run the game faster which would be good.
-			Int newMinFps = (minFps * 11) / 10;
-			if (newMinFps == minFps) {
-				newMinFps = minFps + 1;
-			}
-			if (newMinFps > 30) {
-				newMinFps = 30; // Cap FPS to 30.
-			}
+			/* EA gave this step to the slowest player alone; it now goes to everyone, so the two
+				 messages carry the same rate.  They stay split because the recipients still have to be
+				 split - see the command ID note above, which is about disconnect recovery, not about
+				 the frame rate.  (The step used to be capped at a hardcoded 30 while the settled rate
+				 was capped at FramesPerSecondLimit, so a room configured above 30 slowed its slowest
+				 player down to 30 while everybody else ran faster.) */
 			msg2->setRunAhead(newRunAhead);
-			msg2->setFrameRate(newMinFps);
+			msg2->setFrameRate(commandedFps);
 
 			sendLocalCommand(msg2, 1 << minFpsPlayer);
 

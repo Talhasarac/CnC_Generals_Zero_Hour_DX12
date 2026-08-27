@@ -65,3 +65,29 @@ Int selfSlugThreshold( Int runAhead, UnsignedInt slackPercent )
 
 	return threshold;
 }
+
+Int settleRoomFrameRate( Int minFps, Int fpsLimit )
+{
+	if( minFps < ROOM_FRAME_RATE_FLOOR )
+		minFps = ROOM_FRAME_RATE_FLOOR;
+
+	if( minFps > fpsLimit )
+		minFps = fpsLimit;
+
+	return minFps;
+}
+
+Int probeRoomFrameRate( Int settledFps, Int fpsLimit )
+{
+	Int probed = (settledFps * (100 + ROOM_FRAME_RATE_PROBE_PERCENT)) / 100;
+
+	/* Integer division eats the step below ten frames a second, and a step of zero is the latch
+		 this whole function exists to break. */
+	if( probed <= settledFps )
+		probed = settledFps + 1;
+
+	if( probed > fpsLimit )
+		probed = fpsLimit;
+
+	return probed;
+}

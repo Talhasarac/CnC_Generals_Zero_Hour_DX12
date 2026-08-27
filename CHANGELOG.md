@@ -245,6 +245,21 @@ map. Ctrl+A is still everything at once.
   game nobody finishes. So every match anyone actually plays runs at that minimum, and the safety
   margin it was given works out to that one frame. The brake starts twice as early now, which is
   the difference between easing off and lurching.
+- **One player's two-second hiccup used to slow the match down for the rest of the game.** An online
+  game runs everyone at the speed of the slowest machine in the room, which is fair enough while
+  somebody is actually struggling. The problem was getting back out of it. Each machine reports how
+  fast it is running, and a machine that is keeping up reports exactly the speed it was told to run
+  at — so once the room had been dropped to twelve frames a second, twelve was what everyone
+  reported, and twelve was the answer for the rest of the match. Nothing was wrong on anyone's
+  machine any more; the game had simply agreed with itself to stay slow. The original code has a
+  half-built escape hatch for this — the slowest player is allowed to run a fraction faster "just in
+  case they are able to" — but it is handed to whichever player happens to sit in the lowest slot
+  among everyone tied at the bottom, which is almost never the player who was slow, and everyone
+  else stays pinned. Now every machine is given that fraction. Whoever genuinely cannot keep up
+  still holds the room back, exactly as intended, and the moment they recover the speed climbs back
+  on its own — from twelve frames a second to thirty in about six seconds. A room held down by a
+  machine that really is that slow settles just above it and stays there instead of surging and
+  falling back.
 
 ## Sharper textures, for free
 

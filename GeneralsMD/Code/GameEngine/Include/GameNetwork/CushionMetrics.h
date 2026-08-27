@@ -54,6 +54,30 @@ enum
 		 threshold was 10 * 10 % = one frame, and a brake that engages with one frame of margin left
 		 is not a brake, it is the stall it was meant to prevent.  Two frames is 66 ms at 30 Hz. */
 	SELFSLUG_MIN_THRESHOLD_FRAMES = 2,
+
+	/* The room never runs slower than this, whatever the metrics say. */
+	ROOM_FRAME_RATE_FLOOR = 5,
+
+	/* How far above the slowest reported rate the room is actually told to run.  This is EA's own
+		 step - they applied it to the slowest player alone, "just in case they are able to" - given
+		 to everybody, which is what lets the rate climb at all.  Ten percent, the same slack the
+		 run-ahead is sized with. */
+	ROOM_FRAME_RATE_PROBE_PERCENT = 10,
 };
+
+/* The room's logic rate is set by the packet router to the slowest rate any player reports, and
+	 every machine then paces its own logic on it (Network::timeForNewFrame).  The trap is that the
+	 rate a player reports is the rate they *achieved*, and a player pinned at the room's rate
+	 achieves exactly it - so the reported minimum can never rise above the rate that produced it,
+	 and one player's two-second hitch used to hold the whole room at that speed for the rest of the
+	 match.  The way out is to command a rate slightly above the measured minimum: whoever cannot
+	 follow reports short and pins the room honestly, everybody else follows and the minimum climbs
+	 with the room until it hits the limit. */
+
+/** The slowest reported rate, brought inside the range the room is allowed to run at. */
+Int settleRoomFrameRate( Int minFps, Int fpsLimit );
+
+/** The rate to actually command: one probe step above the settled rate, never above the limit. */
+Int probeRoomFrameRate( Int settledFps, Int fpsLimit );
 
 #endif // _CUSHION_METRICS_H_
