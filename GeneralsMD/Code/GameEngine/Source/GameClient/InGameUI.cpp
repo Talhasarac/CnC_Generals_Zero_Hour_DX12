@@ -1059,6 +1059,7 @@ InGameUI::InGameUI()
 	m_hudLastSampleLogicFrame = 0;
 	m_hudLogicHz = 0.0f;
 	m_hudRealClockBaseMs = 0;
+	m_hudLastDrawMs = 0;
 	for( Int incomeBucket = 0; incomeBucket < INCOME_SAMPLES; incomeBucket++ )
 		m_incomeSamples[ incomeBucket ] = 0;
 	m_incomeSampleCount = 0;
@@ -5656,9 +5657,16 @@ void InGameUI::drawHudOverlay( void )
 	// above show, totalled. The base is set the first time the overlay draws rather than at frame
 	// zero, so switching it on mid-game does not invent an hour of lag.
 	//
+	// A pause stops the logic clock and not the wall clock, and the gap between the two readings
+	// is meant to be simulation lag - time spent in the menu is not lag. So the base is walked
+	// forward by every paused frame's worth of wall clock and both readouts stand still.
+	//
 	UnsignedInt gameSecs = logicFrame / LOGICFRAMES_PER_SECOND;
 	if( m_hudRealClockBaseMs == 0 )
 		m_hudRealClockBaseMs = nowMs - gameSecs * 1000;
+	else if( TheGameLogic->isGamePaused() )
+		m_hudRealClockBaseMs += nowMs - m_hudLastDrawMs;
+	m_hudLastDrawMs = nowMs;
 	UnsignedInt realSecs = (nowMs - m_hudRealClockBaseMs) / 1000;
 
 	UnicodeString text;

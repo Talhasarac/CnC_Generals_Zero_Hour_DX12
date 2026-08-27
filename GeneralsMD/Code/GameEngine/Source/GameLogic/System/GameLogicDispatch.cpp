@@ -1381,20 +1381,17 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 			// the first one to pass the affordability check withdraws the money and every other
 			// member then fails it. That is why clicking four upgrades on four selected barracks
 			// stacked all four on one of them. The bar already chose the least loaded building;
-			// honour that choice when the id is one of the selected objects the player controls,
-			// and fall back to the old group-wide path otherwise. An object upgrade is bought per
-			// building, and the bar now sends one message per building it wants it on, so the
-			// group-wide path must not fire for those either - it would queue N messages on N
-			// buildings each.
+			// honour that choice whenever the player controls the named object, and fall back to
+			// the old group-wide path otherwise. An object upgrade is bought per building, and the
+			// bar now sends one message per building it wants it on, so the group-wide path must
+			// not fire for those either - it would queue N messages on N buildings each.
+			// The named object is authorized by the ownership check below and the revalidation
+			// after it, not by being in the selection: the bar also sends this from the stand-in
+			// builder's bar, where nothing is selected at all - which is where the GLA worker's
+			// fake-buildings toggle lives, so requiring a selection left the worker stuck on
+			// whichever page it was last put on.
 			//
-			Object *producer = NULL;
-			if( currentlySelectedGroup )
-			{
-				ObjectID producerID = msg->getArgument( 0 )->objectID;
-				const VecObjectID& ids = currentlySelectedGroup->getAllIDs();
-				if( std::find( ids.begin(), ids.end(), producerID ) != ids.end() )
-					producer = TheGameLogic->findObjectByID( producerID );
-			}
+			Object *producer = TheGameLogic->findObjectByID( msg->getArgument( 0 )->objectID );
 
 			if( producer && producer->getControllingPlayer() == thisPlayer )
 			{

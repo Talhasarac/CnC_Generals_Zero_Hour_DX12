@@ -844,6 +844,7 @@ protected:
 	UnsignedInt									m_hudLastSampleLogicFrame;	///< logic frame at that same sample
 	Real												m_hudLogicHz;						///< logic frames actually simulated per real second
 	UnsignedInt									m_hudRealClockBaseMs;		///< wall clock the two elapsed-time readouts were aligned at
+	UnsignedInt									m_hudLastDrawMs;				///< wall clock of the previous overlay draw, so a pause can be taken back out of it
 	// A script time freeze stops the logic clock, and the military subtitle's counters are
 	// logic frames, so they have to be stepped by hand while it lasts.  These two turn the
 	// wall clock into that step without drift: every update works out how many 30Hz frames

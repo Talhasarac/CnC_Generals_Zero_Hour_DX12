@@ -296,6 +296,11 @@ Around it, the whole production loop got tightened:
   worker by hand. Click anyway: the order goes to the nearest idle worker, and only falls back to
   interrupting a busy one when every worker you own is busy. Same for the build list you get with
   nothing selected — it stays usable when the whole crew is out working.
+- **The GLA's fake-building list is not a one-way door.** The toggle that swaps a worker's build
+  list between real structures and decoys — the ones that go up in smoke on the Demolition
+  general — did nothing on the build list you get with nothing selected. So a worker left on the
+  decoy page stayed on it, and the only way back was to find that worker on the map and select it.
+  The button works from either list now.
 - **Workers go back to collecting supplies** after they finish, instead of standing there.
 - **The times on the buttons are real seconds, not "seconds at normal speed".** Speed the game up
   and a 20 second barracks reads 10, because that is how long you are going to be waiting. Every
@@ -343,6 +348,8 @@ Around it, the whole production loop got tightened:
   lost.
   The drawing rate really is the drawing rate now: both figures used to be counted off the same
   clock, so the number in brackets was a second copy of the simulation rate and moved with it.
+  Pausing stops both clocks. The real-time one used to keep running while the game stood still, so
+  five minutes in the menu read as five minutes the simulation had fallen behind.
 
 **Placing buildings.** The grid you place on is drawn on the ground now instead of over the top of
 everything — it follows the slope, your units and buildings stand on it rather than under it, and
