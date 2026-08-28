@@ -2555,26 +2555,32 @@ void GameLogic::processCommandList( CommandList *list )
 				 on their way out: a CRC that has not arrived yet from somebody the network still calls
 				 connected, and a CRC that arrives from somebody who is already gone.  Neither is
 				 evidence that anyone computed anything differently. */
-			Bool reported[MAX_SLOTS];
-			Bool connected[MAX_SLOTS];
-			UnsignedInt crcs[MAX_SLOTS];
-			for (Int slot = 0; slot < MAX_SLOTS; ++slot)
+			/* m_cachedCRCs is keyed by player index and the network is indexed by slot, which are not the
+				 same number - player 0 is the neutral player, so the human sitting in slot 0 is player 1.
+				 EA handed the player index straight to isPlayerConnected().  A player index with no slot
+				 behind it (no GameInfo at all, for instance) counts as present rather than as gone: the
+				 point of this is to stop blaming people who left, not to switch the check off. */
+			Bool reported[MAX_PLAYER_COUNT];
+			Bool connected[MAX_PLAYER_COUNT];
+			UnsignedInt crcs[MAX_PLAYER_COUNT];
+			for (Int p = 0; p < MAX_PLAYER_COUNT; ++p)
 			{
-				reported[slot] = FALSE;
-				crcs[slot] = 0;
-				connected[slot] = TheNetwork->isPlayerConnected(slot);
+				reported[p] = FALSE;
+				crcs[p] = 0;
+				const Int slot = ThePlayerList->getSlotIndex(p);
+				connected[p] = (slot < 0) ? TRUE : TheNetwork->isPlayerConnected(slot);
 			}
 			for (std::map<Int, UnsignedInt>::const_iterator crcIt = m_cachedCRCs.begin();
 					 crcIt != m_cachedCRCs.end(); ++crcIt)
 			{
-				if (crcIt->first >= 0 && crcIt->first < MAX_SLOTS)
+				if (crcIt->first >= 0 && crcIt->first < MAX_PLAYER_COUNT)
 				{
 					reported[crcIt->first] = TRUE;
 					crcs[crcIt->first] = crcIt->second;
 				}
 			}
 
-			switch (crcAgreement( reported, crcs, connected, MAX_SLOTS, numPlayers ))
+			switch (crcAgreement( reported, crcs, connected, MAX_PLAYER_COUNT, numPlayers ))
 			{
 				case CRC_AGREEMENT_TOO_FEW:
 					DEBUG_LOG(("Only %d CRCs from %d connected players on frame %d - not comparing\n",

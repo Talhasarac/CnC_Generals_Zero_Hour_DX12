@@ -58,6 +58,7 @@
 #include "GameLogic/Object.h"
 #endif
 #include "GameLogic/SidesList.h"
+#include "GameNetwork/GameInfo.h"
 #include "GameNetwork/NetworkDefs.h"
 
 #ifdef _INTERNAL
@@ -233,6 +234,10 @@ void PlayerList::newGame()
 		p->setDefaultTeam();
 	}
 
+	/* Now that the players exist and are named, write down which network slot each one came from.
+		 The two numbers are not the same and never were: player 0 is the neutral player, so a human
+		 in slot 0 is player 1.  Everything in GameNetwork is indexed by the slot. */
+	assignSlotIndices( TheGameInfo );
 }
 
 //-----------------------------------------------------------------------------
@@ -243,6 +248,9 @@ void PlayerList::init()
 
 	for (int i = 1; i < MAX_PLAYER_COUNT; i++)
 		m_players[i]->init(NULL);
+
+	for (int j = 0; j < MAX_PLAYER_COUNT; j++)
+		m_slotIndices[j] = -1;
 
 	// call setLocalPlayer so that becomingLocalPlayer() gets called appropriately
 	setLocalPlayer(m_players[0]);
@@ -491,3 +499,43 @@ void PlayerList::loadPostProcess( void )
 
 }  // end postProcessLoad
 
+//-----------------------------------------------------------------------------
+void PlayerList::setSlotIndex( Int playerIndex, Int slotIndex )
+{
+	if (playerIndex >= 0 && playerIndex < MAX_PLAYER_COUNT)
+		m_slotIndices[playerIndex] = slotIndex;
+}
+
+//-----------------------------------------------------------------------------
+Int PlayerList::getSlotIndex( Int playerIndex ) const
+{
+	if (playerIndex >= 0 && playerIndex < MAX_PLAYER_COUNT)
+		return m_slotIndices[playerIndex];
+
+	return -1;
+}
+
+//-----------------------------------------------------------------------------
+/** Map every occupied network slot onto the player index that was built from it.  The slots are
+    named "player0".."playerN" when the game is set up, which is the only link between the two. */
+void PlayerList::assignSlotIndices( const GameInfo *gameInfo )
+{
+	for (int i = 0; i < MAX_PLAYER_COUNT; i++)
+		m_slotIndices[i] = -1;
+
+	if (gameInfo == NULL)
+		return;
+
+	AsciiString playerName;
+	for (Int slot = 0; slot < MAX_SLOTS; ++slot)
+	{
+		const GameSlot *gameSlot = gameInfo->getConstSlot( slot );
+		if (gameSlot == NULL || !gameSlot->isOccupied())
+			continue;
+
+		playerName.format( "player%d", slot );
+		Player *player = findPlayerWithNameKey( TheNameKeyGenerator->nameToKey( playerName ) );
+		if (player)
+			setSlotIndex( player->getPlayerIndex(), slot );
+	}
+}

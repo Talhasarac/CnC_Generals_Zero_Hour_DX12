@@ -55,6 +55,7 @@
 class DataChunkInput;
 struct DataChunkInfo;
 class DataChunkOutput;
+class GameInfo;
 class Player;
 class Team;
 class TeamFactory;
@@ -153,6 +154,15 @@ public:
 	*/
 	PlayerMaskType getPlayersWithRelationship( Int srcPlayerIndex, UnsignedInt allowedRelationships );
 
+	/**
+		The network slot a player index came from, or -1 if this player is not somebody's seat in the
+		game (the neutral player, and every player in a game that has no GameInfo behind it).
+
+		These two numbers are not interchangeable and the network code is indexed by the slot: player
+		0 is always the neutral player, so the slot a human sits in is not the index their Player has.
+	*/
+	Int getSlotIndex( Int playerIndex ) const;
+
 protected:
 
 	// snapshot methods
@@ -162,9 +172,13 @@ protected:
 
 private:
 
+	void assignSlotIndices( const GameInfo *gameInfo );
+	void setSlotIndex( Int playerIndex, Int slotIndex );
+
 	Player				*m_local;
 	Int						m_playerCount;
 	Player				*m_players[MAX_PLAYER_COUNT];
+	Int						m_slotIndices[MAX_PLAYER_COUNT];	///< which network slot each player index came from, -1 for none
 
 };
 
