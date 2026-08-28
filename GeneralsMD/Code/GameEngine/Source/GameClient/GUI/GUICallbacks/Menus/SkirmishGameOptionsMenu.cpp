@@ -431,7 +431,6 @@ void reallyDoStart( void )
 
   TheWritableGlobalData->m_mapName = TheSkirmishGameInfo->getMap();
   TheSkirmishGameInfo->startGame(0);
-	InitGameLogicRandom(TheSkirmishGameInfo->getSeed());
 
 		Bool isSkirmish = TRUE;
 	const MapMetaData *md = TheMapCache->findMap(TheSkirmishGameInfo->getMap());
@@ -442,6 +441,8 @@ void reallyDoStart( void )
 
 	if (isSkirmish)
 	{
+		InitGameLogicRandom(TheSkirmishGameInfo->getSeed());
+
 		GameMessage *msg = TheMessageStream->appendMessage( GameMessage::MSG_NEW_GAME );
 		msg->appendIntegerArgument(GAME_SKIRMISH);
 		msg->appendIntegerArgument(DIFFICULTY_NORMAL);	// not really used; just specified so we can add the game speed last
@@ -450,6 +451,12 @@ void reallyDoStart( void )
 	}
 	else
 	{
+		/* A solo campaign map can be launched from the skirmish menu, and it runs as
+			 GAME_SINGLE_PLAYER - which is seeded with 0 everywhere else in the game.  EA seeded it
+			 with the skirmish lobby's seed here and nowhere else, so the same mission played from the
+			 two menus was not the same mission. */
+		InitGameLogicRandom(0);
+
 		GameMessage *msg = TheMessageStream->appendMessage( GameMessage::MSG_NEW_GAME );
 		msg->appendIntegerArgument(GAME_SINGLE_PLAYER);
 		msg->appendIntegerArgument(DIFFICULTY_NORMAL);	// not really used; just specified so we can add the game speed last

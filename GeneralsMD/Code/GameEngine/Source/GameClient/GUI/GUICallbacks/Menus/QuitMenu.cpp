@@ -52,6 +52,7 @@
 #include "GameClient/GameWindowTransitions.h"
 #include "GameClient/DisconnectMenu.h"
 #include "GameLogic/ScriptEngine.h"
+#include "GameNetwork/GameInfo.h"
 
 #ifdef _INTERNAL
 // for occasional debugging...
@@ -204,6 +205,13 @@ static void restartMissionMenu()
 	Int gameMode = TheGameLogic->getGameMode();
 	AsciiString mapName = TheGlobalData->m_mapName;
 
+	/* Read the seed before clearGameData() takes the game apart.  A skirmish restart has to be the
+		 same match again - EA reseeded with a flat 0 whatever mode was running, so the replay of a
+		 restarted skirmish was played back against a different random stream than it was recorded
+		 with and diverged immediately.  Campaign, challenge and a solo map launched from the skirmish
+		 menu all run as GAME_SINGLE_PLAYER and are seeded with 0 everywhere else, so that stays. */
+	const Int seed = (gameMode == GAME_SKIRMISH && TheSkirmishGameInfo) ? TheSkirmishGameInfo->getSeed() : 0;
+
 	//
 	// if the map name was from a save game it will have "Save/" at the front of it,
 	// we want to go back to the original pristine map string for the map name when restarting
@@ -242,11 +250,7 @@ static void restartMissionMenu()
 																																		TheScriptEngine->getGlobalDifficulty(), 
 																																		rankPointsStartedWith)
 							);
-		//if (TheGlobalData->m_fixedSeed >= 0)
-			//InitRandom(TheGlobalData->m_fixedSeed);
-			InitRandom(0);
-		//else
-		//	InitGameLogicRandom(GameClientRandomValue(0, INT_MAX - 1));
+		InitRandom(seed);
 	}
 	//TheTransitionHandler->remove("QuitFull"); //KRISMORNESS ADD
 	//quitMenuLayout = NULL; //KRISMORNESS ADD
