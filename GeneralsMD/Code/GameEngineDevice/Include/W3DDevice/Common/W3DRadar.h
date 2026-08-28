@@ -36,6 +36,7 @@
 
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "Common/Radar.h"
+#include "Common/RadarShroudCache.h"
 #include "WW3D2/WW3DFormat.h"
 
 // FORWARD REFERENCES /////////////////////////////////////////////////////////////////////////////
@@ -102,6 +103,7 @@ protected:
 	WW3DFormat m_shroudTextureFormat;							///< format to use for shroud texture
 	Image *m_shroudImage;													///< shroud image abstraction for drawing
 	TextureClass *m_shroudTexture;								///< shroud texture
+	RadarShroudCache m_shroudCache;								///< what the shroud texture should say, in main memory
 
 	Int m_textureWidth;														///< width for all radar textures
 	Int m_textureHeight;													///< height for all radar textures

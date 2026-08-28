@@ -999,6 +999,15 @@ conversion now. It is also one less way for two machines in an online match to d
 other: the old route asked the processor what rounding mode it happened to be in, and that is not
 something a game gets to control.
 
+**And the black over the parts of the map you cannot see.** The minimap paints that as a small
+picture, and the game keeps it honest as your units move — every time one of them sees a little
+further, the strip of map it just revealed is repainted. It was being repainted a single dot at a
+time, and each dot meant handing the picture to the graphics card, changing that one dot, and taking
+it back. An army on the move reveals hundreds of those a second, and the start of every match repaints
+the entire map that way, one dot after another. The picture is now kept in ordinary memory, where a
+dot costs nothing, and handed over once a frame — only the rectangle that actually changed, and
+nothing at all on a frame where nothing moved.
+
 ## Sound, video, and getting it to start at all
 
 - **Audio is real**, through the game's own audio library. The sound SDK was stripped from the source

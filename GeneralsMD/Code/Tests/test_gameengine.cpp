@@ -45,6 +45,7 @@
 #include <float.h>
 #include "Common/AudioRandomValue.h"
 #include "GameNetwork/CrcAgreement.h"
+#include "Common/RadarShroudCache.h"
 #include "GameNetwork/NetworkUtil.h"
 #include "GameNetwork/NetCommandList.h"
 #include "GameNetwork/GameInfo.h"
@@ -4059,4 +4060,199 @@ TEST(the_simulation_math_fingerprint_is_the_machines_math_and_not_the_callers_fp
 	// and back where the rest of the tests expect to find it
 	setFPMode();
 	CHECK_EQ( getFPMode(), expectedFPMode() );
+}
+
+// ------------------------------------------------------------------------------------------------
+// The radar's shroud layer.  It used to be poked one pixel at a time straight into a Direct3D
+// texture, with a lock and an unlock around each pixel; it is a main-memory buffer now, and the
+// texture hears about it once a frame, over the rectangle that changed.
+
+TEST(radar_shroud_cache_starts_owing_the_whole_texture_a_write)
+{
+	RadarShroudCache cache;
+	cache.setSize( 128, 128 );
+
+	CHECK( cache.isDirty() );
+	CHECK_EQ( cache.getDirtyMinX(), 0 );
+	CHECK_EQ( cache.getDirtyMinY(), 0 );
+	CHECK_EQ( cache.getDirtyMaxX(), 127 );
+	CHECK_EQ( cache.getDirtyMaxY(), 127 );
+	CHECK_EQ( (Int)cache.getAlpha( 0, 0 ), 0 );
+	CHECK_EQ( (Int)cache.getAlpha( 127, 127 ), 0 );
+}
+
+TEST(radar_shroud_cache_grows_its_dirty_rectangle_around_what_changed)
+{
+	RadarShroudCache cache;
+	cache.setSize( 128, 128 );
+
+	// pretend the frame it was created in has been drawn
+	UnsignedByte surface[ 128 * 128 * 4 ];
+	cache.flushTo( surface, 128 * 4, 4 );
+	CHECK( !cache.isDirty() );
+
+	cache.setAlpha( 10, 20, 255 );
+	CHECK( cache.isDirty() );
+	CHECK_EQ( cache.getDirtyMinX(), 10 );
+	CHECK_EQ( cache.getDirtyMaxX(), 10 );
+	CHECK_EQ( cache.getDirtyMinY(), 20 );
+	CHECK_EQ( cache.getDirtyMaxY(), 20 );
+
+	// a second, far away pixel: the rectangle is the union, not the last one written
+	cache.setAlpha( 3, 90, 127 );
+	CHECK_EQ( cache.getDirtyMinX(), 3 );
+	CHECK_EQ( cache.getDirtyMaxX(), 10 );
+	CHECK_EQ( cache.getDirtyMinY(), 20 );
+	CHECK_EQ( cache.getDirtyMaxY(), 90 );
+
+	// and one inside it changes nothing about the bounds
+	cache.setAlpha( 5, 50, 1 );
+	CHECK_EQ( cache.getDirtyMinX(), 3 );
+	CHECK_EQ( cache.getDirtyMaxX(), 10 );
+	CHECK_EQ( cache.getDirtyMinY(), 20 );
+	CHECK_EQ( cache.getDirtyMaxY(), 90 );
+
+	CHECK_EQ( (Int)cache.getAlpha( 10, 20 ), 255 );
+	CHECK_EQ( (Int)cache.getAlpha( 3, 90 ), 127 );
+	CHECK_EQ( (Int)cache.getAlpha( 5, 50 ), 1 );
+}
+
+TEST(radar_shroud_cache_ignores_writes_that_change_nothing)
+{
+	RadarShroudCache cache;
+	cache.setSize( 128, 128 );
+	UnsignedByte surface[ 128 * 128 * 4 ];
+	cache.flushTo( surface, 128 * 4, 4 );
+
+	// the shroud is written cell by cell every time a unit moves, and most of those writes say
+	// what the pixel already said
+	cache.setAlpha( 40, 40, 0 );
+	CHECK( !cache.isDirty() );
+
+	cache.setAlpha( 40, 40, 255 );
+	CHECK( cache.isDirty() );
+	cache.flushTo( surface, 128 * 4, 4 );
+	cache.setAlpha( 40, 40, 255 );
+	CHECK( !cache.isDirty() );
+}
+
+TEST(radar_shroud_cache_drops_points_off_the_texture)
+{
+	RadarShroudCache cache;
+	cache.setSize( 128, 128 );
+	UnsignedByte surface[ 128 * 128 * 4 ];
+	cache.flushTo( surface, 128 * 4, 4 );
+
+	// the caller walks a rectangle of map cells and some of them fall outside the radar
+	cache.setAlpha( -1, 40, 255 );
+	cache.setAlpha( 40, -1, 255 );
+	cache.setAlpha( 128, 40, 255 );
+	cache.setAlpha( 40, 128, 255 );
+	cache.setAlpha( 10000, 10000, 255 );
+	CHECK( !cache.isDirty() );
+	CHECK_EQ( (Int)cache.getAlpha( -1, 40 ), 0 );
+	CHECK_EQ( (Int)cache.getAlpha( 128, 128 ), 0 );
+
+	// the last legal pixel is legal
+	cache.setAlpha( 127, 127, 255 );
+	CHECK( cache.isDirty() );
+	CHECK_EQ( (Int)cache.getAlpha( 127, 127 ), 255 );
+}
+
+TEST(radar_shroud_cache_writes_only_the_dirty_rectangle_into_the_surface)
+{
+	enum { W = 16, H = 8, PITCH = 128 };			// a pitch wider than the rows, like a real lock
+	RadarShroudCache cache;
+	cache.setSize( W, H );
+
+	UnsignedByte surface[ PITCH * H ];
+	memset( surface, 0xCD, sizeof( surface ) );
+	cache.flushTo( surface, PITCH, 4 );				// the opening flush covers everything
+	CHECK( !cache.isDirty() );
+
+	// past the end of each row nothing was touched
+	for( Int y = 0; y < H; y++ )
+		for( Int x = W * 4; x < PITCH; x++ )
+			CHECK_EQ( (Int)surface[ y * PITCH + x ], 0xCD );
+
+	memset( surface, 0xCD, sizeof( surface ) );
+	cache.setAlpha( 2, 3, 255 );
+	cache.setAlpha( 4, 5, 127 );
+	cache.flushTo( surface, PITCH, 4 );
+
+	// rows 3..5, columns 2..4, and not one byte more
+	Int written = 0;
+	for( Int y = 0; y < H; y++ )
+	{
+		for( Int x = 0; x < W; x++ )
+		{
+			UnsignedInt pixel;
+			memcpy( &pixel, surface + y * PITCH + x * 4, sizeof( pixel ) );
+			const Bool inside = ( y >= 3 && y <= 5 && x >= 2 && x <= 4 );
+			if( inside )
+			{
+				++written;
+				CHECK_EQ( pixel, ((UnsignedInt)cache.getAlpha( x, y )) << 24 );
+			}
+			else
+			{
+				CHECK_EQ( pixel, 0xCDCDCDCD );
+			}
+		}
+	}
+	CHECK_EQ( written, 9 );
+	CHECK( !cache.isDirty() );
+
+	// and a flush with nothing to say does not touch the surface at all
+	memset( surface, 0xCD, sizeof( surface ) );
+	cache.flushTo( surface, PITCH, 4 );
+	for( Int i = 0; i < (Int)sizeof( surface ); i++ )
+		CHECK_EQ( (Int)surface[ i ], 0xCD );
+}
+
+TEST(radar_shroud_cache_puts_the_alpha_where_the_pixel_format_wants_it)
+{
+	enum { W = 4, H = 2 };
+	RadarShroudCache cache;
+	cache.setSize( W, H );
+	cache.setAlpha( 1, 1, 255 );
+	cache.setAlpha( 2, 1, 127 );
+
+	// eight bits of alpha, in the top byte, black underneath: GameMakeColor( 0, 0, 0, alpha )
+	UnsignedInt wide[ W * H ];
+	memset( wide, 0, sizeof( wide ) );
+	cache.flushTo( wide, W * 4, 4 );
+	CHECK_EQ( wide[ 1 * W + 1 ], 0xFF000000 );
+	CHECK_EQ( wide[ 1 * W + 2 ], 0x7F000000 );
+	CHECK_EQ( wide[ 0 * W + 0 ], 0u );
+
+	// four bits of it, in the top nibble.  The DrawPixel this replaces masked the colour with
+	// 0xFFFF here and threw the whole alpha away.
+	cache.clear( 0 );
+	cache.setAlpha( 1, 1, 255 );
+	cache.setAlpha( 2, 1, 127 );
+	UnsignedShort narrow[ W * H ];
+	memset( narrow, 0, sizeof( narrow ) );
+	cache.flushTo( narrow, W * 2, 2 );
+	CHECK_EQ( (Int)narrow[ 1 * W + 1 ], 0xF000 );
+	CHECK_EQ( (Int)narrow[ 1 * W + 2 ], 0x7000 );
+	CHECK_EQ( (Int)narrow[ 0 * W + 0 ], 0 );
+}
+
+TEST(radar_shroud_cache_clear_owes_the_whole_texture_a_write_again)
+{
+	RadarShroudCache cache;
+	cache.setSize( 128, 128 );
+	UnsignedByte surface[ 128 * 128 * 4 ];
+	cache.flushTo( surface, 128 * 4, 4 );
+	cache.setAlpha( 60, 60, 255 );
+	cache.flushTo( surface, 128 * 4, 4 );
+
+	cache.clear( 0 );
+	CHECK( cache.isDirty() );
+	CHECK_EQ( cache.getDirtyMinX(), 0 );
+	CHECK_EQ( cache.getDirtyMinY(), 0 );
+	CHECK_EQ( cache.getDirtyMaxX(), 127 );
+	CHECK_EQ( cache.getDirtyMaxY(), 127 );
+	CHECK_EQ( (Int)cache.getAlpha( 60, 60 ), 0 );
 }

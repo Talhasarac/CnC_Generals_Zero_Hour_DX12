@@ -897,6 +897,9 @@ void W3DRadar::init( void )
 	m_shroudTexture->Get_Filter().Set_Min_Filter( TextureFilterClass::FILTER_TYPE_DEFAULT );
 	m_shroudTexture->Get_Filter().Set_Mag_Filter( TextureFilterClass::FILTER_TYPE_DEFAULT );
 
+	// the shroud is written in main memory and handed to that texture once a frame
+	m_shroudCache.setSize( m_textureWidth, m_textureHeight );
+
 	//
 	// create images used for rendering and set them up with the textures
 	//
@@ -1260,15 +1263,8 @@ void W3DRadar::clearShroud()
 		return;
 #endif
 
-	SurfaceClass *surface = m_shroudTexture->Get_Surface_Level();
-	
 	// fill to clear, shroud will make black.  Don't want to make something black that logic can't clear
-	unsigned int color = GameMakeColor( 0, 0, 0, 0 );
-	for( Int y = 0; y < m_textureHeight; y++ )
-	{
-		surface->DrawHLine(y, 0, m_textureWidth-1, color);
-	}
-	REF_PTR_RELEASE(surface);
+	m_shroudCache.clear( 0 );
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -1283,9 +1279,6 @@ void W3DRadar::setShroudLevel(Int shroudX, Int shroudY, CellShroudStatus setting
 	W3DShroud* shroud = TheTerrainRenderObject ? TheTerrainRenderObject->getShroud() : NULL;
 	if (!shroud)
 		return;
-
-	SurfaceClass* surface = m_shroudTexture->Get_Surface_Level();
-	DEBUG_ASSERTCRASH( surface, ("W3DRadar: Can't get surface for Shroud texture\n") );
 
 	Int mapMinX = shroudX * shroud->getCellWidth();
 	Int mapMinY = shroudY * shroud->getCellHeight();
@@ -1326,15 +1319,12 @@ void W3DRadar::setShroudLevel(Int shroudX, Int shroudY, CellShroudStatus setting
 	else
 		alpha = 0;
 
+	// this used to lock the shroud texture once per pixel, through DrawPixel, and it is called
+	// every time any unit's line of sight crosses a shroud cell boundary.  The cache takes the
+	// writes and draw() hands the changed rectangle to the texture in one lock.
 	for( Int y = radarMinY; y <= radarMaxY; y++ )
-	{
 		for( Int x = radarMinX; x <= radarMaxX; x++ )
-		{
-			if( legalRadarPoint( x, y ) )
-				surface->DrawPixel( x, y, GameMakeColor( 0, 0, 0, alpha ) );
-		}
-	}
-	REF_PTR_RELEASE(surface);
+			m_shroudCache.setAlpha( x, y, (UnsignedByte)alpha );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1418,6 +1408,19 @@ void W3DRadar::draw( Int pixelX, Int pixelY, Int width, Int height )
 	if (true)
 #endif
 	{
+		// hand the frame's shroud changes to the texture, one lock for all of them
+		if( m_shroudCache.isDirty() )
+		{
+			SurfaceClass *surface = m_shroudTexture->Get_Surface_Level();
+			SurfaceClass::SurfaceDescription sd;
+			surface->Get_Description( sd );
+			Int pitch;
+			void *bits = surface->Lock( &pitch );
+			m_shroudCache.flushTo( bits, pitch, Get_Bytes_Per_Pixel( sd.Format ) );
+			surface->Unlock();
+			REF_PTR_RELEASE(surface);
+		}
+
 		TheDisplay->drawImage( m_shroudImage, ul.x, ul.y, lr.x, lr.y );
 	}
 
