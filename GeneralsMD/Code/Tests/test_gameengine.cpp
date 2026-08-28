@@ -40,6 +40,7 @@
 #include "GameLogic/LogicRandomValue.h"
 #include "GameNetwork/CrcAgreement.h"
 #include "GameNetwork/NetworkUtil.h"
+#include "GameNetwork/NetCommandList.h"
 #include "GameNetwork/GameInfo.h"
 #include <float.h>
 #include "GameClient/Water.h"
@@ -3571,4 +3572,106 @@ TEST(hotkey_squad_index_covers_group_zero_and_stops_at_the_last_squad)
 		if( !isValidHotkeySquadIndex( group ) )
 			allInRange = FALSE;
 	CHECK( allInRange );
+}
+
+//////////////////////////////////////////////////////////////////////////////
+// Network command list ordering
+//////////////////////////////////////////////////////////////////////////////
+
+/* Helper: an ack for command "commandID" from player "playerID".  An ack's own id is always zero;
+	 the number it sorts by is the id of the command it acknowledges. */
+static NetAckStage1CommandMsg *makeAck( UnsignedShort commandID, UnsignedByte playerID )
+{
+	NetAckStage1CommandMsg *ack = newInstance( NetAckStage1CommandMsg );
+	ack->setCommandID( commandID );
+	ack->setOriginalPlayerID( playerID );
+	ack->setPlayerID( playerID );
+	ack->setID( 0 );
+	return ack;
+}
+
+/* The command list sorts by type, then player, then sort number - and for an ack the sort number
+	 is the acknowledged command's id, not the ack's own id, which is always zero.  The insertion
+	 shortcut compared ids instead, so IsCommandIdNewer(0, 0) was false for every ack and the
+	 shortcut was dead for the one message that arrives in bulk. */
+TEST(netcommand_ordering_uses_the_sort_number_not_the_always_zero_ack_id)
+{
+	NetAckStage1CommandMsg *older = makeAck( 3, 2 );
+	NetAckStage1CommandMsg *newer = makeAck( 7, 2 );
+
+	// what the old comparison looked at: identical, and so never "newer"
+	CHECK_EQ( (Int)older->getID(), 0 );
+	CHECK_EQ( (Int)newer->getID(), 0 );
+	CHECK( !IsCommandIdNewer( newer->getID(), older->getID() ) );
+
+	// what the list actually orders by
+	CHECK_EQ( older->getSortNumber(), 3 );
+	CHECK_EQ( newer->getSortNumber(), 7 );
+
+	CHECK( IsCommandFromSamePlayerGroup( older, newer ) );
+	CHECK( IsCommandNewerInSamePlayerGroup( newer, older ) );
+	CHECK( !IsCommandNewerInSamePlayerGroup( older, newer ) );
+
+	// a different player is a different group, however the numbers compare
+	NetAckStage1CommandMsg *otherPlayer = makeAck( 7, 5 );
+	CHECK( !IsCommandFromSamePlayerGroup( newer, otherPlayer ) );
+	CHECK( !IsCommandNewerInSamePlayerGroup( otherPlayer, older ) );
+
+	// the full ordering is lexicographic: type, then player, then sort number
+	CHECK( IsCommandNewer( otherPlayer, newer ) );			// same type, higher player
+	CHECK( !IsCommandNewer( newer, otherPlayer ) );
+	CHECK( IsCommandNewer( newer, older ) );				// same type and player, higher sort number
+
+	NetAckStage2CommandMsg *laterType = newInstance( NetAckStage2CommandMsg );
+	laterType->setCommandID( 0 );
+	laterType->setPlayerID( 2 );
+	CHECK( IsCommandNewer( laterType, newer ) );				// higher type beats a higher sort number
+	CHECK( !IsCommandNewer( newer, laterType ) );
+
+	older->detach();
+	newer->detach();
+	otherPlayer->detach();
+	laterType->detach();
+}
+
+/* Acks sort to the head of the list, so the shortcut is what keeps a burst of them linear.  Order
+	 has to come out the same whether it is taken or not: in order, out of order, and duplicated. */
+TEST(netcommand_list_orders_a_burst_of_acks_by_acknowledged_command)
+{
+	NetCommandList *list = newInstance( NetCommandList );
+	list->init();
+
+	// in ascending order - the path the shortcut is there for
+	static const UnsignedShort inOrder[] = { 1, 2, 3, 4, 5, 6, 7, 8 };
+	Int i;
+	for( i = 0; i < 8; ++i )
+	{
+		NetAckStage1CommandMsg *ack = makeAck( inOrder[i], 1 );
+		list->addMessage( ack );
+		ack->detach();
+	}
+
+	// out of order, and one exact duplicate of a command already on the list
+	static const UnsignedShort outOfOrder[] = { 12, 9, 11, 10, 5 };
+	for( i = 0; i < 5; ++i )
+	{
+		NetAckStage1CommandMsg *ack = makeAck( outOfOrder[i], 1 );
+		list->addMessage( ack );
+		ack->detach();
+	}
+
+	CHECK_EQ( list->length(), 12 );			// the duplicate 5 was dropped, 1..12 remain
+
+	Int expected = 1;
+	Bool ascending = TRUE;
+	for( NetCommandRef *ref = list->getFirstMessage(); ref != NULL; ref = ref->getNext() )
+	{
+		if( ref->getCommand()->getSortNumber() != expected )
+			ascending = FALSE;
+		++expected;
+	}
+	CHECK( ascending );
+	CHECK_EQ( expected, 13 );
+
+	list->deleteInstance();
 }

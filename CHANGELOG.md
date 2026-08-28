@@ -321,6 +321,18 @@ map. Ctrl+A is still everything at once.
   worst moment in a match — right after someone has already dropped. The list is now read properly,
   and when it genuinely runs out the game says so instead of inventing somebody.
 
+- **The busier the game got, the more time it wasted filing the replies.** Every order anyone gives
+  is confirmed back to them, and in a full eight-player match those confirmations are far and away
+  the most numerous thing on the wire. They are kept in a sorted queue, and the queue had a
+  shortcut for the normal case where the next one belongs on the end — but the shortcut compared
+  the wrong number, one that never changes from one confirmation to the next, so the shortcut could
+  never tell them apart and never once fired for them. The
+  confirmations were also the kind that sorts to the *front* of the queue, so each new one was
+  filed by reading past every confirmation already waiting. Twice the traffic meant four times the
+  filing work, right at the moment the game can least afford it. The shortcut now compares the
+  number the queue is actually sorted by, and the work grows with the traffic instead of with its
+  square.
+
 - **A dropped order used to make the game wait longer each time it went missing — up to two full
   seconds.** When a packet goes astray it is sent again, and the wait before each attempt was
   doubling: the third and fourth time the same order went missing, everybody sat there for a second

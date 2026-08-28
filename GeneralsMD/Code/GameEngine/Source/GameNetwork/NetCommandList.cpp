@@ -124,7 +124,7 @@ void NetCommandList::reset() {
 
 /**
  * Insert sorts msg.  Assumes that all the previous message inserts were done using this function.
- * The message is sorted in based first on command type, then player id, and then command id.
+ * The message is sorted in based first on command type, then player id, and then sort number.
  */
 NetCommandRef * NetCommandList::addMessage(NetCommandMsg *cmdMsg) {
 	if (cmdMsg == NULL) {
@@ -149,12 +149,18 @@ NetCommandRef * NetCommandList::addMessage(NetCommandMsg *cmdMsg) {
 		// So saving the placement of the last message inserted can give us a huge boost in
 		// efficiency.
 		NetCommandRef *theNext = m_lastMessageInserted->getNext();
-		if ((m_lastMessageInserted->getCommand()->getNetCommandType() == msg->getCommand()->getNetCommandType()) &&
-			(m_lastMessageInserted->getCommand()->getPlayerID() == msg->getCommand()->getPlayerID()) &&
-			IsCommandIdNewer(msg->getCommand()->getID(), m_lastMessageInserted->getCommand()->getID()) &&
-			((theNext == NULL) || ((theNext->getCommand()->getNetCommandType() > msg->getCommand()->getNetCommandType()) ||
-			 (theNext->getCommand()->getPlayerID() > msg->getCommand()->getPlayerID()) ||
-			 IsCommandIdNewer(theNext->getCommand()->getID(), msg->getCommand()->getID())))) {
+
+		// This asked whether the new command's *id* was newer, while the scan below orders the list
+		// by sort number.  The two agree for every command except an ack, whose id is the same number
+		// for every ack in a run - so IsCommandIdNewer was false for every pair and the shortcut never
+		// fired for the one kind of message that arrives in bulk.  Acks sort to the head of the list,
+		// so each one then walked every ack already queued: N acks cost N*N/2 steps instead of N.
+		Bool canInsertAfterLast = IsCommandNewerInSamePlayerGroup(msg->getCommand(), m_lastMessageInserted->getCommand());
+		if (canInsertAfterLast && (theNext != NULL)) {
+			canInsertAfterLast = IsCommandNewer(theNext->getCommand(), msg->getCommand());
+		}
+
+		if (canInsertAfterLast) {
 
 			// Make sure this command isn't already in the list.
 			if (isEqualCommandMsg(m_lastMessageInserted->getCommand(), msg->getCommand())) {
@@ -273,9 +279,8 @@ NetCommandRef * NetCommandList::addMessage(NetCommandMsg *cmdMsg) {
 		return msg;
 	}
 
-	// Find the position within the player's section based on the command ID.
-	// If the command type doesn't require a command ID, sort by whatever it should be sorted by.
-	while ((tempmsg != NULL) && (msg->getCommand()->getNetCommandType() == tempmsg->getCommand()->getNetCommandType()) && (msg->getCommand()->getPlayerID() == tempmsg->getCommand()->getPlayerID()) && IsCommandIdNewer((UnsignedShort)msg->getCommand()->getSortNumber(), (UnsignedShort)tempmsg->getCommand()->getSortNumber())) {
+	// Find the position within the player's section based on the sort number.
+	while ((tempmsg != NULL) && IsCommandNewerInSamePlayerGroup(msg->getCommand(), tempmsg->getCommand())) {
 		tempmsg = tempmsg->getNext();
 	}
 

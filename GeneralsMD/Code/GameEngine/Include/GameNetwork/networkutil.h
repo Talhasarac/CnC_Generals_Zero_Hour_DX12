@@ -29,6 +29,7 @@
 
 #include "GameNetwork/NetworkDefs.h"
 #include "GameNetwork/NetworkInterface.h"
+#include "GameNetwork/NetCommandMsg.h"
 
 UnsignedInt ResolveIP(AsciiString host);
 UnsignedShort GenerateNextCommandID();
@@ -46,6 +47,38 @@ inline Bool IsCommandIdNewer( UnsignedShort newVal, UnsignedShort oldVal )
 {
 	const UnsignedShort diff = newVal - oldVal;
 	return diff != 0 && diff < 0x8000;
+}
+
+//
+// The command list is sorted by command type, then player id, then sort number.  The sort number
+// is the command id for everything except the three ack types, which sort by the id of the command
+// they acknowledge - an ack's own id is not a key at all: it stays at the constructor's zero when
+// the ack is made to be sent, and NetPacket::getCommandList sets it to the packet's running command
+// counter when one is read off the wire, which acks do not advance.  Either way it is the same
+// number for every ack in a run.  Every comparison in the list has to use the same key, so all of
+// them ask these.
+//
+inline Bool IsCommandFromSamePlayerGroup( NetCommandMsg *first, NetCommandMsg *second )
+{
+	return first->getNetCommandType() == second->getNetCommandType() &&
+				 first->getPlayerID() == second->getPlayerID();
+}
+
+inline Bool IsCommandNewerInSamePlayerGroup( NetCommandMsg *newCommand, NetCommandMsg *oldCommand )
+{
+	return IsCommandFromSamePlayerGroup( newCommand, oldCommand ) &&
+				 IsCommandIdNewer( (UnsignedShort)newCommand->getSortNumber(), (UnsignedShort)oldCommand->getSortNumber() );
+}
+
+inline Bool IsCommandNewer( NetCommandMsg *newCommand, NetCommandMsg *oldCommand )
+{
+	if( newCommand->getNetCommandType() != oldCommand->getNetCommandType() )
+		return newCommand->getNetCommandType() > oldCommand->getNetCommandType();
+
+	if( newCommand->getPlayerID() != oldCommand->getPlayerID() )
+		return newCommand->getPlayerID() > oldCommand->getPlayerID();
+
+	return IsCommandIdNewer( (UnsignedShort)newCommand->getSortNumber(), (UnsignedShort)oldCommand->getSortNumber() );
 }
 
 #ifdef DEBUG_LOGGING
