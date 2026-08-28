@@ -32,6 +32,7 @@
 #include "Common/Version.h"
 #include "GameClient/TerrainVisual.h" // for TERRAIN_LOD_MIN definition
 #include "GameClient/GameText.h"
+#include "GameNetwork/GameInfo.h" // for the SlotState -autoskirmish hands the AI slots
 
 #ifdef _INTERNAL
 // for occasional debugging...
@@ -99,8 +100,15 @@ static void ConvertShortMapPathToLongMapPath(AsciiString &mapName)
 	token.removeLastChar();
 	token.removeLastChar();
 
-	actualpath.concat(token);
-	actualpath.concat('\\');
+	// "maps\foo.map" is the short form and grows the directory the map lives in; a path that
+	// already names that directory ("maps\foo\foo.map") is left alone instead of growing a third.
+	AsciiString dir = token;
+	dir.concat('\\');
+	if (!actualpath.endsWithNoCase(dir.str()))
+	{
+		actualpath.concat(token);
+		actualpath.concat('\\');
+	}
 	actualpath.concat(token);
 	actualpath.concat(".map");
 
@@ -385,10 +393,13 @@ Int parseNoShadows(char *args[], int)
 
 Int parseMapName(char *args[], int num)
 {
-	if (TheWritableGlobalData && num == 2)
+	// num is what is *left* on the command line, so the original "== 2" quietly ignored the map
+	// whenever another option followed it, and returning 1 left the file name to be re-parsed.
+	if (TheWritableGlobalData && num > 1)
 	{
 		TheWritableGlobalData->m_mapName.set( args[ 1 ] );
 		ConvertShortMapPathToLongMapPath(TheWritableGlobalData->m_mapName);
+		return 2;
 	}
 	return 1;
 }
@@ -929,6 +940,44 @@ Int parseSeed(char *args[], int num)
 	return 2;
 }
 
+Int parseAutoSkirmish(char *args[], int num)
+{
+	if (TheWritableGlobalData && num > 1)
+	{
+		Int players = atoi(args[1]);
+		if (players < 2)
+			players = 2;
+		if (players > MAX_SLOTS)
+			players = MAX_SLOTS;
+		TheWritableGlobalData->m_autoSkirmishPlayers = players;
+	}
+	return 2;
+}
+
+Int parseAIDifficulty(char *args[], int num)
+{
+	if (TheWritableGlobalData && num > 1)
+	{
+		AsciiString difficulty = args[1];
+		if (difficulty.compareNoCase("easy") == 0)
+			TheWritableGlobalData->m_autoSkirmishAIState = SLOT_EASY_AI;
+		else if (difficulty.compareNoCase("medium") == 0 || difficulty.compareNoCase("med") == 0)
+			TheWritableGlobalData->m_autoSkirmishAIState = SLOT_MED_AI;
+		else
+			TheWritableGlobalData->m_autoSkirmishAIState = SLOT_BRUTAL_AI;
+	}
+	return 2;
+}
+
+Int parseObserver(char *args[], int num)
+{
+	if (TheWritableGlobalData)
+	{
+		TheWritableGlobalData->m_autoSkirmishObserver = TRUE;
+	}
+	return 1;
+}
+
 Int parseIncrAGPBuf(char *args[], int num)
 {
 	if (TheWritableGlobalData)
@@ -1171,7 +1220,6 @@ static CommandLineParam params[] =
 
 #if (defined(_DEBUG) || defined(_INTERNAL))
 	{ "-noaudio", parseNoAudio },
-	{ "-map", parseMapName },
 	{ "-nomusic", parseNoMusic },
 	{ "-novideo", parseNoVideo },
 	{ "-noLogOrCrash", parseNoLogOrCrash },
@@ -1240,9 +1288,7 @@ static CommandLineParam params[] =
 	{ "-noShellAnim", parseNoWindowAnimation },
 	{ "-winCursors", parseWinCursors },
 	{ "-constantDebug", parseConstantDebug },
-	{ "-seed", parseSeed },
 	{ "-noagpfix", parseIncrAGPBuf },
-	{ "-noFPSLimit", parseNoFPSLimit },
 	{ "-dumpAssetUsage", parseDumpAssetUsage },
 	{ "-jumpToFrame", parseJumpToFrame },
 	{ "-updateImages", parseUpdateImages },
@@ -1250,6 +1296,16 @@ static CommandLineParam params[] =
 	{ "-extraLogging", parseExtraLogging },
 
 #endif
+
+	/* Outside the _DEBUG/_INTERNAL block on purpose: an unattended Release run is driven entirely
+		 from the command line.  -autoskirmish needs a map to play, -seed makes the run repeatable,
+		 and without -noFPSLimit the simulation is held to the frame rate a human watches at. */
+	{ "-map", parseMapName },
+	{ "-seed", parseSeed },
+	{ "-noFPSLimit", parseNoFPSLimit },
+	{ "-autoskirmish", parseAutoSkirmish },
+	{ "-aidiff", parseAIDifficulty },
+	{ "-observer", parseObserver },
 
 	//-allAdvice feature
 	//{ "-allAdvice", parseAllAdvice },

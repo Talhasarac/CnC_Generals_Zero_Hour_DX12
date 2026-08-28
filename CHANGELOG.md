@@ -1127,6 +1127,13 @@ sake — the 2003 code is still the 2003 code.
 every build. They are not decoration: **most of the bugs in this document were found by those tests,
 not by reading the code.** Linking proves nothing; running proves something.
 
+**The game can now play itself.** One command line starts an eight-player skirmish with no menus:
+seven computer opponents, random factions on random corners of the map, and you watching from an
+observer's camera with nothing to command. Nothing holds the simulation back either, so a match that
+would take half an hour runs in a fraction of it. That is how a fault that shows up once in a
+hundred thousand orders gets found - not by playing carefully, but by letting the machine play
+badly, thousands of times, and recording every match it plays.
+
 **Every fix was proved non-vacuous.** Put the bug back, watch the exact test fail, restore the fix.
 A test that passes both ways is worth nothing, and there are none of those here.
 

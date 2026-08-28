@@ -101,6 +101,7 @@
 #include "GameClient/Drawable.h"
 #include "GameClient/GUICallbacks.h"
 
+#include "GameNetwork/GameInfo.h"
 #include "GameNetwork/NetworkInterface.h"
 #include "GameNetwork/WOLBrowser/WebBrowser.h"
 #include "GameNetwork/LANAPI.h"
@@ -252,6 +253,104 @@ void GameEngine::setFramesPerSecondLimit( Int fps )
 {
 	DEBUG_LOG(("GameEngine::setFramesPerSecondLimit() - setting max fps to %d (TheGlobalData->m_useFpsLimit == %d)\n", fps, TheGlobalData->m_useFpsLimit));
 	m_maxFPS = fps;
+}
+
+/** -----------------------------------------------------------------------------------------------
+ * -autoskirmish <n>: build a skirmish slot list from the command line and launch it without going
+ * through the menus.  This is reallyDoStart() in SkirmishGameOptionsMenu.cpp minus the GUI: the
+ * slots only have to say who is occupied and who is an AI, because GameLogic::startNewGame resolves
+ * a -1 faction, colour and start position itself (populateRandomSideAndColor,
+ * populateRandomStartPosition).  Meant for unattended runs - eight AI players fighting at whatever
+ * frame rate the machine gives, with the local slot watching.
+ */
+static void startAutoSkirmish( void )
+{
+	AsciiString mapName = TheGlobalData->m_mapName;
+	if (mapName.isEmpty())
+	{
+		DEBUG_LOG(("-autoskirmish: no -map was given\n"));
+		return;
+	}
+
+	const MapMetaData *md = TheMapCache->findMap( mapName );
+	if (md == NULL)
+	{
+		DEBUG_LOG(("-autoskirmish: '%s' is not in the map cache\n", mapName.str()));
+		return;
+	}
+	if (!md->m_isMultiplayer)
+	{
+		DEBUG_LOG(("-autoskirmish: '%s' is not a multiplayer map\n", mapName.str()));
+		return;
+	}
+
+	Int numPlayers = TheGlobalData->m_autoSkirmishPlayers;
+	if (numPlayers > md->m_numPlayers)
+	{
+		DEBUG_LOG(("-autoskirmish: '%s' holds %d players, not %d\n", mapName.str(), md->m_numPlayers, numPlayers));
+		numPlayers = md->m_numPlayers;
+	}
+
+	if (TheSkirmishGameInfo == NULL)
+	{
+		TheSkirmishGameInfo = NEW SkirmishGameInfo;
+	}
+	TheSkirmishGameInfo->init();
+	TheSkirmishGameInfo->clearSlotList();
+	TheSkirmishGameInfo->reset();
+	TheSkirmishGameInfo->enterGame();
+
+	UnicodeString localName;
+	localName.translate( AsciiString( "Player" ) );
+	for( Int i = 0; i < numPlayers; i++ )
+	{
+		GameSlot slot;
+		if (i == 0)
+		{
+			slot.setState( SLOT_PLAYER, localName );
+			slot.setName( localName );
+			/* An observer has no units and no base, so the eight seats a map has all go to the AI:
+				 the local slot only carries the camera. */
+			slot.setPlayerTemplate( TheGlobalData->m_autoSkirmishObserver ? PLAYERTEMPLATE_OBSERVER
+																																	 : PLAYERTEMPLATE_RANDOM );
+		}
+		else
+		{
+			slot.setState( (SlotState)TheGlobalData->m_autoSkirmishAIState );
+			slot.setPlayerTemplate( PLAYERTEMPLATE_RANDOM );
+		}
+		slot.setColor( -1 );			// -1 is "random" to populateRandomSideAndColor
+		slot.setStartPos( -1 );		// and to populateRandomStartPosition
+		slot.setTeamNumber( -1 );	// -1 is "no team", so everybody fights everybody
+		TheSkirmishGameInfo->setSlot( i, slot );
+	}
+	TheSkirmishGameInfo->setLocalIP( TheSkirmishGameInfo->getSlot(0)->getIP() );
+	TheSkirmishGameInfo->setMap( mapName );
+
+	/* -seed makes the whole run repeatable: the seed drives the factions, the colours, the start
+		 positions and every logic random draw after them, so the same command line replays the same
+		 match. */
+	const Int seed = (TheGlobalData->m_fixedSeed >= 0) ? TheGlobalData->m_fixedSeed : GetTickCount();
+	TheSkirmishGameInfo->setSeed( seed );
+	TheSkirmishGameInfo->startGame( 0 );
+
+	TheWritableGlobalData->m_shellMapOn = FALSE;
+	TheWritableGlobalData->m_playIntro = FALSE;
+
+	/* The menu passes the game speed slider's position here; -noFPSLimit has already put 30000 in
+		 m_framesPerSecondLimit, which is what makes this run as fast as the machine can. */
+	const Int maxFPS = TheGlobalData->m_framesPerSecondLimit;
+
+	InitRandom( seed );
+	GameMessage *msg = TheMessageStream->appendMessage( GameMessage::MSG_NEW_GAME );
+	msg->appendIntegerArgument( GAME_SKIRMISH );
+	msg->appendIntegerArgument( DIFFICULTY_NORMAL );
+	msg->appendIntegerArgument( 0 );
+	msg->appendIntegerArgument( maxFPS );
+
+	DEBUG_LOG(("-autoskirmish: %d players on '%s', seed %d, up to %d fps, local slot %s\n",
+		numPlayers, mapName.str(), seed, maxFPS,
+		TheGlobalData->m_autoSkirmishObserver ? "observing" : "playing"));
 }
 
 /** -----------------------------------------------------------------------------------------------
@@ -661,6 +760,10 @@ void GameEngine::init( int argc, char *argv[] )
 			{
 				TheRecorder->playbackFile(fname);
 			}
+		}
+		else if (TheGlobalData->m_autoSkirmishPlayers > 0)
+		{
+			startAutoSkirmish();
 		}
 
 		// 

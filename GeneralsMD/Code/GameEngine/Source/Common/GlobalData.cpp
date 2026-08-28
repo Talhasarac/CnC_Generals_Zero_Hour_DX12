@@ -55,6 +55,7 @@
 #include "GameClient/TerrainVisual.h"
 
 #include "GameNetwork/FirewallHelper.h"
+#include "GameNetwork/GameInfo.h" // for the SlotState an auto-started skirmish gives its AI slots
 
 // PUBLIC DATA ////////////////////////////////////////////////////////////////////////////////////
 GlobalData* TheWritableGlobalData = NULL;				///< The global data singleton
@@ -667,6 +668,9 @@ GlobalData::GlobalData()
 	m_constantDebugUpdate = FALSE;
 	m_showTeamDot = FALSE;
 	m_fixedSeed = -1; // disabled
+	m_autoSkirmishPlayers = 0; // no skirmish from the command line
+	m_autoSkirmishAIState = SLOT_BRUTAL_AI;
+	m_autoSkirmishObserver = FALSE;
 	m_horizontalScrollSpeedFactor = 1.0;
 	m_verticalScrollSpeedFactor = 1.0;
 

@@ -939,12 +939,12 @@ Int APIENTRY WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance,
 		** Convert WinMain arguments to simple main argc and argv
 		*/
 		int argc = 1;
-		char * argv[20];
+		char * argv[32];
 		argv[0] = NULL;
 
 		char *token;
 		token = nextParam(lpCmdLine, "\" ");
-		while (argc < 20 && token != NULL) {
+		while (argc < 32 && token != NULL) {
 			argv[argc++] = strtrim(token);
 			//added a preparse step for this flag because it affects window creation style
 			if (stricmp(token,"-win")==0)
