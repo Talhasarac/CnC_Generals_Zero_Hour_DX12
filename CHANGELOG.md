@@ -399,6 +399,11 @@ The game overwrites the same replay file after every match, so the only way to k
 and rename the file before starting the next one. Turn on replay archiving and each game is also
 saved under its own date-and-time name, in its own folder, automatically.
 
+Keep enough of them and the list itself used to give up. Past roughly two thousand rows the scroll
+position wrapped around to a negative number: the view snapped somewhere it should not be and
+scrolling back up stopped responding. Any long list in the game -- replays, maps, a busy chat room
+-- now scrolls the whole way, however many entries it holds.
+
 ## Placing a building, then changing your mind
 
 Right-clicking to cancel a building you were about to place used to also deselect the builder, so

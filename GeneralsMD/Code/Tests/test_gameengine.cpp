@@ -46,6 +46,7 @@
 #include "Common/AudioRandomValue.h"
 #include "GameNetwork/CrcAgreement.h"
 #include "Common/RadarShroudCache.h"
+#include "GameClient/Gadget.h"
 #include "GameNetwork/NetworkUtil.h"
 #include "GameNetwork/NetCommandList.h"
 #include "GameNetwork/GameInfo.h"
@@ -4255,4 +4256,29 @@ TEST(radar_shroud_cache_clear_owes_the_whole_texture_a_write_again)
 	CHECK_EQ( cache.getDirtyMaxX(), 127 );
 	CHECK_EQ( cache.getDirtyMaxY(), 127 );
 	CHECK_EQ( (Int)cache.getAlpha( 60, 60 ), 0 );
+}
+
+// ---------------------------------------------------------------------------------------------
+// A listbox scroll offset is a pixel offset into the running height of every entry above it.
+// Both of the fields that carry it used to be Short while the running total they are compared
+// with, and assigned from, is an Int.
+// ---------------------------------------------------------------------------------------------
+TEST(listbox_scroll_offset_survives_a_list_taller_than_a_signed_short)
+{
+	ListboxData list;
+	memset( &list, 0, sizeof( list ) );
+
+	// four thousand chat lines or replay files at fifteen pixels a row
+	list.totalHeight = 60000;
+	list.displayHeight = 200;
+	list.displayPos = 45000;
+
+	CHECK_EQ( list.displayPos, 45000 );
+	CHECK( list.displayPos > 0 );
+	CHECK( list.displayPos + list.displayHeight <= list.totalHeight );
+
+	// scrolling to the bottom, the way the slider and the mouse wheel do it
+	list.displayPos = list.totalHeight - list.displayHeight;
+	CHECK_EQ( list.displayPos, 59800 );
+	CHECK( list.displayPos > 0 );
 }

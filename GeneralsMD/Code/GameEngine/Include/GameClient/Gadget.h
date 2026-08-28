@@ -377,11 +377,15 @@ typedef struct _ListboxData
 	Int					selectPos;				// Position of current selected entry (for SINGLE select)
 	Int					*selections;			// Pointer to array of selections (for MULTI select)
 
-	Short				displayHeight;		// Height in pixels of listbox display region
+	Int					displayHeight;		// Height in pixels of listbox display region
 																// this is computed based on the existance
 																// of a title or not.
 	UnsignedInt doubleClickTime;	//
-	Short				displayPos;				// Position of current display entry in pixels
+	// both of these are pixel offsets into totalHeight, which is an Int, and displayPos is assigned
+	// straight out of ListEntryRow::listHeight.  A list whose entries add up to more than 32767
+	// pixels - a few thousand chat lines or replays - used to wrap these to a negative number and
+	// the scrollbar jumped to the wrong end of the list.
+	Int					displayPos;				// Position of current display entry in pixels
 
 } ListboxData;
 
