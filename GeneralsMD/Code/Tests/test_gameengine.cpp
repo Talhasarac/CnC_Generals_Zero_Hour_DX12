@@ -3040,14 +3040,11 @@ TEST(selfslug_fires_once_the_margin_eats_into_the_slack)
 
 TEST(selfslug_threshold_has_a_floor_the_shipped_run_ahead_cannot_undercut)
 {
-	/* ConnectionManager::updateRunAhead computes (lat1 + lat2) / 2 * minFps, adds
-		 NetworkRunAheadSlack percent, and clamps to at least MIN_RUNAHEAD (10).  Run the numbers at
-		 the shipped 30 fps and the clamp is not an edge case, it is the answer: two players at 100 ms
-		 average round trip give 1.6 frames, eight players at 300 ms give 9.9 - the formula does not
-		 clear 10 until the two worst round trips add up to about 600 ms.  So the run-ahead every real
-		 game plays on is 10, its 10 % slack is one frame, and a brake that waits until one frame of
-		 margin is left has already lost: at 30 Hz that is 33 ms of warning for a hitch that takes
-		 longer than that to signal, let alone correct. */
+	/* The run-ahead a real room plays on is a handful of frames - MIN_RUNAHEAD is four, and
+		 computeRunAhead only clears that above about 240 ms round trip - so NetworkRunAheadSlack's
+		 10 % of it is worth well under a frame.  A brake that waits until less than one frame of
+		 margin is left has already lost: at 30 Hz that is under 33 ms of warning for a hitch that
+		 takes longer than that to signal, let alone correct.  Hence the floor. */
 	CHECK_EQ( selfSlugThreshold( 10, 10 ), SELFSLUG_MIN_THRESHOLD_FRAMES );
 
 	// the floor holds wherever the arithmetic would land under it, including at zero slack
@@ -3071,6 +3068,102 @@ TEST(selfslug_threshold_has_a_floor_the_shipped_run_ahead_cannot_undercut)
 
 	// a floor is a floor, not a slug-always: the brake still lets go
 	CHECK( !shouldSelfSlug( SELFSLUG_MIN_THRESHOLD_FRAMES, 10, 10 ) );
+}
+
+/* How far ahead the room schedules its commands.  This is the number that decides whether a
+	 click is answered promptly or the match stalls waiting for a packet, and until now it was
+	 neither: the floor under it (MIN_RUNAHEAD, ten frames) was larger than the formula's own answer
+	 on every link anyone plays on, so every game ran at 333 ms of input delay and the arithmetic
+	 that was supposed to adapt the window never got a vote. */
+
+TEST(the_run_ahead_covers_the_trip_it_is_sized_for)
+{
+	/* The one thing a run-ahead must never do is come out shorter than the wire.  getMaximumLatency
+		 sums the two worst average round trips, so the trip a command has to survive is half of it,
+		 and the window has to cover that at the rate the room is running.  EA truncated the division:
+		 a 150 ms round trip is 2.25 frames of wire at 30 Hz and truncates to 2 - 66 ms of window for
+		 75 ms of travel, which arrives late every single time. */
+	for( Int ms = 0; ms <= 800; ms += 5 )
+	{
+		Real latency = (Real)ms / 1000.0f;
+		for( Int fps = 5; fps <= 30; fps += 5 )
+		{
+			Int runAhead = computeRunAhead( latency, fps, 10, MIN_RUNAHEAD, MAX_FRAMES_AHEAD / 2 );
+
+			// the window, in seconds, against the one-way trip it has to cover
+			CHECK( (Real)runAhead / (Real)fps >= (latency / 2.0f) );
+		}
+	}
+}
+
+TEST(the_run_ahead_carries_a_margin_the_percentage_alone_cannot_give)
+{
+	/* An average round trip is exceeded half the time, so a window sized to exactly the average is
+		 wrong half the time.  The proportional slack was meant to be that margin and cannot be: 10 %
+		 of a four frame window is zero frames, 10 % of a ten frame window is one.  The fixed
+		 allowance is what actually covers the jitter, and it is what makes a low floor safe. */
+	for( Int ms = 0; ms <= 800; ms += 5 )
+	{
+		Real latency = (Real)ms / 1000.0f;
+		Int runAhead = computeRunAhead( latency, 30, 10, MIN_RUNAHEAD, MAX_FRAMES_AHEAD / 2 );
+
+		// at least RUNAHEAD_JITTER_FRAMES of room beyond the trip itself, at every latency
+		Real slackSeconds = ( (Real)runAhead / 30.0f ) - ( latency / 2.0f );
+		CHECK( slackSeconds >= ( (Real)RUNAHEAD_JITTER_FRAMES / 30.0f ) - 0.0005f );
+	}
+}
+
+TEST(the_run_ahead_is_shorter_than_the_shipped_floor_on_the_links_that_do_not_need_it)
+{
+	/* What the change is for.  A LAN game and a good broadband game used to be given the same third
+		 of a second of input delay as a transatlantic one, because the floor was ten frames and the
+		 formula never beat it. */
+	const Int shippedFloor = 10;			// EA's MIN_RUNAHEAD, 333 ms of input delay at 30 Hz
+
+	CHECK( computeRunAhead( 0.000f, 30, 10, MIN_RUNAHEAD, 64 ) < shippedFloor );		// LAN
+	CHECK( computeRunAhead( 0.040f, 30, 10, MIN_RUNAHEAD, 64 ) < shippedFloor );		// 40 ms
+	CHECK( computeRunAhead( 0.100f, 30, 10, MIN_RUNAHEAD, 64 ) < shippedFloor );		// 100 ms
+	CHECK( computeRunAhead( 0.160f, 30, 10, MIN_RUNAHEAD, 64 ) < shippedFloor );		// 160 ms
+
+	// and the shortest of them is the floor itself, not something under it
+	CHECK_EQ( computeRunAhead( 0.000f, 30, 10, MIN_RUNAHEAD, 64 ), MIN_RUNAHEAD );
+
+	/* And what it is not: the links that were relying on the floor get more window than the floor
+		 gave them, not less.  600 ms summed round trip is where EA's formula finally reached ten. */
+	CHECK( computeRunAhead( 0.300f, 30, 10, MIN_RUNAHEAD, 64 ) >= 7 );
+	CHECK( computeRunAhead( 0.600f, 30, 10, MIN_RUNAHEAD, 64 ) > shippedFloor );
+	CHECK( computeRunAhead( 1.000f, 30, 10, MIN_RUNAHEAD, 64 ) > 16 );
+}
+
+TEST(the_run_ahead_stays_inside_the_bounds_the_network_buffers_are_built_for)
+{
+	// the window indexes frame buffers sized from MAX_FRAMES_AHEAD; it may not walk out of them
+	for( Int ms = 0; ms <= 20000; ms += 25 )
+	{
+		Int runAhead = computeRunAhead( (Real)ms / 1000.0f, 30, 10, MIN_RUNAHEAD, MAX_FRAMES_AHEAD / 2 );
+		CHECK( runAhead >= MIN_RUNAHEAD );
+		CHECK( runAhead <= MAX_FRAMES_AHEAD / 2 );
+	}
+
+	// a rate of zero is not a division by zero, and a negative latency is not a negative window
+	CHECK_EQ( computeRunAhead( 0.0f, 0, 10, MIN_RUNAHEAD, 64 ), MIN_RUNAHEAD );
+	CHECK_EQ( computeRunAhead( -1.0f, 30, 10, MIN_RUNAHEAD, 64 ), MIN_RUNAHEAD );
+}
+
+TEST(the_shipped_run_ahead_floor_leaves_the_self_slug_brake_room_to_work)
+{
+	/* The floor and the brake are one decision, not two.  The self-slug fires when the measured
+		 cushion drops below selfSlugThreshold(runAhead), so a floor at or below that threshold means
+		 a room at its shortest window is braking permanently - the stall the brake exists to avoid,
+		 applied continuously. */
+	CHECK( MIN_RUNAHEAD > SELFSLUG_MIN_THRESHOLD_FRAMES );
+	CHECK( selfSlugThreshold( MIN_RUNAHEAD, 10 ) < MIN_RUNAHEAD );
+	CHECK( !shouldSelfSlug( MIN_RUNAHEAD, MIN_RUNAHEAD, 10 ) );
+
+	// and the buffers the window is drawn from are big enough for the largest window it can ask for
+	CHECK( MIN_RUNAHEAD <= MAX_FRAMES_AHEAD / 2 );
+	CHECK( FRAME_DATA_LENGTH > 2 * MAX_FRAMES_AHEAD );
+	CHECK( FRAMES_TO_KEEP > MAX_FRAMES_AHEAD / 2 );
 }
 
 /* The room's logic rate.  ConnectionManager::updateRunAhead runs on the packet router: it takes

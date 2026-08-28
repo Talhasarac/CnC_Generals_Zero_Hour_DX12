@@ -28,7 +28,15 @@
 #include "GameNetwork/NetworkUtil.h"
 
 Int MAX_FRAMES_AHEAD = 128;
-Int MIN_RUNAHEAD = 10;
+
+/* The shortest run-ahead the room is ever commanded to use: 133 ms of input delay at 30 Hz.  EA
+	 shipped ten frames - a third of a second on every link, LAN included - and because the formula
+	 in computeRunAhead does not clear ten until the two worst average round trips add up to about
+	 600 ms, ten frames is what every game anyone actually played ran at.  The window can come down
+	 this far because computeRunAhead now rounds the trip up rather than down and carries a fixed
+	 jitter allowance on top (RUNAHEAD_JITTER_FRAMES), so a link that genuinely needs a wide window
+	 is given a wider one than the old floor ever gave it, and a link that does not stops paying. */
+Int MIN_RUNAHEAD = 4;
 Int FRAME_DATA_LENGTH = (MAX_FRAMES_AHEAD+1)*2;
 Int FRAMES_TO_KEEP = (MAX_FRAMES_AHEAD/2) + 1;
 

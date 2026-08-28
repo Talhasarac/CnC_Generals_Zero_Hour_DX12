@@ -56,13 +56,21 @@ Int selfSlugThreshold( Int runAhead, UnsignedInt slackPercent );
 
 enum
 {
-	/* The brake needs room to work.  NetworkRunAheadSlack is 10 %, and MIN_RUNAHEAD is 10 frames -
-		 and that floor is what the run-ahead actually is for every link anyone plays on: the formula
-		 in ConnectionManager::updateRunAhead is (lat1 + lat2) / 2 * minFps * 1.1, which at 30 fps
-		 does not clear 10 until the two worst average round trips add up to about 600 ms.  So the
-		 threshold was 10 * 10 % = one frame, and a brake that engages with one frame of margin left
-		 is not a brake, it is the stall it was meant to prevent.  Two frames is 66 ms at 30 Hz. */
+	/* The brake needs room to work.  NetworkRunAheadSlack is 10 %, and the run-ahead it is a
+		 percentage of is small: MIN_RUNAHEAD is four frames, and computeRunAhead only clears that on
+		 links slower than about 240 ms round trip.  Ten percent of four is nothing, and a brake that
+		 engages with less than a frame of margin left is not a brake, it is the stall it was meant
+		 to prevent.  Two frames is 66 ms at 30 Hz. */
 	SELFSLUG_MIN_THRESHOLD_FRAMES = 2,
+
+	/* The fixed part of the run-ahead's safety margin.  The transit term computeRunAhead sizes the
+		 window from is built out of *average* round trips, and an average is exceeded half the time;
+		 the proportional slack on top of it is worth 0.4 frames on a LAN and one frame on a 300 ms
+		 link, which is not a margin, it is a rounding error.  Two frames - 66 ms at 30 Hz - is the
+		 allowance for the jitter the average hides, and it is what makes a low MIN_RUNAHEAD safe:
+		 the links that need the window get more of it than the old flat floor of ten ever gave them,
+		 and the links that do not stop paying for it. */
+	RUNAHEAD_JITTER_FRAMES = 2,
 
 	/* The room never runs slower than this, whatever the metrics say. */
 	ROOM_FRAME_RATE_FLOOR = 5,
@@ -73,6 +81,17 @@ enum
 		 run-ahead is sized with. */
 	ROOM_FRAME_RATE_PROBE_PERCENT = 10,
 };
+
+/* How far into the future the room schedules its commands.  Every machine runs the same logic
+	 frame at the same time, so a command has to be on every machine before that frame arrives; the
+	 run-ahead is how much head start it is given.  Too small and the room stalls waiting for a
+	 packet that is still in flight, too large and every click is answered late.  The packet router
+	 computes this for the whole room and broadcasts it, so it is one number everybody obeys. */
+
+/** The run-ahead, in frames.  latencySumSeconds is the sum of the two worst average round trips
+	  (ConnectionManager::getMaximumLatency), fps the rate the room has settled on. */
+Int computeRunAhead( Real latencySumSeconds, Int fps, UnsignedInt slackPercent,
+										 Int minRunAhead, Int maxRunAhead );
 
 /* The room's logic rate is set by the packet router to the slowest rate any player reports, and
 	 every machine then paces its own logic on it (Network::timeForNewFrame).  The trap is that the

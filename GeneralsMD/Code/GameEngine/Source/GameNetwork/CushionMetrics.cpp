@@ -23,6 +23,8 @@
 #include "PreRTS.h"
 #include "GameNetwork/CushionMetrics.h"
 
+#include <math.h>
+
 Int frameCushion( UnsignedInt executionFrame, UnsignedInt currentFrame )
 {
 	/* EA wrote this as `UnsignedInt cushion = executionFrame - TheGameLogic->getFrame()`, which is
@@ -72,13 +74,42 @@ Int selfSlugThreshold( Int runAhead, UnsignedInt slackPercent )
 {
 	/* The threshold is the slack the run-ahead was given: once the margin has eaten into that, the
 		 next hiccup is a stall rather than a wobble.  With a floor, because the slack is a
-		 percentage of a run-ahead that is pinned to MIN_RUNAHEAD for every link in practice - see
-		 SELFSLUG_MIN_THRESHOLD_FRAMES. */
+		 percentage of a run-ahead that is a handful of frames on the links most rooms are played on
+		 - see SELFSLUG_MIN_THRESHOLD_FRAMES. */
 	Int threshold = (Int)((runAhead * (Int)slackPercent) / 100);
 	if( threshold < SELFSLUG_MIN_THRESHOLD_FRAMES )
 		threshold = SELFSLUG_MIN_THRESHOLD_FRAMES;
 
 	return threshold;
+}
+
+Int computeRunAhead( Real latencySumSeconds, Int fps, UnsignedInt slackPercent,
+										 Int minRunAhead, Int maxRunAhead )
+{
+	if( latencySumSeconds < 0.0f )
+		latencySumSeconds = 0.0f;
+	if( fps < 1 )
+		fps = 1;			// the room rate is floored long before it gets here, but the division below is real
+
+	/* getMaximumLatency() sums the two worst average round trips, so half of it is the one-way trip
+		 a command has to survive.  Rounded up, where EA truncated: a 150 ms round trip truncates to
+		 two frames - 66 ms - to cover 75 ms of wire, and a run-ahead shorter than the trip itself is
+		 not a tight window, it is a stall on every command that uses it.  Nobody ever saw that
+		 because the old floor of ten frames was larger than the formula's answer on every link
+		 anyone plays on; lowering the floor is what makes the arithmetic underneath it matter. */
+	Int frames = (Int)ceilf( (latencySumSeconds / 2.0f) * (Real)fps );
+
+	// EA's proportional slack, and then the fixed allowance an average and a percentage cannot give
+	frames += (Int)((frames * (Int)slackPercent) / 100);
+	frames += RUNAHEAD_JITTER_FRAMES;
+
+	if( frames < minRunAhead )
+		frames = minRunAhead;
+
+	if( frames > maxRunAhead )
+		frames = maxRunAhead;			// don't let the run ahead get out of hand
+
+	return frames;
 }
 
 Int settleRoomFrameRate( Int minFps, Int fpsLimit )

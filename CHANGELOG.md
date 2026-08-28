@@ -304,6 +304,18 @@ map. Ctrl+A is still everything at once.
   game nobody finishes. So every match anyone actually plays runs at that minimum, and the safety
   margin it was given works out to that one frame. The brake starts twice as early now, which is
   the difference between easing off and lurching.
+- **Online, your orders now happen a third of a second sooner.** Following on from that: the
+  amount the game runs ahead of you is your input delay, and because the formula never beat its own
+  minimum, every game was played at that minimum — a full third of a second between clicking and
+  the unit moving, on a local network as much as on a transatlantic one. That minimum is now less
+  than half what it was. Two things had to be fixed first, because the arithmetic underneath it was
+  never safe to rely on: it rounded the travel time *down*, so on some connections the window it
+  allowed was shorter than the trip the orders had to make — late, every single time — and the
+  safety margin it added was a percentage of a number so small it rounded away to nothing. Both are
+  fixed, and the margin is now a fixed amount of real time rather than a percentage. The result
+  cuts both ways on purpose: a good connection stops paying for a delay it never needed, and a bad
+  one is given a *wider* window than the old minimum ever gave it — a room on half a second of lag
+  used to get thirty-three milliseconds of margin, and now gets a hundred.
 - **One player's two-second hiccup used to slow the match down for the rest of the game.** An online
   game runs everyone at the speed of the slowest machine in the room, which is fair enough while
   somebody is actually struggling. The problem was getting back out of it. Each machine reports how

@@ -1278,19 +1278,12 @@ void ConnectionManager::updateRunAhead(Int oldRunAhead, Int frameRate, Bool didS
 			/* The rate everybody is actually told to run at.  Deliberately a step above the slowest
 				 reported rate: a machine pinned at the room's rate reports exactly that rate back, so
 				 without the step the reported minimum can never rise and one player's hitch pins the
-				 room for the rest of the match - see CushionMetrics.h.  The run-ahead below is left on
-				 the settled rate rather than this one: it is the room's honest measured speed, and the
-				 formula's result is clamped to MIN_RUNAHEAD for every real link anyway. */
+				 room for the rest of the match - see CushionMetrics.h.  The run-ahead below is sized
+				 on the settled rate rather than this one: it is the room's honest measured speed, and
+				 sizing a safety window on the rate we are hoping for is how the window comes up short. */
 			Int commandedFps = probeRoomFrameRate(minFps, TheGlobalData->m_framesPerSecondLimit);
-			Int newRunAhead = (Int)((getMaximumLatency() / 2.0) * (Real)minFps);
-			newRunAhead += (newRunAhead * TheGlobalData->m_networkRunAheadSlack) / 100; // Add in 10% of slack to the run ahead in case of network hiccups.
-			if (newRunAhead < MIN_RUNAHEAD) {
-				newRunAhead = MIN_RUNAHEAD; // make sure its at least MIN_RUNAHEAD.
-			}
-
-			if (newRunAhead > (MAX_FRAMES_AHEAD / 2)) {
-				newRunAhead = MAX_FRAMES_AHEAD / 2; // dont let run ahead get out of hand.
-			}
+			Int newRunAhead = computeRunAhead(getMaximumLatency(), minFps,
+				TheGlobalData->m_networkRunAheadSlack, MIN_RUNAHEAD, MAX_FRAMES_AHEAD / 2);
 
 			NetRunAheadCommandMsg *msg = newInstance(NetRunAheadCommandMsg);
 			msg->setPlayerID(m_localSlot);
