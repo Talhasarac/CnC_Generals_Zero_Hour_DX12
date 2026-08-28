@@ -1806,10 +1806,15 @@ Object *DozerAIUpdate::construct( const ThingTemplate *what,
 	BodyModuleInterface *body = obj->getBodyModule();
 	body->internalChangeHealth( -body->getHealth() + 1.0f );
 
-	// set the model action state to awaiting construction
-	obj->clearAndSetModelConditionFlags(
-		MAKE_MODELCONDITION_MASK2(MODELCONDITION_PARTIALLY_CONSTRUCTED, MODELCONDITION_ACTIVELY_BEING_CONSTRUCTED), 
-		MAKE_MODELCONDITION_MASK(MODELCONDITION_AWAITING_CONSTRUCTION)
+	//
+	// leave every construction model condition off.  The art's AWAITING_CONSTRUCTION state is a
+	// foundation, and a plan standing on the map has to show the finished building - it is drawn as a
+	// translucent silhouette of it instead (Drawable::getEffectiveOpacity).  The two "work under way"
+	// states go on when the builder arrives, in DozerActionMoveToState::update.
+	//
+	obj->clearModelConditionFlags(
+		MAKE_MODELCONDITION_MASK3(MODELCONDITION_AWAITING_CONSTRUCTION, MODELCONDITION_PARTIALLY_CONSTRUCTED,
+															MODELCONDITION_ACTIVELY_BEING_CONSTRUCTED)
 	);
 
 	// we have a construction pending - unless a human player's dozer is already building

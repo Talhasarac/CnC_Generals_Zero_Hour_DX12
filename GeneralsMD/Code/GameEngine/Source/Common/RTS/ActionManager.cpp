@@ -113,16 +113,34 @@ static Bool isObjectShroudedForAction ( const Object *source, const Object *targ
 
 	if( source && target && source->getControllingPlayer() ) 
 	{
-		if( source->getControllingPlayer()->getPlayerType() == PLAYER_HUMAN 
-			&& commandSource != CMD_FROM_SCRIPT
-			&& target->getShroudedStatus( source->getControllingPlayer()->getPlayerIndex() ) >= OBJECTSHROUD_FOGGED
-			)
-		{
-			return TRUE;
-		}
+		//
+		// ...with one exception: a structure the asking player has planned but not started clears no
+		// shroud of its own (Object_shroudClearingRange), so it sits in fog on its owner's screen by
+		// design.  It is still their own plan, drawn for them and selectable, and the fog must not be
+		// what stops them sending a builder back to it.
+		//
+		Bool ownPlacementSilhouette = source->getControllingPlayer() == target->getControllingPlayer()
+			&& Object_isAwaitingBuilder( target->testStatus( OBJECT_STATUS_UNDER_CONSTRUCTION ),
+																	 target->getConstructionPercent() );
+
+		return ActionManager_shroudHidesTarget( source->getControllingPlayer()->getPlayerType() == PLAYER_HUMAN,
+																						commandSource == CMD_FROM_SCRIPT,
+																						target->getShroudedStatus( source->getControllingPlayer()->getPlayerIndex() ) >= OBJECTSHROUD_FOGGED,
+																						ownPlacementSilhouette );
 	}
 
 	return FALSE;
+}
+
+// ------------------------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------------------------
+Bool ActionManager_shroudHidesTarget( Bool humanSource, Bool fromScript, Bool targetFoggedOrWorse,
+																			Bool ownPlacementSilhouette )
+{
+	if( ownPlacementSilhouette )
+		return FALSE;
+
+	return humanSource && !fromScript && targetFoggedOrWorse;
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////

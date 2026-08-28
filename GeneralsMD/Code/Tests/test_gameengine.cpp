@@ -75,6 +75,11 @@
 #include "GameLogic/Module/QueueProductionExitUpdate.h"
 #include "GameLogic/Module/SupplyCenterProductionExitUpdate.h"
 #include "WWMath/matrix3d.h"
+#include "GameClient/Drawable.h"
+#include "Common/BuildAssistant.h"
+#include "GameLogic/Object.h"
+#include "GameClient/CommandXlat.h"
+#include "Common/ActionManager.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -4696,4 +4701,121 @@ TEST(a_rotate_key_press_moves_the_camera_exactly_one_eighth)
 	CHECK_NEAR( View_stepAngleByEighths( 0.1f, 1 ), step, 0.0001f );
 	CHECK_NEAR( View_stepAngleByEighths( -0.1f, -1 ), -step, 0.0001f );
 	CHECK_NEAR( View_stepAngleByEighths( 0.0f, 0 ), 0.0f, 0.0001f );
+}
+
+/** Placing a structure buys a plan, not a building.  The object does go down at once - it is paid
+	 for, it holds the ground, and it can be clicked and cancelled - but nothing is built until a
+	 builder walks over to it, so it is drawn as the same translucent silhouette that was following
+	 the cursor a moment earlier.  A plan on the map must never read as a building already standing
+	 there. */
+TEST(a_structure_waiting_for_its_builder_is_drawn_as_a_silhouette)
+{
+	CHECK( Object_isAwaitingBuilder( TRUE, 0.0f ) == TRUE );
+
+	CHECK_NEAR( Drawable_effectiveOpacity( 1.0f, 1.0f, TRUE ), PLACEMENT_SILHOUETTE_OPACITY, 0.0001f );
+
+	// what followed the cursor and what landed on the map are drawn at the same opacity
+	CHECK_NEAR( Drawable_effectiveOpacity( PLACEMENT_SILHOUETTE_OPACITY, 1.0f, FALSE ),
+							Drawable_effectiveOpacity( 1.0f, 1.0f, TRUE ), 0.0001f );
+
+	// and it is see-through, which is the whole reason the renderer puts it in the translucent pass
+	CHECK( Drawable_effectiveOpacity( 1.0f, 1.0f, TRUE ) != 1.0f );
+}
+
+/** The first percent of work is what ends the plan, so the moment the builder arrives and starts
+	 the structure turns solid and stays solid for the rest of its life.  A finished building carries
+	 CONSTRUCTION_COMPLETE (-1) and must not be mistaken for one sitting at zero. */
+TEST(a_structure_the_builder_has_reached_is_drawn_solid)
+{
+	CHECK( Object_isAwaitingBuilder( TRUE, 0.1f ) == FALSE );
+	CHECK( Object_isAwaitingBuilder( TRUE, 99.9f ) == FALSE );
+	CHECK( Object_isAwaitingBuilder( FALSE, 0.0f ) == FALSE );
+	CHECK( Object_isAwaitingBuilder( FALSE, CONSTRUCTION_COMPLETE ) == FALSE );
+
+	CHECK_NEAR( Drawable_effectiveOpacity( 1.0f, 1.0f, FALSE ), 1.0f, 0.0001f );
+}
+
+/** The silhouette scales whatever opacity the drawable already asked for instead of replacing it,
+	 so a stealthed or half-faded drawable is not dragged back up to 45% by being a plan, and one
+	 that has been faded all the way out stays out. */
+TEST(the_placement_silhouette_scales_the_opacity_it_is_given)
+{
+	CHECK_NEAR( Drawable_effectiveOpacity( 0.5f, 1.0f, TRUE ), 0.5f * PLACEMENT_SILHOUETTE_OPACITY, 0.0001f );
+	CHECK_NEAR( Drawable_effectiveOpacity( 1.0f, 0.5f, TRUE ), 0.5f * PLACEMENT_SILHOUETTE_OPACITY, 0.0001f );
+	CHECK_NEAR( Drawable_effectiveOpacity( 0.0f, 1.0f, TRUE ), 0.0f, 0.0001f );
+}
+
+/** Ground you have already scouted stays buildable after your units leave it, so a base can be
+	 planned out into the fog and the builder sent to walk there.  Shroud - terrain nobody of yours
+	 has ever laid eyes on - is still off limits, which is what stops the map being read through a
+	 placement cursor. */
+TEST(a_base_can_be_planned_into_fog_but_not_into_shroud)
+{
+	CHECK( BuildAssistant_shroudBlocksBuilding( CELLSHROUD_CLEAR ) == FALSE );
+	CHECK( BuildAssistant_shroudBlocksBuilding( CELLSHROUD_FOGGED ) == FALSE );
+	CHECK( BuildAssistant_shroudBlocksBuilding( CELLSHROUD_SHROUDED ) == TRUE );
+}
+
+/** A plan is not a scout.  A structure that has been placed but not started opens no shroud at all,
+	 so drawing a base out into the fog cannot be used to see what is standing there.  Once the
+	 builder arrives EA's own rule takes over - the structure sees itself and no further - and a
+	 finished building goes back to the sight its template gives it. */
+TEST(a_planned_structure_opens_no_shroud_until_the_work_starts)
+{
+	const Real templateRange = 300.0f;
+	const Real boundingRadius = 40.0f;
+
+	CHECK_NEAR( Object_shroudClearingRange( templateRange, TRUE, 0.0f, boundingRadius ), 0.0f, 0.0001f );
+	CHECK_NEAR( Object_shroudClearingRange( templateRange, TRUE, 0.1f, boundingRadius ), boundingRadius, 0.0001f );
+	CHECK_NEAR( Object_shroudClearingRange( templateRange, TRUE, 99.9f, boundingRadius ), boundingRadius, 0.0001f );
+	CHECK_NEAR( Object_shroudClearingRange( templateRange, FALSE, CONSTRUCTION_COMPLETE, boundingRadius ),
+							templateRange, 0.0001f );
+
+	// a structure that clears no shroud at all is not the same as one with no vision by template
+	CHECK_NEAR( Object_shroudClearingRange( 0.0f, FALSE, CONSTRUCTION_COMPLETE, boundingRadius ), 0.0f, 0.0001f );
+}
+
+/** Since the plan reveals nothing, the fog it was placed in would swallow it - and there would be
+	 nothing left on screen to click on and cancel.  Your own plan is drawn through the fog; anything
+	 else fogged, including an enemy's, is still hidden. */
+TEST(your_own_plan_is_drawn_through_the_fog_that_hides_everything_else)
+{
+	CHECK( GameClient_hiddenByShroud( OBJECTSHROUD_FOGGED, TRUE ) == FALSE );
+	CHECK( GameClient_hiddenByShroud( OBJECTSHROUD_SHROUDED, TRUE ) == FALSE );
+
+	CHECK( GameClient_hiddenByShroud( OBJECTSHROUD_FOGGED, FALSE ) == TRUE );
+	CHECK( GameClient_hiddenByShroud( OBJECTSHROUD_SHROUDED, FALSE ) == TRUE );
+
+	// nothing changes for what the player can see anyway
+	CHECK( GameClient_hiddenByShroud( OBJECTSHROUD_CLEAR, FALSE ) == FALSE );
+	CHECK( GameClient_hiddenByShroud( OBJECTSHROUD_PARTIAL_CLEAR, FALSE ) == FALSE );
+}
+
+/** There is nothing to stop about a building that is still going up, so the stop key calls it off
+	 instead - the same cancel, refund and all, that the command bar button on that structure does.
+	 One structure of your own only: a mixed selection or anything already finished still means
+	 stop. */
+TEST(the_stop_key_cancels_a_building_that_is_still_going_up)
+{
+	CHECK( Command_stopMeansCancelConstruction( 1, TRUE, TRUE ) == TRUE );
+
+	CHECK( Command_stopMeansCancelConstruction( 1, TRUE, FALSE ) == FALSE );		// finished building
+	CHECK( Command_stopMeansCancelConstruction( 1, FALSE, TRUE ) == FALSE );	// not yours
+	CHECK( Command_stopMeansCancelConstruction( 2, TRUE, TRUE ) == FALSE );		// more than one thing
+	CHECK( Command_stopMeansCancelConstruction( 0, FALSE, FALSE ) == FALSE );	// nothing selected
+}
+
+/** The plan sits in fog on its owner's screen on purpose, and the fog gate on orders would then
+	 refuse every click on it: no build cursor, no resume, nothing but selection.  A player's own
+	 plan is never hidden from that player's own builders.  Everything else the gate does is
+	 untouched - an enemy in fog is still out of reach, the AI and scripts still ignore the gate
+	 entirely. */
+TEST(the_fog_never_hides_your_own_plan_from_your_own_builder)
+{
+	CHECK( ActionManager_shroudHidesTarget( TRUE, FALSE, TRUE, TRUE ) == FALSE );		// your own plan
+	CHECK( ActionManager_shroudHidesTarget( TRUE, FALSE, TRUE, FALSE ) == TRUE );		// anything else fogged
+
+	CHECK( ActionManager_shroudHidesTarget( TRUE, TRUE, TRUE, FALSE ) == FALSE );		// from a script
+	CHECK( ActionManager_shroudHidesTarget( FALSE, FALSE, TRUE, FALSE ) == FALSE );	// asked by the AI
+	CHECK( ActionManager_shroudHidesTarget( TRUE, FALSE, FALSE, FALSE ) == FALSE );	// in plain sight
 }

@@ -95,6 +95,20 @@
 GameClient *TheGameClient = NULL;
 
 //-------------------------------------------------------------------------------------------------
+/** Fog and shroud hide a drawable from the local player, with one exception: a structure the player
+	* has just planned.  It clears no shroud of its own, so a base planned out into fog would otherwise
+	* disappear the moment it was placed - it stays drawn, as the silhouette of the finished building,
+	* until the builder walks over and the work starts for real. */
+//-------------------------------------------------------------------------------------------------
+Bool GameClient_hiddenByShroud( ObjectShroudStatus status, Bool ownPlacementSilhouette )
+{
+	if( ownPlacementSilhouette )
+		return FALSE;
+
+	return status >= OBJECTSHROUD_FOGGED;
+}
+
+//-------------------------------------------------------------------------------------------------
 GameClient::GameClient()
 {
 
@@ -715,7 +729,17 @@ void GameClient::update( void )
 							ss = OBJECTSHROUD_CLEAR;
 						}
 					}
-					draw->setFullyObscuredByShroud(ss >= OBJECTSHROUD_FOGGED);
+					//
+					// a structure the local player has planned but not started is drawn wherever it was
+					// put, fog or no fog: it reveals nothing (Object_shroudClearingRange gives it no
+					// sight at all), so without this it would be invisible to the player who placed it
+					// and there would be nothing to click on to cancel it.
+					//
+					Bool ownPlacementSilhouette = object->isLocallyControlled()
+						&& Object_isAwaitingBuilder( object->testStatus( OBJECT_STATUS_UNDER_CONSTRUCTION ),
+																				 object->getConstructionPercent() );
+
+					draw->setFullyObscuredByShroud( GameClient_hiddenByShroud( ss, ownPlacementSilhouette ) );
 				}
 			}
 			draw->updateDrawable();

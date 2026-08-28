@@ -5214,16 +5214,37 @@ void Object::setVisionRange( Real newVisionRange )
 }
 
 //-------------------------------------------------------------------------------------------------
+/** A structure that has only been planned - it stands on the map at zero percent and its builder is
+	* still walking over - is not there yet as far as sight is concerned, so it opens no shroud: a base
+	* can be laid out into fog without the plan itself scouting the ground it sits on.  Once the
+	* builder arrives and the first percent goes in, EA's rule takes over and the structure sees
+	* itself and no further. */
+//-------------------------------------------------------------------------------------------------
+Bool Object_isAwaitingBuilder( Bool underConstruction, Real constructionPercent )
+{
+	return underConstruction && constructionPercent <= 0.0f;
+}
+
+//-------------------------------------------------------------------------------------------------
+Real Object_shroudClearingRange( Real ownRange, Bool underConstruction, Real constructionPercent,
+																 Real boundingCircleRadius )
+{
+	if( Object_isAwaitingBuilder( underConstruction, constructionPercent ) )
+		return 0.0f;
+
+	if( underConstruction )
+		return boundingCircleRadius;
+
+	return ownRange;
+}
+
+//-------------------------------------------------------------------------------------------------
 Real Object::getShroudClearingRange() const
 {
-	Real shroudClearingRange=m_shroudClearingRange;
-
-	if( getStatusBits().test( OBJECT_STATUS_UNDER_CONSTRUCTION ) )
-	{	
-		//structures under construction have limited vision range.  For now, base it
-		//on the geometry extents so the structure can only see itself.
-		shroudClearingRange = getGeometryInfo().getBoundingCircleRadius();
-	}
+	Real shroudClearingRange = Object_shroudClearingRange( m_shroudClearingRange,
+																												 getStatusBits().test( OBJECT_STATUS_UNDER_CONSTRUCTION ),
+																												 m_constructionPercent,
+																												 getGeometryInfo().getBoundingCircleRadius() );
 
 #if defined(_DEBUG) || defined(_INTERNAL)
 	if (TheGlobalData->m_debugVisibility) 

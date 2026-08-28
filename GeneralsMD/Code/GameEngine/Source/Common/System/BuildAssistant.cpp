@@ -912,6 +912,16 @@ LegalBuildCode BuildAssistant::isLocationClearOfObjects( const Coord3D *worldPos
 }
 
 //-------------------------------------------------------------------------------------------------
+/** Fog is fair game: ground you have already scouted stays buildable after your units leave it, so
+	* a base can be planned out into the dark half of the map and the builder sent to walk there.
+	* Shroud - terrain nobody of yours has ever laid eyes on - is still off limits. */
+//-------------------------------------------------------------------------------------------------
+Bool BuildAssistant_shroudBlocksBuilding( CellShroudStatus status )
+{
+	return status == CELLSHROUD_SHROUDED;
+}
+
+//-------------------------------------------------------------------------------------------------
 /** Query if we can build at this location.  Note that 'build' may be null and is NOT required
 	* to be valid to know if a location is legal to build at.  'builderObject' is used 
 	* for queries that require a pathfind check and should be NULL if not required */
@@ -942,7 +952,7 @@ LegalBuildCode BuildAssistant::isLocationLegalToBuild( const Coord3D *worldPos,
 			if (builderObject && builderObject->getControllingPlayer())
 				playerIndex = builderObject->getControllingPlayer()->getPlayerIndex();
 			DEBUG_ASSERTCRASH(playerIndex >= 0, ("isLocationLegalToBuild() needs a builderObject with a team to check for shroud"));
-			if( ThePartitionManager->getShroudStatusForPlayer(playerIndex, x, y) != CELLSHROUD_CLEAR )
+			if( BuildAssistant_shroudBlocksBuilding( ThePartitionManager->getShroudStatusForPlayer(playerIndex, x, y) ) )
 			{
 				return LBC_SHROUD;
 			}

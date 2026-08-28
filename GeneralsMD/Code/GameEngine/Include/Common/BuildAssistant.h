@@ -99,6 +99,11 @@ enum LegalBuildCode
 };
 
 //-------------------------------------------------------------------------------------------------
+/** Does what the local player can see of a cell stop them putting a structure on it? */
+//-------------------------------------------------------------------------------------------------
+extern Bool BuildAssistant_shroudBlocksBuilding( CellShroudStatus status );
+
+//-------------------------------------------------------------------------------------------------
 //-------------------------------------------------------------------------------------------------
 class BuildAssistant : public SubsystemInterface
 {

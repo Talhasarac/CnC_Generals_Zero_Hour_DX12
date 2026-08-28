@@ -68,6 +68,16 @@ enum BodyDamageType;
 #define DEF_DECAY_FRAMES (4)
 #define SUSTAIN_INDEFINITELY (0xfffffffe) // forever and ever, amen.
 
+//
+// A structure that has been placed but whose builder has not walked over yet is drawn as a
+// translucent silhouette at this opacity - the same value the placement preview uses, so what
+// you see under the cursor is exactly what lands on the map until the build actually starts.
+//
+const Real PLACEMENT_SILHOUETTE_OPACITY = 0.45f;
+
+///< the opacity a drawable is actually drawn at, given what it is doing
+extern Real Drawable_effectiveOpacity( Real explicitOpacity, Real stealthOpacity, Bool awaitingBuilder );
+
 //-----------------------------------------------------------------------------
 //@TODO -- The drawable icon system needs to be implemented in a proper manner -- KM
 //				 Fact 1: Every drawable in the world shouldn't have to have a pointer 
@@ -529,7 +539,7 @@ public:
 	inline void setDrawableOpacity( Real value ) { m_explicitOpacity = value; }	///< set alpha/opacity value used to override defaults when drawing.
 	
 	// note that this is not the 'get' inverse of setDrawableOpacity, since stealthing can also affect the effective opacity!
-	inline Real getEffectiveOpacity() const { return m_explicitOpacity * m_effectiveStealthOpacity; }		///< get alpha/opacity value used to override defaults when drawing.
+	Real getEffectiveOpacity() const;		///< get alpha/opacity value used to override defaults when drawing.
 	void setEffectiveOpacity( Real pulseFactor, Real explicitOpacity = -1.0f );
 	
 	// this is for the add'l pass fx which operates completely independently of the stealth opacity effects. Draw() does the fading every frame.

@@ -257,6 +257,9 @@ inline Drawable* GameClient::findDrawableByID( const DrawableID id )
 
 
 // the singleton
+///< does the shroud hide this drawable from the local player?
+extern Bool GameClient_hiddenByShroud( ObjectShroudStatus status, Bool ownPlacementSilhouette );
+
 extern GameClient *TheGameClient;
 
 #endif // _GAME_INTERFACE_H_

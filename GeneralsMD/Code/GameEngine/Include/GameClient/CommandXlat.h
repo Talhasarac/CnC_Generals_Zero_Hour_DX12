@@ -126,4 +126,7 @@ public:
 
 extern void pickAndPlayUnitVoiceResponse( const DrawableList *list, GameMessage::Type msgType, PickAndPlayInfo *info = NULL );
 
+///< does the stop key cancel a building that is going up, rather than stopping a unit?
+extern Bool Command_stopMeansCancelConstruction( Int selectionCount, Bool locallyControlled, Bool underConstruction );
+
 #endif

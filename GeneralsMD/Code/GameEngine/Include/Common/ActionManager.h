@@ -58,6 +58,12 @@ enum CanEnterType
 
 // ------------------------------------------------------------------------------------------------
 // ------------------------------------------------------------------------------------------------
+//-------------------------------------------------------------------------------------------------
+/** Does what the asking player can see of a target stop them ordering something done to it? */
+//-------------------------------------------------------------------------------------------------
+extern Bool ActionManager_shroudHidesTarget( Bool humanSource, Bool fromScript, Bool targetFoggedOrWorse,
+																						 Bool ownPlacementSilhouette );
+
 class ActionManager : public SubsystemInterface
 {
 

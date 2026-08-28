@@ -101,7 +101,7 @@
 
 
 // ------------------------------------------------------------------------------------------------
-static const Real placementOpacity = 0.45f;
+static const Real placementOpacity = PLACEMENT_SILHOUETTE_OPACITY;
 static const RGBColor illegalBuildColor = { 1.0, 0.0, 0.0 };
 
 // ------------------------------------------------------------------------------------------------

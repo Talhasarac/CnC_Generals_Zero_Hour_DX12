@@ -160,6 +160,16 @@ enum CrushSquishTestType
  * Object definition. Objects are manipulated via TheGameLogic singleton.
  * @todo Create an ObjectInterface class.
  */
+//-------------------------------------------------------------------------------------------------
+/** Has a structure been planned but not started?  It is on the map, at zero percent, waiting for a
+	* builder to walk over to it. */
+//-------------------------------------------------------------------------------------------------
+extern Bool Object_isAwaitingBuilder( Bool underConstruction, Real constructionPercent );
+
+///< how far a structure clears shroud, given where it is in its construction
+extern Real Object_shroudClearingRange( Real ownRange, Bool underConstruction, Real constructionPercent,
+																				Real boundingCircleRadius );
+
 class Object : public Thing, public Snapshot
 {
 

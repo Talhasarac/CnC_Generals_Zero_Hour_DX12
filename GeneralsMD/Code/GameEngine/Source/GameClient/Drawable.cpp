@@ -347,6 +347,37 @@ void Drawable::saturateRGB(RGBColor& color, Real factor)
 
 
 //-------------------------------------------------------------------------------------------------
+/** Opacity a drawable is drawn at.  Stealth scales whatever the drawable asked for, and a structure
+	* that has been placed but not started - its builder is still walking over - is drawn as the same
+	* translucent silhouette the placement preview used, so a plan on the map never reads as a
+	* building that is already standing there. */
+//-------------------------------------------------------------------------------------------------
+Real Drawable_effectiveOpacity( Real explicitOpacity, Real stealthOpacity, Bool awaitingBuilder )
+{
+	Real opacity = explicitOpacity * stealthOpacity;
+
+	if( awaitingBuilder )
+		opacity *= PLACEMENT_SILHOUETTE_OPACITY;
+
+	return opacity;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The silhouette is the finished building, not a foundation: the construction model conditions are
+	* left alone until the builder arrives, so what stands on the map is the shape that was under the
+	* cursor.  A drawable with no object behind it is the placement preview itself, which carries the
+	* same opacity explicitly. */
+//-------------------------------------------------------------------------------------------------
+Real Drawable::getEffectiveOpacity() const
+{
+	const Object *obj = getObject();
+	Bool awaitingBuilder = obj && Object_isAwaitingBuilder( obj->testStatus( OBJECT_STATUS_UNDER_CONSTRUCTION ),
+																													 obj->getConstructionPercent() );
+
+	return Drawable_effectiveOpacity( m_explicitOpacity, m_effectiveStealthOpacity, awaitingBuilder );
+}
+
+//-------------------------------------------------------------------------------------------------
 /** Drawables are lightweight, graphical entities which live on the GameClient,
  * and are usually bound to GameLogic objects.  In other words, they are the
  * graphical side of a logical object, whereas GameLogic objects encapsulate

@@ -114,6 +114,17 @@ static Bool isForceAttackTargeting( void )
 																						 TheInGameUI->isInAttackMoveToMode() );
 }
 
+//-------------------------------------------------------------------------------------------------
+/**
+ * Does the stop key mean "cancel this building"?
+ * Only for a single structure of your own that is still under construction - a mixed selection, an
+ * enemy structure or anything already finished still means stop.
+ */
+Bool Command_stopMeansCancelConstruction( Int selectionCount, Bool locallyControlled, Bool underConstruction )
+{
+	return selectionCount == 1 && locallyControlled && underConstruction;
+}
+
 
 #if defined(_DEBUG) || defined(_INTERNAL)
 /*non-static*/ Real TheSkateDistOverride = 0.0f;
@@ -3036,11 +3047,28 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 
 		//-----------------------------------------------------------------------------------------
 		case GameMessage::MSG_META_STOP:
-			// This message always works on the currently selected team
-			TheMessageStream->appendMessage(GameMessage::MSG_DO_STOP);
+		{
+			//
+			// stop one structure of your own that is still going up and there is nothing to stop yet -
+			// what you mean is call the whole thing off, which is what the command bar's cancel button
+			// on that same structure does, refund and all.
+			//
+			const DrawableList *selected = TheInGameUI->getAllSelectedDrawables();
+			Int selectionCount = selected ? selected->size() : 0;
+			const Drawable *onlyDrawable = ( selectionCount == 1 ) ? selected->front() : NULL;
+			const Object *onlyObject = onlyDrawable ? onlyDrawable->getObject() : NULL;
+
+			if( Command_stopMeansCancelConstruction( selectionCount,
+																							 onlyObject && onlyObject->isLocallyControlled(),
+																							 onlyObject && onlyObject->testStatus( OBJECT_STATUS_UNDER_CONSTRUCTION ) ) )
+				TheMessageStream->appendMessage(GameMessage::MSG_DOZER_CANCEL_CONSTRUCT);
+			else
+				// This message always works on the currently selected team
+				TheMessageStream->appendMessage(GameMessage::MSG_DO_STOP);
 
 			disp = DESTROY_MESSAGE;
 			break;
+		}
 
 		//-----------------------------------------------------------------------------------------
 		case GameMessage::MSG_META_CREATE_FORMATION:

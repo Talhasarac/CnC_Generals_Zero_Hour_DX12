@@ -446,6 +446,19 @@ around with the building as you wheel it. Siting a war factory is a decision abo
 tanks face when they roll off the line, and until now you could not see that decision until the
 building was finished and selected.
 
+A building you order now lands on the map as a see-through silhouette of the finished thing - not a
+foundation, the building itself - and it stays that way until a worker walks over and puts the first
+spade in. One dozer and four orders gives you the whole base drawn out on the ground before a penny
+of it is spent, and if the third one was a mistake, click it and take the money back. Stop cancels
+it too, so the same key you use to call off a unit calls off a building.
+
+Ground your units have already walked stays buildable after they leave it: a forward base can be
+planned out into the dark and a worker sent to walk there, instead of parking a scout on the spot
+first to hold the lights on. The plan sees nothing while it stands there - it opens no fog of its
+own, so drawing buildings across the map tells you nothing about what is sitting in it. You can see
+your own plan through the fog, click it, and send a builder to it whenever you like; your opponent
+sees nothing. Land nobody of yours has ever seen is still off limits.
+
 ## Bonuses that come and go when they should
 
 A squad of infantry standing over its own dead used to keep the horde bonus the dead were paying
