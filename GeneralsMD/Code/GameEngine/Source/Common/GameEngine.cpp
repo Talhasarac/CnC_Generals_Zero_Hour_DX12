@@ -256,6 +256,10 @@ void GameEngine::setFramesPerSecondLimit( Int fps )
 	m_maxFPS = fps;
 }
 
+/* -replay <file>: the name the command line asked for, opened after init()'s resetAll().  See
+	 the .rep branch in init() for why it cannot be opened where it is parsed. */
+static AsciiString thePendingReplayFile;
+
 /** -----------------------------------------------------------------------------------------------
  * -autoskirmish <n>: build a skirmish slot list from the command line and launch it without going
  * through the menus.  This is reallyDoStart() in SkirmishGameOptionsMenu.cpp minus the GUI: the
@@ -768,7 +772,19 @@ void GameEngine::init( int argc, char *argv[] )
 			}
 			else if (fname.endsWithNoCase(".rep"))
 			{
-				TheRecorder->playbackFile(fname);
+				/* Playback cannot start here.  init() ends with TheSubsystemList->resetAll(), and
+					 RecorderClass::reset() closes the file it is playing back and drops the mode to
+					 NONE - after which the queued MSG_NEW_GAME starts a replay game with no command
+					 stream behind it and the recorder, seeing mode NONE, starts *recording* that empty
+					 game over the replay it was asked to play.  The menu path is unaffected because by
+					 then the reset is long past.  So remember the name and open it below.
+
+					 The shell map goes off for the same reason the .map branch turns it off: it is a
+					 live game of its own, and a replay that fails to open would otherwise leave the
+					 process sitting in it, which from the outside looks exactly like a hung playback. */
+				TheWritableGlobalData->m_shellMapOn = FALSE;
+				TheWritableGlobalData->m_playIntro = FALSE;
+				thePendingReplayFile = fname;
 			}
 		}
 		else if (TheGlobalData->m_autoSkirmishPlayers > 0)
@@ -830,6 +846,19 @@ void GameEngine::init( int argc, char *argv[] )
 
 	TheSubsystemList->resetAll();
 	HideControlBar();
+
+	/* Now that every subsystem has been reset, the recorder can be handed the replay and keep
+		 it: the file stays open, the mode stays PLAYBACK, and the MSG_NEW_GAME appended here is
+		 the one the logic acts on. */
+	if (thePendingReplayFile.isNotEmpty())
+	{
+		if (!TheRecorder->playbackFile( thePendingReplayFile ))
+		{
+			DEBUG_LOG(("-replay: '%s' could not be played back\n", thePendingReplayFile.str()));
+			TheWritableGlobalData->m_shellMapOn = TRUE;
+		}
+		thePendingReplayFile.clear();
+	}
 }  // end init
 
 /** -----------------------------------------------------------------------------------------------

@@ -1162,6 +1162,25 @@ Int parseMaxGameFrames(char *args[], int num)
 	return 2;
 }
 
+/* -replay <file> plays a replay back without the menus, the way -autoskirmish starts a match
+	 without them.  The only route into playback was ReplayMenu's list box and the _DEBUG/_INTERNAL
+	 -file switch, so a Release build could record a game and then had no way to play it back
+	 unattended - which is exactly what checking that a multiplayer replay still plays needs.
+
+	 The name is resolved against the replay directory by RecorderClass::readReplayHeader, so pass
+	 the bare file name; the extension is optional. */
+Int parseReplay(char *args[], int num)
+{
+	if (TheWritableGlobalData && num > 1)
+	{
+		AsciiString name = args[1];
+		if (!name.endsWithNoCase(".rep"))
+			name.concat(".rep");
+		TheWritableGlobalData->m_initialFile = name;
+	}
+	return 2;
+}
+
 Int parseDumpAssetUsage(char *args[], int num)
 {
 	if (TheWritableGlobalData)
@@ -1351,6 +1370,7 @@ static CommandLineParam params[] =
 	{ "-observer", parseObserver },
 	{ "-headless", parseHeadless },
 	{ "-maxframes", parseMaxGameFrames },
+	{ "-replay", parseReplay },
 
 	//-allAdvice feature
 	//{ "-allAdvice", parseAllAdvice },
