@@ -5274,3 +5274,31 @@ TEST(each_start_position_gets_flat_ground_to_build_on)
 		}
 	}
 }
+
+//////////////////////////////////////////////////////////////////////////////
+// Headless runs
+//////////////////////////////////////////////////////////////////////////////
+
+extern const char *GameEngine_headlessRunResult( UnsignedInt frame, UnsignedInt victoryEndFrame, Int maxGameFrames );
+
+TEST(headless_run_ends_on_a_decision_or_on_the_frame_limit)
+{
+	// nothing decided and no limit asked for: the run keeps going, however long that is
+	CHECK( GameEngine_headlessRunResult( 5000, 0, 0 ) == NULL );
+
+	// the first second is the trap.  A map that has not finished placing its objects has every
+	// player owning nothing, which reads as eliminated, and VictoryConditions stores that as an end
+	// frame inside the settle window - an unattended run must not take it for a result.
+	CHECK( GameEngine_headlessRunResult( 40, 1, 0 ) == NULL );
+	CHECK( GameEngine_headlessRunResult( 40, 30, 0 ) == NULL );
+	CHECK_STR( GameEngine_headlessRunResult( 40, 31, 0 ), "decided" );
+
+	// -maxframes is the floor under a stalemate, and the comparison is >= so a limit that was
+	// already passed still ends the run rather than never matching
+	CHECK( GameEngine_headlessRunResult( 2999, 0, 3000 ) == NULL );
+	CHECK_STR( GameEngine_headlessRunResult( 3000, 0, 3000 ), "frame limit reached" );
+	CHECK_STR( GameEngine_headlessRunResult( 4000, 0, 3000 ), "frame limit reached" );
+
+	// a real result outranks the limit on the frame they land together
+	CHECK_STR( GameEngine_headlessRunResult( 3000, 2000, 3000 ), "decided" );
+}

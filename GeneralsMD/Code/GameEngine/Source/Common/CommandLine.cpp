@@ -1128,6 +1128,40 @@ Int parseNoFPSLimit(char *args[], int num)
 	return 1;
 }
 
+/* -headless is the unattended-run switch: no frame is ever drawn, the logic tick runs flat out
+	 instead of being paced against wall clock, audio is silenced, and the process quits by itself
+	 the moment the match is decided.  A window and a D3D device are still created - W3D reaches into
+	 drawables and the asset manager throughout, so a true null display is a much larger change than
+	 skipping the one draw call is worth.  Pair it with -autoskirmish and -observer for a soak run.
+
+	 Audio goes off because at several hundred logic frames a second the game hands the mixer a few
+	 thousand events a second that nobody will hear; -headless is for a machine, not a listener. */
+Int parseHeadless(char *args[], int num)
+{
+	if (TheWritableGlobalData)
+	{
+		TheWritableGlobalData->m_headless = TRUE;
+		TheWritableGlobalData->m_audioOn = FALSE;
+		TheWritableGlobalData->m_musicOn = FALSE;
+		TheWritableGlobalData->m_soundsOn = FALSE;
+		TheWritableGlobalData->m_speechOn = FALSE;
+		TheWritableGlobalData->m_videoOn = FALSE;
+	}
+	return 1;
+}
+
+/* -maxframes <n> bounds a headless run in logic frames rather than in seconds, so the cutoff is
+	 the same on every machine and in every replay.  A stalemate between eight brutal AIs is a real
+	 outcome and it does not end on its own. */
+Int parseMaxGameFrames(char *args[], int num)
+{
+	if (TheWritableGlobalData && num > 1)
+	{
+		TheWritableGlobalData->m_maxGameFrames = atoi(args[1]);
+	}
+	return 2;
+}
+
 Int parseDumpAssetUsage(char *args[], int num)
 {
 	if (TheWritableGlobalData)
@@ -1315,6 +1349,8 @@ static CommandLineParam params[] =
 	{ "-autoskirmish", parseAutoSkirmish },
 	{ "-aidiff", parseAIDifficulty },
 	{ "-observer", parseObserver },
+	{ "-headless", parseHeadless },
+	{ "-maxframes", parseMaxGameFrames },
 
 	//-allAdvice feature
 	//{ "-allAdvice", parseAllAdvice },

@@ -780,7 +780,11 @@ void GameClient::update( void )
 	// redraw all views, update the GUI
 	//if(TheGameLogic->getFrame() >= 2)
 		
-		TheDisplay->DRAW();
+		/* -headless never draws.  The device and every drawable stay alive - this skips the frame,
+			 not the client - which is what makes an unattended run fast: rendering is the larger half
+			 of the loop's wall clock in a normal match. */
+		if (!TheGlobalData->m_headless)
+			TheDisplay->DRAW();
 	}
 
 	{

@@ -36,6 +36,7 @@
 #include "Common/PlayerTemplate.h"
 #include "Common/Team.h"
 #include "Common/PlayerList.h"
+#include "Common/Player.h"
 #include "Common/GameAudio.h"
 #include "Common/GameEngine.h"
 #include "Common/INI.h"
@@ -921,6 +922,84 @@ static Real engineElapsedMS( const Int64 &from, const Int64 &to )
 }
 #endif
 
+/** -----------------------------------------------------------------------------------------------
+ * Why an unattended run is over, or NULL while it is still going.  The string is what the log line
+ * says, so the reason and the report of it cannot drift apart.
+ *
+ * VictoryConditions publishes the end frame for a free-camera observer too, so nothing here
+ * re-derives who won.  It has one trap: 'not decided yet' and 'decided on frame 0' are the same
+ * stored zero, and the check starts running before a map has finished placing its objects - at
+ * which point every player owns nothing and therefore looks eliminated.  Requiring the end frame to
+ * be past the first second is what keeps an unpopulated map from reading as an instant draw.
+ */
+const char *GameEngine_headlessRunResult( UnsignedInt frame, UnsignedInt victoryEndFrame, Int maxGameFrames )
+{
+	const UnsignedInt SETTLE_FRAMES = 30;
+	if (victoryEndFrame > SETTLE_FRAMES)
+		return "decided";
+	if (maxGameFrames > 0 && frame >= (UnsignedInt)maxGameFrames)
+		return "frame limit reached";
+	return NULL;
+}
+
+/** -----------------------------------------------------------------------------------------------
+ * -headless: decide whether the unattended run is finished, and if it is, write down how it went
+ * and quit.  Two ways to finish: the match is decided, or -maxframes ran out.
+ */
+static void updateHeadlessRun( void )
+{
+	if (!TheGlobalData->m_headless || !TheGameLogic->isInGame() || TheGameLogic->isInShellGame())
+		return;
+
+	static DWORD runStartTime = 0;
+	static UnsignedInt runStartFrame = 0;
+	if (runStartTime == 0)
+	{
+		runStartTime = timeGetTime();
+		runStartFrame = TheGameLogic->getFrame();
+	}
+
+	const UnsignedInt frame = TheGameLogic->getFrame();
+	const char *why = GameEngine_headlessRunResult( frame, TheVictoryConditions->getEndFrame(),
+																									TheGlobalData->m_maxGameFrames );
+	if (why == NULL)
+		return;
+
+	const DWORD wallMs = timeGetTime() - runStartTime;
+	const Real logicFps = wallMs ? (Real)(frame - runStartFrame) * 1000.0f / (Real)wallMs : 0.0f;
+
+	DEBUG_LOG(("HEADLESS RESULT: %s on frame %d (%d frames in %.1fs wall, %.0f logic fps, %.1fx real time)\n",
+						 why, frame,
+						 frame - runStartFrame, wallMs / 1000.0f, logicFps,
+						 logicFps / (Real)TheGameEngine->getFramesPerSecondLimit()));
+
+	for( Int i = 0; i < ThePlayerList->getPlayerCount(); ++i )
+	{
+		Player *p = ThePlayerList->getNthPlayer( i );
+		// The list also carries the civilian and neutral slots and, with -observer, the camera the
+		// run is watched from.  None of them plays, so none of them has a result worth a line.
+		if (!p->isPlayableSide() || p->isPlayerObserver())
+			continue;
+
+		ScoreKeeper *score = p->getScoreKeeper();
+		DEBUG_LOG(("HEADLESS PLAYER %d '%ls': %s | score %d | money %d earned %d spent | units %d built %d lost %d killed | buildings %d built %d lost\n",
+							 i, p->getPlayerDisplayName().str(),
+							 TheVictoryConditions->hasAchievedVictory(p) ? "WON" :
+								 (TheVictoryConditions->hasSinglePlayerBeenDefeated(p) ? "eliminated" : "alive"),
+							 score->calculateScore(),
+							 score->getTotalMoneyEarned(), score->getTotalMoneySpent(),
+							 score->getTotalUnitsBuilt(), score->getTotalUnitsLost(), score->getTotalUnitsDestroyed(),
+							 score->getTotalBuildingsBuilt(), score->getTotalBuildingsLost()));
+	}
+
+	/* Tear the match down the way the benchmark timer does, so the replay of the run is closed and
+		 written rather than left half-flushed by the process going away. */
+	if (TheRecorder->getMode() == RECORDERMODETYPE_RECORD)
+		TheRecorder->stopRecording();
+	TheGameLogic->clearGameData();
+	TheGameEngine->setQuitting( TRUE );
+}
+
 void GameEngine::update( void )
 {
 	USE_PERF_TIMER(GameEngine_update)
@@ -971,6 +1050,12 @@ void GameEngine::update( void )
 		Bool fastMode = TheGlobalData->m_TiVOFastMode && TheGameLogic->isInReplayGame();
 #endif
 		fastMode = fastMode || TheTacticalView->getTimeMultiplier() > 1 || TheScriptEngine->isTimeFast();
+
+		/* -headless has no picture to pace the tick against and nobody watching it go by, so it runs
+			 a logic frame every pass and the match plays out as fast as the machine manages.  Same
+			 branch as fast-forward, different reason: this one is not a cheat, it is the whole point
+			 of an unattended run. */
+		fastMode = fastMode || TheGlobalData->m_headless;
 
 		static DWORD prevLogicTime = timeGetTime();
 		static Real logicAccumMs = 0.0f;
@@ -1037,6 +1122,8 @@ void GameEngine::update( void )
 			logicTicks = logicTicksThisPass;
 #endif
 		}
+
+		updateHeadlessRun();
 
 #ifdef DEBUG_LOGGING
 		fpsFrames++;

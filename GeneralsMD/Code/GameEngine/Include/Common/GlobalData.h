@@ -349,6 +349,8 @@ public:
 	Int m_autoSkirmishPlayers;				///< -autoskirmish <n>: start an n player skirmish straight from the command line (0 = off)
 	Int m_autoSkirmishAIState;				///< SlotState the AI slots of an auto-started skirmish get (-aidiff)
 	Bool m_autoSkirmishObserver;			///< -observer: the local slot of an auto-started skirmish watches instead of playing
+	Bool m_headless;							///< -headless: never draw a frame, never pace the logic tick, quit when the match ends
+	Int m_maxGameFrames;						///< -maxframes <n>: quit after n logic frames however the match is going (0 = no limit)
 
 	Int m_maxParticleCount;						///< maximum number of particles that can exist
 	Int m_maxFieldParticleCount;			///< maximum number of field-type particles that can exist (roughly)

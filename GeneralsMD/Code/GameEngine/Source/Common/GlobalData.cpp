@@ -671,6 +671,8 @@ GlobalData::GlobalData()
 	m_autoSkirmishPlayers = 0; // no skirmish from the command line
 	m_autoSkirmishAIState = SLOT_BRUTAL_AI;
 	m_autoSkirmishObserver = FALSE;
+	m_headless = FALSE;
+	m_maxGameFrames = 0; // run until the match ends
 	m_horizontalScrollSpeedFactor = 1.0;
 	m_verticalScrollSpeedFactor = 1.0;
 

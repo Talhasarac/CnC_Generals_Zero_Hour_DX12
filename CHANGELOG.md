@@ -1145,6 +1145,16 @@ speeding the *game* up rather than the picture, which is why every countdown on 
 almost as soon as it appeared. The picture and the rules are on separate clocks now, and that switch
 respects the difference.
 
+**And now it can play itself with the picture turned off entirely.** Drawing is most of what a
+frame costs, so a match nobody is watching does not pay for it: a twenty-three minute skirmish
+between two hard opponents plays out in thirty-eight seconds, thirty-six times faster than real
+time. The run closes itself the moment the match is decided - or after a set number of turns,
+since a stalemate between computer players never ends on its own - and writes down who won and
+what every side built, earned, lost and destroyed on the way. The same starting number gives back
+the same match to the frame: run it twice and the winner, the frame it won on and every score on
+the board come out identical, so a run that turns up something strange can be replayed until it
+gives up the reason.
+
 **Every fix was proved non-vacuous.** Put the bug back, watch the exact test fail, restore the fix.
 A test that passes both ways is worth nothing, and there are none of those here.
 
