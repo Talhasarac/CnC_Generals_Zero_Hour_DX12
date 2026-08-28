@@ -34,6 +34,7 @@
 #include "GameNetwork/StallJudgement.h"
 #include "GameNetwork/KeepAliveSchedule.h"
 #include "GameNetwork/CushionMetrics.h"
+#include "GameNetwork/LinkSimulation.h"
 #include <float.h>
 #include "GameClient/Water.h"
 #include "GameLogic/Module/PhysicsUpdate.h"
@@ -2525,6 +2526,83 @@ TEST(keepalive_every_player_gets_one_within_the_round)
 	// the last slot is due strictly before the round ends, so it is never skipped by the restart
 	CHECK_EQ( keepAliveSlotsDue( roundMS - 1, roundMS, 8 ), 8 );
 	CHECK( roundMS <= 15000 );		// under the shortest NAT UDP timeouts seen in the wild
+}
+
+// ---------------------------------------------------------------------------------------------
+// The synthetic link simulator (MULTIPLAYER 6).  The transport can hold packets back and throw
+// some away, so a lossy or slow line can be reproduced without a second machine.  Both decisions
+// are pure, so both can be pinned here - including the two things EA got wrong in them, which
+// nobody could have noticed because the whole facility was compiled out of the shipping build.
+// ---------------------------------------------------------------------------------------------
+
+TEST(linksim_packet_loss_percentage_is_the_percentage)
+{
+	// the count of losing rolls over the hundred a GameClientRandomValue(1, 100) can produce is
+	// the percentage itself.  EA rolled (0, 100) - a hundred and one outcomes - against the same
+	// comparison, so every setting was one point too lossy...
+	Int pct;
+	for( pct = 0; pct <= 100; pct++ )
+	{
+		Int lost = 0;
+		for( Int roll = 1; roll <= 100; roll++ )
+			if (linkSimPacketIsLost( pct, roll ))
+				lost++;
+		CHECK_EQ( lost, pct );
+	}
+
+	// ...and the setting that says "do not drop anything" dropped one packet in a hundred and one
+	CHECK( !linkSimPacketIsLost( 0, 1 ) );
+	CHECK( linkSimPacketIsLost( 100, 100 ) );
+	CHECK( linkSimPacketIsLost( 1, 1 ) );
+	CHECK( !linkSimPacketIsLost( 1, 2 ) );
+}
+
+TEST(linksim_delivery_is_the_average_plus_the_jitter)
+{
+	// no modulation asked for: the delay is exactly what was asked for
+	CHECK_EQ( linkSimDeliveryTime( 1000, 40, 0, 0, 0 ), 1040u );
+	CHECK_EQ( linkSimDeliveryTime( 1000, 40, 0, 0, 15 ), 1055u );
+	CHECK_EQ( linkSimDeliveryTime( 1000, 40, 0, 0, -15 ), 1025u );
+
+	// an amplitude with no period is not a modulation, and must not become one
+	CHECK_EQ( linkSimDeliveryTime( 1000, 40, 500, 0, 0 ), 1040u );
+
+	// nothing is ever delivered before it arrived, however the jitter falls
+	CHECK_EQ( linkSimDeliveryTime( 1000, 40, 0, 0, -400 ), 1000u );
+	CHECK_EQ( linkSimDeliveryTime( 0, 0, 0, 0, -400 ), 0u );
+}
+
+TEST(linksim_the_modulation_has_the_period_it_says_it_has)
+{
+	// a period in milliseconds, read the way the field documents itself: zero phase at the start of
+	// every period, the peak a quarter of the way in, the trough three quarters in.
+	const Int period = 8000;
+	const Int amp = 100;
+
+	CHECK_EQ( linkSimDeliveryTime( 0, 200, amp, period, 0 ), 200u );					// sin 0
+	CHECK_EQ( linkSimDeliveryTime( period/4, 200, amp, period, 0 ), (UnsignedInt)(period/4 + 300) );	// sin pi/2
+	CHECK_EQ( linkSimDeliveryTime( period/2, 200, amp, period, 0 ), (UnsignedInt)(period/2 + 200) );	// sin pi
+	CHECK_EQ( linkSimDeliveryTime( 3*period/4, 200, amp, period, 0 ), (UnsignedInt)(3*period/4 + 100) );	// sin 3pi/2
+
+	// and it repeats: the same point of the next period gives the same delay
+	CHECK_EQ( linkSimDeliveryTime( period, 200, amp, period, 0 ) - period, 200u );
+	CHECK_EQ( linkSimDeliveryTime( period + period/4, 200, amp, period, 0 ) - (period + period/4), 300u );
+
+	/* EA's own line was sin(now * period), which at any usable setting moves the argument by whole
+		 radians every millisecond - a second noise source, not a modulation - and overflows an
+		 UnsignedInt after a minute of uptime.  The property that pins the difference: over one
+		 period the delay is a single smooth hump, so consecutive milliseconds differ by almost
+		 nothing.  Under EA's reading they differ by the whole amplitude. */
+	UnsignedInt a = linkSimDeliveryTime( 1000000, 200, amp, period, 0 ) - 1000000;
+	UnsignedInt b = linkSimDeliveryTime( 1000001, 200, amp, period, 0 ) - 1000001;
+	CHECK( (a > b ? a - b : b - a) <= 1u );
+
+	// still true where EA's version wrapped: uptimes past the point now * period overflows
+	UnsignedInt late = 0xFFFFF000u;
+	UnsignedInt c = linkSimDeliveryTime( late, 200, amp, period, 0 ) - late;
+	UnsignedInt d = linkSimDeliveryTime( late + 1, 200, amp, period, 0 ) - (late + 1);
+	CHECK( c >= 100u && c <= 300u );
+	CHECK( (c > d ? c - d : d - c) <= 1u );
 }
 
 // ---------------------------------------------------------------------------------------------

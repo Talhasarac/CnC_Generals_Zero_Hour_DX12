@@ -475,6 +475,16 @@ public:
 	Bool m_specialPowerUsesDelay ;
 #endif
   Bool m_TiVOFastMode;            ///< When true, the client speeds up the framerate... set by HOTKEY!
+
+	/* Synthetic link conditions - the transport can hold incoming packets back and throw some of
+		 them away, so a slow or lossy line can be reproduced on one machine.  These lived in the
+		 debug-only block below, and this fork only ever ships Release, so the switch they drive did
+		 not exist in any build anyone could run.  All five default to off. */
+	Int m_latencyAverage;					///< Average latency to insert, in milliseconds
+	Int m_latencyAmplitude;				///< Amplitude of the sinusoidal modulation of that latency, in milliseconds
+	Int m_latencyPeriod;					///< Period of that modulation, in milliseconds; 0 means no modulation
+	Int m_latencyNoise;						///< Max amplitude of the jitter thrown on top, in milliseconds
+	Int m_packetLoss;							///< Percent of incoming packets to drop
   
 
 
@@ -520,11 +530,6 @@ public:
 	Bool m_useLocalMOTD;
 	AsciiString m_baseStatsDir;
 	AsciiString m_MOTDPath;
-	Int m_latencyAverage;					///< Average latency to insert
-	Int m_latencyAmplitude;				///< Amplitude of sinusoidal modulation of latency
-	Int m_latencyPeriod;					///< Period of sinusoidal modulation of latency
-	Int m_latencyNoise;						///< Max amplitude of jitter to throw in
-	Int m_packetLoss;							///< Percent of packets to drop
 	Bool m_extraLogging;					///< More expensive debug logging to catch crashes.
 #endif
 

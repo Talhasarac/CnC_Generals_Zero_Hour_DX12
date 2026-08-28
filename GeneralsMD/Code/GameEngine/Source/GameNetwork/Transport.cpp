@@ -26,6 +26,7 @@
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
 
 #include "Common/CRC.h"
+#include "GameNetwork/LinkSimulation.h"
 #include "GameNetwork/Transport.h"
 #include "GameNetwork/NetworkInterface.h"
 
@@ -76,6 +77,11 @@ Transport::Transport(void)
 {
 	m_winsockInit = false;
 	m_udpsock = NULL;
+	// EA never initialized these two.  It did not bite because everything that read them was
+	// compiled out of the shipping build; now that the simulator is built in every configuration,
+	// a Transport that is used before init() would have run on whatever was on the heap.
+	m_useLatency = false;
+	m_usePacketLoss = false;
 }
 
 Transport::~Transport(void)
@@ -137,9 +143,7 @@ Bool Transport::init( UnsignedInt ip, UnsignedShort port )
 	{
 		m_outBuffer[i].length = 0;
 		m_inBuffer[i].length = 0;
-#if defined(_DEBUG) || defined(_INTERNAL)
 		m_delayedInBuffer[i].message.length = 0;
-#endif
 	}
 	for (i=0; i<MAX_TRANSPORT_STATISTICS_SECONDS; ++i)
 	{
@@ -155,13 +159,16 @@ Bool Transport::init( UnsignedInt ip, UnsignedShort port )
 
 	m_port = port;
 
-#if defined(_DEBUG) || defined(_INTERNAL)
-	if (TheGlobalData->m_latencyAverage > 0 || TheGlobalData->m_latencyNoise)
-		m_useLatency = true;
+	/* Synthetic link conditions, off unless asked for.  Assigned rather than only ever set true:
+		 EA's version could not turn either switch back off, so a second game in the same process
+		 inherited the first one's settings. */
+	m_useLatency = (TheGlobalData->m_latencyAverage > 0 || TheGlobalData->m_latencyNoise != 0);
+	m_usePacketLoss = (TheGlobalData->m_packetLoss != 0);
 
-	if (TheGlobalData->m_packetLoss)
-		m_usePacketLoss = true;
-#endif
+	DEBUG_ASSERTLOG(!m_useLatency && !m_usePacketLoss,
+		("Transport: simulating a link with %d ms latency (amp %d, period %d, noise %d) and %d%% packet loss\n",
+		TheGlobalData->m_latencyAverage, TheGlobalData->m_latencyAmplitude,
+		TheGlobalData->m_latencyPeriod, TheGlobalData->m_latencyNoise, TheGlobalData->m_packetLoss));
 
 	return true;
 }
@@ -250,7 +257,6 @@ Bool Transport::doSend() {
 		}
 	} // for (i=0; i<MAX_MESSAGES; ++i)
 
-#if defined(_DEBUG) || defined(_INTERNAL)
 	// Latency simulation - deliver anything we're holding on to that is ready
 	if (m_useLatency)
 	{
@@ -271,7 +277,6 @@ Bool Transport::doSend() {
 			}
 		}
 	}
-#endif
 	return retval;
 }
 
@@ -287,9 +292,7 @@ Bool Transport::doRecv()
 
 	// Read in anything on our socket
 	sockaddr_in from;
-#if defined(_DEBUG) || defined(_INTERNAL)
 	UnsignedInt now = timeGetTime();
-#endif
 
 	TransportMessage incomingMessage;
 	unsigned char *buf = (unsigned char *)&incomingMessage;
@@ -297,16 +300,14 @@ Bool Transport::doRecv()
 //	DEBUG_LOG(("Transport::doRecv - checking\n"));
 	while ( (len=m_udpsock->Read(buf, MAX_MESSAGE_LEN, &from)) > 0 )
 	{
-#if defined(_DEBUG) || defined(_INTERNAL)
 		// Packet loss simulation
 		if (m_usePacketLoss)
 		{
-			if ( TheGlobalData->m_packetLoss >= GameClientRandomValue(0, 100) )
+			if ( linkSimPacketIsLost( TheGlobalData->m_packetLoss, GameClientRandomValue(1, 100) ) )
 			{
 				continue;
 			}
 		}
-#endif
 
 //		DEBUG_LOG(("Transport::doRecv - Got something! len = %d\n", len));
 		// Decrypt the packet
@@ -333,17 +334,16 @@ Bool Transport::doRecv()
 
 		for (int i=0; i<MAX_MESSAGES; ++i)
 		{
-#if defined(_DEBUG) || defined(_INTERNAL)
 			// Latency simulation
 			if (m_useLatency)
 			{
 				if (m_delayedInBuffer[i].message.length == 0)
 				{
 					// Empty slot; use it
-					m_delayedInBuffer[i].deliveryTime =
-						now + TheGlobalData->m_latencyAverage +
-						(Int)(TheGlobalData->m_latencyAmplitude * sin(now * TheGlobalData->m_latencyPeriod)) +
-						GameClientRandomValue(-TheGlobalData->m_latencyNoise, TheGlobalData->m_latencyNoise);
+					m_delayedInBuffer[i].deliveryTime = linkSimDeliveryTime( now,
+						TheGlobalData->m_latencyAverage, TheGlobalData->m_latencyAmplitude,
+						TheGlobalData->m_latencyPeriod,
+						GameClientRandomValue(-TheGlobalData->m_latencyNoise, TheGlobalData->m_latencyNoise) );
 					m_delayedInBuffer[i].message.length = incomingMessage.length;
 					m_delayedInBuffer[i].message.addr = ntohl(from.sin_addr.S_un.S_addr);
 					m_delayedInBuffer[i].message.port = ntohs(from.sin_port);
@@ -353,7 +353,6 @@ Bool Transport::doRecv()
 			}
 			else
 			{
-#endif
 				if (m_inBuffer[i].length == 0)
 				{
 					// Empty slot; use it
@@ -363,9 +362,7 @@ Bool Transport::doRecv()
 					memcpy(&m_inBuffer[i], buf, len);
 					break;
 				}
-#if defined(_DEBUG) || defined(_INTERNAL)
 			}
-#endif
 		}
 		//DEBUG_ASSERTCRASH(i<MAX_MESSAGES, ("Message lost!"));
 	}

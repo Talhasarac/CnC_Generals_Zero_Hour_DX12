@@ -99,7 +99,10 @@ struct TransportMessage
 };
 #pragma pack(pop)
 
-#if defined(_DEBUG) || defined(_INTERNAL)
+/**
+ * A received packet the transport is holding back, to reproduce a slow link on one machine.
+ * Built in every configuration - it used to be debug-only, and this fork only ever ships Release.
+ */
 #pragma pack(push, 1)
 struct DelayedTransportMessage
 {
@@ -107,7 +110,6 @@ struct DelayedTransportMessage
 	TransportMessage message;
 };
 #pragma pack(pop)
-#endif
 
 /**
  * Message types

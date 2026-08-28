@@ -413,7 +413,9 @@ Int parseYRes(char *args[], int num)
 	return 1;
 }
 
-#if defined(_DEBUG) || defined(_INTERNAL)
+/* The five synthetic link conditions below used to be debug-build-only, and this fork only ever
+	 ships Release, so the switch they drive did not exist in any build anyone could run.  They are
+	 the cheapest way to reproduce a lossy or slow link without a second machine on a bad line. */
 //=============================================================================
 //=============================================================================
 Int parseLatencyAverage(char *args[], int num)
@@ -469,6 +471,7 @@ Int parsePacketLoss(char *args[], int num)
 	return 2;
 }
 
+#if defined(_DEBUG) || defined(_INTERNAL)
 //=============================================================================
 //=============================================================================
 Int parseLowDetail(char *args[], int num)
@@ -1160,6 +1163,12 @@ static CommandLineParam params[] =
 	{ "-particlebounce", parseParticleBounce },
 	{ "-quickstart", parseQuickStart },
 
+	{ "-packetloss", parsePacketLoss },
+	{ "-latAvg", parseLatencyAverage },
+	{ "-latAmp", parseLatencyAmplitude },
+	{ "-latPeriod", parseLatencyPeriod },
+	{ "-latNoise", parseLatencyNoise },
+
 #if (defined(_DEBUG) || defined(_INTERNAL))
 	{ "-noaudio", parseNoAudio },
 	{ "-map", parseMapName },
@@ -1191,11 +1200,6 @@ static CommandLineParam params[] =
 	{ "-nofade", parseNoFade },
 	{ "-nomovecamera", parseNoMoveCamera },
 	{ "-nocinematic", parseNoCinematic },
-	{ "-packetloss", parsePacketLoss },
-	{ "-latAvg", parseLatencyAverage },
-	{ "-latAmp", parseLatencyAmplitude },
-	{ "-latPeriod", parseLatencyPeriod },
-	{ "-latNoise", parseLatencyNoise },
 	{ "-noViewLimit", parseNoViewLimit },
 	{ "-lowDetail", parseLowDetail },
 	{ "-noDynamicLOD", parseNoDynamicLOD },

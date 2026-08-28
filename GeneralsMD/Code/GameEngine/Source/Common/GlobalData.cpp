@@ -380,13 +380,14 @@ GlobalData* GlobalData::m_theOriginal = NULL;
 	{ "AutoAflameParticleSystem",					INI::parseAsciiString,  NULL,  offsetof( GlobalData, m_autoAflameParticleSystem ) },
 	{ "AutoAflameParticleMax",						INI::parseInt,					NULL,	 offsetof( GlobalData, m_autoAflameParticleMax ) },
 
-/* These are internal use only, they do not need file definitons 	
+	// Synthetic link conditions, for reproducing a slow or lossy line on one machine.  EA had these
+	// commented out as "internal use only"; they are no more dangerous than the command-line options
+	// that set the same fields, and an INI is the only way to set them for a run the launcher starts.
 	{ "LatencyAverage",							INI::parseInt,				NULL,			offsetof( GlobalData, m_latencyAverage ) },
 	{ "LatencyAmplitude",						INI::parseInt,				NULL,			offsetof( GlobalData, m_latencyAmplitude ) },
 	{ "LatencyPeriod",							INI::parseInt,				NULL,			offsetof( GlobalData, m_latencyPeriod ) },
 	{ "LatencyNoise",								INI::parseInt,				NULL,			offsetof( GlobalData, m_latencyNoise ) },
 	{ "PacketLoss",									INI::parseInt,				NULL,			offsetof( GlobalData, m_packetLoss ) },
-*/
 
 	{ "BuildSpeed",									INI::parseReal,				NULL,			offsetof( GlobalData, m_BuildSpeed ) },
 	{ "MinDistFromEdgeOfMapForBuild",	 INI::parseReal,				NULL,			offsetof( GlobalData, m_MinDistFromEdgeOfMapForBuild ) },
@@ -569,6 +570,12 @@ GlobalData::GlobalData()
 #endif
   m_TiVOFastMode = FALSE;
 
+	m_latencyAverage = 0;
+	m_latencyAmplitude = 0;
+	m_latencyPeriod = 0;
+	m_latencyNoise = 0;
+	m_packetLoss = 0;
+
 #if defined(_DEBUG) || defined(_INTERNAL)
 	m_wireframe = 0;
 	m_stateMachineDebug = FALSE;
@@ -603,11 +610,6 @@ GlobalData::GlobalData()
 	m_disableCameraFade = false;
 	m_disableScriptedInputDisabling = false;
 	m_disableMilitaryCaption = false;
-	m_latencyAverage = 0;
-	m_latencyAmplitude = 0;
-	m_latencyPeriod = 0;
-	m_latencyNoise = 0;
-	m_packetLoss = 0;
 	m_saveStats = FALSE;
 	m_saveAllStats = FALSE;
 	m_useLocalMOTD = FALSE;

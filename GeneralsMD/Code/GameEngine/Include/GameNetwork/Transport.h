@@ -76,9 +76,7 @@ public:
 	TransportMessage m_outBuffer[MAX_MESSAGES];
 	TransportMessage m_inBuffer[MAX_MESSAGES];
 
-#if defined(_DEBUG) || defined(_INTERNAL)
-	DelayedTransportMessage m_delayedInBuffer[MAX_MESSAGES];
-#endif
+	DelayedTransportMessage m_delayedInBuffer[MAX_MESSAGES];		// only used when latency simulation is on
 
 	UnsignedShort m_port;
 private:
