@@ -1319,7 +1319,13 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 					currentlySelectedGroup->groupOverrideSpecialPowerDestination( spType, loc, CMD_FROM_PLAYER );
 				}
 			}
-		}
+
+			// This case had no break and fell into MSG_DO_ATTACK_OBJECT, which reads argument 0 as an
+			// object id - here that argument is a Coord3D, so the union handed findObjectByID the raw
+			// float bits of the x coordinate.
+			break;
+
+		}  // end override special power destination
 
 		//---------------------------------------------------------------------------------------------
 		case GameMessage::MSG_DO_ATTACK_OBJECT:
