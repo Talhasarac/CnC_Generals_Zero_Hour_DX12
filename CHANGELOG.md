@@ -1155,6 +1155,11 @@ the same match to the frame: run it twice and the winner, the frame it won on an
 the board come out identical, so a run that turns up something strange can be replayed until it
 gives up the reason.
 
+**And it can play itself over a network.** Two copies of the game on one machine, on opposite ends
+of a real connection, playing the same match against each other with no lobby and nobody clicking
+anything. That is the only way to reach the faults that live in a multiplayer game and nowhere else
+— the ones where two machines quietly stop agreeing about what just happened.
+
 **Every fix was proved non-vacuous.** Put the bug back, watch the exact test fail, restore the fix.
 A test that passes both ways is worth nothing, and there are none of those here.
 

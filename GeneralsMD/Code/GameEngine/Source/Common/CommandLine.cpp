@@ -1162,6 +1162,35 @@ Int parseMaxGameFrames(char *args[], int num)
 	return 2;
 }
 
+/* -netgame <ip>[,<ip>...] starts a LAN game against those addresses with no lobby in front of it,
+	 and -netslot <n> says which of them this copy is.  Every machine is given the same slot list in
+	 the same order, which is all the lobby ever agreed on: the slot list, the map and the seed.  A
+	 network game is the only kind of game whose replay exercises the multiplayer paths (a CRC per
+	 NET_CRC_INTERVAL frames, real remote players, a local slot that is not 0), so without this there
+	 is no way to produce one unattended. */
+Int parseNetGame(char *args[], int num)
+{
+	if (TheWritableGlobalData && num > 1)
+	{
+		TheWritableGlobalData->m_netGameHosts = args[1];
+	}
+	return 2;
+}
+
+Int parseNetSlot(char *args[], int num)
+{
+	if (TheWritableGlobalData && num > 1)
+	{
+		Int slot = atoi(args[1]);
+		if (slot < 0)
+			slot = 0;
+		if (slot >= MAX_SLOTS)
+			slot = MAX_SLOTS - 1;
+		TheWritableGlobalData->m_netGameLocalSlot = slot;
+	}
+	return 2;
+}
+
 /* -replay <file> plays a replay back without the menus, the way -autoskirmish starts a match
 	 without them.  The only route into playback was ReplayMenu's list box and the _DEBUG/_INTERNAL
 	 -file switch, so a Release build could record a game and then had no way to play it back
@@ -1371,6 +1400,8 @@ static CommandLineParam params[] =
 	{ "-headless", parseHeadless },
 	{ "-maxframes", parseMaxGameFrames },
 	{ "-replay", parseReplay },
+	{ "-netgame", parseNetGame },
+	{ "-netslot", parseNetSlot },
 
 	//-allAdvice feature
 	//{ "-allAdvice", parseAllAdvice },

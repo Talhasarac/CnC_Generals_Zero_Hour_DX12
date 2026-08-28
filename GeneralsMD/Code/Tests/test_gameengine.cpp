@@ -50,6 +50,7 @@
 #include "GameNetwork/CrcAgreement.h"
 #include "GameLogic/GameLogic.h"
 #include "Common/EarlyCommandLine.h"
+#include "GameNetwork/NetworkUtil.h"
 #include "Common/RadarShroudCache.h"
 #include "GameClient/Gadget.h"
 #include "GameNetwork/NetworkUtil.h"
@@ -5360,4 +5361,33 @@ TEST(an_option_read_before_the_parser_exists_is_read_on_word_boundaries)
 	CHECK( findCommandLineValueIn( L"-logPrefix abcdef", L"-logPrefix", tiny, sizeof( tiny ) ) );
 	CHECK_STR( tiny, "ab" );
 	CHECK( !findCommandLineValueIn( L"-logPrefix abcdef", L"-logPrefix", tiny, 0 ) );
+}
+
+TEST(a_netgame_slot_list_is_the_player_order_on_every_machine)
+{
+	/* -netgame carries what the LAN lobby otherwise agrees on: who plays, at which address, in
+	   which order.  Every machine is handed the same list, and ConnectionManager::parseUserList
+	   finds the local player in it by address, so the order has to survive the read exactly. */
+	UnsignedInt ips[ MAX_SLOTS ];
+
+	CHECK_EQ( 2, ResolveHostList( "127.0.0.1,127.0.0.2", ips, MAX_SLOTS ) );
+	CHECK_EQ( 0x7f000001, ips[0] );	// host order, the order LANGameSlot::setIP wants
+	CHECK_EQ( 0x7f000002, ips[1] );
+
+	CHECK_EQ( 3, ResolveHostList( "10.0.0.3,10.0.0.1,10.0.0.2", ips, MAX_SLOTS ) );
+	CHECK_EQ( 0x0a000003, ips[0] );	// given order, not sorted
+	CHECK_EQ( 0x0a000001, ips[1] );
+	CHECK_EQ( 0x0a000002, ips[2] );
+
+	// an empty list is no game, not a one player one
+	CHECK_EQ( 0, ResolveHostList( "", ips, MAX_SLOTS ) );
+
+	// more addresses than there are slots is refused rather than quietly cut short
+	CHECK_EQ( -1, ResolveHostList( "10.0.0.1,10.0.0.2,10.0.0.3", ips, 2 ) );
+
+	// and so is anything that is not an address, however ResolveIP says so
+	CHECK_EQ( -1, ResolveHostList( "10.0.0.1,999.1.1.1", ips, MAX_SLOTS ) );	// INADDR_NONE
+
+	// a stray separator is not a slot - the list is whatever stands between the commas
+	CHECK_EQ( 2, ResolveHostList( "10.0.0.1,,10.0.0.2", ips, MAX_SLOTS ) );
 }

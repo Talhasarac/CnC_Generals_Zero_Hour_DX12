@@ -673,6 +673,8 @@ GlobalData::GlobalData()
 	m_autoSkirmishObserver = FALSE;
 	m_headless = FALSE;
 	m_maxGameFrames = 0; // run until the match ends
+	m_netGameHosts.clear(); // no network game from the command line
+	m_netGameLocalSlot = 0;
 	m_horizontalScrollSpeedFactor = 1.0;
 	m_verticalScrollSpeedFactor = 1.0;
 

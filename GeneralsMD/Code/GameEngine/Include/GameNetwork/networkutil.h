@@ -32,6 +32,13 @@
 #include "GameNetwork/NetCommandMsg.h"
 
 UnsignedInt ResolveIP(AsciiString host);
+
+/** Read a comma separated list of addresses - a -netgame slot list - into host order addresses,
+    in the order they were given, since that order is the player order on every machine.  Returns
+    how many were read, or -1 if the list is longer than maxAddresses or one entry is not an
+    address.  ResolveIP() answers INADDR_NONE for a malformed dotted quad and 0 for a name it
+    cannot look up; neither is a player, so both are refused here. */
+Int ResolveHostList(AsciiString hosts, UnsignedInt *addresses, Int maxAddresses);
 UnsignedShort GenerateNextCommandID();
 Bool DoesCommandRequireACommandID(NetCommandType type);
 Bool CommandRequiresAck(NetCommandMsg *msg);

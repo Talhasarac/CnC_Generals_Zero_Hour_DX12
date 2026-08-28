@@ -212,6 +212,10 @@ public:
 	virtual inline UnsignedInt GetLocalIP( void ) { return m_localIP; }								///< What's my IP?
 	virtual void fillInLANMessage( LANMessage *msg );																	///< Fill in default params
 	virtual void checkMOTD( void );
+
+	/// -netgame: build a game out of a slot list handed to us and start it, with no lobby traffic
+	Bool StartAutomatedGame( AsciiString mapName, Int seed, const UnsignedInt *slotIPs,
+													 Int numSlots, Int localSlot );
 protected:
 
 	enum PendingActionType

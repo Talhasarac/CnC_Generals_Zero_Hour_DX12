@@ -115,6 +115,24 @@ UnsignedInt ResolveIP(AsciiString host)
 /**
  * Returns the next network command ID.
  */
+Int ResolveHostList(AsciiString hosts, UnsignedInt *addresses, Int maxAddresses)
+{
+	Int count = 0;
+	AsciiString host;
+	while (hosts.nextToken( &host, "," ))
+	{
+		if (count >= maxAddresses)
+			return -1;
+
+		UnsignedInt ip = ResolveIP( host );
+		if (ip == 0 || ip == 0xffffffff)
+			return -1;
+
+		addresses[ count++ ] = ip;
+	}
+	return count;
+}
+
 UnsignedShort GenerateNextCommandID() {
 	// The counter used to start at 64000, so the first wrap arrived about 1500 commands into the
 	// very first match.  It still wraps - it is sixteen bits wide - but IsCommandIdNewer, which is

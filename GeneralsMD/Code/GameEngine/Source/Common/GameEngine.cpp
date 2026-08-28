@@ -106,6 +106,8 @@
 #include "GameNetwork/NetworkInterface.h"
 #include "GameNetwork/WOLBrowser/WebBrowser.h"
 #include "GameNetwork/LANAPI.h"
+#include "GameNetwork/LANAPICallbacks.h"
+#include "GameNetwork/NetworkUtil.h"
 #include "GameNetwork/GameSpy/GameResultsThread.h"
 
 #include "Common/Version.h"
@@ -365,6 +367,67 @@ static void startAutoSkirmish( void )
 	DEBUG_LOG(("-autoskirmish: %d slots on '%s', seed %d, up to %d fps, %s\n",
 		numPlayers, mapName.str(), seed, maxFPS,
 		observing ? "every slot AI, watching from the free camera" : "slot 0 is the local player"));
+}
+
+/** -----------------------------------------------------------------------------------------------
+ * -netgame <ip>[,<ip>...] -netslot <n>: play a LAN game against those addresses, with the slot
+ * list, the map and the seed coming from the command line instead of from the lobby.  Same job as
+ * startAutoSkirmish() one level up, and the same restriction: the map has to be a multiplayer map
+ * that is already in the cache on every machine, because nothing is transferred.
+ *
+ * Every copy has to be given the same list in the same order and its own -netslot, and the seed
+ * has to match too - the factions, the colours and the start positions are all drawn from it, and
+ * two machines that disagree about them desync on the first frame.
+ */
+static void startAutoNetGame( void )
+{
+	AsciiString mapName = TheGlobalData->m_mapName;
+	if (mapName.isEmpty())
+	{
+		DEBUG_LOG(("-netgame: no -map was given\n"));
+		return;
+	}
+
+	const MapMetaData *md = TheMapCache->findMap( mapName );
+	if (md == NULL)
+	{
+		DEBUG_LOG(("-netgame: '%s' is not in the map cache\n", mapName.str()));
+		return;
+	}
+	if (!md->m_isMultiplayer)
+	{
+		DEBUG_LOG(("-netgame: '%s' is not a multiplayer map\n", mapName.str()));
+		return;
+	}
+
+	UnsignedInt slotIPs[ MAX_SLOTS ];
+	Int numSlots = ResolveHostList( TheGlobalData->m_netGameHosts, slotIPs, MAX_SLOTS );
+	if (numSlots < 2)
+	{
+		DEBUG_LOG(("-netgame: '%s' is not a list of 2 to %d addresses\n",
+			TheGlobalData->m_netGameHosts.str(), MAX_SLOTS));
+		return;
+	}
+
+	if (numSlots > md->m_numPlayers)
+	{
+		DEBUG_LOG(("-netgame: '%s' holds %d players, not %d\n", mapName.str(), md->m_numPlayers, numSlots));
+		return;
+	}
+
+	/* The seed is what the host would have picked and sent round, so it has to be given here - an
+		 unseeded network game is one that disagrees with itself. */
+	if (TheGlobalData->m_fixedSeed < 0)
+	{
+		DEBUG_LOG(("-netgame: needs a -seed, and the same one on every machine\n"));
+		return;
+	}
+
+	if (TheLAN == NULL)
+		TheLAN = NEW LANAPI();
+
+	TheLAN->StartAutomatedGame( mapName, TheGlobalData->m_fixedSeed, slotIPs, numSlots,
+		TheGlobalData->m_netGameLocalSlot );
 }
 
 /** -----------------------------------------------------------------------------------------------
@@ -787,6 +850,14 @@ void GameEngine::init( int argc, char *argv[] )
 				thePendingReplayFile = fname;
 			}
 		}
+		else if (TheGlobalData->m_netGameHosts.isNotEmpty())
+		{
+			/* Deferred for the same reason the replay is: the network game has to survive the
+				 resetAll() that ends init(), and TheRecorder has to be past its reset before the
+				 MSG_NEW_GAME that makes it start recording is queued. */
+			TheWritableGlobalData->m_shellMapOn = FALSE;
+			TheWritableGlobalData->m_playIntro = FALSE;
+		}
 		else if (TheGlobalData->m_autoSkirmishPlayers > 0)
 		{
 			startAutoSkirmish();
@@ -858,6 +929,11 @@ void GameEngine::init( int argc, char *argv[] )
 			TheWritableGlobalData->m_shellMapOn = TRUE;
 		}
 		thePendingReplayFile.clear();
+	}
+
+	if (TheGlobalData->m_netGameHosts.isNotEmpty() && TheGlobalData->m_initialFile.isEmpty())
+	{
+		startAutoNetGame();
 	}
 }  // end init
 

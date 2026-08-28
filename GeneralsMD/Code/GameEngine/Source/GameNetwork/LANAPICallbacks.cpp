@@ -181,6 +181,122 @@ void LANAPI::OnHasMap( UnsignedInt playerIP, Bool status )
 	}//if
 }// void LANAPI::OnHasMap( UnicodeString player, Bool status ) 
 
+/** -----------------------------------------------------------------------------------------------
+ * -netgame: start a LAN game from a slot list given on the command line instead of one negotiated
+ * in the lobby.  Everything the lobby ever produces is here - who is in which slot, at which
+ * address, on which map, with which seed - so the announce/join/accept round trips can be skipped
+ * entirely and the game set up in one call.  This is OnGameStart() with the preferences, the GUI
+ * and the map transfer taken out; the network setup below is deliberately kept identical to it,
+ * because that is what decides who talks to whom.
+ *
+ * Every machine must be given the same list in the same order: the slot order is the player order,
+ * and ConnectionManager::parseUserList picks the local slot out of it by IP, so each copy also
+ * needs its own address (-netslot picks which one it is).  Two copies on one machine therefore
+ * want two addresses out of 127.0.0.0/8, which Windows routes to loopback in its entirety.
+ */
+Bool LANAPI::StartAutomatedGame( AsciiString mapName, Int seed, const UnsignedInt *slotIPs,
+																 Int numSlots, Int localSlot )
+{
+	if (numSlots < 2 || numSlots > MAX_SLOTS || localSlot < 0 || localSlot >= numSlots)
+	{
+		DEBUG_LOG(("-netgame: %d slots with the local player at %d makes no game\n", numSlots, localSlot));
+		return FALSE;
+	}
+
+	/* init() binds the lobby socket to m_localIP, so the address has to be ours before it runs.
+		 Nothing is ever sent on that socket here - the lobby is only pumped from the LAN menus - but
+		 leaving it bound to INADDR_ANY would mean the second copy on a machine fails to bind. */
+	m_localIP = slotIPs[localSlot];
+	init();
+	m_isInLANMenu = FALSE;
+	m_inLobby = FALSE;
+
+	LANGameInfo *game = NEW LANGameInfo;
+	game->enterGame();
+	/* enterGame() resets, and reset() seeds itself from GetTickCount() - so the seed we were
+		 handed has to be set after it, or the replay header records a clock reading and plays back
+		 a different game than the one that ran. */
+	game->setSeed( seed );
+
+	UnicodeString gameName;
+	gameName.format( L"%8.8X", slotIPs[0] );
+	game->setName( gameName );
+
+	for (Int i = 0; i < numSlots; ++i)
+	{
+		/* The names have to differ: GameInfo looks players up by name, and the player list ends up
+			 with one side per slot named after it. */
+		UnicodeString playerName;
+		playerName.format( L"Player%d", i + 1 );
+
+		LANGameSlot slot;
+		slot.setState( SLOT_PLAYER, playerName );
+		slot.setIP( slotIPs[i] );
+		slot.setPort( NETWORK_BASE_PORT_NUMBER );	// one address per player, so one port does for all
+		slot.setLastHeard( timeGetTime() );
+		slot.setLogin( m_userName );
+		slot.setHost( m_hostName );
+		slot.setPlayerTemplate( PLAYERTEMPLATE_RANDOM );
+		slot.setColor( -1 );			// -1 is "random" to populateRandomSideAndColor
+		slot.setStartPos( -1 );		// and to populateRandomStartPosition
+		slot.setTeamNumber( -1 );	// -1 is "no team", so everybody fights everybody
+		slot.setAccept();
+		game->setSlot( i, slot );
+
+		if (i == localSlot)
+			m_name = playerName;
+	}
+
+	game->setNext( NULL );
+	game->setMap( mapName );
+	game->setIsDirectConnect( FALSE );
+	game->setLastHeard( timeGetTime() );
+	game->setLocalIP( m_localIP );
+
+	/* The map is not transferred, so both machines have to already have it - but say what we have,
+		 the way the game options screen does, since the replay header carries it. */
+	const MapMetaData *md = TheMapCache->findMap( mapName );
+	if (md != NULL)
+	{
+		game->setMapCRC( md->m_CRC );
+		game->setMapSize( md->m_filesize );
+	}
+
+	m_currentGame = game;
+	addGame( game );
+
+	// Set up the game network - same order and same arguments as OnGameStart()
+	if (TheNetwork != NULL)
+	{
+		delete TheNetwork;
+		TheNetwork = NULL;
+	}
+
+	TheNetwork = NetworkInterface::createNetwork();
+	TheNetwork->init();
+	TheNetwork->setLocalAddress( m_localIP, NETWORK_BASE_PORT_NUMBER );
+	TheNetwork->initTransport();
+	TheNetwork->parseUserList( m_currentGame );
+
+	if (TheGameLogic->isInGame())
+		TheGameLogic->clearGameData();
+
+	m_currentGame->startGame( 0 );
+
+	TheWritableGlobalData->m_pendingFile = m_currentGame->getMap();
+	TheWritableGlobalData->m_shellMapOn = FALSE;
+	TheWritableGlobalData->m_playIntro = FALSE;
+
+	GameMessage *msg = TheMessageStream->appendMessage( GameMessage::MSG_NEW_GAME );
+	msg->appendIntegerArgument( GAME_LAN );
+
+	InitRandom( seed );
+
+	DEBUG_LOG(("-netgame: %d players on '%s', seed %d, we are slot %d at %8.8X\n",
+		numSlots, mapName.str(), seed, localSlot, m_localIP));
+	return TRUE;
+}
+
 void LANAPI::OnGameStartTimer( Int seconds )
 {
 	UnicodeString text;
