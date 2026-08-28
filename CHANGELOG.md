@@ -1008,6 +1008,11 @@ the entire map that way, one dot after another. The picture is now kept in ordin
 dot costs nothing, and handed over once a frame — only the rectangle that actually changed, and
 nothing at all on a frame where nothing moved.
 
+**And scrolling across a big map.** Every frame the camera moves, the game sweeps the whole terrain
+looking for its lowest point. It was reading that grid across the grain — every step landing in a
+different part of memory — and it is read along the grain now. Same answer, a fraction of the work,
+on exactly the maps where scrolling used to feel heaviest.
+
 ## Sound, video, and getting it to start at all
 
 - **Audio is real**, through the game's own audio library. The sound SDK was stripped from the source
