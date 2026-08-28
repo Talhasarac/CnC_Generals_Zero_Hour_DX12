@@ -483,9 +483,10 @@ void RecorderClass::updateRecord()
 	GameMessage *msg = TheCommandList->getFirstMessage();
 	while (msg != NULL) {
 		if (msg->getType() == GameMessage::MSG_NEW_GAME &&
-			 msg->getArgument(0)->integer != GAME_SHELL && 
-			 msg->getArgument(0)->integer != GAME_SINGLE_PLAYER && // Due to the massive amount of scripts that use <local player> in GC and single player, replays have been cut for them.
-			 msg->getArgument(0)->integer != GAME_NONE) 
+			 // Due to the massive amount of scripts that use <local player> in GC and single player,
+			 // replays have been cut for them - so shell, single player, none and replay itself are
+			 // all out.  See isRecordableGameMode() in GameLogic.h.
+			 isRecordableGameMode( msg->getArgument(0)->integer )) 
 		{
 			m_originalGameMode = msg->getArgument(0)->integer;
 			DEBUG_LOG(("RecorderClass::updateRecord() - original game is mode %d\n", m_originalGameMode));

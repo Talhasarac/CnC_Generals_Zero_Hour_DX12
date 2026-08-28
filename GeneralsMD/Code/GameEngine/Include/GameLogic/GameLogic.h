@@ -84,6 +84,16 @@ enum
 	GAME_NONE
 };
 
+/* Which of those modes is worth writing a replay for.  EA asked this the other way round, in
+   RecorderClass::updateRecord(), as a list of the modes *not* to record - shell, single player and
+   none - which quietly said yes to GAME_REPLAY: a replay game whose recorder is in mode NONE (the
+   -replay path used to leave it there) started recording the replay it was playing, over the file
+   it was reading.  A whitelist cannot make that mistake, and a mode added later has to opt in. */
+inline Bool isRecordableGameMode( Int gameMode )
+{
+	return gameMode == GAME_LAN || gameMode == GAME_SKIRMISH || gameMode == GAME_INTERNET;
+}
+
 enum
 {
 	CRC_CACHED,

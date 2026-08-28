@@ -48,6 +48,7 @@
 #include <float.h>
 #include "Common/AudioRandomValue.h"
 #include "GameNetwork/CrcAgreement.h"
+#include "GameLogic/GameLogic.h"
 #include "Common/RadarShroudCache.h"
 #include "GameClient/Gadget.h"
 #include "GameNetwork/NetworkUtil.h"
@@ -5301,4 +5302,26 @@ TEST(headless_run_ends_on_a_decision_or_on_the_frame_limit)
 
 	// a real result outranks the limit on the frame they land together
 	CHECK_STR( GameEngine_headlessRunResult( 3000, 2000, 3000 ), "decided" );
+}
+
+TEST(a_replay_game_is_never_itself_recorded)
+{
+	// what a replay is worth writing: a game a human played in real time
+	CHECK( isRecordableGameMode( GAME_LAN ) );
+	CHECK( isRecordableGameMode( GAME_SKIRMISH ) );
+	CHECK( isRecordableGameMode( GAME_INTERNET ) );
+
+	// EA's three exclusions, kept
+	CHECK( !isRecordableGameMode( GAME_SHELL ) );
+	CHECK( !isRecordableGameMode( GAME_SINGLE_PLAYER ) );
+	CHECK( !isRecordableGameMode( GAME_NONE ) );
+
+	/* the one the blacklist let through.  RecorderClass::update() runs updateRecord() when the mode
+	   is NONE as well as RECORD, so a replay game started while the recorder sat in NONE used to
+	   start a recording of the replay - over the file being played back. */
+	CHECK( !isRecordableGameMode( GAME_REPLAY ) );
+
+	// and a mode nobody has invented yet has to opt in rather than default to being recorded
+	CHECK( !isRecordableGameMode( GAME_NONE + 1 ) );
+	CHECK( !isRecordableGameMode( -1 ) );
 }
