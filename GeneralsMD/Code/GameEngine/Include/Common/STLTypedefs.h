@@ -67,6 +67,7 @@ class Object;
 enum NameKeyType;
 enum ObjectID;
 enum DrawableID;
+enum ParticleSystemID;
 
 #include <algorithm>
 #include <bitset>
@@ -185,6 +186,15 @@ namespace rts
 		{ 
 			std::hash<UnsignedInt> tmp;
 			return tmp((UnsignedInt)nkt);
+		}
+	};
+
+	template<> struct hash<ParticleSystemID>
+	{
+		size_t operator()(ParticleSystemID psid) const
+		{
+			std::hash<UnsignedInt> tmp;
+			return tmp((UnsignedInt)psid);
 		}
 	};
 

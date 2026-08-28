@@ -62,6 +62,11 @@ enum ParticleSystemID
 	INVALID_PARTICLE_SYSTEM_ID = 0
 };
 
+// The manager's master list of live systems.  It lives out here so that a ParticleSystem can hold
+// its own position in it and unlink itself in constant time instead of making the manager scan.
+typedef std::list<ParticleSystem*> ParticleSystemPtrList;
+typedef ParticleSystemPtrList::iterator ParticleSystemPtrListIt;
+
 #define MAX_VOLUME_PARTICLE_DEPTH ( 16 )
 #define DEFAULT_VOLUME_PARTICLE_DEPTH ( 0 )//The Default is not to do the volume thing!
 #define OPTIMUM_VOLUME_PARTICLE_DEPTH ( 6 )
@@ -718,6 +723,8 @@ protected:
 	Particle *				m_systemParticlesTail;
 
 	Shadow *					m_groundShadow;									///< client-only soft blob on the terrain, never xfered
+	friend class ParticleSystemManager;					///< it hands us our slot in its list and takes it back
+	ParticleSystemPtrListIt	m_managerListIt;					///< where we sit in the manager's master list, so it need not look
 
 	UnsignedInt				m_particleCount;								///< current count of particles for this system
 	ParticleSystemID	m_systemID;											///< unique id given to this system from the particle system manager
@@ -780,8 +787,9 @@ class ParticleSystemManager : public SubsystemInterface,
 
 public:
 
-	typedef std::list<ParticleSystem*> ParticleSystemList;
-	typedef std::list<ParticleSystem*>::iterator ParticleSystemListIt;
+	typedef ParticleSystemPtrList ParticleSystemList;
+	typedef ParticleSystemPtrListIt ParticleSystemListIt;
+	typedef std::hash_map< ParticleSystemID, ParticleSystem *, rts::hash<ParticleSystemID>, rts::equal_to<ParticleSystemID> > ParticleSystemIDMap;
 	typedef std::hash_map<AsciiString, ParticleSystemTemplate *, rts::hash<AsciiString>, rts::equal_to<AsciiString> > TemplateMap;
 
 	ParticleSystemManager( void );
@@ -846,6 +854,9 @@ public:
 	// these are only for use by partcle systems to link and unlink themselves
 	void friend_addParticleSystem( ParticleSystem *particleSystemToAdd );
 	void friend_removeParticleSystem( ParticleSystem *particleSystemToRemove );
+	// A restored system reads its saved id after the constructor has already filed it under the
+	// fresh one, so it tells the manager to re-file it.
+	void friend_renumberParticleSystem( ParticleSystem *particleSystem, ParticleSystemID oldID );
 
 protected:
 
@@ -860,6 +871,7 @@ protected:
 	ParticleSystemID m_uniqueSystemID;					///< unique system ID to assign to each system created
 
 	ParticleSystemList m_allParticleSystemList;
+	ParticleSystemIDMap m_allParticleSystemMap;	///< the same systems, by id, so findParticleSystem() is not a scan
 
 	UnsignedInt m_particleCount;
 	UnsignedInt m_fieldParticleCount; ///< this does not need to be xfered, since it is evaluated every frame

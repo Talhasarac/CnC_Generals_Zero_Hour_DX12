@@ -881,6 +881,14 @@ turn, and the one after. A squad that used to leave on turn 4,120 leaves on turn
 is a thirtieth of a second - you cannot see it, and it was sitting still waiting for orders either
 way.
 
+**And every burning building asking where its smoke is.** A damaged structure, a laser beam, a
+beacon, a shockwave — each of them holds on to an effect by number and asks the game to hand it back,
+every frame, for as long as it lives. Asking meant reading down the list of every effect alive in the
+match until the right one turned up, and a late-game fight has hundreds of them alive at once while a
+burning base has dozens of things doing the asking. Every effect now knows where it is, so the
+question is answered in one step instead of hundreds — and an effect that dies is no longer hunted
+down that same list before it can be cleared away.
+
 ## Sound, video, and getting it to start at all
 
 - **Audio is real**, through the game's own audio library. The sound SDK was stripped from the source

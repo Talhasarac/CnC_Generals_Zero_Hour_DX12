@@ -42,6 +42,7 @@
 #include <float.h>
 #include "GameClient/Water.h"
 #include "GameLogic/Module/PhysicsUpdate.h"
+#include "GameClient/GameClient.h"
 #include "GameClient/ParticleSys.h"
 #include "GameClient/ControlBar.h"
 #include "GameClient/InGameUI.h"
@@ -2741,6 +2742,138 @@ TEST(logicrandom_unchanged_honours_its_bounds)
 	// degenerate ranges answer the way the ordinary versions do
 	CHECK_EQ( GetGameLogicRandomValueUnchanged( 5, 5 ), 5 );
 	CHECK_EQ( GetGameLogicRandomValueRealUnchanged( 3.0f, 3.0f ), 3.0f );
+}
+
+// ---------------------------------------------------------------------------------------------
+// The particle system manager's bookkeeping.  Finding a system by id, and unlinking a dead one,
+// both used to be linear walks of every live system - on paths the renderer and the logic take
+// thousands of times a frame.
+// ---------------------------------------------------------------------------------------------
+
+// A particle system stamps itself with TheGameClient's frame, so the test needs one of those too.
+// The base class' constructor only zeroes counters, but its destructor tears down half the world's
+// globals (the shell, the in-game UI, the campaign manager), so the stub is made once and never
+// destroyed.
+class TestGameClient : public GameClient
+{
+public:
+	virtual void createRayEffectByTemplate( const Coord3D *, const Coord3D *, const ThingTemplate * ) {}
+	virtual void addScorch( const Coord3D *, Real, Scorches ) {}
+	virtual Drawable *friend_createDrawable( const ThingTemplate *, DrawableStatus = DRAWABLE_STATUS_NONE ) { return NULL; }
+	virtual void setTeamColor( Int, Int, Int ) {}
+	virtual void adjustLOD( Int ) {}
+	virtual void notifyTerrainObjectMoved( Object * ) {}
+	virtual Display *createGameDisplay( void ) { return NULL; }
+	virtual InGameUI *createInGameUI( void ) { return NULL; }
+	virtual GameWindowManager *createWindowManager( void ) { return NULL; }
+	virtual FontLibrary *createFontLibrary( void ) { return NULL; }
+	virtual DisplayStringManager *createDisplayStringManager( void ) { return NULL; }
+	virtual VideoPlayerInterface *createVideoPlayer( void ) { return NULL; }
+	virtual TerrainVisual *createTerrainVisual( void ) { return NULL; }
+	virtual Keyboard *createKeyboard( void ) { return NULL; }
+	virtual Mouse *createMouse( void ) { return NULL; }
+	virtual SnowManager *createSnowManager( void ) { return NULL; }
+	virtual void setFrameRate( Real ) {}
+};
+
+static GameClient *theTestGameClient = NULL;
+
+static GameClient *getTestGameClient( void )
+{
+	if( theTestGameClient == NULL )
+		theTestGameClient = new TestGameClient;
+	return theTestGameClient;
+}
+
+// The real managers live in GameEngineDevice; all we need is something concrete to file systems in.
+class TestParticleSystemManager : public ParticleSystemManager
+{
+public:
+	virtual Int getOnScreenParticleCount( void ) { return 0; }
+	virtual void doParticles( RenderInfoClass & ) {}
+	virtual void queueParticleRender() {}
+	virtual void preloadAssets( TimeOfDay ) {}
+};
+
+TEST(particlesys_find_answers_by_id_and_forgets_a_dead_system)
+{
+	GameClient *savedClient = TheGameClient;
+	TheGameClient = getTestGameClient();
+	ParticleSystemManager *savedManager = TheParticleSystemManager;
+
+	{
+		TestParticleSystemManager mgr;
+		TheParticleSystemManager = &mgr;
+
+		ParticleSystemTemplate *tmpl = mgr.newTemplate( AsciiString( "TestParticleSystem" ) );
+		CHECK( tmpl != NULL );
+
+		ParticleSystem *a = mgr.createParticleSystem( tmpl, FALSE );
+		ParticleSystem *b = mgr.createParticleSystem( tmpl, FALSE );
+		ParticleSystem *c = mgr.createParticleSystem( tmpl, FALSE );
+		CHECK( a != NULL && b != NULL && c != NULL );
+
+		const ParticleSystemID idA = a->getSystemID();
+		const ParticleSystemID idB = b->getSystemID();
+		const ParticleSystemID idC = c->getSystemID();
+		CHECK( idA != idB && idB != idC && idA != idC );
+
+		CHECK( mgr.findParticleSystem( idA ) == a );
+		CHECK( mgr.findParticleSystem( idB ) == b );
+		CHECK( mgr.findParticleSystem( idC ) == c );
+		CHECK( mgr.findParticleSystem( (ParticleSystemID)0x7fffffff ) == NULL );
+		CHECK( mgr.findParticleSystem( INVALID_PARTICLE_SYSTEM_ID ) == NULL );
+		CHECK_EQ( mgr.getParticleSystemCount(), 3 );
+
+		// killing one out of the middle must not disturb the other two, and its id must stop resolving
+		b->deleteInstance();
+		CHECK( mgr.findParticleSystem( idB ) == NULL );
+		CHECK( mgr.findParticleSystem( idA ) == a );
+		CHECK( mgr.findParticleSystem( idC ) == c );
+		CHECK_EQ( mgr.getParticleSystemCount(), 2 );
+
+		a->deleteInstance();
+		c->deleteInstance();
+		CHECK_EQ( mgr.getParticleSystemCount(), 0 );
+		CHECK( mgr.findParticleSystem( idA ) == NULL );
+		CHECK( mgr.findParticleSystem( idC ) == NULL );
+	}
+
+	TheParticleSystemManager = savedManager;
+	TheGameClient = savedClient;
+}
+
+TEST(particlesys_reset_lets_the_ids_start_over_without_ghosts)
+{
+	GameClient *savedClient = TheGameClient;
+	TheGameClient = getTestGameClient();
+	ParticleSystemManager *savedManager = TheParticleSystemManager;
+
+	{
+		TestParticleSystemManager mgr;
+		TheParticleSystemManager = &mgr;
+
+		ParticleSystemTemplate *tmpl = mgr.newTemplate( AsciiString( "TestParticleSystem" ) );
+		CHECK( tmpl != NULL );
+
+		for( Int i = 0; i < 8; ++i )
+			CHECK( mgr.createParticleSystem( tmpl, FALSE ) != NULL );
+		CHECK_EQ( mgr.getParticleSystemCount(), 8 );
+
+		mgr.reset();
+		CHECK_EQ( mgr.getParticleSystemCount(), 0 );
+
+		// reset rewinds the id counter, so an entry left behind would answer for a brand new system
+		ParticleSystem *fresh = mgr.createParticleSystem( tmpl, FALSE );
+		CHECK( fresh != NULL );
+		CHECK( mgr.findParticleSystem( fresh->getSystemID() ) == fresh );
+
+		mgr.reset();
+		CHECK_EQ( mgr.getParticleSystemCount(), 0 );
+	}
+
+	TheParticleSystemManager = savedManager;
+	TheGameClient = savedClient;
 }
 
 // ---------------------------------------------------------------------------------------------

@@ -2654,7 +2654,10 @@ void ParticleSystem::xfer( Xfer *xfer )
 	ParticleSystemInfo::xfer( xfer );
 
 	// particle system ID
+	const ParticleSystemID idBeforeXfer = m_systemID;
 	xfer->xferUser( &m_systemID, sizeof( ParticleSystemID ) );
+	if( m_systemID != idBeforeXfer )
+		TheParticleSystemManager->friend_renumberParticleSystem( this, idBeforeXfer );
 
 	// attached to drawable id
 	xfer->xferDrawableID( &m_attachedToDrawableID );
@@ -3171,6 +3174,7 @@ void ParticleSystemManager::reset( void )
 	m_particleCount = 0;
 	m_fieldParticleCount = 0;
 	m_particleSystemCount = 0;
+	m_allParticleSystemMap.clear();
 
 	m_uniqueSystemID = INVALID_PARTICLE_SYSTEM_ID;
 	
@@ -3255,20 +3259,8 @@ ParticleSystem *ParticleSystemManager::findParticleSystem( ParticleSystemID id )
 	if (id == INVALID_PARTICLE_SYSTEM_ID)
 		return NULL;	// my, that was easy
 
-	ParticleSystem *system = NULL;
-
-	for( ParticleSystemListIt it = m_allParticleSystemList.begin(); it != m_allParticleSystemList.end(); ++it ) {
-		system = *it;
-		if (!system) {
-			continue;
-		}
-
-		if( system->getSystemID() == id ) {
-			return system;
-		}
-	}
-
-	return NULL;
+	ParticleSystemIDMap::const_iterator it = m_allParticleSystemMap.find( id );
+	return (it != m_allParticleSystemMap.end()) ? it->second : NULL;
 
 }  // end findParticleSystem
 
@@ -3435,6 +3427,8 @@ void ParticleSystemManager::removeParticle( Particle *particleToRemove)
 void ParticleSystemManager::friend_addParticleSystem( ParticleSystem *particleSystemToAdd )
 {
 	m_allParticleSystemList.push_back(particleSystemToAdd);
+	particleSystemToAdd->m_managerListIt = --m_allParticleSystemList.end();
+	m_allParticleSystemMap[ particleSystemToAdd->getSystemID() ] = particleSystemToAdd;
 	++m_particleSystemCount;
 }
 
@@ -3443,12 +3437,24 @@ void ParticleSystemManager::friend_addParticleSystem( ParticleSystem *particleSy
 // ------------------------------------------------------------------------------------------------
 void ParticleSystemManager::friend_removeParticleSystem( ParticleSystem *particleSystemToRemove )
 {
-	ParticleSystemListIt it = std::find(m_allParticleSystemList.begin(), m_allParticleSystemList.end(), particleSystemToRemove);
-	if (it != m_allParticleSystemList.end()) {
-		m_allParticleSystemList.erase(it);
-		--m_particleSystemCount;
-	}
+	// The constructor filed it and only the destructor calls this, so the iterator is ours and
+	// still good; EA scanned the whole list for it on every single system that died.
+	m_allParticleSystemList.erase( particleSystemToRemove->m_managerListIt );
+	m_allParticleSystemMap.erase( particleSystemToRemove->getSystemID() );
+	--m_particleSystemCount;
+}
 
+// ------------------------------------------------------------------------------------------------
+/** A system loaded from a save file is constructed with a fresh id and then reads its saved one,
+ * so the id it was filed under is no longer the id it answers to.  Re-file it. */
+// ------------------------------------------------------------------------------------------------
+void ParticleSystemManager::friend_renumberParticleSystem( ParticleSystem *particleSystem, ParticleSystemID oldID )
+{
+	ParticleSystemIDMap::iterator it = m_allParticleSystemMap.find( oldID );
+	if (it != m_allParticleSystemMap.end() && it->second == particleSystem)
+		m_allParticleSystemMap.erase( it );
+
+	m_allParticleSystemMap[ particleSystem->getSystemID() ] = particleSystem;
 }
 
 // ------------------------------------------------------------------------------------------------
