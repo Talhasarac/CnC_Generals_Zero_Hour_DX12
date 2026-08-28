@@ -124,6 +124,18 @@ inline Bool isValidHotkeySquadIndex( Int squadNumber )
 	return squadNumber >= 0 && squadNumber < NUM_HOTKEY_SQUADS;
 }
 
+//
+// A network command names the object it acts on by id, and an id is only a number - nothing in the
+// message ties it to the machine that sent it, so a doctored one can name any object on the map,
+// including one it does not own.  The dispatcher runs whatever it is handed, so the ownership
+// question has to be asked there.  This compares identity and never looks inside either player.
+//
+class Player;
+inline Bool isPlayerCommandingOwnObject( const Player *commandingPlayer, const Player *objectController )
+{
+	return commandingPlayer != NULL && commandingPlayer == objectController;
+}
+
 // ------------------------------------------------------------------------------------------------
 typedef Int PlayerIndex;
 #define PLAYER_INDEX_INVALID -1

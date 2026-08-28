@@ -3700,3 +3700,24 @@ TEST(a_new_game_only_starts_from_a_standing_start)
 			refusedEveryBusyState = FALSE;
 	CHECK( refusedEveryBusyState );
 }
+
+/* A network command names the object it acts on by id, and nothing in the message ties that id to
+	 the machine that sent it.  The special power cases ran whatever object they were handed, so a
+	 doctored command could fire another player's superweapon.  They ask this first now.  The
+	 predicate compares identity only and never dereferences either pointer, so the test can use
+	 stand-in addresses for players. */
+TEST(a_command_may_only_name_an_object_its_sender_controls)
+{
+	const Player *alice = (const Player *)0x100;
+	const Player *bob   = (const Player *)0x200;
+
+	CHECK( isPlayerCommandingOwnObject( alice, alice ) );	// your own unit
+	CHECK( !isPlayerCommandingOwnObject( alice, bob ) );	// somebody else's
+	CHECK( !isPlayerCommandingOwnObject( bob, alice ) );
+
+	// an object with no controller is nobody's to command, and neither is anything at all when the
+	// message names a player slot that is not in the game
+	CHECK( !isPlayerCommandingOwnObject( alice, NULL ) );
+	CHECK( !isPlayerCommandingOwnObject( NULL, alice ) );
+	CHECK( !isPlayerCommandingOwnObject( NULL, NULL ) );
+}

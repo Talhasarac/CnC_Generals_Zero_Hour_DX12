@@ -753,7 +753,8 @@ void Player::update()
 				GameMessage *msg = TheMessageStream->appendMessage( GameMessage::MSG_ENABLE_RETALIATION_MODE );
 				if( msg )
 				{
-					msg->appendIntegerArgument( getPlayerIndex() );
+					// No player index: the message can only ever be about the player who sent it, and
+					// carrying the index made it look like it could be about somebody else.
 					msg->appendBooleanArgument( TheGlobalData->m_clientRetaliationModeEnabled );
 				}
 			}

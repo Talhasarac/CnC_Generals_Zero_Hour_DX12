@@ -686,14 +686,14 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 
 		case GameMessage::MSG_ENABLE_RETALIATION_MODE:
 		{
-			//Logically turns on or off retaliation mode for a specified player.
-			Int playerIndex = msg->getArgument( 0 )->integer;
-			Bool enableRetaliation = msg->getArgument( 1 )->boolean;
-
-			Player *player = ThePlayerList->getNthPlayer( playerIndex );
-			if( player )
+			// Turns retaliation mode on or off for the player who sent the message.  The message used
+			// to carry a player index as well, and the case obeyed it - so a doctored one could set
+			// anybody's retaliation mode.  Player::update only ever posts this for itself, so the index
+			// was always the sender's own and the argument is gone.
+			const Bool enableRetaliation = msg->getArgument( 0 )->boolean;
+			if( thisPlayer )
 			{
-				player->setLogicalRetaliationModeEnabled( enableRetaliation );
+				thisPlayer->setLogicalRetaliationModeEnabled( enableRetaliation );
 			}
 			break;
 		}
@@ -734,6 +734,13 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 			Object* source = TheGameLogic->findObjectByID(sourceID);
 			if (source != NULL)
 			{
+				if( !isPlayerCommandingOwnObject( thisPlayer, source->getControllingPlayer() ) )
+				{
+					DEBUG_CRASH( ("MSG_DO_SPECIAL_POWER: a command from player %d named object %d, which it does not control",
+						msg->getPlayerIndex(), (Int)sourceID) );
+					break;
+				}
+
 				AIGroup* theGroup = TheAI->createGroup();
 				theGroup->add(source);
 				theGroup->groupDoSpecialPower( specialPowerID, options );
@@ -775,6 +782,13 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 			Object* source = TheGameLogic->findObjectByID(sourceID);
 			if (source != NULL)
 			{
+				if( !isPlayerCommandingOwnObject( thisPlayer, source->getControllingPlayer() ) )
+				{
+					DEBUG_CRASH( ("MSG_DO_SPECIAL_POWER_AT_LOCATION: a command from player %d named object %d, which it does not control",
+						msg->getPlayerIndex(), (Int)sourceID) );
+					break;
+				}
+
 				AIGroup* theGroup = TheAI->createGroup();
 				theGroup->add(source);
 				theGroup->groupDoSpecialPowerAtLocation( specialPowerID, &targetCoord, angle, objectInWay, options );
@@ -814,6 +828,13 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 			Object* source = TheGameLogic->findObjectByID(sourceID);
 			if (source != NULL)
 			{
+				if( !isPlayerCommandingOwnObject( thisPlayer, source->getControllingPlayer() ) )
+				{
+					DEBUG_CRASH( ("MSG_DO_SPECIAL_POWER_AT_OBJECT: a command from player %d named object %d, which it does not control",
+						msg->getPlayerIndex(), (Int)sourceID) );
+					break;
+				}
+
 				AIGroup* theGroup = TheAI->createGroup();
 				theGroup->add(source);
 				theGroup->groupDoSpecialPowerAtObject( specialPowerID, target, options );
@@ -1279,6 +1300,13 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 			Object* source = TheGameLogic->findObjectByID(sourceID);
 			if (source != NULL)
 			{
+				if( !isPlayerCommandingOwnObject( thisPlayer, source->getControllingPlayer() ) )
+				{
+					DEBUG_CRASH( ("MSG_DO_SPECIAL_POWER_OVERRIDE_DESTINATION: a command from player %d named object %d, which it does not control",
+						msg->getPlayerIndex(), (Int)sourceID) );
+					break;
+				}
+
 				AIGroup* theGroup = TheAI->createGroup();
 				theGroup->add(source);
 				theGroup->groupOverrideSpecialPowerDestination( spType, loc, CMD_FROM_PLAYER );

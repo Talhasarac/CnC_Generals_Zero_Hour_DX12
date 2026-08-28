@@ -303,6 +303,14 @@ map. Ctrl+A is still everything at once.
   on its own — from twelve frames a second to thirty in about six seconds. A room held down by a
   machine that really is that slow settles just above it and stays there instead of surging and
   falling back.
+- **Nobody can fire your superweapon but you.** An order arriving over the network says which unit
+  or building it is about, and the game used to run it on whatever it named — it never checked that
+  the player who sent the order owned the thing. A doctored order could set off another player's
+  superweapon, or redirect one that was already on its way. Orders are now refused unless the sender
+  controls what they name. The same went for the retaliation setting, which arrived carrying a
+  player number and would happily change somebody else's; it no longer carries one, because it was
+  only ever about the player who sent it.
+
 - **An online match could be forced into a disconnect screen with no way out.** The command that
   starts a new game was obeyed no matter what the machine was doing — including in the middle of a
   match. The player who received it quietly restarted into a different game; everybody else was
