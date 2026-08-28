@@ -317,10 +317,8 @@ void EMPUpdate::doDisableAttack( void )
 						if (sys)
 						{
 							Coord3D offs = {0,0,0};
-							// These sparks only exist when createParticleSystem() had room for them, and that
-							// depends on the particle cap and the detail settings of the machine we are on.
-							// Rolling them from the shared logic stream made every player's graphics options
-							// part of the simulation.
+							// Where a spark sits inside the victim is a thing only this machine ever looks
+							// at, so it comes off the client stream.  Nothing in the simulation reads it.
 							curVictim->getGeometryInfo().makeRandomOffsetWithinFootprint( offs, TRUE );
 							offs.z = GameClientRandomValue(3, victimHeight);
 
