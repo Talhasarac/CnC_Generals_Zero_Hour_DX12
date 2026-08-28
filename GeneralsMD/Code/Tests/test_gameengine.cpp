@@ -39,6 +39,7 @@
 #include "Common/RandomValue.h"
 #include "GameLogic/LogicRandomValue.h"
 #include "GameNetwork/CrcAgreement.h"
+#include "GameNetwork/GameInfo.h"
 #include <float.h>
 #include "GameClient/Water.h"
 #include "GameLogic/Module/PhysicsUpdate.h"
@@ -3391,4 +3392,61 @@ TEST(terrainlogic_finds_a_trigger_area_by_name_and_notices_edits)
 
 	PolygonTrigger::deleteTriggers();
 	CHECK( tl.getTriggerAreaByName( "Zone1" ) == NULL );
+}
+
+// A restarted skirmish must draw the same random colors, start positions and factions as the first
+// run did.  The draws only happen for a slot whose value is still negative, so the setup captured
+// before the first draw has to be put back before the second start.
+TEST(gameslot_restores_the_pre_randomization_setup_on_a_restart)
+{
+	GameSlot slot;
+
+	// nothing captured yet, and the map's own "random" markers are what the slot starts with
+	CHECK( !slot.hasSavedOriginalSetup() );
+	CHECK_EQ( slot.getColor(), -1 );
+	CHECK_EQ( slot.getStartPos(), -1 );
+	CHECK_EQ( slot.getPlayerTemplate(), (Int)PLAYERTEMPLATE_RANDOM );
+
+	// first start: capture, then let the draws resolve every one of them
+	slot.saveOriginalSetup();
+	CHECK( slot.hasSavedOriginalSetup() );
+	CHECK_EQ( slot.getOriginalColor(), -1 );
+	CHECK_EQ( slot.getOriginalStartPos(), -1 );
+	CHECK_EQ( slot.getOriginalPlayerTemplate(), (Int)PLAYERTEMPLATE_RANDOM );
+
+	slot.setColor( 3 );
+	slot.setStartPos( 5 );
+	slot.setPlayerTemplate( 2 );
+	CHECK_EQ( slot.getColor(), 3 );
+	CHECK_EQ( slot.getStartPos(), 5 );
+	CHECK_EQ( slot.getPlayerTemplate(), 2 );
+
+	// second start: the capture is still there, so the slot is rolled back instead of re-captured
+	CHECK( slot.hasSavedOriginalSetup() );
+	slot.setColor( slot.getOriginalColor() );
+	slot.setStartPos( slot.getOriginalStartPos() );
+	slot.setPlayerTemplate( slot.getOriginalPlayerTemplate() );
+	CHECK_EQ( slot.getColor(), -1 );
+	CHECK_EQ( slot.getStartPos(), -1 );
+	CHECK_EQ( slot.getPlayerTemplate(), (Int)PLAYERTEMPLATE_RANDOM );
+
+	// and the originals survive the rollback, so a third start rolls back to the same place
+	CHECK_EQ( slot.getOriginalColor(), -1 );
+	CHECK_EQ( slot.getOriginalStartPos(), -1 );
+	CHECK_EQ( slot.getOriginalPlayerTemplate(), (Int)PLAYERTEMPLATE_RANDOM );
+
+	// a slot that was set up by hand is captured as-is, not as the random markers
+	GameSlot fixed;
+	fixed.setColor( 4 );
+	fixed.setStartPos( 1 );
+	fixed.setPlayerTemplate( 6 );
+	fixed.saveOriginalSetup();
+	CHECK_EQ( fixed.getOriginalColor(), 4 );
+	CHECK_EQ( fixed.getOriginalStartPos(), 1 );
+	CHECK_EQ( fixed.getOriginalPlayerTemplate(), 6 );
+
+	// leaving the lobby clears the capture, so the next game captures its own setup
+	fixed.reset();
+	CHECK( !fixed.hasSavedOriginalSetup() );
+	CHECK_EQ( fixed.getOriginalColor(), -1 );
 }

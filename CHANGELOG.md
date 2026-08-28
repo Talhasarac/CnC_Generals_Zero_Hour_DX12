@@ -167,6 +167,12 @@ map. Ctrl+A is still everything at once.
   match was built from and started the next attempt on a different one, so the replay it was writing
   no longer matched the game being played and would not play back. Restart now hands the game back
   the number it had.
+- **And it restarts with the same colours, the same corners and the same armies.** "Random" colour,
+  "random" starting position and "random" army are drawn from that same shared number the moment the
+  match begins. On a restart they had already been drawn once — the slots now held real answers — so
+  there was nothing left to draw and the second attempt started from the first attempt's results,
+  with the shared sequence a few numbers further along than the replay expected. The lobby's choices
+  are now put back before the restart, so the second attempt makes the same picks the first one did.
 - **Somebody quitting no longer ends the game for everyone else.** The game checks that all the
   machines still agree by comparing a fingerprint of the world every so often, and if two of them
   differ the match stops. A player leaving sent one last fingerprint from a machine that was already

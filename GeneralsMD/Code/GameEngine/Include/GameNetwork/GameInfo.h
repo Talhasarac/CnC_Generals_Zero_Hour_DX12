@@ -103,7 +103,8 @@ public:
 	inline void setNATBehavior( FirewallHelperClass::FirewallBehaviorType NATBehavior) { m_NATBehavior = NATBehavior; }
 	inline FirewallHelperClass::FirewallBehaviorType getNATBehavior() const { return m_NATBehavior; }
 	
-	void saveOffOriginalInfo( void );
+	void saveOriginalSetup( void );
+	Bool hasSavedOriginalSetup( void ) const { return m_hasSavedOriginalSetup; }
 	inline Int getOriginalPlayerTemplate( void ) const	{ return m_origPlayerTemplate; }
 	inline Int getOriginalColor( void ) const						{ return m_origColor; }
 	inline Int getOriginalStartPos( void ) const				{ return m_origStartPos; }
@@ -133,6 +134,7 @@ protected:
 	Bool m_isAccepted;
 	Bool m_hasMap;
 	Bool m_isMuted;
+	Bool m_hasSavedOriginalSetup;											///< TRUE once the pre-randomization setup below was captured
 	Int m_color;																			///< color, or -1 for random
 	Int m_startPos;																		///< start position, or -1 for random
 	Int m_playerTemplate;															///< PlayerTemplate

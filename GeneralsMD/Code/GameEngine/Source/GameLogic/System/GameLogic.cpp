@@ -1214,7 +1214,20 @@ void GameLogic::startNewGame( Bool loadingSaveGame )
 		{
 			GameSlot *slot = game->getSlot(i);
 			if (!loadingSaveGame) {
-				slot->saveOffOriginalInfo();
+				if (slot->hasSavedOriginalSetup())
+				{
+					DEBUG_ASSERTCRASH(m_gameMode == GAME_SKIRMISH, ("Expected GAME_SKIRMISH but got %d", m_gameMode));
+
+					// Random color, position and faction are drawn off the logical seed.  A restarted
+					// game puts the pre-draw values back so the same draws happen again.
+					slot->setColor(slot->getOriginalColor());
+					slot->setStartPos(slot->getOriginalStartPos());
+					slot->setPlayerTemplate(slot->getOriginalPlayerTemplate());
+				}
+				else
+				{
+					slot->saveOriginalSetup();
+				}
 			}
 			if (slot->isAI())
 			{
