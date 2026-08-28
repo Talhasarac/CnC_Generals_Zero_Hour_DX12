@@ -49,6 +49,28 @@
 //#pragma MESSAGE("************************************** WARNING, optimization disabled for debugging purposes")
 #endif
 
+//How long the transport waits for its troops to board again before it rolls on without them.
+#define FRAMES_TO_WAIT_FOR_BOARDING (10 * LOGICFRAMES_PER_SECOND)
+
+//-------------------------------------------------------------------------------------------------
+/** Should the troops we deployed climb back into the transport?
+  * Only once nobody is still shooting and there is nothing left near us worth shooting at.
+  * Free function with no Object in its signature so a test can pin the rule - the same trick as
+  * AIAttackMove_shouldRetaliate in AIStates.cpp. */
+Bool AssaultTransport_shouldRetrieveMembers( Bool membersOutside, Bool membersFighting, Bool areaClear )
+{
+	return membersOutside && !membersFighting && areaClear;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Does the transport hold still this frame instead of driving on with the attack move?
+  * Only while troops are still outside and the boarding wait has not run out; see
+  * AssaultTransport_shouldRetrieveMembers above. */
+Bool AssaultTransport_waitingForBoarding( Bool membersOutside, UnsignedInt framesRemaining )
+{
+	return membersOutside && framesRemaining > 0;
+}
+
 //-------------------------------------------------------------------------------------------------
 //-------------------------------------------------------------------------------------------------
 //-------------------------------------------------------------------------------------------------
@@ -320,10 +342,63 @@ UpdateSleepTime AssaultTransportAIUpdate::update( void )
 	}
 	else
 	{
-		if( m_isAttackMove && getAIStateType() != AI_ATTACK_MOVE_TO )
+		if( m_isAttackMove )
 		{
-			//Continue to move towards the attackmove area.
-			aiAttackMoveToPosition( &m_attackMoveGoalPos, NO_MAX_SHOTS_LIMIT, CMD_FROM_AI );
+			//The target we deployed for is gone. Find out whether the troops we let out still have
+			//something to do.
+			Bool membersOutside = FALSE;
+			Bool membersFighting = FALSE;
+			for( int i = 0; i < m_currentMembers; i++ )
+			{
+				Object *member = TheGameLogic->findObjectByID( m_memberIDs[ i ] );
+				AIUpdateInterface *ai = member ? member->getAI() : NULL;
+				if( member && ai && !member->isContained() )
+				{
+					membersOutside = TRUE;
+					if( ai->getCurrentVictim() != NULL )
+					{
+						membersFighting = TRUE;
+					}
+				}
+			}
+
+			//Only worth a partition scan once the troops are out and nobody is engaged.
+			Bool areaClear = FALSE;
+			if( membersOutside && !membersFighting )
+			{
+				areaClear = isAssaultAreaClear();
+			}
+
+			if( AssaultTransport_shouldRetrieveMembers( membersOutside, membersFighting, areaClear ) )
+			{
+				//Nobody left to shoot at, so pick the troops back up instead of walking them along
+				//behind the transport for the rest of the attack move.
+				retrieveMembers();
+				if( !m_framesRemaining )
+				{
+					m_framesRemaining = FRAMES_TO_WAIT_FOR_BOARDING;
+				}
+			}
+
+			if( AssaultTransport_waitingForBoarding( membersOutside, m_framesRemaining ) )
+			{
+				//Hold here while they climb back in - driving off would just make them chase us.
+				//The wait is bounded so a member that cannot make it back never stalls the attack move.
+				if( getAIStateType() == AI_ATTACK_MOVE_TO )
+				{
+					aiIdle( CMD_FROM_AI );
+				}
+				m_framesRemaining--;
+			}
+			else
+			{
+				m_framesRemaining = 0;
+				if( getAIStateType() != AI_ATTACK_MOVE_TO )
+				{
+					//Continue to move towards the attackmove area.
+					aiAttackMoveToPosition( &m_attackMoveGoalPos, NO_MAX_SHOTS_LIMIT, CMD_FROM_AI );
+				}
+			}
 		}
 		else if( m_isAttackObject )
 		{
@@ -435,6 +510,24 @@ Bool AssaultTransportAIUpdate::isMemberHealthy( const Object *member ) const
 		}
 	}
 	return FALSE;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Is there anything left worth fighting near the transport? ClearRangeRequiredToContinueAttackMove
+  * is the INI knob EA declared for exactly this and never read. */
+Bool AssaultTransportAIUpdate::isAssaultAreaClear() const
+{
+	const AssaultTransportAIUpdateModuleData *data = getAssaultTransportAIUpdateModuleData();
+	const Object *transport = getObject();
+
+	PartitionFilterRelationship		filterRelationship( transport, PartitionFilterRelationship::ALLOW_ENEMIES );
+	PartitionFilterAlive					filterAlive;
+	PartitionFilterSameMapStatus	filterMapStatus( transport );
+	PartitionFilter *filters[] = { &filterRelationship, &filterAlive, &filterMapStatus, NULL };
+
+	Object *enemy = ThePartitionManager->getClosestObject( transport, data->m_clearRangeRequiredToContinueAttackMove,
+																												FROM_CENTER_2D, filters );
+	return enemy == NULL;
 }
 
 //-------------------------------------------------------------------------------------------------

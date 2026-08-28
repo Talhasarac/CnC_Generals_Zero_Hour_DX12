@@ -105,6 +105,7 @@ public:
 	void reset();
 	Bool isMemberWounded( const Object *member ) const;	//Member requires medical attention?
 	Bool isMemberHealthy( const Object *member ) const; //Member has full health?
+	Bool isAssaultAreaClear() const;	//Nothing hostile left near the transport?
 	void retrieveMembers();
 	void giveFinalOrders();
   Bool isAttackPointless() const;

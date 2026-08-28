@@ -96,6 +96,24 @@
 
 #define dont_ALLOW_ALT_F4
 
+//-------------------------------------------------------------------------------------------------
+/**
+ * Is the ctrl key asking for force fire right now?
+ * While the attack move cursor is up, ctrl means "one shared pace" instead (see
+ * issueMoveToLocationCommand), so the targeting code must not read it as force attack - otherwise
+ * ctrl + click on the ground fires at the dirt instead of ordering the attack move.
+ */
+Bool CommandXlat_isForceAttackTargeting( Bool ctrlHeld, Bool attackMoveArmed )
+{
+	return ctrlHeld && !attackMoveArmed;
+}
+
+static Bool isForceAttackTargeting( void )
+{
+	return CommandXlat_isForceAttackTargeting( TheInGameUI->isInForceAttackMode(),
+																						 TheInGameUI->isInAttackMoveToMode() );
+}
+
 
 #if defined(_DEBUG) || defined(_INTERNAL)
 /*non-static*/ Real TheSkateDistOverride = 0.0f;
@@ -887,7 +905,7 @@ GameMessage::Type CommandTranslator::issueMoveToLocationCommand( const Coord3D *
 		{
 			msgType = GameMessage::MSG_DO_FORCEMOVETO;
 		}
-		else if( TheInGameUI->isInForceAttackMode() && isForceAttackable )
+		else if( isForceAttackTargeting() && isForceAttackable )
 		{
 			msgType = GameMessage::MSG_DO_ATTACK_OBJECT;
 		}
@@ -1461,7 +1479,7 @@ GameMessage::Type CommandTranslator::evaluateContextCommand( Drawable *draw,
 		//a position interaction.
 		draw = NULL;
 		obj = NULL;
-	} else if (TheInGameUI->isInForceAttackMode() ) {
+	} else if (isForceAttackTargeting() ) {
 		// setting the drawableInWay to draw will allow us to force attack in the issue move command
 		// if there is a location to which we should attack.
 		drawableInWay = draw;
@@ -1714,7 +1732,7 @@ GameMessage::Type CommandTranslator::evaluateContextCommand( Drawable *draw,
 		}
 		
 		// ********************************************************************************************
-		else if( draw && !TheInGameUI->isInForceAttackMode() && 
+		else if( draw && !isForceAttackTargeting() && 
 						 TheInGameUI->canSelectedObjectsDoAction( InGameUI::ACTIONTYPE_RESUME_CONSTRUCTION, obj, InGameUI::SELECTION_ANY ) )
 		{
 			
@@ -1746,7 +1764,7 @@ GameMessage::Type CommandTranslator::evaluateContextCommand( Drawable *draw,
 
 		}  // end else if
 		// ********************************************************************************************
-		else if( draw && !TheInGameUI->isInForceAttackMode() && 
+		else if( draw && !isForceAttackTargeting() && 
 						 TheInGameUI->canSelectedObjectsDoAction( InGameUI::ACTIONTYPE_DOCK_AT, 
 																											obj, 
 																											InGameUI::SELECTION_ALL ) )
@@ -1784,7 +1802,7 @@ GameMessage::Type CommandTranslator::evaluateContextCommand( Drawable *draw,
 
 		}
 		// ********************************************************************************************
-		else if( draw && !TheInGameUI->isInForceAttackMode() && 
+		else if( draw && !isForceAttackTargeting() && 
 						 TheInGameUI->canSelectedObjectsDoAction( InGameUI::ACTIONTYPE_REPAIR_OBJECT, obj, InGameUI::SELECTION_ANY ) )
 		{
 			
@@ -1816,7 +1834,7 @@ GameMessage::Type CommandTranslator::evaluateContextCommand( Drawable *draw,
 
 		}  // end else if
 		// ********************************************************************************************
-		else if( draw && !TheInGameUI->isInForceAttackMode() && 
+		else if( draw && !isForceAttackTargeting() && 
 						TheInGameUI->canSelectedObjectsDoAction( InGameUI::ACTIONTYPE_GET_REPAIRED_AT, obj, InGameUI::SELECTION_ANY ) )
 		{
 
@@ -1850,7 +1868,7 @@ GameMessage::Type CommandTranslator::evaluateContextCommand( Drawable *draw,
 
 		}  // end else if
 		// ********************************************************************************************
-		else if( draw && !TheInGameUI->isInForceAttackMode() && 
+		else if( draw && !isForceAttackTargeting() && 
 						 TheInGameUI->canSelectedObjectsDoAction( InGameUI::ACTIONTYPE_GET_HEALED_AT, obj, InGameUI::SELECTION_ANY ) )
 		{
 			
@@ -1882,7 +1900,7 @@ GameMessage::Type CommandTranslator::evaluateContextCommand( Drawable *draw,
 
 		}  // end else if
 		// ********************************************************************************************
-		else if( draw && draw->getObject() && !TheInGameUI->isInForceAttackMode() && 
+		else if( draw && draw->getObject() && !isForceAttackTargeting() && 
 						 TheInGameUI->canSelectedObjectsDoAction( InGameUI::ACTIONTYPE_HIJACK_VEHICLE, 
 																											draw->getObject(), 
 																											InGameUI::SELECTION_ANY ) )
@@ -1907,7 +1925,7 @@ GameMessage::Type CommandTranslator::evaluateContextCommand( Drawable *draw,
 
 		}  // end else if
 		// ********************************************************************************************
-		else if( draw && !TheInGameUI->isInForceAttackMode() && 
+		else if( draw && !isForceAttackTargeting() && 
 						 TheInGameUI->canSelectedObjectsDoAction( InGameUI::ACTIONTYPE_CONVERT_OBJECT_TO_CARBOMB, obj, InGameUI::SELECTION_ANY ) )
 		{
 			
@@ -1928,7 +1946,7 @@ GameMessage::Type CommandTranslator::evaluateContextCommand( Drawable *draw,
 			}  // end else
 		}
 		// ********************************************************************************************
-		else if( draw && draw->getObject() && !TheInGameUI->isInForceAttackMode() && 
+		else if( draw && draw->getObject() && !isForceAttackTargeting() && 
 						 TheInGameUI->canSelectedObjectsDoAction( InGameUI::ACTIONTYPE_SABOTAGE_BUILDING, 
 																											draw->getObject(), 
 																											InGameUI::SELECTION_ANY ) )
@@ -1947,7 +1965,7 @@ GameMessage::Type CommandTranslator::evaluateContextCommand( Drawable *draw,
 
 		}  // end else if
 		// ********************************************************************************************
-		else if( draw && !TheInGameUI->isInForceAttackMode() && canSelectionSalvage(obj) )
+		else if( draw && !isForceAttackTargeting() && canSelectionSalvage(obj) )
 		{
 			GameMessage *msg;
 			
@@ -1967,7 +1985,7 @@ GameMessage::Type CommandTranslator::evaluateContextCommand( Drawable *draw,
 
 		}  // end else if
 		// ********************************************************************************************
-		else if( draw && !TheInGameUI->isInForceAttackMode() && 
+		else if( draw && !isForceAttackTargeting() && 
 						 TheInGameUI->canSelectedObjectsDoAction( InGameUI::ACTIONTYPE_ENTER_OBJECT, obj, InGameUI::SELECTION_ANY, true ) )
 		{
 			
@@ -1988,7 +2006,7 @@ GameMessage::Type CommandTranslator::evaluateContextCommand( Drawable *draw,
 
 		}  // end else if
 		// ********************************************************************************************
-		else if( draw && (result = TheInGameUI->getCanSelectedObjectsAttack( InGameUI::ACTIONTYPE_ATTACK_OBJECT, obj, InGameUI::SELECTION_ANY, TheInGameUI->isInForceAttackMode() )) == ATTACKRESULT_POSSIBLE )
+		else if( draw && (result = TheInGameUI->getCanSelectedObjectsAttack( InGameUI::ACTIONTYPE_ATTACK_OBJECT, obj, InGameUI::SELECTION_ANY, isForceAttackTargeting() )) == ATTACKRESULT_POSSIBLE )
 		{
 			
 			if( type == DO_COMMAND || type == EVALUATE_ONLY )
@@ -3724,7 +3742,7 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 					// and what "picked" is we would do a command ... but here we only will generate
 					// the hint message, *not* the actual command
 					//
-					if (TheInGameUI->isInForceAttackMode()) {
+					if (isForceAttackTargeting()) {
 						evaluateForceAttack(draw, draw->getPosition(), DO_HINT );
 					} else {
 						evaluateContextCommand( draw, draw->getPosition(), DO_HINT );
@@ -3748,7 +3766,7 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 			// This message occurs whenever the mouse cursor moves off of a drawable, in which
 			// case we want to turn off the pick hint.
 			//
-			if (TheInGameUI->isInForceAttackMode()) {
+			if (isForceAttackTargeting()) {
 				evaluateForceAttack( NULL, &position, DO_HINT );
 			} else {
 				evaluateContextCommand( NULL, &position, DO_HINT );
@@ -3835,11 +3853,11 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 														|| (command && command->getCommandType() == GUI_COMMAND_SPECIAL_POWER_FROM_SHORTCUT);
 				if (isPoint && controllable)
 				{
-					UnsignedInt pickType = getPickTypesForContext( TheInGameUI->isInForceAttackMode() );
+					UnsignedInt pickType = getPickTypesForContext( isForceAttackTargeting() );
 					Drawable *draw = TheTacticalView->pickDrawable(&msg->getArgument(0)->pixelRegion.lo, 
-																													TheInGameUI->isInForceAttackMode(), 
+																													isForceAttackTargeting(), 
 																													(PickType) pickType);
-					if (TheInGameUI->isInForceAttackMode()) {
+					if (isForceAttackTargeting()) {
 						evaluateForceAttack( draw, &pos, DO_COMMAND );
 					} else {
 						evaluateContextCommand( draw, &pos, DO_COMMAND );
@@ -3906,12 +3924,12 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 													|| (command && command->getCommandType() == GUI_COMMAND_SPECIAL_POWER_FROM_SHORTCUT);
 			if (isPoint && controllable)
 			{
-				UnsignedInt pickType = getPickTypesForContext( TheInGameUI->isInForceAttackMode() );
+				UnsignedInt pickType = getPickTypesForContext( isForceAttackTargeting() );
 				Drawable *draw = TheTacticalView->pickDrawable(&msg->getArgument(0)->pixelRegion.lo, 
-																												TheInGameUI->isInForceAttackMode(), 
+																												isForceAttackTargeting(), 
 																												(PickType) pickType);
 
-				if (TheInGameUI->isInForceAttackMode()) {
+				if (isForceAttackTargeting()) {
 					evaluateForceAttack( draw, &pos, DO_COMMAND );
 				} else {
 					evaluateContextCommand( draw, &pos, DO_COMMAND );

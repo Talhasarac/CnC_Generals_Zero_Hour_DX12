@@ -711,6 +711,57 @@ TEST(physics_forward_speed_is_the_projection_not_a_per_axis_norm)
 	CHECK_NEAR( PhysicsBehavior::calcForwardSpeed( climb, up ), 12.0f, 0.01f );
 }
 
+/* CommandXlat.cpp: ctrl is the force fire modifier, but while the attack move cursor is up it
+   means "one shared pace" for the group instead.  The click dispatch used to read the raw ctrl
+   state, so A then ctrl+click fired at the ground rather than issuing the attack move. */
+extern Bool CommandXlat_isForceAttackTargeting( Bool ctrlHeld, Bool attackMoveArmed );
+
+TEST(ctrl_is_force_fire_only_while_the_attack_move_cursor_is_down)
+{
+	/* plain ctrl+click: force fire, as in retail. */
+	CHECK(  CommandXlat_isForceAttackTargeting( true,  false ) );
+
+	/* attack move armed: ctrl is the group speed modifier, so nothing force fires. */
+	CHECK( !CommandXlat_isForceAttackTargeting( true,  true ) );
+
+	/* no ctrl at all, either way. */
+	CHECK( !CommandXlat_isForceAttackTargeting( false, false ) );
+	CHECK( !CommandXlat_isForceAttackTargeting( false, true ) );
+}
+
+/* AssaultTransportAIUpdate.cpp: the troop crawler deploys its passengers at a target and used to
+   leave them walking behind it for the rest of the attack move once that target died. */
+extern Bool AssaultTransport_shouldRetrieveMembers( Bool membersOutside, Bool membersFighting, Bool areaClear );
+extern Bool AssaultTransport_waitingForBoarding( Bool membersOutside, UnsignedInt framesRemaining );
+
+TEST(troop_crawler_picks_its_troops_back_up_only_when_the_fight_is_over)
+{
+	/* deployed, nobody shooting, nothing hostile in range: climb back in. */
+	CHECK( AssaultTransport_shouldRetrieveMembers( true, false, true ) );
+
+	/* a member still has a victim - leave them to it. */
+	CHECK( !AssaultTransport_shouldRetrieveMembers( true, true, true ) );
+
+	/* nobody has a target yet, but something hostile is still in range: wait for them to engage. */
+	CHECK( !AssaultTransport_shouldRetrieveMembers( true, false, false ) );
+
+	/* everybody is already aboard: nothing to order. */
+	CHECK( !AssaultTransport_shouldRetrieveMembers( false, false, true ) );
+}
+
+TEST(troop_crawler_waits_for_boarding_but_not_forever)
+{
+	/* troops outside and time on the clock: hold position while they board. */
+	CHECK( AssaultTransport_waitingForBoarding( true, 300 ) );
+	CHECK( AssaultTransport_waitingForBoarding( true, 1 ) );
+
+	/* the wait ran out - roll on rather than stalling on a member that cannot get back. */
+	CHECK( !AssaultTransport_waitingForBoarding( true, 0 ) );
+
+	/* all aboard: continue the attack move immediately. */
+	CHECK( !AssaultTransport_waitingForBoarding( false, 300 ) );
+}
+
 /* AIStates.cpp: an attack move leashes a human player's ground unit so a target
    that backs away cannot walk it off the order.  Aircraft must be exempt: they
    acquire out to weapon range, which is far beyond the leash, so they broke it on

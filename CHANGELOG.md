@@ -93,6 +93,16 @@ What you get now:
   whatever it happened to pick — usually the nearest thing — while something else emptied a magazine
   into its flank. It now turns onto whatever is actually hurting it, as long as it can reach it, and
   goes back to the advance once that is dealt with.
+- **Ctrl on the attack-move click orders the attack-move, not a bombardment of the dirt.** Ctrl is
+  the force-fire key, and while the attack-move cursor was up the click was still being read that
+  way: instead of advancing at a shared pace, the group stood where it was and shelled the ground
+  you clicked. Ctrl now means what the attack-move cursor says it means, and only that.
+- **Troop Crawlers pick their squad back up.** A Troop Crawler on attack-move drops its passengers
+  on whatever it runs into. Once that fight was over the infantry stayed out, jogging along behind
+  the crawler in the open for the rest of the order — arriving at the next fight on foot, scattered,
+  and already in range. Now, when there is nothing left to shoot at, the crawler holds for them to
+  climb back in and then carries on. If someone cannot make it back it waits ten seconds and moves
+  on rather than parking the whole advance.
 - **Loading a save does not scramble what your attack-moving units do next.** The count of rounds a
   unit had spent on its current fight — which is how the game tells a real firing pass from a failed
   approach — was not among the things written into a save file, and on load it came back as whatever
