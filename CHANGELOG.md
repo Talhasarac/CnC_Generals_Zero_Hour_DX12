@@ -163,6 +163,11 @@ map. Ctrl+A is still everything at once.
 - **Loading a save remembers what your guards were guarding.** The guard order was written to the
   file one slot too far and overwrote the position it was guarding, so units restored from a save
   could come back watching the wrong place.
+- **Units come back from a save with the weapons the map gave them.** A map can rewrite what a
+  unit is — different damage, different range, different reload — and many of them do. Saving wrote
+  down the unit's name, and loading looked that name up and found the original, un-rewritten version
+  underneath the map's changes. Reload a save on such a map and your army quietly went back to
+  stock weapons. It now finds the version the map actually gave you.
 - **Restarting a skirmish restarts the same skirmish.** Hitting restart threw away the number the
   match was built from and started the next attempt on a different one, so the replay it was writing
   no longer matched the game being played and would not play back. Restart now hands the game back

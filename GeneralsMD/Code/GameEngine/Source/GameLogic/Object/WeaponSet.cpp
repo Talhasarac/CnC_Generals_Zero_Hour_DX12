@@ -236,6 +236,11 @@ void WeaponSet::xfer( Xfer *xfer )
 			if (tt == NULL)
 				throw INI_INVALID_DATA;
 
+			// The name was written from a live object, whose template Object's constructor took to
+			// the end of its override chain; findTemplate hands back the head of that chain.  Without
+			// this the weapon set restored from a save is the map override's predecessor.
+			tt = finalOverrideOf( tt );
+
 			m_curWeaponTemplateSet = tt->findWeaponTemplateSet(wsFlags);
 			if (m_curWeaponTemplateSet == NULL)
 				throw INI_INVALID_DATA;

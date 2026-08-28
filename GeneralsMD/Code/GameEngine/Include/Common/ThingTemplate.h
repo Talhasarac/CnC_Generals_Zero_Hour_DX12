@@ -772,6 +772,20 @@ private:
 //           Inlining                                                       
 //-----------------------------------------------------------------------------
 
+//
+// A map's INI can override an object's template, and ThingFactory::newOverride hangs the override
+// off the end of the base template's chain rather than replacing it - both keep the same name, and
+// TheThingFactory->findTemplate always hands back the head of the chain, the un-overridden one.
+// Object's constructor has always ended its template with this ("Force the thing template to use
+// the most overridden version of itself - jkmcd"), so anything that looks a template up by name and
+// then compares or indexes it against a live object has to do the same or it is talking about a
+// different template that happens to share a name.
+//
+inline const ThingTemplate *finalOverrideOf( const ThingTemplate *tmpl )
+{
+	return tmpl ? (const ThingTemplate *)tmpl->getFinalOverride() : NULL;
+}
+
 //-----------------------------------------------------------------------------
 //           Externals                                                     
 //-----------------------------------------------------------------------------

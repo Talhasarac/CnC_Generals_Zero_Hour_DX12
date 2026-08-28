@@ -39,6 +39,7 @@
 #include "Common/RandomValue.h"
 #include "GameLogic/LogicRandomValue.h"
 #include "GameClient/ClientRandomValue.h"
+#include "Common/ThingTemplate.h"
 #include "Common/AudioRandomValue.h"
 #include "GameNetwork/CrcAgreement.h"
 #include "GameNetwork/NetworkUtil.h"
@@ -3794,4 +3795,43 @@ TEST(a_games_seed_sets_the_client_and_audio_streams_as_well_as_the_logic_one)
 	CHECK( clientMoved );
 	CHECK( audioMoved );
 	CHECK( logicMoved );
+}
+
+/* A map's INI overrides an object template by hanging a copy off the end of the original's chain,
+	 under the same name.  findTemplate hands back the head of that chain; Object's constructor walks
+	 to the end.  WeaponSet::xfer wrote a live object's template name into the save and looked it up
+	 again on load without walking, so a unit on an overridden map came back holding the weapon set of
+	 the template the override replaced.  Both sites go through finalOverrideOf now.
+
+	 The chain lives entirely in Overridable, and finalOverrideOf touches nothing else, so the test
+	 builds it out of plain Overridables: a ThingTemplate cannot be constructed here, its constructor
+	 reads TheGlobalData.  ThingTemplate's only base is Overridable, non-virtually, so the cast is an
+	 identity on the pointer. */
+TEST(a_template_looked_up_by_name_is_taken_to_the_end_of_its_override_chain)
+{
+	Overridable *base     = newInstance( Overridable );
+	Overridable *override = newInstance( Overridable );
+	Overridable *later    = newInstance( Overridable );
+
+	#define AS_TEMPLATE(p) ((const ThingTemplate *)(const Overridable *)(p))
+
+	// nothing overrides it yet, so the answer is the template itself
+	CHECK( finalOverrideOf( AS_TEMPLATE(base) ) == AS_TEMPLATE(base) );
+
+	// one override, then a second hung off the first - which is how newOverride builds them
+	base->setNextOverride( override );
+	CHECK( finalOverrideOf( AS_TEMPLATE(base) ) == AS_TEMPLATE(override) );
+
+	override->setNextOverride( later );
+	CHECK( finalOverrideOf( AS_TEMPLATE(base) ) == AS_TEMPLATE(later) );
+	CHECK( finalOverrideOf( AS_TEMPLATE(override) ) == AS_TEMPLATE(later) );
+	CHECK( finalOverrideOf( AS_TEMPLATE(later) ) == AS_TEMPLATE(later) );
+
+	// and a name that matched nothing stays nothing rather than being dereferenced
+	CHECK( finalOverrideOf( NULL ) == NULL );
+
+	#undef AS_TEMPLATE
+
+	// one delete, not three: ~Overridable deletes whatever the chain still points at
+	base->deleteInstance();
 }

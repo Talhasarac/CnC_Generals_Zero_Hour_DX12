@@ -233,7 +233,7 @@ Object::Object( const ThingTemplate *tt, const ObjectStatusMaskType &objectStatu
 	// Force the thing template to use the most overridden version of itself - jkmcd
 	// Note that after this, the object will be using m_template, which forces the usage of the 
 	// most overridden version of tt, so this is okay.
-	tt = (const ThingTemplate *) tt->getFinalOverride();
+	tt = finalOverrideOf( tt );
 		
 	Int i, modIdx;
 	AsciiString modName;
