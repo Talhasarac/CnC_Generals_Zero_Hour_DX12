@@ -87,12 +87,7 @@ Shell::Shell( void )
 //-------------------------------------------------------------------------------------------------
 Shell::~Shell( void )
 {
-	WindowLayout *newTop = top();
-	while(newTop)
-	{
-		popImmediate();
-		newTop = top();
-	}
+	destroyScreenStack();
 
 	if(m_background)
 	{
@@ -137,6 +132,38 @@ Shell::~Shell( void )
 	}
 
 }  // end ~Shell
+
+//-------------------------------------------------------------------------------------------------
+/** Tear every screen off the stack.  This is not a run of popImmediate(): that goes through
+	* doPop(), which runs the init of whatever the pop uncovers - so emptying the stack one screen
+	* at a time re-initialized every menu underneath the top one, in a shell that is being destroyed,
+	* against subsystems that are already going away.  Here the screen is shut down, unlinked and
+	* deleted, and nothing underneath it is woken up. */
+//-------------------------------------------------------------------------------------------------
+void Shell::destroyScreenStack( void )
+{
+	WindowLayout *screen = top();
+	while( screen )
+	{
+
+		// do NOT set a pending pop, the screen is removed here and not by shutdownComplete()
+		m_pendingPop = FALSE;
+
+		Bool immediatePop = TRUE;
+		screen->runShutdown( &immediatePop );
+
+		unlinkScreen( screen );
+		screen->destroyWindows();
+		screen->deleteInstance();
+
+		screen = top();
+
+	}  // end while
+
+	if (TheIMEManager)
+		TheIMEManager->detatch();
+
+}  // end destroyScreenStack
 
 //-------------------------------------------------------------------------------------------------
 /** Initialize the shell system */

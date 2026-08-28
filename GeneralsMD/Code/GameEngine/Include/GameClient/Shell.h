@@ -159,6 +159,8 @@ public:
 
 protected:
 
+	void destroyScreenStack( void );												///< tear the whole stack down without re-initializing what it uncovers
+
 	void linkScreen( WindowLayout *screen );								///< link screen to list
 	void unlinkScreen( WindowLayout *screen );							///< remove screen from list
 
