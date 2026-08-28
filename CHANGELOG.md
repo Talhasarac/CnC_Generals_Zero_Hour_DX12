@@ -404,6 +404,12 @@ position wrapped around to a negative number: the view snapped somewhere it shou
 scrolling back up stopped responding. Any long list in the game -- replays, maps, a busy chat room
 -- now scrolls the whole way, however many entries it holds.
 
+Opening one of those lists was its own wait. Every menu that shows maps rebuilt the entire map
+catalogue from scratch each time it appeared, and again every time you switched between the
+shipped maps and your own -- re-reading the catalogue of hundreds of maps out of the game's
+archives over and over. It is read once now, and again only when one of your own maps actually changed on
+disk. The map, skirmish and replay menus open without the pause.
+
 ## Placing a building, then changing your mind
 
 Right-clicking to cancel a building you were about to place used to also deselect the builder, so

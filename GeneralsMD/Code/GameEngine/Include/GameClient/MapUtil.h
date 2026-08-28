@@ -95,7 +95,10 @@ public:
 class MapCache : public std::map<AsciiString, MapMetaData>
 {
 public:
-	MapCache() {}
+	MapCache()
+		: m_doLoadStandardMapCacheINI(TRUE)
+		, m_doLoadUserMapCacheINI(TRUE)
+	{}
 	void updateCache( void );
 
 	AsciiString getMapDir() const;
@@ -117,6 +120,9 @@ private:
 	void writeCacheINI( Bool userDir );
 
 	static const char * m_mapCacheName;
+	// both MapCache.ini files only need reading once a run - see updateCache
+	Bool m_doLoadStandardMapCacheINI;
+	Bool m_doLoadUserMapCacheINI;
 	std::map<AsciiString, Bool> m_seen;
 
 	std::set<AsciiString> m_allowedMaps;

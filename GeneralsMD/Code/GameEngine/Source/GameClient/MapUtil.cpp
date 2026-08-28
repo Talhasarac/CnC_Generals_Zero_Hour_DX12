@@ -466,11 +466,22 @@ void MapCache::updateCache( void )
 
 	TheFileSystem->createDirectory(getUserMapDir());
 
-	if (loadUserMaps())
+	// this runs again every time a map list is populated: every menu that shows maps calls it on
+	// open, and again on each toggle between the shipped and the user map directory.  Re-parsing
+	// the shipped MapCache.ini out of the archive on each of those is what made those menus hitch.
+	const Bool userMapsChanged = loadUserMaps();
+	if (userMapsChanged)
 	{
 		writeCacheINI( TRUE );
 	}
-	loadStandardMaps();	// we shall overwrite info from matching user maps to prevent munkees from getting rowdy :)
+	// we shall overwrite info from matching user maps to prevent munkees from getting rowdy :)
+	// the shipped cache cannot change while the game runs, so read it once - and again whenever a
+	// user map was (re)parsed, since that pass is what could have overwritten an official entry.
+	if (m_doLoadStandardMapCacheINI || userMapsChanged)
+	{
+		loadStandardMaps();
+		m_doLoadStandardMapCacheINI = FALSE;
+	}
 #if defined(_DEBUG) || defined(_INTERNAL)
 	if (TheLocalFileSystem->doesFileExist(getMapDir().str()))
 	{
@@ -535,16 +546,23 @@ Bool MapCache::loadUserMaps()
 	{
 		mapDir = getUserMapDir();
 
-		INI ini;
-		AsciiString fname;
-		fname.format("%s\\%s", mapDir.str(), m_mapCacheName);
-		File *fp = TheFileSystem->openFile(fname.str(), File::READ);
-		if (fp)
+		// once this has been read, what is in memory is a superset of it: writeCacheINI writes the
+		// file back out of memory, and every later pass re-parses whatever changed on disk anyway.
+		if (m_doLoadUserMapCacheINI)
 		{
-			fp->close();
-			ini.load( fname, INI_LOAD_OVERWRITE, NULL );
-		}
+			m_doLoadUserMapCacheINI = FALSE;
 
+			INI ini;
+			AsciiString fname;
+			fname.format("%s\\%s", mapDir.str(), m_mapCacheName);
+			File *fp = TheFileSystem->openFile(fname.str(), File::READ);
+			if (fp)
+			{
+				fp->close();
+				ini.load( fname, INI_LOAD_OVERWRITE, NULL );
+			}
+
+		}
 	}
 
 	// mark all as unseen
