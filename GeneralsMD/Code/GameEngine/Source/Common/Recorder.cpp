@@ -1181,7 +1181,6 @@ Bool RecorderClass::playbackFile(AsciiString filename)
 		msg->appendIntegerArgument(rankPoints);
 		if( maxFPS != 0 )
 			msg->appendIntegerArgument(maxFPS);
-		//InitGameLogicRandom( m_gameInfo.getSeed());
 		InitRandom( m_gameInfo.getSeed() );
 	}
 

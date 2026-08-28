@@ -171,6 +171,15 @@ void InitRandom( void )
 #endif
 }
 
+//
+// Starting a game seeds all three streams from the one number.  It used to seed only the logic
+// stream (InitGameLogicRandom, now gone): the client and audio streams kept whatever the process
+// had been running on since startup, which is a time_t, so they held a different value on every
+// machine in the room and a different one again on every playback of the same replay.  The logic
+// stream lands in exactly the same place either way - this costs the simulation nothing - but any
+// draw that leaks out of the client stream into something the simulation can see now reads the
+// same on every machine instead of being a divergence waiting for a chance.
+//
 void InitRandom( UnsignedInt seed )
 {
 	seedRandom(seed, theGameAudioSeed);
@@ -179,21 +188,6 @@ void InitRandom( UnsignedInt seed )
 	theGameLogicBaseSeed = seed;
 #ifdef DEBUG_RANDOM_LOGIC
 DEBUG_LOG(( "InitRandom %08lx\n",seed));
-#endif
-}
-
-void InitGameLogicRandom( UnsignedInt seed )
-{
-#ifdef DETERMINISTIC
-	// needs to be the same every time
-	seedRandom(0, theGameLogicSeed);
-	theGameLogicBaseSeed = 0;
-#else
-	seedRandom(seed, theGameLogicSeed);
-	theGameLogicBaseSeed = seed;
-#endif
-#ifdef DEBUG_RANDOM_LOGIC
-DEBUG_LOG(( "InitRandom Logic %08lx\n",seed));
 #endif
 }
 

@@ -38,6 +38,8 @@
 #include "Common/Energy.h"
 #include "Common/RandomValue.h"
 #include "GameLogic/LogicRandomValue.h"
+#include "GameClient/ClientRandomValue.h"
+#include "Common/AudioRandomValue.h"
 #include "GameNetwork/CrcAgreement.h"
 #include "GameNetwork/NetworkUtil.h"
 #include "GameNetwork/NetCommandList.h"
@@ -2697,7 +2699,7 @@ TEST(crcagreement_a_room_with_nobody_left_in_it_is_not_a_mismatch)
 
 TEST(logicrandom_unchanged_does_not_move_the_shared_seed)
 {
-	InitGameLogicRandom( 12345 );
+	InitRandom( 12345 );
 	const UnsignedInt before = GetGameLogicRandomSeedCRC();
 
 	for (int i = 0; i < 50; ++i)
@@ -2717,7 +2719,7 @@ TEST(logicrandom_unchanged_does_not_move_the_shared_seed)
 
 TEST(logicrandom_unchanged_is_the_same_answer_on_every_machine)
 {
-	InitGameLogicRandom( 777 );
+	InitRandom( 777 );
 	const Int first = GetGameLogicRandomValueUnchanged( 0, 1000000 );
 
 	// same seed state, same answer - repeatedly, because it does not consume anything
@@ -2726,18 +2728,18 @@ TEST(logicrandom_unchanged_is_the_same_answer_on_every_machine)
 
 	// a second machine that reached this point through the same logic holds the same seed and gets
 	// the same answer, which is what made this safe to use for a scripted sound's variant pick
-	InitGameLogicRandom( 777 );
+	InitRandom( 777 );
 	CHECK_EQ( GetGameLogicRandomValueUnchanged( 0, 1000000 ), first );
 
 	// once the simulation itself rolls, the answer moves on with it
 	GetGameLogicRandomValue( 0, 99, __FILE__, __LINE__ );
-	InitGameLogicRandom( 778 );
+	InitRandom( 778 );
 	CHECK_NE( GetGameLogicRandomValueUnchanged( 0, 1000000 ), first );
 }
 
 TEST(logicrandom_unchanged_honours_its_bounds)
 {
-	InitGameLogicRandom( 4242 );
+	InitRandom( 4242 );
 	for (int i = 0; i < 200; ++i)
 	{
 		GetGameLogicRandomValue( 0, 99, __FILE__, __LINE__ );	// walk the seed along
@@ -3744,4 +3746,52 @@ TEST(a_player_index_from_outside_this_machine_is_bounded_before_use)
 		if( isValidPlayerIndex( i ) != (i >= 0 && i < MAX_PLAYER_COUNT) )
 			acceptedOnlyTheList = FALSE;
 	CHECK( acceptedOnlyTheList );
+}
+
+/* Starting a game used to seed only the logic stream.  The client and audio streams kept the
+	 time_t the process was seeded with at startup, so they read differently on every machine in the
+	 room and differently again on every playback of the same replay - and any draw that leaks out of
+	 the client stream into something the simulation can see is then a divergence.  A game's seed now
+	 sets all three, and the logic stream still lands exactly where it did. */
+TEST(a_games_seed_sets_the_client_and_audio_streams_as_well_as_the_logic_one)
+{
+	const Int DRAWS = 16;
+	Int client[DRAWS], audio[DRAWS], logic[DRAWS];
+
+	InitRandom( 31337 );
+	const UnsignedInt logicSeedAfterInit = GetGameLogicRandomSeedCRC();
+	for( Int i = 0; i < DRAWS; ++i )
+	{
+		client[i] = GameClientRandomValue( 0, 1000000 );
+		audio[i]  = GameAudioRandomValue( 0, 1000000 );
+		logic[i]  = GetGameLogicRandomValue( 0, 1000000, __FILE__, __LINE__ );
+	}
+
+	// the same seed on the machine next to you, or on the same machine tomorrow, reads the same
+	InitRandom( 31337 );
+	CHECK_EQ( GetGameLogicRandomSeedCRC(), logicSeedAfterInit );
+	Bool clientRepeated = TRUE, audioRepeated = TRUE, logicRepeated = TRUE;
+	for( Int i = 0; i < DRAWS; ++i )
+	{
+		if( GameClientRandomValue( 0, 1000000 ) != client[i] ) clientRepeated = FALSE;
+		if( GameAudioRandomValue( 0, 1000000 )  != audio[i]  ) audioRepeated  = FALSE;
+		if( GetGameLogicRandomValue( 0, 1000000, __FILE__, __LINE__ ) != logic[i] ) logicRepeated = FALSE;
+	}
+	CHECK( clientRepeated );
+	CHECK( audioRepeated );
+	CHECK( logicRepeated );
+
+	// and a different game is a different game, in all three
+	InitRandom( 31338 );
+	CHECK_NE( GetGameLogicRandomSeedCRC(), logicSeedAfterInit );
+	Bool clientMoved = FALSE, audioMoved = FALSE, logicMoved = FALSE;
+	for( Int i = 0; i < DRAWS; ++i )
+	{
+		if( GameClientRandomValue( 0, 1000000 ) != client[i] ) clientMoved = TRUE;
+		if( GameAudioRandomValue( 0, 1000000 )  != audio[i]  ) audioMoved  = TRUE;
+		if( GetGameLogicRandomValue( 0, 1000000, __FILE__, __LINE__ ) != logic[i] ) logicMoved = TRUE;
+	}
+	CHECK( clientMoved );
+	CHECK( audioMoved );
+	CHECK( logicMoved );
 }

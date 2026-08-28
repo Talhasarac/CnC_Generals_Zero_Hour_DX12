@@ -167,6 +167,14 @@ map. Ctrl+A is still everything at once.
   match was built from and started the next attempt on a different one, so the replay it was writing
   no longer matched the game being played and would not play back. Restart now hands the game back
   the number it had.
+- **A replay now sounds and looks the way it did when you played it.** The game runs three separate
+  streams of random numbers: one for the simulation, one for what you see, one for what you hear —
+  which voice line a unit picks, which way a spark flies. Starting a match set the simulation's
+  stream from the number the match was built on and left the other two on whatever the clock said
+  when the program opened. So the battle replayed exactly, and everything around it did not: a
+  different clock, a different set of voices and sparks, every single time. All three start from the
+  match's own number now. The same thing was true of the two machines in a network game, which is a
+  worse place for a number that differs per machine to be sitting.
 - **And it restarts with the same colours, the same corners and the same armies.** "Random" colour,
   "random" starting position and "random" army are drawn from that same shared number the moment the
   match begins. On a restart they had already been drawn once — the slots now held real answers — so

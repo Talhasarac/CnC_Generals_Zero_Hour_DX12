@@ -441,7 +441,7 @@ void reallyDoStart( void )
 
 	if (isSkirmish)
 	{
-		InitGameLogicRandom(TheSkirmishGameInfo->getSeed());
+		InitRandom(TheSkirmishGameInfo->getSeed());
 
 		GameMessage *msg = TheMessageStream->appendMessage( GameMessage::MSG_NEW_GAME );
 		msg->appendIntegerArgument(GAME_SKIRMISH);
@@ -455,7 +455,7 @@ void reallyDoStart( void )
 			 GAME_SINGLE_PLAYER - which is seeded with 0 everywhere else in the game.  EA seeded it
 			 with the skirmish lobby's seed here and nowhere else, so the same mission played from the
 			 two menus was not the same mission. */
-		InitGameLogicRandom(0);
+		InitRandom(0);
 
 		GameMessage *msg = TheMessageStream->appendMessage( GameMessage::MSG_NEW_GAME );
 		msg->appendIntegerArgument(GAME_SINGLE_PLAYER);
