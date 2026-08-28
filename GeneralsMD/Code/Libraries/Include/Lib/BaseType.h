@@ -243,15 +243,42 @@ __forceinline float fast_float_ceil(float f)
 }
 
 //-------------------------------------------------------------------------------------------------
-#define REAL_TO_INT(x)						((Int)(fast_float2long_round(fast_float_trunc(x))))
-#define REAL_TO_UNSIGNEDINT(x)		((UnsignedInt)(fast_float2long_round(fast_float_trunc(x))))
-#define REAL_TO_SHORT(x)					((Short)(fast_float2long_round(fast_float_trunc(x))))
-#define REAL_TO_UNSIGNEDSHORT(x)	((UnsignedShort)(fast_float2long_round(fast_float_trunc(x))))
-#define REAL_TO_BYTE(x)						((Byte)(fast_float2long_round(fast_float_trunc(x))))
-#define REAL_TO_UNSIGNEDBYTE(x)		((UnsignedByte)(fast_float2long_round(fast_float_trunc(x))))
-#define REAL_TO_CHAR(x)						((Char)(fast_float2long_round(fast_float_trunc(x))))
+
+/* Float to integer, and it is a plain cast.
+ *
+ * EA wrote these as fast_float2long_round(fast_float_trunc(x)): mask the fractional mantissa bits
+ * off with a block of inline assembly, then push the result through the x87 stack with fld/fistp.
+ * In 1999 that beat the compiler, which had to spill the FPU control word twice to honour C's
+ * round-toward-zero rule.  On a machine with SSE2 - which is every machine that can run this, and
+ * which is what MSVC targets by default for x86 - a cast to Int is a single cvttss2si that already
+ * truncates toward zero, and the two-step version is a memory round trip, an x87 stack push and an
+ * x87 stack pop to reach the same answer.
+ *
+ * The cost is not just the instructions.  These macros sit in a header the whole game includes, and
+ * an __asm block in an inlined function stops MSVC optimizing across it: every expression in this
+ * file's neighbourhood - and REAL_TO_INT alone has 235 call sites, most of them in the simulation -
+ * was compiled with one hand tied.  It is also where the fast_float_trunc register clobber lived,
+ * the one that ended every run at the main menu until the "xor ebx,ebx" was found.
+ *
+ * The result is identical for every value that fits in the destination, and the intermediate cast
+ * to Int is kept where the destination is narrower so the two-step narrowing is exactly the one the
+ * long-returning original did.  Better than identical in one respect: fast_float2long_round rounds
+ * by the FPU's current mode, which the comment on it warns "tends to be left in unpredictable modes
+ * by various system bits of code" - it was only safe here because fast_float_trunc had already made
+ * the value integral.  cvttss2si has no mode to be left in.  The trunc/floor/ceil helpers below are
+ * untouched; they still have callers that want a Real back.
+ *
+ * Pinned by real_to_int_agrees_with_the_assembly_it_replaced in test_gameengine.cpp. */
+
+#define REAL_TO_INT(x)						((Int)(x))
+#define REAL_TO_UNSIGNEDINT(x)		((UnsignedInt)(Int)(x))
+#define REAL_TO_SHORT(x)					((Short)(Int)(x))
+#define REAL_TO_UNSIGNEDSHORT(x)	((UnsignedShort)(Int)(x))
+#define REAL_TO_BYTE(x)						((Byte)(Int)(x))
+#define REAL_TO_UNSIGNEDBYTE(x)		((UnsignedByte)(Int)(x))
+#define REAL_TO_CHAR(x)						((Char)(Int)(x))
 #define DOUBLE_TO_REAL(x)					((Real) (x))
-#define DOUBLE_TO_INT(x)					((Int) (fast_float2long_round(fast_float_trunc(x))))
+#define DOUBLE_TO_INT(x)					((Int)(x))
 #define INT_TO_REAL(x)						((Real) (x))
 
 // once we've ceiled/floored, trunc and round are identical, and currently, round is faster... (srj)

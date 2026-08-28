@@ -421,6 +421,100 @@ TEST(fast_float_trunc_leaves_ebx_alone)
 	CHECK_NEAR( fast_float_trunc( -3.75f ), -3.0f, 0.0001f );
 }
 
+/* REAL_TO_INT and its siblings used to be fast_float2long_round(fast_float_trunc(x)) - an inline
+	 assembly mantissa mask followed by an x87 fld/fistp - and are now a plain cast, which on any
+	 SSE2 target is the single cvttss2si instruction that does both.  The claim is that nothing
+	 changed except the speed, so the witness runs the two side by side.  The assembly helpers are
+	 still in BaseType.h (FAST_REAL_TRUNC and the floor/ceil macros use them), so this is the real
+	 old expression, not a re-implementation of it. */
+
+static Int oldRealToInt( Real f )
+{
+	return (Int)(fast_float2long_round(fast_float_trunc(f)));
+}
+
+TEST(real_to_int_agrees_with_the_assembly_it_replaced)
+{
+	/* The values that decide it: either side of zero, either side of one, exact halves, exact
+		 integers, and the ends of the range a 32 bit signed conversion is defined over.  Anything
+		 whose magnitude reaches 2^31 is out of range for both spellings and both give INT_MIN, so
+		 the sweep stops below it. */
+	static const Real kInteresting[] =
+	{
+		0.0f, -0.0f, 0.25f, -0.25f, 0.5f, -0.5f, 0.75f, -0.75f,
+		1.0f, -1.0f, 1.5f, -1.5f, 1.9999999f, -1.9999999f,
+		2.5f, -2.5f, 3.75f, -3.75f, 30.0f, -30.0f,
+		127.5f, -127.5f, 128.0f, -128.0f, 255.9f, -255.9f, 256.0f,
+		32767.9f, -32768.0f, 65535.9f, 65536.0f,
+		1.0e6f, -1.0e6f, 16777216.0f, -16777216.0f, 16777217.0f,
+		1.0e9f, -1.0e9f, 2147483520.0f, -2147483520.0f,
+		1.1754944e-38f, -1.1754944e-38f			// smallest normal float, either sign
+	};
+
+	for( Int i = 0; i < (Int)(sizeof(kInteresting)/sizeof(kInteresting[0])); ++i )
+	{
+		Real f = kInteresting[i];
+		CHECK_EQ( REAL_TO_INT( f ), oldRealToInt( f ) );
+
+		// the narrowing spellings truncate to Int first, exactly as the long-returning original did
+		CHECK_EQ( (Int)REAL_TO_SHORT( f ), (Int)(Short)oldRealToInt( f ) );
+		CHECK_EQ( (Int)REAL_TO_UNSIGNEDSHORT( f ), (Int)(UnsignedShort)oldRealToInt( f ) );
+		CHECK_EQ( (Int)REAL_TO_BYTE( f ), (Int)(Byte)oldRealToInt( f ) );
+		CHECK_EQ( (Int)REAL_TO_UNSIGNEDBYTE( f ), (Int)(UnsignedByte)oldRealToInt( f ) );
+		CHECK_EQ( (Int)REAL_TO_CHAR( f ), (Int)(Char)oldRealToInt( f ) );
+		CHECK_EQ( (Int)REAL_TO_UNSIGNEDINT( f ), (Int)(UnsignedInt)oldRealToInt( f ) );
+	}
+
+	/* And a sweep, because a hand-picked list is a hand-picked list.  The generator is a plain LCG
+		 over the float's bit pattern, rejected down to the range the conversion is defined over, so
+		 the same 20000 values are tested on every machine that runs this. */
+	UnsignedInt bits = 0x12345678;
+	Int tested = 0;
+	for( Int n = 0; n < 400000 && tested < 20000; ++n )
+	{
+		bits = bits * 1664525u + 1013904223u;
+
+		Real f;
+		memcpy( &f, &bits, sizeof(f) );
+
+		// NaNs, infinities and everything at or past 2^31 are out of range for both spellings
+		if( !(f == f) || f >= 2147483520.0f || f <= -2147483520.0f )
+			continue;
+
+		++tested;
+		CHECK_EQ( REAL_TO_INT( f ), oldRealToInt( f ) );
+		CHECK_EQ( (Int)REAL_TO_UNSIGNEDBYTE( f ), (Int)(UnsignedByte)oldRealToInt( f ) );
+	}
+
+	CHECK_EQ( tested, 20000 );
+}
+
+TEST(real_to_int_does_not_care_what_rounding_mode_it_is_called_in)
+{
+	/* The old spelling's second half was an fld/fistp, and fistp rounds by the FPU's current mode -
+		 its own comment says the mode "tends to be left in unpredictable modes by various system bits
+		 of code".  It was only safe because the mantissa mask ran first.  A cast has no mode at all,
+		 which is one less way for two machines to disagree about the same simulation. */
+	const UnsignedInt callersMode = _controlfp( 0, 0 );
+
+	_controlfp( _RC_CHOP, _MCW_RC );
+	const Int chop = REAL_TO_INT( -3.75f ) * 1000 + REAL_TO_INT( 3.75f );
+
+	_controlfp( _RC_UP, _MCW_RC );
+	CHECK_EQ( REAL_TO_INT( -3.75f ) * 1000 + REAL_TO_INT( 3.75f ), chop );
+
+	_controlfp( _RC_DOWN, _MCW_RC );
+	CHECK_EQ( REAL_TO_INT( -3.75f ) * 1000 + REAL_TO_INT( 3.75f ), chop );
+
+	_controlfp( _RC_NEAR, _MCW_RC );
+	CHECK_EQ( REAL_TO_INT( -3.75f ) * 1000 + REAL_TO_INT( 3.75f ), chop );
+
+	// truncation toward zero, in every one of them
+	CHECK_EQ( chop, -3 * 1000 + 3 );
+
+	_controlfp( callersMode, _MCW_PC | _MCW_RC );
+}
+
 /* The length is a parameter and not a strlen() call on purpose: anything the compiler
    emits between the two blocks below is free to use these registers itself, so the
    witness only stays honest while the call is the only thing in between. */

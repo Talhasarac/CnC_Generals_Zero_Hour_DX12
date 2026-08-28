@@ -988,6 +988,17 @@ burning base has dozens of things doing the asking. Every effect now knows where
 question is answered in one step instead of hundreds — and an effect that dies is no longer hunted
 down that same list before it can be cleared away.
 
+**And every decimal turned into a whole number.** The game does that constantly — a position, a
+health value, a countdown, hundreds of times per unit per turn. It was doing it with a scrap of
+hand-written 1999 assembly language that pushed the number through the processor's old
+floating-point stack, which was the fast way to do it when the game was written. On any processor
+made this century the plain, obvious conversion is a single instruction that does exactly the same
+thing, and because the old one was written inline it also stopped the compiler from improving
+anything near it — and it sits in a file the whole game is built on top of. It is the plain
+conversion now. It is also one less way for two machines in an online match to disagree with each
+other: the old route asked the processor what rounding mode it happened to be in, and that is not
+something a game gets to control.
+
 ## Sound, video, and getting it to start at all
 
 - **Audio is real**, through the game's own audio library. The sound SDK was stripped from the source
