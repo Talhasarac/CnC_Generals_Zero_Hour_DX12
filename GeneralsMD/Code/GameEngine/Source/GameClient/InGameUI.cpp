@@ -104,6 +104,18 @@
 static const Real placementOpacity = 0.45f;
 static const RGBColor illegalBuildColor = { 1.0, 0.0, 0.0 };
 
+// ------------------------------------------------------------------------------------------------
+// Layout of the production strip; drawProductionStrip() further down is where it is all used.
+// ------------------------------------------------------------------------------------------------
+enum
+{
+	PRODUCTION_STRIP_CAMEO	= 32,		///< nominal cameo edge in pixels; the real one keeps this area
+	PRODUCTION_STRIP_GAP		= 3,		///< space between cameos, and between the two rows
+	PRODUCTION_STRIP_LEFT		= 8,		///< inset from the left edge of the screen
+	PRODUCTION_STRIP_LIFT		= 24,		///< clearance above the control bar
+	PRODUCTION_STRIP_MORE		= 34		///< width kept for the "+N" that closes an overflowing row
+};
+
 //-------------------------------------------------------------------------------------------------
 /** Pointer to show while a structure rides the cursor.  Mouse::BUILD_PLACEMENT and
 	* INVALID_BUILD_PLACEMENT are two names in CursorININames[] that no shipped Mouse.ini ever
@@ -1071,6 +1083,8 @@ InGameUI::InGameUI()
 		m_productionStripCount[ stripRow ] = 0;
 		m_productionStripTotal[ stripRow ] = 0;
 	}
+	m_productionStripCameoW = PRODUCTION_STRIP_CAMEO;
+	m_productionStripCameoH = PRODUCTION_STRIP_CAMEO;
 	m_productionStripOverflow = NULL;
 
 	m_superweaponPosition.x = 0.7f;
@@ -5702,25 +5716,26 @@ void InGameUI::drawHudOverlay( void )
 
 //-------------------------------------------------------------------------------------------------
 // The production strip: one cameo per queued item, drawn over the world just above the control
-// bar, left aligned in a row that grows to the right. The top row is global - everything the local
-// player has queued anywhere. When a single producer is selected its own queue gets a second row
-// beneath it. Each row draws at most PRODUCTION_STRIP_ROW_MAX cameos and finishes with a "+N" for
+// bar, left aligned in a row that grows to the right, soonest to finish first - the item about to
+// pop is always the leftmost one, wherever in the base it is being built. The top row is global -
+// everything the local player has queued anywhere. When a single producer is selected its own
+// queue gets a second row beneath it. Each row draws at most PRODUCTION_STRIP_ROW_MAX cameos and finishes with a "+N" for
 // whatever else is queued. Units and upgrades wear the same two border colours the command bar
 // uses. The item a building is actually working on wears a radial fill. A click takes the camera
 // to the building an item is queued on; ctrl-click cancels it.
 //-------------------------------------------------------------------------------------------------
-enum
-{
-	PRODUCTION_STRIP_CAMEO	= 32,		///< cameo edge in pixels
-	PRODUCTION_STRIP_GAP		= 3,		///< space between cameos, and between the two rows
-	PRODUCTION_STRIP_LEFT		= 8,		///< inset from the left edge of the screen
-	PRODUCTION_STRIP_LIFT		= 24,		///< clearance above the control bar
-	PRODUCTION_STRIP_MORE		= 34		///< width kept for the "+N" that closes an overflowing row
-};
 
 //-------------------------------------------------------------------------------------------------
-/** Append everything this object has queued, units and upgrades alike, in queue order. Everything
-	* is counted in *total; only the first 'max' of them get a slot to be drawn in. */
+/** Append everything this object has queued, units and upgrades alike, into a list kept sorted by
+	* how long each item still has to wait - soonest first. Everything is counted in *total; only
+	* the 'max' items that finish first get a slot to be drawn in, whatever order they were met in.
+	*
+	* The wait is cumulative down a producer's queue: an entry only starts once everything ahead of
+	* it has popped, so its remaining time is the time left on the entry in front plus its own build
+	* time. Only the head of a queue carries progress, so this is what separates "arrives next" from
+	* "arrives eventually" across a whole base's worth of buildings. A quantity modifier (the China
+	* barracks' Red Guard pairs) does not multiply the wait - the entry overbuilds in place and all
+	* of its units pop in the same handful of frames. */
 //-------------------------------------------------------------------------------------------------
 static void appendProducerQueue( Object *obj, InGameUI::ProductionStripSlot *slots,
 																 Int *count, Int max, Int *total )
@@ -5732,22 +5747,35 @@ static void appendProducerQueue( Object *obj, InGameUI::ProductionStripSlot *slo
 	if( pu == NULL )
 		return;
 
+	Player *owner = obj->getControllingPlayer();
+	Int ahead = 0;					///< frames the queue in front of the current entry still needs
+
 	for( const ProductionEntry *p = pu->firstProduction(); p; p = pu->nextProduction( p ) )
 	{
 		Int id = 0;
 		Bool isUpgrade = FALSE;
+		Int buildFrames = 0;
 
 		if( p->getProductionType() == PRODUCTION_UNIT )
 		{
 			id = (Int)p->getProductionID();
+			if( p->getProductionObject() )
+				buildFrames = p->getProductionObject()->calcTimeToBuild( owner );
 		}
 		else if( p->getProductionType() == PRODUCTION_UPGRADE && p->getProductionUpgrade() )
 		{
 			isUpgrade = TRUE;
 			id = (Int)p->getProductionUpgrade()->getUpgradeNameKey();
+			buildFrames = p->getProductionUpgrade()->calcTimeToBuild( owner );
 		}
 		else
 			continue;
+
+		Int left = buildFrames - REAL_TO_INT( buildFrames * p->getPercentComplete() / 100.0f );
+		if( left < 0 )
+			left = 0;					// an item that is overbuilding while it waits for a door
+		const Int remaining = ahead + left;
+		ahead = remaining;
 
 		//
 		// one cameo per queue entry, not per unit that entry will deliver. A quantity modifier
@@ -5759,13 +5787,29 @@ static void appendProducerQueue( Object *obj, InGameUI::ProductionStripSlot *slo
 		//
 		(*total)++;
 
-		if( *count >= max )
-			continue;						// past the end of the row: counted, but not drawn
+		//
+		// walk back over the items that finish later than this one and drop it in front of them.
+		// Ties keep the order they were met in, so a base full of identical barracks stays put
+		// instead of shuffling frame to frame.
+		//
+		Int at = *count;
+		while( at > 0 && slots[ at - 1 ].remaining > remaining )
+			at--;
 
-		InGameUI::ProductionStripSlot *slot = &slots[ (*count)++ ];
+		if( at >= max )
+			continue;						// everything already kept finishes sooner: counted, but not drawn
+
+		if( *count < max )
+			(*count)++;
+
+		for( Int j = *count - 1; j > at; j-- )
+			slots[ j ] = slots[ j - 1 ];
+
+		InGameUI::ProductionStripSlot *slot = &slots[ at ];
 		slot->producer = obj->getID();
 		slot->id = id;
 		slot->isUpgrade = isUpgrade;
+		slot->remaining = remaining;
 		slot->pos.x = 0;
 		slot->pos.y = 0;
 	}
@@ -5821,13 +5865,16 @@ void InGameUI::drawProductionStripRow( Int row, Int y )
 	if( count < 1 )
 		return;
 
+	const Int cameoW = m_productionStripCameoW;
+	const Int cameoH = m_productionStripCameoH;
+
 	const Int hidden = m_productionStripTotal[ row ] - count;
-	Int rowWidth = count * PRODUCTION_STRIP_CAMEO + ( count - 1 ) * PRODUCTION_STRIP_GAP;
+	Int rowWidth = count * cameoW + ( count - 1 ) * PRODUCTION_STRIP_GAP;
 	if( hidden > 0 )
 		rowWidth += PRODUCTION_STRIP_GAP + PRODUCTION_STRIP_MORE;
 
 	// one plate behind the row, so the cameos read over any terrain
-	TheDisplay->drawFillRect( PRODUCTION_STRIP_LEFT - 3, y - 3, rowWidth + 6, PRODUCTION_STRIP_CAMEO + 6,
+	TheDisplay->drawFillRect( PRODUCTION_STRIP_LEFT - 3, y - 3, rowWidth + 6, cameoH + 6,
 														GameMakeColor( 0, 0, 0, 130 ) );
 
 	Int x = PRODUCTION_STRIP_LEFT;
@@ -5853,7 +5900,7 @@ void InGameUI::drawProductionStripRow( Int row, Int y )
 				cameo = entry->getProductionObject()->getButtonImage();
 
 			if( cameo )
-				TheDisplay->drawImage( cameo, x, y, x + PRODUCTION_STRIP_CAMEO, y + PRODUCTION_STRIP_CAMEO );
+				TheDisplay->drawImage( cameo, x, y, x + cameoW, y + cameoH );
 
 			//
 			// The scrim starts covering the cameo and is swept off as the item is built, the same
@@ -5865,7 +5912,7 @@ void InGameUI::drawProductionStripRow( Int row, Int y )
 			//
 			const Int percent = ( pu->firstProduction() == entry )
 													? REAL_TO_INT( entry->getPercentComplete() ) : 0;
-			TheDisplay->drawRemainingRectClock( x, y, PRODUCTION_STRIP_CAMEO, PRODUCTION_STRIP_CAMEO,
+			TheDisplay->drawRemainingRectClock( x, y, cameoW, cameoH,
 																					percent, GameMakeColor( 0, 0, 0, 100 ) );
 		}
 
@@ -5878,8 +5925,8 @@ void InGameUI::drawProductionStripRow( Int row, Int y )
 		if( TheKeyboard && TheKeyboard->isCtrl() && TheMouse )
 		{
 			const MouseIO *io = TheMouse->getMouseStatus();
-			cancelHover = io && io->pos.x >= x && io->pos.x < x + PRODUCTION_STRIP_CAMEO &&
-										io->pos.y >= y && io->pos.y < y + PRODUCTION_STRIP_CAMEO;
+			cancelHover = io && io->pos.x >= x && io->pos.x < x + cameoW &&
+										io->pos.y >= y && io->pos.y < y + cameoH;
 		}
 
 		// same border colours the command bar puts on its build and upgrade buttons
@@ -5889,21 +5936,21 @@ void InGameUI::drawProductionStripRow( Int row, Int y )
 		else if( TheControlBar )
 			border = slot->isUpgrade ? TheControlBar->getUpgradeBorderColor()
 															 : TheControlBar->getBuildBorderColor();
-		TheDisplay->drawOpenRect( x, y, PRODUCTION_STRIP_CAMEO, PRODUCTION_STRIP_CAMEO, 1.0f, border );
+		TheDisplay->drawOpenRect( x, y, cameoW, cameoH, 1.0f, border );
 
 		if( cancelHover )
 		{
-			const Int barInset = PRODUCTION_STRIP_CAMEO / 4;
+			const Int barInset = cameoW / 4;
 			const Int barHeight = 4;
 
-			TheDisplay->drawFillRect( x, y, PRODUCTION_STRIP_CAMEO, PRODUCTION_STRIP_CAMEO,
+			TheDisplay->drawFillRect( x, y, cameoW, cameoH,
 																GameMakeColor( 190, 0, 0, 120 ) );
-			TheDisplay->drawFillRect( x + barInset, y + ( PRODUCTION_STRIP_CAMEO - barHeight ) / 2,
-																PRODUCTION_STRIP_CAMEO - 2 * barInset, barHeight,
+			TheDisplay->drawFillRect( x + barInset, y + ( cameoH - barHeight ) / 2,
+																cameoW - 2 * barInset, barHeight,
 																GameMakeColor( 255, 255, 255, 255 ) );
 		}
 
-		x += PRODUCTION_STRIP_CAMEO + PRODUCTION_STRIP_GAP;
+		x += cameoW + PRODUCTION_STRIP_GAP;
 	}
 
 	//
@@ -5928,7 +5975,7 @@ void InGameUI::drawProductionStripRow( Int row, Int y )
 		m_productionStripOverflow->getSize( &textWidth, &textHeight );
 
 		m_productionStripOverflow->draw( x + ( PRODUCTION_STRIP_MORE - textWidth ) / 2,
-																		 y + ( PRODUCTION_STRIP_CAMEO - textHeight ) / 2,
+																		 y + ( cameoH - textHeight ) / 2,
 																		 GameMakeColor( 235, 235, 235, 255 ),
 																		 GameMakeColor( 0, 0, 0, 255 ) );
 	}
@@ -5985,9 +6032,32 @@ void InGameUI::drawProductionStrip( void )
 		barTop = barPos.y;
 	}
 
+	//
+	// the same cameo art the command bar draws is not square, so drawing it into a square box
+	// squashed it and the strip read as a different set of icons than the bar right below it.
+	// Take the aspect from a real command button and keep the box's area at the nominal size, so
+	// the row stays as long as it was: a wider cameo is a correspondingly shorter one.
+	//
+	m_productionStripCameoW = PRODUCTION_STRIP_CAMEO;
+	m_productionStripCameoH = PRODUCTION_STRIP_CAMEO;
+	static NameKeyType commandButtonKey = TheNameKeyGenerator->nameToKey( "ControlBar.wnd:ButtonCommand01" );
+	GameWindow *commandButton = TheWindowManager->winGetWindowFromId( NULL, commandButtonKey );
+	if( commandButton )
+	{
+		ICoord2D buttonSize;
+		commandButton->winGetSize( &buttonSize.x, &buttonSize.y );
+		if( buttonSize.x > 0 && buttonSize.y > 0 )
+		{
+			const Real aspect = INT_TO_REAL( buttonSize.x ) / INT_TO_REAL( buttonSize.y );
+			const Real area = INT_TO_REAL( PRODUCTION_STRIP_CAMEO * PRODUCTION_STRIP_CAMEO );
+			m_productionStripCameoH = REAL_TO_INT_CEIL( (Real)sqrt( area / aspect ) );
+			m_productionStripCameoW = REAL_TO_INT_CEIL( m_productionStripCameoH * aspect );
+		}
+	}
+
 	// the selected building's row is the lower one, nearest the bar it belongs to
-	const Int lowerY = barTop - PRODUCTION_STRIP_CAMEO - PRODUCTION_STRIP_LIFT;
-	const Int upperY = lowerY - PRODUCTION_STRIP_CAMEO - PRODUCTION_STRIP_GAP;
+	const Int lowerY = barTop - m_productionStripCameoH - PRODUCTION_STRIP_LIFT;
+	const Int upperY = lowerY - m_productionStripCameoH - PRODUCTION_STRIP_GAP;
 
 	if( m_productionStripCount[ 1 ] > 0 )
 	{
@@ -6016,8 +6086,8 @@ Bool InGameUI::handleProductionStripClick( const ICoord2D *mouse, Bool cancel )
 		{
 			const ProductionStripSlot *slot = &m_productionStrip[ row ][ i ];
 
-			if( mouse->x < slot->pos.x || mouse->x >= slot->pos.x + PRODUCTION_STRIP_CAMEO ||
-					mouse->y < slot->pos.y || mouse->y >= slot->pos.y + PRODUCTION_STRIP_CAMEO )
+			if( mouse->x < slot->pos.x || mouse->x >= slot->pos.x + m_productionStripCameoW ||
+					mouse->y < slot->pos.y || mouse->y >= slot->pos.y + m_productionStripCameoH )
 				continue;
 
 			Object *producer = TheGameLogic->findObjectByID( slot->producer );

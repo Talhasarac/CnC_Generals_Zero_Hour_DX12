@@ -499,10 +499,15 @@ kept two separate sets of books on that, and they disagreed with each other in f
 The original showed you one factory at a time and made you click through the rest.
 
 There is now a single row above the command bar carrying **everything your base is building
-anywhere** — units and upgrades, oldest first, each one filling up as it progresses. Click a picture
-to jump the camera to the building making it. Hold Ctrl and click to cancel it, wherever it is. One
-picture is one order: a Chinese barracks hands you two Red Guards for a single click, and the strip
-shows that as the one thing you paid for and the one thing a cancel takes back.
+anywhere** — units and upgrades, **whatever is coming out next at the front**, each one filling up
+as it progresses. The order is by the time left, not by when you clicked: a tank two seconds from
+rolling out sits ahead of a rocket soldier ordered earlier but stuck behind three others, and an
+item waits for everything queued in front of it at its own building, so the strip reads left to
+right as the order things will actually arrive in. Click a picture to jump the camera to the
+building making it. Hold Ctrl and click to cancel it, wherever it is. One picture is one order: a
+Chinese barracks hands you two Red Guards for a single click, and the strip shows that as the one
+thing you paid for and the one thing a cancel takes back. The pictures are cut to the same shape as
+the ones on the command bar below, so the same unit is the same picture in both places.
 
 Around it, the whole production loop got tightened:
 

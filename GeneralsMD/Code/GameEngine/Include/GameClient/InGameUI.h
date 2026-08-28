@@ -527,6 +527,7 @@ public:  // ********************************************************************
 		Int						id;									///< a unit's ProductionID, or an upgrade's name key
 																			///  (kept as an Int so this header stays clear of GameLogic)
 		Bool					isUpgrade;					///< which of those two the id means
+		Int						remaining;					///< logic frames until this item pops, waiting time ahead of it included
 		ICoord2D			pos;								///< top left corner of the cameo on screen
 	};
 
@@ -862,12 +863,15 @@ protected:
 
 	//
 	// The global production strip: every unit the local player has queued anywhere, one cameo
-	// each, oldest first, left aligned above the control bar. drawProductionStrip() lays it out
-	// and records where each cameo landed; handleProductionStripClick() reads those back.
+	// each, soonest to finish first, left aligned above the control bar. drawProductionStrip()
+	// lays it out and records where each cameo landed; handleProductionStripClick() reads those
+	// back.
 	//
 	ProductionStripSlot					m_productionStrip[ PRODUCTION_STRIP_ROWS ][ PRODUCTION_STRIP_ROW_MAX ];
 	Int													m_productionStripCount[ PRODUCTION_STRIP_ROWS ];	///< cameos drawn per row
 	Int													m_productionStripTotal[ PRODUCTION_STRIP_ROWS ];	///< items queued per row, drawn or not
+	Int													m_productionStripCameoW;		///< cameo size this frame, in the control bar's aspect
+	Int													m_productionStripCameoH;
 	DisplayString *							m_productionStripOverflow;	///< the "+N" that stands for the rest of a row
 
 	Coord2D											m_superweaponPosition;
