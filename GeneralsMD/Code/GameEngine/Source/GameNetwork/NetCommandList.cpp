@@ -151,10 +151,10 @@ NetCommandRef * NetCommandList::addMessage(NetCommandMsg *cmdMsg) {
 		NetCommandRef *theNext = m_lastMessageInserted->getNext();
 		if ((m_lastMessageInserted->getCommand()->getNetCommandType() == msg->getCommand()->getNetCommandType()) &&
 			(m_lastMessageInserted->getCommand()->getPlayerID() == msg->getCommand()->getPlayerID()) &&
-			(m_lastMessageInserted->getCommand()->getID() < msg->getCommand()->getID()) &&
+			IsCommandIdNewer(msg->getCommand()->getID(), m_lastMessageInserted->getCommand()->getID()) &&
 			((theNext == NULL) || ((theNext->getCommand()->getNetCommandType() > msg->getCommand()->getNetCommandType()) ||
 			 (theNext->getCommand()->getPlayerID() > msg->getCommand()->getPlayerID()) ||
-			 (theNext->getCommand()->getID() > msg->getCommand()->getID())))) {
+			 IsCommandIdNewer(theNext->getCommand()->getID(), msg->getCommand()->getID())))) {
 
 			// Make sure this command isn't already in the list.
 			if (isEqualCommandMsg(m_lastMessageInserted->getCommand(), msg->getCommand())) {
@@ -275,7 +275,7 @@ NetCommandRef * NetCommandList::addMessage(NetCommandMsg *cmdMsg) {
 
 	// Find the position within the player's section based on the command ID.
 	// If the command type doesn't require a command ID, sort by whatever it should be sorted by.
-	while ((tempmsg != NULL) && (msg->getCommand()->getNetCommandType() == tempmsg->getCommand()->getNetCommandType()) && (msg->getCommand()->getPlayerID() == tempmsg->getCommand()->getPlayerID()) && (msg->getCommand()->getSortNumber() > tempmsg->getCommand()->getSortNumber())) {
+	while ((tempmsg != NULL) && (msg->getCommand()->getNetCommandType() == tempmsg->getCommand()->getNetCommandType()) && (msg->getCommand()->getPlayerID() == tempmsg->getCommand()->getPlayerID()) && IsCommandIdNewer((UnsignedShort)msg->getCommand()->getSortNumber(), (UnsignedShort)tempmsg->getCommand()->getSortNumber())) {
 		tempmsg = tempmsg->getNext();
 	}
 

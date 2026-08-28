@@ -203,6 +203,14 @@ map. Ctrl+A is still everything at once.
   thirty-six of the game's sixty-eight special powers never counted at all. The summary covers the
   whole of it now. This does not stop two machines drifting apart; it stops them drifting apart
   quietly, and moves the report back to the frame it actually started on.
+- **Your orders stop arriving in the wrong order a few minutes into a network game.** Every order
+  you give is numbered so the other machines can put your orders back in the order you gave them.
+  The counter was sixteen bits wide and started near the top of its range, so it rolled over to
+  zero after about fifteen hundred orders - a few minutes of ordinary play - and from that moment
+  the game read your newest orders as your oldest ones. Your own commands could execute back to
+  front, and because sorting them depended on the order the packets happened to arrive in, two
+  machines could end up executing the same commands in different orders and drift apart. The
+  numbering still rolls over; the game now reads it correctly when it does.
 
 - **A network game runs at the speed it says it does.** Playing against other people, the
   simulation was gated by two separate clocks at once — the network's and the game's own — and a

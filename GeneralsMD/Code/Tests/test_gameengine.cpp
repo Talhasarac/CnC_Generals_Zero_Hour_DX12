@@ -39,6 +39,7 @@
 #include "Common/RandomValue.h"
 #include "GameLogic/LogicRandomValue.h"
 #include "GameNetwork/CrcAgreement.h"
+#include "GameNetwork/NetworkUtil.h"
 #include "GameNetwork/GameInfo.h"
 #include <float.h>
 #include "GameClient/Water.h"
@@ -3506,4 +3507,41 @@ TEST(bitflags_crc_covers_every_word_of_the_flag_set)
 			fullMinusOne.set( i );
 	}
 	CHECK_NE( crcOfStatusMask( full ), crcOfStatusMask( fullMinusOne ) );
+}
+
+// ---------------------------------------------------------------------------------------------
+// Network command ids are sixteen bits and wrap.  NetCommandList insert-sorts by them, so the
+// comparison has to survive the wrap or a player's own orders come out of order - and, because a
+// broken comparison makes the sorted insert depend on arrival order, come out differently on two
+// machines that received the same commands in different orders.
+// ---------------------------------------------------------------------------------------------
+TEST(network_command_ids_are_ordered_across_the_sixteen_bit_wrap)
+{
+	// away from the wrap, this is plain ordering
+	CHECK( IsCommandIdNewer( 1, 0 ) );
+	CHECK( !IsCommandIdNewer( 0, 1 ) );
+	CHECK( !IsCommandIdNewer( 7, 7 ) );			// the same id is not newer than itself
+
+	// across the wrap - the raw > comparison gets both of these backwards
+	CHECK( IsCommandIdNewer( 0, 65535 ) );
+	CHECK( !IsCommandIdNewer( 65535, 0 ) );
+	CHECK( IsCommandIdNewer( 3, 65530 ) );
+	CHECK( !IsCommandIdNewer( 65530, 3 ) );
+
+	// half the id space ahead is still ahead; one past that is read as behind
+	CHECK( IsCommandIdNewer( 0x7FFF, 0 ) );
+	CHECK( !IsCommandIdNewer( 0x8000, 0 ) );
+
+	// every consecutive pair across a run that crosses 65535 -> 0 is ordered, both ways round
+	Bool allOrdered = TRUE;
+	UnsignedShort id = 65500;
+	for( Int i = 0; i < 100; ++i )
+	{
+		UnsignedShort next = (UnsignedShort)(id + 1);
+		if( !IsCommandIdNewer( next, id ) || IsCommandIdNewer( id, next ) )
+			allOrdered = FALSE;
+		id = next;
+	}
+	CHECK( allOrdered );
+	CHECK_EQ( (Int)id, 64 );					// the run really did cross the wrap
 }

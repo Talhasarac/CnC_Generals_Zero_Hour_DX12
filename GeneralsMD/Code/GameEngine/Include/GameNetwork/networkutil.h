@@ -38,6 +38,16 @@ Bool CommandRequiresDirectSend(NetCommandMsg *msg);
 Bool IsCommandSynchronized(NetCommandType type);
 AsciiString GetAsciiNetCommandType(NetCommandType type);
 
+// Command ids are sixteen bits wide and wrap.  Ordering them with < or > puts every command
+// issued after a wrap in front of every command issued before it, so the answer comes from the
+// distance between them instead: newVal is newer when it sits within half the id space ahead of
+// oldVal.  Equal ids are not newer.
+inline Bool IsCommandIdNewer( UnsignedShort newVal, UnsignedShort oldVal )
+{
+	const UnsignedShort diff = newVal - oldVal;
+	return diff != 0 && diff < 0x8000;
+}
+
 #ifdef DEBUG_LOGGING
 extern "C" {
 void dumpBufferToLog(const void *vBuf, Int len, const char *fname, Int line);

@@ -108,9 +108,11 @@ UnsignedInt ResolveIP(AsciiString host)
  * Returns the next network command ID.
  */
 UnsignedShort GenerateNextCommandID() {
-	static UnsignedShort commandID = 64000;
-	++commandID;
-	return commandID;
+	// The counter used to start at 64000, so the first wrap arrived about 1500 commands into the
+	// very first match.  It still wraps - it is sixteen bits wide - but IsCommandIdNewer, which is
+	// what NetCommandList sorts by, survives the wrap.
+	static UnsignedShort commandID = 0;
+	return commandID++;
 }
 
 /**
