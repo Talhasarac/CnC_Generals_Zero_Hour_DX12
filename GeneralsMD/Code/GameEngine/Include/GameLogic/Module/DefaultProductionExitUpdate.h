@@ -54,6 +54,13 @@ public:
 		m_useSpawnRallyPoint = false;
 	}
 
+	virtual Bool getProductionExitPointsInModelSpace( Coord3D& unitCreatePoint, Coord3D& naturalRallyPoint ) const
+	{
+		unitCreatePoint = m_unitCreatePoint;
+		naturalRallyPoint = m_naturalRallyPoint;
+		return TRUE;
+	}
+
 	static void buildFieldParse(MultiIniFieldParse& p) 
 	{
     UpdateModuleData::buildFieldParse(p);

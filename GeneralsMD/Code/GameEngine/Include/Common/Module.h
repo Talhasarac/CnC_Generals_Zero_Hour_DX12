@@ -117,6 +117,11 @@ public:
 	virtual const W3DTreeDrawModuleData* getAsW3DTreeDrawModuleData() const { return NULL; }
 	virtual StaticGameLODLevel getMinimumRequiredGameLOD() const { return (StaticGameLODLevel)0;}
 
+	/** Where units this module produces come out, in model space.  Answered by the production exit
+		* modules only, so the build placement preview can draw the exit before there is an Object to
+		* ask through ExitInterface.  Both points are relative to the model origin. */
+	virtual Bool getProductionExitPointsInModelSpace( Coord3D& unitCreatePoint, Coord3D& naturalRallyPoint ) const { return FALSE; }
+
 	static void buildFieldParse(MultiIniFieldParse& p) 
 	{
 		// nothing

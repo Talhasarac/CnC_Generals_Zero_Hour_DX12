@@ -440,6 +440,12 @@ Right-clicking to cancel a building you were about to place used to also deselec
 putting down something else meant finding and clicking the dozer again. The cancel now cancels the
 placement and nothing else.
 
+A building on the cursor now shows you where its units will come out. The see-through ghost carries a
+line from its door to the spot units step to before they take their first order, and that line swings
+around with the building as you wheel it. Siting a war factory is a decision about which way the
+tanks face when they roll off the line, and until now you could not see that decision until the
+building was finished and selected.
+
 ## Bonuses that come and go when they should
 
 A squad of infantry standing over its own dead used to keep the horde bonus the dead were paying
@@ -511,6 +517,12 @@ the ones on the command bar below, so the same unit is the same picture in both 
 
 Around it, the whole production loop got tightened:
 
+- **A unit finishes walking out of the building that built it before it takes an order.** Clicking
+  a tank the instant it appeared used to turn it around inside its own factory. Nothing blocks a unit
+  while it is still stepping out of the door, so it could be pushed back through the wall, and the
+  next one off the line came out into an occupied doorway. A click during that one step out does
+  nothing now; the unit is yours the moment it is clear. Aircraft leaving a pad or a runway are
+  untouched — redirecting those is the point of them.
 - **An upgrade you can buy is offered even if one of the selected buildings already has it.** Select
   every barracks you own and the upgrade button used to grey out the moment the first one in the
   group had bought it, leaving you to hunt the rest down one at a time. The button now lights if

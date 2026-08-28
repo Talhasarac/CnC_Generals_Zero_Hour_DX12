@@ -70,6 +70,10 @@
 #include "Common/XferCRC.h"
 #include "Common/ObjectStatusTypes.h"
 #include "Common/Player.h"
+#include "GameLogic/Module/DefaultProductionExitUpdate.h"
+#include "GameLogic/Module/QueueProductionExitUpdate.h"
+#include "GameLogic/Module/SupplyCenterProductionExitUpdate.h"
+#include "WWMath/matrix3d.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -4563,4 +4567,80 @@ TEST(simulation_uses_no_runtime_trig)
 	if (hits != 0)
 		printf("    %d runtime math call(s) in the simulation; use Lib/Trig.h\n", hits);
 	CHECK_EQ(hits, 0);
+}
+
+/* The build placement preview draws the door of the structure it is carrying before that structure
+	 exists, so it cannot go through ExitInterface - it asks the production exit module's *data* for
+	 the two points instead.  A module that produces nothing must keep answering no, or every wall
+	 segment would sprout a rally line out of (0,0,0). */
+TEST(production_exit_points_come_off_the_module_data_before_there_is_an_object)
+{
+	Coord3D create, natural;
+
+	DefaultProductionExitUpdateModuleData def;
+	def.m_unitCreatePoint.x = 10.0f;   def.m_unitCreatePoint.y = -3.0f;  def.m_unitCreatePoint.z = 1.0f;
+	def.m_naturalRallyPoint.x = 40.0f; def.m_naturalRallyPoint.y = 5.0f; def.m_naturalRallyPoint.z = 0.0f;
+
+	CHECK( def.getProductionExitPointsInModelSpace( create, natural ) );
+	CHECK_NEAR( create.x, 10.0f, 0.0001f );
+	CHECK_NEAR( create.y, -3.0f, 0.0001f );
+	CHECK_NEAR( create.z, 1.0f, 0.0001f );
+	CHECK_NEAR( natural.x, 40.0f, 0.0001f );
+	CHECK_NEAR( natural.y, 5.0f, 0.0001f );
+
+	// the war factory / barracks style queue module and the supply center answer the same way
+	QueueProductionExitUpdateModuleData queue;
+	queue.m_unitCreatePoint.x = 7.0f;
+	queue.m_naturalRallyPoint.x = 70.0f;
+	CHECK( queue.getProductionExitPointsInModelSpace( create, natural ) );
+	CHECK_NEAR( create.x, 7.0f, 0.0001f );
+	CHECK_NEAR( natural.x, 70.0f, 0.0001f );
+
+	SupplyCenterProductionExitUpdateModuleData supply;
+	supply.m_unitCreatePoint.x = -8.0f;
+	supply.m_naturalRallyPoint.x = -80.0f;
+	CHECK( supply.getProductionExitPointsInModelSpace( create, natural ) );
+	CHECK_NEAR( create.x, -8.0f, 0.0001f );
+	CHECK_NEAR( natural.x, -80.0f, 0.0001f );
+
+	// and anything that is not a production exit module says no and touches nothing
+	UpdateModuleData notAnExit;
+	create.x = 1234.0f;
+	natural.x = 5678.0f;
+	CHECK( notAnExit.getProductionExitPointsInModelSpace( create, natural ) == FALSE );
+	CHECK_NEAR( create.x, 1234.0f, 0.0001f );
+	CHECK_NEAR( natural.x, 5678.0f, 0.0001f );
+}
+
+/* Those points are in model space, and the preview line is only useful if it swings around with
+	 the building as the player wheels it.  This is the transform the renderer applies: a structure
+	 dropped at (100,200) facing a quarter turn left puts a door that is 10 units "ahead" of the
+	 model origin 10 units to the north of the building, not 10 units east of it. */
+TEST(a_placed_structures_exit_point_turns_with_the_structure)
+{
+	Coord3D create, natural;
+
+	DefaultProductionExitUpdateModuleData def;
+	def.m_unitCreatePoint.x = 10.0f;   def.m_unitCreatePoint.y = 0.0f;   def.m_unitCreatePoint.z = 0.0f;
+	def.m_naturalRallyPoint.x = 30.0f; def.m_naturalRallyPoint.y = 0.0f; def.m_naturalRallyPoint.z = 0.0f;
+	CHECK( def.getProductionExitPointsInModelSpace( create, natural ) );
+
+	Matrix3D transform;
+	transform.Make_Identity();
+	transform.Rotate_Z( PI / 2.0f );
+	transform.Set_Translation( Vector3( 100.0f, 200.0f, 5.0f ) );
+
+	Vector3 exitLoc( create.x, create.y, create.z );
+	transform.Transform_Vector( transform, exitLoc, &exitLoc );
+	CHECK_NEAR( exitLoc.X, 100.0f, 0.001f );
+	CHECK_NEAR( exitLoc.Y, 210.0f, 0.001f );
+	CHECK_NEAR( exitLoc.Z, 5.0f, 0.001f );
+
+	Vector3 rallyLoc( natural.x, natural.y, natural.z );
+	transform.Transform_Vector( transform, rallyLoc, &rallyLoc );
+	CHECK_NEAR( rallyLoc.X, 100.0f, 0.001f );
+	CHECK_NEAR( rallyLoc.Y, 230.0f, 0.001f );
+
+	// the two points are distinct, which is what tells the renderer to draw a line and not just a puck
+	CHECK( !(exitLoc == rallyLoc) );
 }

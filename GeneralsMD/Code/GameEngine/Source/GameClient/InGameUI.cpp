@@ -3400,6 +3400,18 @@ const ThingTemplate *InGameUI::getPendingPlaceType( void )
 }
 
 //-------------------------------------------------------------------------------------------------
+/** The see-thru structure the cursor is carrying, so the renderer can hang decoration off it -
+	* the exit line, for one.  NULL whenever we are not in placement mode. */
+//-------------------------------------------------------------------------------------------------
+const Drawable *InGameUI::getPendingPlaceDrawable( void ) const
+{
+	if( m_pendingPlaceType == NULL )
+		return NULL;
+
+	return m_placeIcon[ 0 ];
+}
+
+//-------------------------------------------------------------------------------------------------
 //-------------------------------------------------------------------------------------------------
 const ObjectID InGameUI::getPendingPlaceSourceObjectID( void )
 {

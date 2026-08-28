@@ -445,6 +445,21 @@ public:
 	UnsignedInt getOcclusionDelay(void) const { return m_occlusionDelay;}
 	
 	const ModuleInfo& getBehaviorModuleInfo() const { return m_behaviorModuleInfo; }
+
+	/** Ask the production exit module, if this template has one, where its units come out.  Both
+		* points come back in model space.  This is the only way to get at them before the structure
+		* exists - the build placement preview has a Drawable and a template, no Object, so there is
+		* no ExitInterface to ask. */
+	Bool getProductionExitPointsInModelSpace( Coord3D& unitCreatePoint, Coord3D& naturalRallyPoint ) const
+	{
+		for( Int i = 0; i < m_behaviorModuleInfo.getCount(); ++i )
+		{
+			const ModuleData* data = m_behaviorModuleInfo.getNthData( i );
+			if( data && data->getProductionExitPointsInModelSpace( unitCreatePoint, naturalRallyPoint ) )
+				return TRUE;
+		}
+		return FALSE;
+	}
 	const ModuleInfo& getDrawModuleInfo() const { return m_drawModuleInfo; }
 	const ModuleInfo& getClientUpdateModuleInfo() const { return m_clientUpdateModuleInfo; }
 

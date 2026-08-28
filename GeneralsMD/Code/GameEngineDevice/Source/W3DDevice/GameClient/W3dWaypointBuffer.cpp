@@ -564,6 +564,49 @@ void W3DWaypointBuffer::drawWaypoints(RenderInfoClass &rinfo)
 		renderQueuedLines( localRinfo );
 
 	}
+
+	//
+	// While a structure rides the cursor waiting to be placed, show where its units will come out.
+	// Siting a war factory is a decision about which way the tanks face when they roll off the
+	// line, and until now that was invisible until the building was finished and selected. The two
+	// points come off the template's production exit module - there is no Object yet, so there is no
+	// ExitInterface to ask - and the ghost's own transform carries them into world space, so the
+	// line swings around with the building as the player wheels it.
+	//
+	const Drawable *placeIcon = TheInGameUI->getPendingPlaceDrawable();
+	if( placeIcon )
+	{
+		Coord3D createPoint, naturalRallyPoint;
+		if( TheInGameUI->getPendingPlaceType()->getProductionExitPointsInModelSpace( createPoint, naturalRallyPoint ) )
+		{
+			const Matrix3D *transform = placeIcon->getTransformMatrix();
+
+			Vector3 exitLoc( createPoint.x, createPoint.y, createPoint.z );
+			transform->Transform_Vector( *transform, exitLoc, &exitLoc );
+
+			Vector3 rallyLoc( naturalRallyPoint.x, naturalRallyPoint.y, naturalRallyPoint.z );
+			transform->Transform_Vector( *transform, rallyLoc, &rallyLoc );
+
+			// a helipad puts both points in the same place; one puck, no line
+			if( !(exitLoc == rallyLoc) )
+			{
+				LightEnvironmentClass lightEnv;
+				lightEnv.Reset(Vector3(0,0,0), Vector3(1.0f,1.0f,1.0f));
+				lightEnv.Pre_Render_Update(rinfo.Camera.Get_Transform());
+				RenderInfoClass localRinfo(rinfo.Camera);
+				localRinfo.light_environment=&lightEnv;
+
+				m_waypointNodeRobj->Set_Position( rallyLoc );
+				WW3D::Render(*m_waypointNodeRobj,localRinfo); //The little hockey puck
+
+				Vector3 points[ 2 ];
+				points[ 0 ] = exitLoc;
+				points[ 1 ] = rallyLoc;
+				queueLine( 2, points );
+				renderQueuedLines( localRinfo );
+			}
+		}
+	}
 }
 
 

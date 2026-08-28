@@ -2637,6 +2637,18 @@ Bool AIUpdateInterface::isAllowedToRespondToAiCommands(const AICommandParms* par
   // ALLOWING ONLY THE SPECTREUPDATE TO COMMAND IT VIA CMD_FROM_AI
   // AUTHOR, LORENZEN... 5/15/03
 
+	//
+	// A unit that is still walking the exit path out of the thing that produced it finishes that
+	// step before it will listen to anyone.  Taking an order mid-doorway leaves it turning around
+	// inside the building's footprint, which blocks the next unit off the line and, with
+	// setCanPathThroughUnits on for the exit path, lets it be shoved back through the wall.
+	// Aircraft are left alone: their "exit path" is the taxi and takeoff run off a helipad or
+	// airfield, which the player is expected to be able to redirect.
+	//
+	if ( parms->m_cmdSource == CMD_FROM_PLAYER
+			 && getStateMachine()->getCurrentStateID() == AI_FOLLOW_EXITPRODUCTION_PATH
+			 && isDoingGroundMovement() )
+		return FALSE;
 
 	return TRUE;
 }
