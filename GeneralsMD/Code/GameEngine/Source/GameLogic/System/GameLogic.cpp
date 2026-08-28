@@ -59,6 +59,7 @@
 #include "Common/Xfer.h"
 #include "Common/XferCRC.h"
 #include "Common/XferDeepCRC.h"
+#include "Common/SimulationMathCrc.h"
 #include "Common/GameSpyMiscPreferences.h"
 
 #include "GameClient/ControlBar.h"
@@ -2669,6 +2670,13 @@ void GameLogic::writeMismatchDump( Int numPlayers )
 	fprintf( fp, "Mismatch detected on frame %d\n", m_frame );
 	fprintf( fp, "Local player is slot %d of %d connected players; %d CRCs were compared\n\n",
 		TheNetwork ? TheNetwork->getLocalPlayerID() : 0, numPlayers, m_cachedCRCs.size() );
+
+	/* Two machines that never agreed about arithmetic produce a mismatch that looks exactly like a
+		 logic bug.  This number depends on the machine's math and nothing else, so the first thing to
+		 compare between two dumps is this line: same value, the game states diverged; different value,
+		 they were never going to agree and no amount of reading the object table below will say why. */
+	fprintf( fp, "Simulation math fingerprint 0x%8.8X (FPU mode 0x%4.4X, expected 0x%4.4X)\n\n",
+		SimulationMathCrc::calculate(), getFPMode(), expectedFPMode() );
 
 	for( std::map<Int, UnsignedInt>::const_iterator crcIt = m_cachedCRCs.begin();
 			 crcIt != m_cachedCRCs.end(); ++crcIt )

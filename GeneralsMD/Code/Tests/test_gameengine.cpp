@@ -40,6 +40,9 @@
 #include "GameLogic/LogicRandomValue.h"
 #include "GameClient/ClientRandomValue.h"
 #include "Common/ThingTemplate.h"
+#include "Common/SimulationMathCrc.h"
+#include "GameLogic/FPUControl.h"
+#include <float.h>
 #include "Common/AudioRandomValue.h"
 #include "GameNetwork/CrcAgreement.h"
 #include "GameNetwork/NetworkUtil.h"
@@ -3834,4 +3837,39 @@ TEST(a_template_looked_up_by_name_is_taken_to_the_end_of_its_override_chain)
 
 	// one delete, not three: ~Overridable deletes whatever the chain still points at
 	base->deleteInstance();
+}
+
+/* The simulation math fingerprint exists so that two players comparing mismatch dumps can tell
+	 "our arithmetic differs" from "our game states diverged".  That only works if the number is a
+	 function of the machine's math alone - in particular, it must not depend on whatever FPU mode
+	 the caller happened to be in, and it must not leave that mode changed behind it. */
+TEST(the_simulation_math_fingerprint_is_the_machines_math_and_not_the_callers_fpu_mode)
+{
+	/* Three callers, three FPU modes, none of them the one the simulation runs in unless it happens
+		 to be: 53-bit precision is what the C runtime starts a process in and what a driver that
+		 resets the FPU leaves behind, and round-to-chop is a mode the game never wants but nothing
+		 stops a plugin from leaving set.  All three must produce the same fingerprint. */
+
+	setFPMode();
+	const UnsignedInt fromSimulationMode = SimulationMathCrc::calculate();
+
+	// a real value, not a CRC of nothing at all, and repeatable
+	CHECK( fromSimulationMode != 0 );
+	CHECK_EQ( SimulationMathCrc::calculate(), fromSimulationMode );
+
+	_controlfp( _PC_53, _MCW_PC );
+	const UnsignedInt modeIn53 = getFPMode();
+	CHECK( modeIn53 != expectedFPMode() );
+	CHECK_EQ( SimulationMathCrc::calculate(), fromSimulationMode );
+	CHECK_EQ( getFPMode(), modeIn53 );	// and the caller's mode is still the caller's
+
+	_controlfp( _PC_64 | _RC_CHOP, _MCW_PC | _MCW_RC );
+	const UnsignedInt modeInChop = getFPMode();
+	CHECK( modeInChop != expectedFPMode() );
+	CHECK_EQ( SimulationMathCrc::calculate(), fromSimulationMode );
+	CHECK_EQ( getFPMode(), modeInChop );
+
+	// and back where the rest of the tests expect to find it
+	setFPMode();
+	CHECK_EQ( getFPMode(), expectedFPMode() );
 }

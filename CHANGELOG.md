@@ -260,7 +260,10 @@ map. Ctrl+A is still everything at once.
   world — where it was, how hurt it was, and its own fingerprint — for the last several checkpoints,
   and writes it out on both machines when the check fails. Lining up the two files points at the
   single unit, building or projectile that went its own way, which is the difference between fixing
-  a desync and guessing at it.
+  a desync and guessing at it. The report also starts with a fingerprint of the machine's own
+  arithmetic — the same sums, run on constants, on both machines. If that one number differs, the
+  two computers were never doing the same maths and nothing further down the file is worth reading;
+  if it matches, the fault really is in the game.
 - **A LAN game refuses to start between two machines with different game files.** Two people whose
   data files differ cannot play the same match, however well the connection behaves — one hand-edited
   file and the two simulations part company a few minutes in, with nothing on screen to say why. The
