@@ -48,6 +48,7 @@
 #include "Common/GameEngine.h"
 #include "Common/GameSounds.h"
 #include "Common/Debug.h"
+#include "Common/EarlyCommandLine.h"
 #include "Common/GameMemory.h"
 #include "Common/SafeDisc/CdaPfn.h"
 #include "Common/StackDump.h"
@@ -1056,8 +1057,13 @@ Int APIENTRY WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance,
 		//Create a mutex with a unique name to Generals in order to determine if
 		//our app is already running.
 		//WARNING: DO NOT use this number for any other application except Generals.
+		/* -multiInstance lets a second copy start.  One copy at a time is right for a player and
+			 wrong for a test: a network game needs two machines, and on this one that means two
+			 processes, each bound to its own address out of 127.0.0.0/8. */
+		const Bool oneCopyIsEnough = (findEarlyCommandLineOption( L"-multiInstance" ) == NULL);
+
 		GeneralsMutex = CreateMutex(NULL, FALSE, GENERALS_GUID);
-		if (GetLastError() == ERROR_ALREADY_EXISTS)
+		if (oneCopyIsEnough && GetLastError() == ERROR_ALREADY_EXISTS)
 		{
 			HWND ccwindow = FindWindow(GENERALS_GUID, NULL);
 			if (ccwindow)

@@ -49,6 +49,7 @@
 #include "Common/AudioRandomValue.h"
 #include "GameNetwork/CrcAgreement.h"
 #include "GameLogic/GameLogic.h"
+#include "Common/EarlyCommandLine.h"
 #include "Common/RadarShroudCache.h"
 #include "GameClient/Gadget.h"
 #include "GameNetwork/NetworkUtil.h"
@@ -5324,4 +5325,39 @@ TEST(a_replay_game_is_never_itself_recorded)
 	// and a mode nobody has invented yet has to opt in rather than default to being recorded
 	CHECK( !isRecordableGameMode( GAME_NONE + 1 ) );
 	CHECK( !isRecordableGameMode( -1 ) );
+}
+
+TEST(an_option_read_before_the_parser_exists_is_read_on_word_boundaries)
+{
+	/* Two options are read straight off the wide command line, before CommandLine.cpp's parser is
+	   alive: -logPrefix (the debug log's name is chosen by a static constructor) and -multiInstance
+	   (the one-copy mutex is taken in WinMain).  The reader is the whole of that parser. */
+	const wchar_t *line = L"\"D:\Run\generals.exe\" -win -multiInstance -logPrefix b_ -maxframes 600";
+
+	CHECK( findCommandLineOptionIn( line, L"-win" ) != NULL );
+	CHECK( findCommandLineOptionIn( line, L"-multiInstance" ) != NULL );
+	CHECK( findCommandLineOptionIn( line, L"-headless" ) == NULL );
+	CHECK( findCommandLineOptionIn( NULL, L"-win" ) == NULL );
+
+	// case does not matter, and an option is only an option on a word boundary
+	CHECK( findCommandLineOptionIn( line, L"-LOGPREFIX" ) != NULL );
+	CHECK( findCommandLineOptionIn( line, L"-log" ) == NULL );			// not a prefix of a longer word
+	CHECK( findCommandLineOptionIn( L"x-win", L"-win" ) == NULL );	// nor a tail of one
+
+	char value[ 32 ];
+	CHECK( findCommandLineValueIn( line, L"-logPrefix", value, sizeof( value ) ) );
+	CHECK_STR( value, "b_" );
+	CHECK( findCommandLineValueIn( line, L"-maxframes", value, sizeof( value ) ) );
+	CHECK_STR( value, "600" );
+
+	// an option with nothing after it, or with another option after it, has no value
+	CHECK( !findCommandLineValueIn( line, L"-multiInstance", value, sizeof( value ) ) );
+	CHECK( !findCommandLineValueIn( L"-logPrefix", L"-logPrefix", value, sizeof( value ) ) );
+	CHECK( !findCommandLineValueIn( line, L"-nothere", value, sizeof( value ) ) );
+
+	// and a value longer than the buffer is cut to fit, with room kept for the terminator
+	char tiny[ 3 ];	// not "small": rpcndr.h has that as a #define for char
+	CHECK( findCommandLineValueIn( L"-logPrefix abcdef", L"-logPrefix", tiny, sizeof( tiny ) ) );
+	CHECK_STR( tiny, "ab" );
+	CHECK( !findCommandLineValueIn( L"-logPrefix abcdef", L"-logPrefix", tiny, 0 ) );
 }

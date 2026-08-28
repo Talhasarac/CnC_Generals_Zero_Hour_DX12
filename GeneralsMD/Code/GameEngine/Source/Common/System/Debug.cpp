@@ -52,6 +52,7 @@
 #include "Common/CriticalSection.h"
 #endif
 #include "Common/Debug.h"
+#include "Common/EarlyCommandLine.h"
 #include "Common/SystemInfo.h"
 #include "Common/UnicodeString.h"
 #include "GameClient/GameText.h"
@@ -354,11 +355,22 @@ void DebugInit(int flags)
 		char prevbuf[ _MAX_PATH ];
 		char curbuf[ _MAX_PATH ];
 
+		/* -logPrefix <tag> names this run's log.  Two copies of the game on one machine - which is
+			 what testing a network game here comes down to, MULTIPLAYER.md section 6 - otherwise open
+			 the same file with "w" and only one of them keeps it.  It is read here rather than in
+			 WinMain because a static constructor gets here first: preMainInitMemoryManager() calls
+			 DEBUG_INIT before main, and by the time WinMain could set gAppPrefix the file is open. */
+		char logPrefix[ 32 ];
+		if (!findEarlyCommandLineValue( L"-logPrefix", logPrefix, sizeof( logPrefix ) ))
+			logPrefix[0] = 0;
+
 		strcpy(prevbuf, dirbuf);
 		strcat(prevbuf, gAppPrefix);
+		strcat(prevbuf, logPrefix);
 		strcat(prevbuf, DEBUG_FILE_NAME_PREV);
 		strcpy(curbuf, dirbuf);
 		strcat(curbuf, gAppPrefix);
+		strcat(curbuf, logPrefix);
 		strcat(curbuf, DEBUG_FILE_NAME);
 
  		remove(prevbuf);
