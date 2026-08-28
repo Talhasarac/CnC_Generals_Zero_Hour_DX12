@@ -224,7 +224,7 @@ NetPacketList NetPacket::ConstructBigCommandPacketList(NetCommandRef *ref) {
 	wrapperMsg->detach();
 	wrapperMsg = NULL;
 
-	delete bigPacketData;
+	delete [] bigPacketData;
 	bigPacketData = NULL;
 
 	return packetList;
@@ -5728,6 +5728,9 @@ NetCommandMsg * NetPacket::readFileMessage(UnsignedByte *data, Int &i) {
 	i += dataLength;
 
 	msg->setFileData(buf, dataLength);
+	// setFileData keeps a copy of its own; this was the sender's chunk of the file and nothing
+	// else ever frees it.
+	delete [] buf;
 
 	return msg;
 }
