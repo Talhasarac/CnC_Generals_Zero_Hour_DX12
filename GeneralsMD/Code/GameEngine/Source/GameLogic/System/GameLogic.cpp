@@ -107,6 +107,7 @@
 #include "GameNetwork/GameSpy/PeerDefs.h"
 #include "GameNetwork/GameSpy/ThreadUtils.h"
 #include "GameNetwork/LANAPICallbacks.h"
+#include "GameNetwork/CrcAgreement.h"
 #include "GameNetwork/NetworkInterface.h"
 #include "GameNetwork/GameSpy/PersistentStorageThread.h"
 
@@ -2549,32 +2550,44 @@ void GameLogic::processCommandList( CommandList *list )
 					++numPlayers;
 			}
 
-			/* A player who leaves stays "connected" for a few more frames than their last CRC
-				 message survives, and at a short CRC interval that gap is hit routinely.  Missing CRCs
-				 are not evidence that anybody computed anything differently - they are evidence that a
-				 packet is not here yet.  Say so and let the next CRC frame decide, instead of blaming
-				 the leaver for a desync that never happened. */
-			if (m_cachedCRCs.size() < (size_t)numPlayers)
+			/* The decision itself lives in CrcAgreement.h, where it can be tested without a room
+				 full of machines.  Two ways to get a mismatch that never happened, both about players
+				 on their way out: a CRC that has not arrived yet from somebody the network still calls
+				 connected, and a CRC that arrives from somebody who is already gone.  Neither is
+				 evidence that anyone computed anything differently. */
+			Bool reported[MAX_SLOTS];
+			Bool connected[MAX_SLOTS];
+			UnsignedInt crcs[MAX_SLOTS];
+			for (Int slot = 0; slot < MAX_SLOTS; ++slot)
 			{
-				DEBUG_LOG(("Only %d CRCs from %d connected players on frame %d - not comparing\n",
-					m_cachedCRCs.size(), numPlayers, m_frame));
+				reported[slot] = FALSE;
+				crcs[slot] = 0;
+				connected[slot] = TheNetwork->isPlayerConnected(slot);
 			}
-			else
+			for (std::map<Int, UnsignedInt>::const_iterator crcIt = m_cachedCRCs.begin();
+					 crcIt != m_cachedCRCs.end(); ++crcIt)
 			{
-				//DEBUG_LOG(("Comparing %d CRCs on frame %d\n", m_cachedCRCs.size(), m_frame));
-				std::map<Int, UnsignedInt>::const_iterator crcIt = m_cachedCRCs.begin();
-				Int validatorCRC = crcIt->second;
-				//DEBUG_LOG(("Validator CRC from player %d is %8.8X\n", crcIt->first, validatorCRC));
-				while (++crcIt != m_cachedCRCs.end())
+				if (crcIt->first >= 0 && crcIt->first < MAX_SLOTS)
 				{
-					Int validatedCRC = crcIt->second;
-					//DEBUG_LOG(("CRC to validate is from player %d: %8.8X\n", crcIt->first, validatedCRC));
-					if (validatorCRC != validatedCRC)
-					{
-						DEBUG_CRASH(("CRC mismatch!"));
-						sawCRCMismatch = TRUE;
-					}
+					reported[crcIt->first] = TRUE;
+					crcs[crcIt->first] = crcIt->second;
 				}
+			}
+
+			switch (crcAgreement( reported, crcs, connected, MAX_SLOTS, numPlayers ))
+			{
+				case CRC_AGREEMENT_TOO_FEW:
+					DEBUG_LOG(("Only %d CRCs from %d connected players on frame %d - not comparing\n",
+						m_cachedCRCs.size(), numPlayers, m_frame));
+					break;
+
+				case CRC_AGREEMENT_MISMATCH:
+					DEBUG_CRASH(("CRC mismatch!"));
+					sawCRCMismatch = TRUE;
+					break;
+
+				case CRC_AGREEMENT_AGREE:
+					break;
 			}
 		}
 

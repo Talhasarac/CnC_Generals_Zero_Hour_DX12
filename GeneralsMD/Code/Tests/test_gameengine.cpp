@@ -36,6 +36,7 @@
 #include "GameNetwork/CushionMetrics.h"
 #include "GameNetwork/LinkSimulation.h"
 #include "Common/Energy.h"
+#include "GameNetwork/CrcAgreement.h"
 #include <float.h>
 #include "GameClient/Water.h"
 #include "GameLogic/Module/PhysicsUpdate.h"
@@ -2604,6 +2605,75 @@ TEST(linksim_the_modulation_has_the_period_it_says_it_has)
 	UnsignedInt d = linkSimDeliveryTime( late + 1, 200, amp, period, 0 ) - (late + 1);
 	CHECK( c >= 100u && c <= 300u );
 	CHECK( (c > d ? c - d : d - c) <= 1u );
+}
+
+// ---------------------------------------------------------------------------------------------
+// Whether the room actually disagreed about a frame (MULTIPLAYER 1.1, upstream #2796).
+// ---------------------------------------------------------------------------------------------
+
+TEST(crcagreement_everyone_still_playing_has_to_have_reported)
+{
+	Bool reported[4]  = { TRUE, TRUE, TRUE, FALSE };
+	Bool connected[4] = { TRUE, TRUE, TRUE, TRUE };
+	UnsignedInt crc[4] = { 0x1111u, 0x1111u, 0x1111u, 0u };
+
+	// four connected players, three hashes: the fourth packet is not here yet, which is not a
+	// mismatch.  Decide on the next CRC frame instead.
+	CHECK_EQ( crcAgreement( reported, crc, connected, 4, 4 ), CRC_AGREEMENT_TOO_FEW );
+
+	// once it arrives, and it agrees
+	reported[3] = TRUE;
+	crc[3] = 0x1111u;
+	CHECK_EQ( crcAgreement( reported, crc, connected, 4, 4 ), CRC_AGREEMENT_AGREE );
+}
+
+TEST(crcagreement_a_player_who_has_left_does_not_get_a_vote)
+{
+	// slot 3 is gone, but their last hash - computed on a machine that was already tearing the
+	// game down - arrived this frame.  EA compared it against everybody who is still playing and
+	// ended the match on it.
+	Bool reported[4]  = { TRUE, TRUE, TRUE, TRUE };
+	Bool connected[4] = { TRUE, TRUE, TRUE, FALSE };
+	UnsignedInt crc[4] = { 0x1111u, 0x1111u, 0x1111u, 0xDEADBEEFu };
+
+	CHECK_EQ( crcAgreement( reported, crc, connected, 4, 3 ), CRC_AGREEMENT_AGREE );
+
+	// the leaver is also not counted towards the quorum: three connected players, and the two
+	// hashes that are here are not enough.
+	reported[2] = FALSE;
+	CHECK_EQ( crcAgreement( reported, crc, connected, 4, 3 ), CRC_AGREEMENT_TOO_FEW );
+}
+
+TEST(crcagreement_two_players_who_are_both_here_and_disagree_is_a_mismatch)
+{
+	Bool reported[4]  = { TRUE, TRUE, TRUE, TRUE };
+	Bool connected[4] = { TRUE, TRUE, TRUE, TRUE };
+	UnsignedInt crc[4] = { 0x1111u, 0x1111u, 0x2222u, 0x1111u };
+
+	CHECK_EQ( crcAgreement( reported, crc, connected, 4, 4 ), CRC_AGREEMENT_MISMATCH );
+
+	// the disagreement is found wherever it sits, including against the first reporter
+	crc[0] = 0x2222u; crc[1] = 0x1111u; crc[2] = 0x1111u; crc[3] = 0x1111u;
+	CHECK_EQ( crcAgreement( reported, crc, connected, 4, 4 ), CRC_AGREEMENT_MISMATCH );
+
+	// but only between players who are both still connected
+	connected[0] = FALSE;
+	CHECK_EQ( crcAgreement( reported, crc, connected, 4, 3 ), CRC_AGREEMENT_AGREE );
+}
+
+TEST(crcagreement_a_room_with_nobody_left_in_it_is_not_a_mismatch)
+{
+	Bool reported[2]  = { FALSE, FALSE };
+	Bool connected[2] = { FALSE, FALSE };
+	UnsignedInt crc[2] = { 0u, 0u };
+
+	// nothing to compare, and nothing expected: agreement by default, never a mismatch.  EA read
+	// begin() unconditionally here.
+	CHECK_EQ( crcAgreement( reported, crc, connected, 2, 0 ), CRC_AGREEMENT_AGREE );
+
+	// one player alone in the room agrees with themselves
+	reported[0] = TRUE; connected[0] = TRUE; crc[0] = 0x99u;
+	CHECK_EQ( crcAgreement( reported, crc, connected, 2, 1 ), CRC_AGREEMENT_AGREE );
 }
 
 // ---------------------------------------------------------------------------------------------

@@ -163,6 +163,12 @@ map. Ctrl+A is still everything at once.
 - **Loading a save remembers what your guards were guarding.** The guard order was written to the
   file one slot too far and overwrote the position it was guarding, so units restored from a save
   could come back watching the wrong place.
+- **Somebody quitting no longer ends the game for everyone else.** The game checks that all the
+  machines still agree by comparing a fingerprint of the world every so often, and if two of them
+  differ the match stops. A player leaving sent one last fingerprint from a machine that was already
+  shutting the game down — and that fingerprint was counted. The four people still playing were told
+  they had desynced because a fifth had quit. Only players who are actually still in the game count
+  now, both for the comparison and for deciding whether everyone has reported in yet.
 - **A power sabotage does not follow you into the next game.** Shutting a base's power down set a
   timer, and nothing cleared that timer when the match ended. Start another game without quitting to
   the desktop and the player who had been sabotaged began the new map blacked out — no radar, no
