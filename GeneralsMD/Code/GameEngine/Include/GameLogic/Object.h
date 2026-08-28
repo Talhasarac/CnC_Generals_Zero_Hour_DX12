@@ -170,6 +170,9 @@ extern Bool Object_isAwaitingBuilder( Bool underConstruction, Real constructionP
 extern Real Object_shroudClearingRange( Real ownRange, Bool underConstruction, Real constructionPercent,
 																				Real boundingCircleRadius );
 
+///< does this object go away without any death of its own - no explosion, no collapse, no rubble?
+extern Bool Object_deathIsSilent( Bool underConstruction, Real constructionPercent );
+
 class Object : public Thing, public Snapshot
 {
 

@@ -4819,3 +4819,16 @@ TEST(the_fog_never_hides_your_own_plan_from_your_own_builder)
 	CHECK( ActionManager_shroudHidesTarget( FALSE, FALSE, TRUE, FALSE ) == FALSE );	// asked by the AI
 	CHECK( ActionManager_shroudHidesTarget( TRUE, FALSE, FALSE, FALSE ) == FALSE );	// in plain sight
 }
+
+//-------------------------------------------------------------------------------------------------
+/** A plan is a silhouette, not a building: cancelling it - or an enemy shooting it - must not set
+	off the explosion, collapse and rubble of a structure that never stood.  Object::onDie skips
+	its die modules and destroys it outright when this says so. */
+//-------------------------------------------------------------------------------------------------
+TEST(a_plan_dies_without_an_explosion_but_a_building_does_not)
+{
+	CHECK( Object_deathIsSilent( TRUE, 0.0f ) == TRUE );			// still waiting for its builder
+	CHECK( Object_deathIsSilent( TRUE, 0.5f ) == FALSE );			// half up, it blows up like a building
+	CHECK( Object_deathIsSilent( TRUE, 100.0f ) == FALSE );		// the last frame of construction
+	CHECK( Object_deathIsSilent( FALSE, 0.0f ) == FALSE );		// finished: percent means nothing here
+}

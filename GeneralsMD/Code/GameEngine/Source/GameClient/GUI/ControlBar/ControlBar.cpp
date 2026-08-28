@@ -3127,6 +3127,23 @@ void ControlBar::setControlCommand( GameWindow *button, const CommandButton *com
 			break;
 		}
 	}
+	//
+	// the stop button does not live on the grid: MSG_META_STOP presses it whether or not grid hot
+	// keys are switched on, and on a building of yours that is still going up it is the cancel key,
+	// so the button wears that letter in both modes.
+	//
+	if( commandButton->getCommandType() == GUI_COMMAND_STOP )
+	{
+		UnicodeString stopKey = getMetaKeyLabel( GameMessage::MSG_META_STOP );
+
+		if( stopKey.isEmpty() )
+			button->winClearStatus( WIN_STATUS_SHORTCUT_BUTTON );
+		else
+			button->winSetStatus( WIN_STATUS_SHORTCUT_BUTTON );
+
+		GadgetButtonSetText( button, stopKey );
+	}
+
 	GadgetButtonSetAltSound(button, "GUICommandBarClick");
 
 }  // end setControlCommand

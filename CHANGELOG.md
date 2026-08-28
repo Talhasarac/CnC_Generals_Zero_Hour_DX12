@@ -451,6 +451,8 @@ foundation, the building itself - and it stays that way until a worker walks ove
 spade in. One dozer and four orders gives you the whole base drawn out on the ground before a penny
 of it is spent, and if the third one was a mistake, click it and take the money back. Stop cancels
 it too, so the same key you use to call off a unit calls off a building.
+Calling one off is quiet, too: a plan nobody has built yet has nothing to blow up, so it simply goes
+away instead of detonating a building that was never there.
 
 Ground your units have already walked stays buildable after they leave it: a forward base can be
 planned out into the dark and a worker sent to walk there, instead of parking a scout on the spot
@@ -458,6 +460,9 @@ first to hold the lights on. The plan sees nothing while it stands there - it op
 own, so drawing buildings across the map tells you nothing about what is sitting in it. You can see
 your own plan through the fog, click it, and send a builder to it whenever you like; your opponent
 sees nothing. Land nobody of yours has ever seen is still off limits.
+
+The stop button in the command bar now has its key printed on it, the way the build buttons do, so
+the key that cancels a half-finished building is written on the button that does the same thing.
 
 ## Bonuses that come and go when they should
 

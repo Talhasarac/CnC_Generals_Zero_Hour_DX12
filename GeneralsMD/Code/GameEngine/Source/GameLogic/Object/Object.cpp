@@ -4646,12 +4646,25 @@ void Object::onDie( DamageInfo *damageInfo )
 	
 	Bool selfInflicted = (damageInfo->in.m_sourceID == getID());
 
-	// FIRST, call our die modules.
-	for (BehaviorModule** d = m_behaviors; *d; ++d)
+	//
+	// FIRST, call our die modules - unless nothing has been built here yet, in which case they are
+	// exactly what must not run: the die modules are the explosion, the collapse and the rubble of a
+	// building that stood, and a plan waiting for its builder never did.  It simply goes away, the
+	// way DestroyDie would have taken it.  Everything below still happens - the radar, the team
+	// notice, a GLA hole starting its rebuild over.
+	//
+	if( Object_deathIsSilent( testStatus( OBJECT_STATUS_UNDER_CONSTRUCTION ), m_constructionPercent ) )
 	{
-		DieModuleInterface* die = (*d)->getDie();
-		if (die)
-			die->onDie(damageInfo);
+		TheGameLogic->destroyObject( this );
+	}
+	else
+	{
+		for (BehaviorModule** d = m_behaviors; *d; ++d)
+		{
+			DieModuleInterface* die = (*d)->getDie();
+			if (die)
+				die->onDie(damageInfo);
+		}
 	}
 
 	// When objects die we remove from the radar as they're really not interesting anymore
@@ -5239,6 +5252,13 @@ Real Object_shroudClearingRange( Real ownRange, Bool underConstruction, Real con
 }
 
 //-------------------------------------------------------------------------------------------------
+Bool Object_deathIsSilent( Bool underConstruction, Real constructionPercent )
+{
+	// a plan the builder never reached is a silhouette of a building, not a building: there is
+	// nothing standing to blow up, collapse or leave rubble behind.
+	return Object_isAwaitingBuilder( underConstruction, constructionPercent );
+}
+
 Real Object::getShroudClearingRange() const
 {
 	Real shroudClearingRange = Object_shroudClearingRange( m_shroudClearingRange,
