@@ -400,6 +400,19 @@ inline Real GameLogic::getHeight( void ) { return m_height; }
 inline UnsignedInt GameLogic::getFrame( void ) { return m_frame; }
 
 inline Bool GameLogic::isInGame( void ) { return !(m_gameMode == GAME_NONE); }
+
+//
+// MSG_NEW_GAME arrives over the message stream like any other command, so a game already in
+// progress can be handed one.  Starting a second game on top of the first tears down the state the
+// first one is still running on, and in a network game the other machines - which were not told to
+// start anything - sit in the disconnect screen waiting for a player who is now somewhere else
+// entirely, with no frame that will ever arrive to end the wait.  A new game only begins from a
+// standing start.
+//
+inline Bool IsReadyToStartNewGame( Bool inGame, Bool clearingGameData, Bool loadingMap )
+{
+	return !inGame && !clearingGameData && !loadingMap;
+}
 inline void GameLogic::setGameMode( Int mode ) { m_gameMode = mode; }
 inline Int  GameLogic::getGameMode( void ) { return m_gameMode; }
 inline Bool GameLogic::isInLanGame( void ) { return (m_gameMode == GAME_LAN); }

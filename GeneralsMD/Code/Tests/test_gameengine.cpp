@@ -3675,3 +3675,28 @@ TEST(netcommand_list_orders_a_burst_of_acks_by_acknowledged_command)
 
 	list->deleteInstance();
 }
+
+//////////////////////////////////////////////////////////////////////////////
+// Starting a new game
+//////////////////////////////////////////////////////////////////////////////
+
+/* MSG_NEW_GAME comes down the message stream like any other command, and the dispatcher used to
+	 act on it whatever the game was doing.  Handed one mid-match, a machine tears down the game the
+	 others are still playing and they wait in the disconnect screen for frames that never come. */
+TEST(a_new_game_only_starts_from_a_standing_start)
+{
+	// nothing running: the only state a new game may begin from
+	CHECK( IsReadyToStartNewGame( FALSE, FALSE, FALSE ) );
+
+	// each of the three on its own is enough to refuse
+	CHECK( !IsReadyToStartNewGame( TRUE,  FALSE, FALSE ) );		// a match is already running
+	CHECK( !IsReadyToStartNewGame( FALSE, TRUE,  FALSE ) );		// the last one is still being torn down
+	CHECK( !IsReadyToStartNewGame( FALSE, FALSE, TRUE  ) );		// a map is part way through loading
+
+	// and no combination of them lets one through
+	Bool refusedEveryBusyState = TRUE;
+	for( Int bits = 1; bits < 8; ++bits )
+		if( IsReadyToStartNewGame( (bits & 1) != 0, (bits & 2) != 0, (bits & 4) != 0 ) )
+			refusedEveryBusyState = FALSE;
+	CHECK( refusedEveryBusyState );
+}

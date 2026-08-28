@@ -303,6 +303,13 @@ map. Ctrl+A is still everything at once.
   on its own — from twelve frames a second to thirty in about six seconds. A room held down by a
   machine that really is that slow settles just above it and stays there instead of surging and
   falling back.
+- **An online match could be forced into a disconnect screen with no way out.** The command that
+  starts a new game was obeyed no matter what the machine was doing — including in the middle of a
+  match. The player who received it quietly restarted into a different game; everybody else was
+  left waiting on turns from someone who was no longer in the same game at all, which is a wait that
+  never ends. A game now only starts when there is no game running, none being shut down, and no map
+  part way through loading.
+
 - **The repair for a corrupted order was turned off for the first two seconds of every game.** When
   a player's orders for a moment arrive damaged rather than late, the game throws them away and asks
   that player to send them again — and that request is answered only if the moment in question is

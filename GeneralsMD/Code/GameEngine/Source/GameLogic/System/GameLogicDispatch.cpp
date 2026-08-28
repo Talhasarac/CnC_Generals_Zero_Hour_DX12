@@ -469,6 +469,13 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 		//---------------------------------------------------------------------------------------------
 		case GameMessage::MSG_NEW_GAME:
 		{
+			if( !IsReadyToStartNewGame( isInGame(), isClearingGameData(), isLoadingMap() ) )
+			{
+				DEBUG_CRASH( ("MSG_NEW_GAME while the last one is still going (inGame=%d, clearingData=%d, loadingMap=%d)",
+					isInGame(), isClearingGameData(), isLoadingMap()) );
+				break;
+			}
+
 			//DEBUG_ASSERTCRASH(msg->getArgumentCount() == 1 || msg->getArgumentCount() == 2, ("%d arguments to MSG_NEW_GAME", msg->getArgumentCount()));
 			Int gameMode = msg->getArgument( 0 )->integer;
 			Int rankPoints = 0;
