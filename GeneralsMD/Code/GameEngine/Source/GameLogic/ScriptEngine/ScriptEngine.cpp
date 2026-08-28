@@ -445,6 +445,7 @@ void ScriptEngine::addConditionTemplateInfo( Template *actionTemplate)
 //-------------------------------------------------------------------------------------------------
 //-------------------------------------------------------------------------------------------------
 ScriptEngine::ScriptEngine():
+m_scriptNameCacheValid(FALSE),
 m_numCounters(0),
 m_numFlags(0),
 m_callingTeam(NULL),
@@ -5285,6 +5286,10 @@ void ScriptEngine::reset( void )
 	if (TheScriptConditions) {
 		TheScriptConditions->reset();
 	}
+	m_scriptNameCacheValid = FALSE;
+	m_scriptsByName.clear();
+	m_groupsByName.clear();
+
 	m_numCounters = 1;
 	m_numAttackInfo = 1;
 	m_numFlags = 1;
@@ -5432,6 +5437,11 @@ void ScriptEngine::reset( void )
 //-------------------------------------------------------------------------------------------------
 void ScriptEngine::newMap( void )
 {
+	// a new map means a new set of scripts, so the name index is stale
+	m_scriptNameCacheValid = FALSE;
+	m_scriptsByName.clear();
+	m_groupsByName.clear();
+
 	m_numCounters = 1;
 	Int i;
 	for (i=0; i<MAX_COUNTERS; i++) {
@@ -6404,18 +6414,39 @@ Int ScriptEngine::allocateFlag( const AsciiString& name)
 //-------------------------------------------------------------------------------------------------
 ScriptGroup  *ScriptEngine::findGroup(const AsciiString& name)
 {
-	Int i;
-	for (i=0; i<TheSidesList->getNumSides(); i++) {
+	if (!m_scriptNameCacheValid) {
+		buildScriptNameCache();
+	}
+	ScriptGroupNameMap::const_iterator it = m_groupsByName.find(name);
+	return (it != m_groupsByName.end()) ? it->second : 0; // Shouldn't ever happen.
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Indexes every script and script group in TheSidesList by name.  Insert-if-absent, walked in
+ * exactly the order the old linear searches used, so a duplicated name still resolves to the same
+ * script it always did. */
+//-------------------------------------------------------------------------------------------------
+void ScriptEngine::buildScriptNameCache( void )
+{
+	m_scriptsByName.clear();
+	m_groupsByName.clear();
+	m_scriptNameCacheValid = TRUE;
+
+	for (Int i=0; i<TheSidesList->getNumSides(); i++) {
 		ScriptList *pSL = TheSidesList->getSideInfo(i)->getScriptList();
 		if (pSL==NULL) continue;
+		Script *pScr;
+		for (pScr = pSL->getScript(); pScr; pScr=pScr->getNext()) {
+			m_scriptsByName.insert(std::make_pair(pScr->getName(), pScr));
+		}
 		ScriptGroup *pGroup;
 		for (pGroup = pSL->getScriptGroup(); pGroup; pGroup=pGroup->getNext()) {
-			if (pGroup->getName() == name) {
-				return pGroup;
+			m_groupsByName.insert(std::make_pair(pGroup->getName(), pGroup));
+			for (pScr = pGroup->getScript(); pScr; pScr=pScr->getNext()) {
+				m_scriptsByName.insert(std::make_pair(pScr->getName(), pScr));
 			}
 		}
 	}
-	return 0; // Shouldn't ever happen.
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -6423,26 +6454,11 @@ ScriptGroup  *ScriptEngine::findGroup(const AsciiString& name)
 //-------------------------------------------------------------------------------------------------
 Script  *ScriptEngine::findScript(const AsciiString& name)
 {
-	Int i;
-	for (i=0; i<TheSidesList->getNumSides(); i++) {
-		ScriptList *pSL = TheSidesList->getSideInfo(i)->getScriptList();
-		if (pSL==NULL) continue;
-		Script *pScr;
-		for (pScr = pSL->getScript(); pScr; pScr=pScr->getNext()) {
-			if ((name==pScr->getName())) {
-				return pScr;
-			}
-		}
-		ScriptGroup *pGroup;
-		for (pGroup = pSL->getScriptGroup(); pGroup; pGroup=pGroup->getNext()) {
-			for (pScr = pGroup->getScript(); pScr; pScr=pScr->getNext()) {
-				if ((name==pScr->getName())) {
-					return pScr;
-				}
-			}
-		}
+	if (!m_scriptNameCacheValid) {
+		buildScriptNameCache();
 	}
-	return 0; // Shouldn't ever happen.
+	ScriptNameMap::const_iterator it = m_scriptsByName.find(name);
+	return (it != m_scriptsByName.end()) ? it->second : 0; // Shouldn't ever happen.
 }
 
 //-------------------------------------------------------------------------------------------------

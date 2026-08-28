@@ -881,6 +881,12 @@ turn, and the one after. A squad that used to leave on turn 4,120 leaves on turn
 is a thirtieth of a second - you cannot see it, and it was sitting still waiting for orders either
 way.
 
+**And the map's own scripts, looked up by name.** A map is a few hundred little scripts, and one
+script calling another means finding it by name — which meant reading down every player's list of
+scripts, and every folder inside those lists, until the name turned up. The computer opponents' own
+behaviour is written in exactly those scripts and they call each other constantly. The names are
+fixed the moment a map is loaded, so they are now looked up directly instead of hunted for.
+
 **And every burning building asking where its smoke is.** A damaged structure, a laser beam, a
 beacon, a shockwave — each of them holds on to an effect by number and asks the game to hand it back,
 every frame, for as long as it lives. Asking meant reading down the list of every effect alive in the

@@ -400,6 +400,7 @@ protected:
 	void executeScript( Script *pScript );
 	Script *findScript(const AsciiString& name);
 	ScriptGroup *findGroup(const AsciiString& name);
+	void buildScriptNameCache( void );			///< index every script and group in TheSidesList by name
 	void setSway( ScriptAction *pAction );
 	void setCounter( ScriptAction *pAction );
 	void addCounter( ScriptAction *pAction );
@@ -455,6 +456,16 @@ protected:
 	Int								m_numCounters;
 	TFlag							m_flags[MAX_FLAGS];
 	Int								m_numFlags;
+	// Looking a script up by name used to walk every side's script list, and its groups' lists, on
+	// every call - and a script that calls subroutines does that several times per evaluation.  The
+	// lists are fixed for the life of a map, so they are indexed once and the index is thrown away
+	// whenever the map is.
+	typedef std::hash_map< AsciiString, Script *, rts::hash<AsciiString>, rts::equal_to<AsciiString> > ScriptNameMap;
+	typedef std::hash_map< AsciiString, ScriptGroup *, rts::hash<AsciiString>, rts::equal_to<AsciiString> > ScriptGroupNameMap;
+	ScriptNameMap			m_scriptsByName;
+	ScriptGroupNameMap m_groupsByName;
+	Bool							m_scriptNameCacheValid;
+
 	AttackPriorityInfo m_attackPriorityInfo[MAX_ATTACK_PRIORITIES];
 	Int								m_numAttackInfo;
 	Int								m_endGameTimer;

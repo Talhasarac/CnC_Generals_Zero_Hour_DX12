@@ -50,6 +50,8 @@
 #include "GameLogic/AIPlayer.h"
 #include "GameLogic/AIPathfind.h"
 #include "GameLogic/ScriptEngine.h"
+#include "GameLogic/Scripts.h"
+#include "GameLogic/SidesList.h"
 #include "Common/TunnelTracker.h"
 #include "Common/StateMachine.h"
 
@@ -2742,6 +2744,76 @@ TEST(logicrandom_unchanged_honours_its_bounds)
 	// degenerate ranges answer the way the ordinary versions do
 	CHECK_EQ( GetGameLogicRandomValueUnchanged( 5, 5 ), 5 );
 	CHECK_EQ( GetGameLogicRandomValueRealUnchanged( 3.0f, 3.0f ), 3.0f );
+}
+
+// ---------------------------------------------------------------------------------------------
+// Looking a script up by name.  This used to walk every side's script list and every group inside
+// it, on every call, and a subroutine call does it twice.
+// ---------------------------------------------------------------------------------------------
+
+TEST(scriptengine_finds_a_script_by_name_wherever_it_lives)
+{
+	SidesList sides;
+	SidesList *savedSides = TheSidesList;
+	TheSidesList = &sides;
+
+	Dict emptyDict;
+	sides.addSide( &emptyDict );
+	sides.addSide( &emptyDict );
+
+	// side 0: one loose script, and one inside a group
+	ScriptList *list0 = newInstance(ScriptList);
+	sides.getSideInfo( 0 )->setScriptList( list0 );
+
+	Script *loose = newInstance(Script);
+	loose->setName( AsciiString( "LooseScript" ) );
+	list0->addScript( loose, 0 );
+
+	ScriptGroup *group = newInstance(ScriptGroup);
+	group->setName( AsciiString( "TheGroup" ) );
+	list0->addGroup( group, 0 );
+
+	Script *inGroup = newInstance(Script);
+	inGroup->setName( AsciiString( "GroupedScript" ) );
+	group->addScript( inGroup, 0 );
+
+	// side 1: another loose one, to prove the search does not stop at the first side
+	ScriptList *list1 = newInstance(ScriptList);
+	sides.getSideInfo( 1 )->setScriptList( list1 );
+
+	Script *otherSide = newInstance(Script);
+	otherSide->setName( AsciiString( "OtherSideScript" ) );
+	list1->addScript( otherSide, 0 );
+
+	ScriptEngine engine;
+	CHECK( engine.findScriptByName( AsciiString( "LooseScript" ) ) == loose );
+	CHECK( engine.findScriptByName( AsciiString( "GroupedScript" ) ) == inGroup );
+	CHECK( engine.findScriptByName( AsciiString( "OtherSideScript" ) ) == otherSide );
+	CHECK( engine.findScriptByName( AsciiString( "NoSuchScript" ) ) == NULL );
+	CHECK( engine.findScriptByName( AsciiString() ) == NULL );
+
+	// asking twice must answer the same, whether the index was built on this call or the last one
+	CHECK( engine.findScriptByName( AsciiString( "GroupedScript" ) ) == inGroup );
+
+	// a new map throws the index away; the same engine must pick up the new scripts
+	sides.getSideInfo( 0 )->setScriptList( NULL );
+	list0->deleteInstance();
+	sides.getSideInfo( 1 )->setScriptList( NULL );
+	list1->deleteInstance();
+
+	ScriptList *reloaded = newInstance(ScriptList);
+	sides.getSideInfo( 0 )->setScriptList( reloaded );
+	Script *afterLoad = newInstance(Script);
+	afterLoad->setName( AsciiString( "AfterLoad" ) );
+	reloaded->addScript( afterLoad, 0 );
+
+	engine.newMap();
+	CHECK( engine.findScriptByName( AsciiString( "AfterLoad" ) ) == afterLoad );
+	CHECK( engine.findScriptByName( AsciiString( "LooseScript" ) ) == NULL );
+
+	sides.getSideInfo( 0 )->setScriptList( NULL );
+	reloaded->deleteInstance();
+	TheSidesList = savedSides;
 }
 
 // ---------------------------------------------------------------------------------------------
