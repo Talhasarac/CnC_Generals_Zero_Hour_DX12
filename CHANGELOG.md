@@ -887,6 +887,12 @@ scripts, and every folder inside those lists, until the name turned up. The comp
 behaviour is written in exactly those scripts and they call each other constantly. The names are
 fixed the moment a map is loaded, so they are now looked up directly instead of hunted for.
 
+**And the places on the map, looked up by name.** A map is dotted with named spots to walk to and
+named regions to watch — "move here", "is anyone standing in this area yet". Every time a script
+mentioned one, the game read down the entire list of them until the name turned up, and the area
+question is asked by every script that watches a region, on every pass. Both lists are fixed the
+moment a map loads, so both are now looked up directly.
+
 **And every burning building asking where its smoke is.** A damaged structure, a laser beam, a
 beacon, a shockwave — each of them holds on to an effect by number and asks the game to hand it back,
 every frame, for as long as it lives. Asking meant reading down the list of every effect alive in the

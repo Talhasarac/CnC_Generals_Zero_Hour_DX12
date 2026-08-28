@@ -52,6 +52,8 @@
 #include "GameLogic/ScriptEngine.h"
 #include "GameLogic/Scripts.h"
 #include "GameLogic/SidesList.h"
+#include "GameLogic/TerrainLogic.h"
+#include "GameLogic/PolygonTrigger.h"
 #include "Common/TunnelTracker.h"
 #include "Common/StateMachine.h"
 
@@ -3290,4 +3292,103 @@ TEST(selfslug_is_monotonic_in_the_cushion)
 			CHECK( !seenNo );
 	}
 	CHECK( seenNo );
+}
+
+// ---------------------------------------------------------------------------------------------
+// TerrainLogic used to answer "which waypoint is called X" and "which trigger area is called X"
+// by walking the whole list, on every call, and the scripts ask constantly.  Both are indexed now,
+// and the index has to notice the list changing under it.
+// ---------------------------------------------------------------------------------------------
+class TestTerrainLogic : public TerrainLogic
+{
+public:
+	void addTestWaypoint( UnsignedInt id, AsciiString name )
+	{
+		Coord3D loc;
+		loc.x = (Real)id;
+		loc.y = 0.0f;
+		loc.z = 0.0f;
+		Waypoint *way = newInstance(Waypoint)( (WaypointID)id, name, &loc,
+																					 AsciiString::TheEmptyString,
+																					 AsciiString::TheEmptyString,
+																					 AsciiString::TheEmptyString, FALSE );
+		linkWaypoint( way );
+	}
+
+	void dropAllWaypoints( void ) { deleteWaypoints(); }
+};
+
+// A missing waypoint reads as id 0 / name "<none>" rather than a null dereference, so a broken
+// index reports itself instead of taking the whole run down.
+static UnsignedInt waypointID( Waypoint *way ) { return way ? (UnsignedInt)way->getID() : 0; }
+static AsciiString waypointName( Waypoint *way ) { return way ? way->getName() : AsciiString("<none>"); }
+
+TEST(terrainlogic_finds_a_waypoint_by_name_and_by_id)
+{
+	TestTerrainLogic tl;
+
+	tl.addTestWaypoint( 1, "Alpha" );
+	tl.addTestWaypoint( 2, "Bravo" );
+	tl.addTestWaypoint( 3, "Charlie" );
+
+	CHECK( tl.getWaypointByName( "Bravo" ) != NULL );
+	CHECK_EQ( waypointID( tl.getWaypointByName( "Bravo" ) ), (UnsignedInt)2 );
+	CHECK( tl.getWaypointByID( 3 ) != NULL );
+	CHECK_STR( waypointName( tl.getWaypointByID( 3 ) ).str(), "Charlie" );
+	CHECK( tl.getWaypointByName( "Nobody" ) == NULL );
+	CHECK( tl.getWaypointByID( 99 ) == NULL );
+
+	// the index was built by those lookups; a waypoint added afterwards still has to be found
+	tl.addTestWaypoint( 4, "Delta" );
+	CHECK( tl.getWaypointByName( "Delta" ) != NULL );
+	CHECK_EQ( waypointID( tl.getWaypointByName( "Delta" ) ), (UnsignedInt)4 );
+	CHECK( tl.getWaypointByName( "Alpha" ) != NULL );
+
+	// the list is built by pushing onto the head and the old search returned the first match from
+	// the head, so the most recently added of two waypoints sharing a name is the one that answers
+	tl.addTestWaypoint( 5, "Alpha" );
+	CHECK_EQ( waypointID( tl.getWaypointByName( "Alpha" ) ), (UnsignedInt)5 );
+
+	tl.dropAllWaypoints();
+	CHECK( tl.getWaypointByName( "Alpha" ) == NULL );
+	CHECK( tl.getWaypointByID( 1 ) == NULL );
+}
+
+TEST(terrainlogic_finds_a_trigger_area_by_name_and_notices_edits)
+{
+	PolygonTrigger::deleteTriggers();
+
+	TestTerrainLogic tl;
+
+	PolygonTrigger *zone1 = newInstance(PolygonTrigger)( 4 );
+	zone1->setTriggerName( "Zone1" );
+	PolygonTrigger::addPolygonTrigger( zone1 );
+
+	PolygonTrigger *zone2 = newInstance(PolygonTrigger)( 4 );
+	zone2->setTriggerName( "Zone2" );
+	PolygonTrigger::addPolygonTrigger( zone2 );
+
+	CHECK( tl.getTriggerAreaByName( "Zone1" ) == zone1 );
+	CHECK( tl.getTriggerAreaByName( "Zone2" ) == zone2 );
+	CHECK( tl.getTriggerAreaByName( "Zone3" ) == NULL );
+
+	// added after the index was built
+	PolygonTrigger *zone3 = newInstance(PolygonTrigger)( 4 );
+	zone3->setTriggerName( "Zone3" );
+	PolygonTrigger::addPolygonTrigger( zone3 );
+	CHECK( tl.getTriggerAreaByName( "Zone3" ) == zone3 );
+
+	// renamed after the index was built
+	zone3->setTriggerName( "Zone9" );
+	CHECK( tl.getTriggerAreaByName( "Zone9" ) == zone3 );
+	CHECK( tl.getTriggerAreaByName( "Zone3" ) == NULL );
+
+	// unlinked after the index was built
+	PolygonTrigger::removePolygonTrigger( zone2 );
+	CHECK( tl.getTriggerAreaByName( "Zone2" ) == NULL );
+	CHECK( tl.getTriggerAreaByName( "Zone1" ) == zone1 );
+	zone2->deleteInstance();
+
+	PolygonTrigger::deleteTriggers();
+	CHECK( tl.getTriggerAreaByName( "Zone1" ) == NULL );
 }

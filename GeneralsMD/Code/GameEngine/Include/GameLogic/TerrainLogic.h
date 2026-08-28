@@ -330,10 +330,16 @@ protected:
 	Bool parseWaypointData(DataChunkInput &file, DataChunkInfo *info, void *userData);
 	/// Add a waypoint to the list.
 	void addWaypoint(MapObject *pMapObj);
+	/// Put a built waypoint at the head of the list.
+	void linkWaypoint(Waypoint *pWay);
 	/// Add a directed link between waypoints.
 	void addWaypointLink(Int id1, Int id2);
 	/// Deletes all waypoints.
 	void deleteWaypoints(void);
+	/// Index every waypoint by name and by id.
+	void buildWaypointIndex(void);
+	/// Index every polygon trigger by name.
+	void buildTriggerAreaIndex(void);
 	/// Deletes all bridges.
 	void deleteBridges(void);
 
@@ -349,6 +355,21 @@ protected:
 
 	Waypoint *m_waypointListHead;
 	Bridge *m_bridgeListHead;
+
+	// Finding a waypoint or a trigger area by name used to walk the whole list on every call, and a
+	// map's scripts do that many times per evaluation.  Both lists are fixed for the life of a map,
+	// so each is indexed once and the index is dropped whenever the list underneath it changes.
+	typedef std::hash_map< AsciiString, Waypoint *, rts::hash<AsciiString>, rts::equal_to<AsciiString> > WaypointNameMap;
+	typedef std::hash_map< UnsignedInt, Waypoint *, rts::hash<UnsignedInt>, rts::equal_to<UnsignedInt> > WaypointIDMap;
+	typedef std::hash_map< AsciiString, PolygonTrigger *, rts::hash<AsciiString>, rts::equal_to<AsciiString> > TriggerAreaNameMap;
+
+	WaypointNameMap			m_waypointsByName;
+	WaypointIDMap				m_waypointsByID;
+	Bool								m_waypointIndexValid;
+
+	TriggerAreaNameMap	m_triggerAreasByName;
+	/// the PolygonTrigger list revision m_triggerAreasByName was built from; 0 means never built
+	UnsignedInt					m_triggerAreaIndexRevision;
 
 	Bool		m_bridgeDamageStatesChanged;
 

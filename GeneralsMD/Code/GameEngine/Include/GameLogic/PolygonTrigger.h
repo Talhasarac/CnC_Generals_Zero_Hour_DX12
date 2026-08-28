@@ -90,6 +90,10 @@ protected:
 
 	static PolygonTrigger* ThePolygonTriggerListPtr;
 	static Int s_currentID; ///< Current id for new triggers.
+	// Bumped by everything that can change the list or a trigger's name, so that anyone keeping an
+	// index of the list by name can tell that theirs went stale.  Starts at 1 so that a cache which
+	// has never been built (revision 0) never looks current.
+	static UnsignedInt s_listRevision;
 
 protected:
 	void reallocate(void);
@@ -115,12 +119,13 @@ public:
 public:
 	static void addPolygonTrigger(PolygonTrigger *pTrigger);
 	static void removePolygonTrigger(PolygonTrigger *pTrigger);
-	void setNextPoly(PolygonTrigger *nextPoly) {m_nextPolygonTrigger = nextPoly;} ///< Link the next map object.
+	static UnsignedInt getListRevision(void) {return s_listRevision;}
+	void setNextPoly(PolygonTrigger *nextPoly) {m_nextPolygonTrigger = nextPoly; ++s_listRevision;} ///< Link the next map object.
 	void addPoint(const ICoord3D &point);
 	void setPoint(const ICoord3D &point, Int ndx);
 	void insertPoint(const ICoord3D &point, Int ndx);
 	void deletePoint(Int ndx);
-	void setTriggerName(AsciiString name) {m_triggerName = name;};
+	void setTriggerName(AsciiString name) {m_triggerName = name; ++s_listRevision;};
 
 	void setLayerName(AsciiString name) {m_layerName = name;};
 	AsciiString getLayerName(void)  const {return m_layerName;} 

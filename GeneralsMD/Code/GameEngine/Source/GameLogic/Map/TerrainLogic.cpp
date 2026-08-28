@@ -983,6 +983,8 @@ TerrainLogic::TerrainLogic()
 
 	m_waypointListHead = NULL;
 	m_bridgeListHead = NULL;
+	m_waypointIndexValid = FALSE;
+	m_triggerAreaIndexRevision = 0;
 	m_mapData = NULL;
 	m_bridgeDamageStatesChanged = FALSE;
 	m_mapDX = 0;
@@ -1366,8 +1368,18 @@ void TerrainLogic::addWaypoint(MapObject *pMapObj)
 	DEBUG_ASSERTCRASH(pMapObj->isWaypoint(), ("not a waypoint"));
 	Waypoint *pWay = newInstance(Waypoint)(pMapObj->getWaypointID(), pMapObj->getWaypointName(), 
 																&loc, label1, label2, label3, biDirectional);
+	linkWaypoint(pWay);
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Puts a built waypoint at the head of the list, which is where the name and id lookups expect
+ * the newest one to be, and drops the index that no longer describes the list. */
+//-------------------------------------------------------------------------------------------------
+void TerrainLogic::linkWaypoint(Waypoint *pWay)
+{
 	pWay->setNext(m_waypointListHead);
 	m_waypointListHead = pWay;
+	m_waypointIndexValid = FALSE;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1423,6 +1435,40 @@ void TerrainLogic::deleteWaypoints(void)
 		pWay->deleteInstance();
 	}
 	m_waypointListHead = NULL;
+	m_waypointsByName.clear();
+	m_waypointsByID.clear();
+	m_waypointIndexValid = FALSE;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Indexes every waypoint by name and by id.  The walk runs from the head of the list, and the
+ * entries are insert-if-absent, so a name or an id that appears twice still resolves to the same
+ * waypoint the old linear searches returned. */
+//-------------------------------------------------------------------------------------------------
+void TerrainLogic::buildWaypointIndex(void)
+{
+	m_waypointsByName.clear();
+	m_waypointsByID.clear();
+	m_waypointIndexValid = TRUE;
+
+	for( Waypoint *way = m_waypointListHead; way; way = way->getNext() ) {
+		m_waypointsByName.insert( std::make_pair( way->getName(), way ) );
+		m_waypointsByID.insert( std::make_pair( (UnsignedInt)way->getID(), way ) );
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Indexes every polygon trigger by name.  Same rule as the waypoints: walked from the head of the
+ * list, insert-if-absent, so a duplicated area name resolves exactly as it did before. */
+//-------------------------------------------------------------------------------------------------
+void TerrainLogic::buildTriggerAreaIndex(void)
+{
+	m_triggerAreasByName.clear();
+	m_triggerAreaIndexRevision = PolygonTrigger::getListRevision();
+
+	for (PolygonTrigger* pTrig = PolygonTrigger::getFirstPolygonTrigger(); pTrig; pTrig = pTrig->getNext()) {
+		m_triggerAreasByName.insert( std::make_pair( pTrig->getTriggerName(), pTrig ) );
+	}
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1564,11 +1610,11 @@ void TerrainLogic::addLandmarkBridgeToLogic(Object *bridgeObj)
 //-------------------------------------------------------------------------------------------------
 Waypoint *TerrainLogic::getWaypointByName( AsciiString name )
 {
-	for( Waypoint *way = m_waypointListHead; way; way = way->getNext() )
-		if (way->getName() == name)
-			return way;
+	if (!m_waypointIndexValid)
+		buildWaypointIndex();
 
-	return NULL;
+	WaypointNameMap::const_iterator it = m_waypointsByName.find( name );
+	return (it != m_waypointsByName.end()) ? it->second : NULL;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1576,11 +1622,11 @@ Waypoint *TerrainLogic::getWaypointByName( AsciiString name )
 //-------------------------------------------------------------------------------------------------
 Waypoint *TerrainLogic::getWaypointByID( UnsignedInt id )
 {
-	for( Waypoint *way = m_waypointListHead; way; way = way->getNext() )
-		if (way->getID() == id)
-			return way;
+	if (!m_waypointIndexValid)
+		buildWaypointIndex();
 
-	return NULL;
+	WaypointIDMap::const_iterator it = m_waypointsByID.find( id );
+	return (it != m_waypointsByID.end()) ? it->second : NULL;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1640,12 +1686,11 @@ Bool TerrainLogic::isPurposeOfPath( Waypoint *pWay, AsciiString label )
 //-------------------------------------------------------------------------------------------------
 PolygonTrigger *TerrainLogic::getTriggerAreaByName( AsciiString name )
 {
-	for (PolygonTrigger* pTrig = PolygonTrigger::getFirstPolygonTrigger(); pTrig; pTrig = pTrig->getNext()) {
-		AsciiString trigName = pTrig->getTriggerName();
-		if (name == trigName) 
-			return pTrig;
-	}
-	return NULL;
+	if (m_triggerAreaIndexRevision != PolygonTrigger::getListRevision())
+		buildTriggerAreaIndex();
+
+	TriggerAreaNameMap::const_iterator it = m_triggerAreasByName.find( name );
+	return (it != m_triggerAreasByName.end()) ? it->second : NULL;
 }
 
 

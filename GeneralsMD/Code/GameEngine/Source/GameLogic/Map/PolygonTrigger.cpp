@@ -38,6 +38,7 @@
 /* ********* PolygonTrigger class ****************************/
 PolygonTrigger *PolygonTrigger::ThePolygonTriggerListPtr = NULL;
 Int PolygonTrigger::s_currentID = 1;
+UnsignedInt PolygonTrigger::s_listRevision = 1;
 /**
  PolygonTrigger - Constructor.
 */
@@ -301,6 +302,7 @@ void PolygonTrigger::addPolygonTrigger(PolygonTrigger *pTrigger)
 	}
 	pTrigger->m_nextPolygonTrigger = ThePolygonTriggerListPtr;
 	ThePolygonTriggerListPtr = pTrigger;
+	++s_listRevision;
 }
 
 /**
@@ -327,6 +329,7 @@ void PolygonTrigger::removePolygonTrigger(PolygonTrigger *pTrigger)
 		}
 	}
 	pTrigger->m_nextPolygonTrigger = NULL;
+	++s_listRevision;
 }
 
 /**
@@ -337,6 +340,7 @@ void PolygonTrigger::deleteTriggers(void)
 	PolygonTrigger *pList = ThePolygonTriggerListPtr;	
 	ThePolygonTriggerListPtr = NULL;
 	s_currentID = 1;
+	++s_listRevision;
 	pList->deleteInstance();
 }
 
