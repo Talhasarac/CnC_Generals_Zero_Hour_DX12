@@ -20,6 +20,13 @@ running at the wrong speed.
 Those two things are now separate. The picture runs as fast as your hardware allows. The rules run on
 their own clock, at exactly the pace they were designed for.
 
+That holds in the other direction too, which matters more. When a big late-game battle pushed the
+frame rate down, the *game* used to slow down with it - drop to twenty frames and a match ran at
+under half speed, so units crawled and build times stretched. Now a slow moment costs you a dropped
+picture frame, not a slow game: the rules keep their pace and catch up through the stutter. If the
+machine falls so far behind that even that is not enough, the game slows rather than freezing - and
+the clock in the corner tells you honestly that it is happening.
+
 That sounds simple and it was not. Every animation in the game counted frames instead of time —
 explosion flashes, tree sway, water, menu transitions, camera drift, screen fades. Uncap the picture
 and all of it starts racing. Each one now has a clock of its own, so **you get a smooth, modern

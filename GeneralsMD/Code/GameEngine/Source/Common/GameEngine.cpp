@@ -868,9 +868,17 @@ DECLARE_PERF_TIMER(GameEngine_update)
 
 /** -----------------------------------------------------------------------------------------------
  * Wall-clock pacing for the logic tick: update() may be called at any render rate, but a logic
- * frame is only "due" every 1000/logicFps milliseconds. The elapsed time added per call is
- * clamped to one logic frame, so a renderer slower than the logic rate runs one logic frame per
- * render frame (the original slow-machine behavior) instead of a catch-up burst.
+ * frame is only "due" every 1000/logicFps milliseconds.
+ *
+ * A render pass longer than one logic frame owes the simulation more than one tick, and the debt
+ * has to be payable or game speed silently becomes render speed - at 20fps a 30Hz match runs a
+ * third slow. So the accumulator carries up to LOGIC_CATCHUP_MAX_FRAMES frames of debt and the
+ * caller drains it in a loop, skipping the client half while it catches up.
+ *
+ * The cap is what keeps that from spiralling: when the logic frame itself is what blew the budget,
+ * paying the debt would just queue more of the same work. Past the cap the surplus is dropped and
+ * the match honestly runs slow - which is what the HUD's 'hz' readout reports.
+ *
  * Free function (not a member, not static) so test_gameengine can link straight to it.
  */
 Bool GameEngine_isLogicFrameDue( Real& accumMs, Real elapsedMs, Int logicFps )
@@ -878,9 +886,12 @@ Bool GameEngine_isLogicFrameDue( Real& accumMs, Real elapsedMs, Int logicFps )
 	if (logicFps <= 0)
 		return TRUE;
 	const Real msPerLogicFrame = 1000.0f / logicFps;
-	if (elapsedMs > msPerLogicFrame)
-		elapsedMs = msPerLogicFrame;
+	const Real maxAccumMs = msPerLogicFrame * LOGIC_CATCHUP_MAX_FRAMES;
+	if (elapsedMs > maxAccumMs)
+		elapsedMs = maxAccumMs;
 	accumMs += elapsedMs;
+	if (accumMs > maxAccumMs)
+		accumMs = maxAccumMs;
 	if (accumMs < msPerLogicFrame)
 		return FALSE;
 	accumMs -= msPerLogicFrame;
@@ -918,9 +929,11 @@ void GameEngine::update( void )
 		static Int fpsFrames = 0;
 		static Real fpsClientTotal = 0.0f, fpsClientMax = 0.0f;
 		static Real fpsLogicTotal = 0.0f, fpsLogicMax = 0.0f;
+		static Int fpsLogicTicks = 0, fpsCatchupPasses = 0;
 		static DWORD fpsWindowStart = timeGetTime();
 		Int64 tClientStart, tClientEnd, tLogicStart, tLogicEnd;
 		Real clientMS = 0.0f, logicMS = 0.0f;
+		Int logicTicks = 0;
 		QueryPerformanceCounter( (LARGE_INTEGER *)&tClientStart );
 #endif
 
@@ -966,6 +979,7 @@ void GameEngine::update( void )
 		prevLogicTime = now;
 
 		Bool logicFrameDue;
+		Bool mayCatchUp = FALSE;
 		if (fastMode)
 		{
 			logicAccumMs = 0.0f;
@@ -985,18 +999,42 @@ void GameEngine::update( void )
 		else
 		{
 			logicFrameDue = GameEngine_isLogicFrameDue(logicAccumMs, elapsedMs, m_maxFPS);
+			// Only the wall-clock-paced path has a debt to pay back.  Fast mode and the network
+			// clock above both mean exactly one logic frame per call, by their own definition.
+			mayCatchUp = (m_maxFPS > 0);
 		}
 
-		if (logicFrameDue &&
-				((TheNetwork == NULL && !TheGameLogic->isGamePaused()) || (TheNetwork && TheNetwork->isFrameDataReady())))
+		const Bool logicMayRun =
+				((TheNetwork == NULL && !TheGameLogic->isGamePaused()) || (TheNetwork && TheNetwork->isFrameDataReady()));
+
+		if (!logicMayRun)
+		{
+			// A paused game, or one waiting on the network, is not falling behind - it is stopped.
+			// Drop the debt so resuming does not open with a catch-up burst.
+			logicAccumMs = 0.0f;
+		}
+		else if (logicFrameDue)
 		{
 #ifdef DEBUG_LOGGING
 			QueryPerformanceCounter( (LARGE_INTEGER *)&tLogicStart );
 #endif
-			TheGameLogic->UPDATE();
+			// Pay off the wall clock's debt.  Every pass after the first is a logic frame this call
+			// already owes, and it runs without a client pass in front of it: a render frame is what
+			// gets dropped so that game speed stays put when the frame rate does not.  Both the loop
+			// count and the pacer's own accumulator cap stop at LOGIC_CATCHUP_MAX_FRAMES, so a logic
+			// frame that is itself over budget cannot pull the loop into a spiral.
+			Int logicTicksThisPass = 0;
+			do
+			{
+				TheGameLogic->UPDATE();
+				++logicTicksThisPass;
+			}
+			while (mayCatchUp && logicTicksThisPass < LOGIC_CATCHUP_MAX_FRAMES &&
+						 GameEngine_isLogicFrameDue(logicAccumMs, 0.0f, m_maxFPS));
 #ifdef DEBUG_LOGGING
 			QueryPerformanceCounter( (LARGE_INTEGER *)&tLogicEnd );
 			logicMS = engineElapsedMS( tLogicStart, tLogicEnd );
+			logicTicks = logicTicksThisPass;
 #endif
 		}
 
@@ -1004,6 +1042,8 @@ void GameEngine::update( void )
 		fpsFrames++;
 		fpsClientTotal += clientMS;
 		fpsLogicTotal += logicMS;
+		fpsLogicTicks += logicTicks;
+		if( logicTicks > 1 ) fpsCatchupPasses++;
 		if( clientMS > fpsClientMax ) fpsClientMax = clientMS;
 		if( logicMS > fpsLogicMax ) fpsLogicMax = logicMS;
 		{
@@ -1014,13 +1054,19 @@ void GameEngine::update( void )
 				const Real fps = (Real)fpsFrames * 1000.0f / (Real)windowMS;
 				if( fps < 50.0f && TheGameLogic && TheGameLogic->isInGame() && !TheGameLogic->isInShellGame() )
 				{
-					DEBUG_LOG(("FPS %.0f over %dms (%d frames, logic frame %d) | client avg %.1f max %.1f | logic avg %.1f max %.1f | unaccounted %.1fms\n",
-										 fps, (Int)windowMS, fpsFrames, TheGameLogic->getFrame(),
+					// 'hz' is the rate the simulation actually achieved and 'catchup' how many render
+					// frames were dropped to hold it there; hz short of m_maxFPS with catchup passes
+					// present is the logic side being genuinely over budget, not the pacer.
+					DEBUG_LOG(("FPS %.0f over %dms (%d frames, %d hz, %d catchup, logic frame %d) | client avg %.1f max %.1f | logic avg %.1f max %.1f | unaccounted %.1fms\n",
+										 fps, (Int)windowMS, fpsFrames,
+										 (Int)((Real)fpsLogicTicks * 1000.0f / (Real)windowMS + 0.5f), fpsCatchupPasses,
+										 TheGameLogic->getFrame(),
 										 fpsClientTotal / fpsFrames, fpsClientMax,
 										 fpsLogicTotal / fpsFrames, fpsLogicMax,
 										 (Real)windowMS - fpsClientTotal - fpsLogicTotal));
 				}
 				fpsFrames = 0;
+				fpsLogicTicks = fpsCatchupPasses = 0;
 				fpsClientTotal = fpsLogicTotal = 0.0f;
 				fpsClientMax = fpsLogicMax = 0.0f;
 				fpsWindowStart = nowMS;

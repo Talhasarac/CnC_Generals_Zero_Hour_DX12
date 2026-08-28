@@ -54,6 +54,7 @@
 #include "GameClient/Water.h"
 #include "GameLogic/Module/PhysicsUpdate.h"
 #include "GameClient/GameClient.h"
+#include "Common/GameEngine.h"
 #include "GameClient/ParticleSys.h"
 #include "GameClient/ControlBar.h"
 #include "GameClient/InGameUI.h"
@@ -607,11 +608,43 @@ TEST(logic_tick_is_wall_clock_paced_not_render_paced)
 			++due;
 	CHECK( due >= 89 && due <= 91 );
 
-	/* A renderer slower than the logic rate runs exactly one logic frame per
-	   render frame (elapsed time is clamped) - never a catch-up burst. */
+	/* A renderer slower than the logic rate owes more than one tick per pass, and
+	   the debt has to be payable or the simulation just runs at render speed. A
+	   100ms pass against 30Hz logic owes three frames: due on the first ask, and
+	   still due on the follow-up asks that add no time of their own. */
 	accum = 0.0f;
-	for( Int i = 0; i < 50; ++i )
-		CHECK( GameEngine_isLogicFrameDue( accum, 100.0f, 30 ) );
+	due = 0;
+	while( GameEngine_isLogicFrameDue( accum, due == 0 ? 100.0f : 0.0f, 30 ) )
+		if( ++due >= LOGIC_CATCHUP_MAX_FRAMES )
+			break;
+	CHECK( due > 1 );
+	CHECK( due <= LOGIC_CATCHUP_MAX_FRAMES );
+
+	/* ...and the debt is capped there, however far behind the pass fell. A one
+	   second stall must not queue thirty frames of catch-up: the surplus is
+	   dropped, and the match honestly runs slow instead of spiralling. */
+	accum = 0.0f;
+	due = 0;
+	while( GameEngine_isLogicFrameDue( accum, due == 0 ? 1000.0f : 0.0f, 30 ) )
+		if( ++due > LOGIC_CATCHUP_MAX_FRAMES )
+			break;
+	CHECK_EQ( due, LOGIC_CATCHUP_MAX_FRAMES );
+
+	/* Over a run the pacer still hands out wall-clock time and no more: 3 seconds
+	   of 20fps passes is 90 logic frames, not 60 (render-paced) and not 180. */
+	accum = 0.0f;
+	due = 0;
+	for( Int pass = 0; pass < 60; ++pass )
+	{
+		Int ticks = 0;
+		while( GameEngine_isLogicFrameDue( accum, ticks == 0 ? 50.0f : 0.0f, 30 ) )
+		{
+			++due;
+			if( ++ticks >= LOGIC_CATCHUP_MAX_FRAMES )
+				break;
+		}
+	}
+	CHECK( due >= 89 && due <= 91 );
 
 	/* A non-positive fps never throttles (the -noFPSLimit style dev mode). */
 	CHECK( GameEngine_isLogicFrameDue( accum, 0.0f, 0 ) );
