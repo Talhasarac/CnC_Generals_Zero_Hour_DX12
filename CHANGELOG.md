@@ -1128,11 +1128,15 @@ every build. They are not decoration: **most of the bugs in this document were f
 not by reading the code.** Linking proves nothing; running proves something.
 
 **The game can now play itself.** One command line starts an eight-player skirmish with no menus:
-seven computer opponents, random factions on random corners of the map, and you watching from an
-observer's camera with nothing to command. Nothing holds the simulation back either, so a match that
-would take half an hour runs in a fraction of it. That is how a fault that shows up once in a
-hundred thousand orders gets found - not by playing carefully, but by letting the machine play
-badly, thousands of times, and recording every match it plays.
+eight computer opponents, random factions on random corners of the map, and a free camera with
+nothing to command - watching costs no seat, so the map is full. The match can be told to run at
+several times its normal pace as well, so a game that would take half an hour is over in a fraction
+of it. That is how a fault that shows up once in a hundred thousand orders gets found - not by
+playing carefully, but by letting the machine play badly, thousands of times, and recording every
+match it plays. It also caught itself doing it wrong: for a while that fast-forward switch was
+speeding the *game* up rather than the picture, which is why every countdown on screen ran out
+almost as soon as it appeared. The picture and the rules are on separate clocks now, and that switch
+respects the difference.
 
 **Every fix was proved non-vacuous.** Put the bug back, watch the exact test fail, restore the fix.
 A test that passes both ways is worth nothing, and there are none of those here.

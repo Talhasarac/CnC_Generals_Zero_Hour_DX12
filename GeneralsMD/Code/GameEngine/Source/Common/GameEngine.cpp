@@ -300,19 +300,22 @@ static void startAutoSkirmish( void )
 	TheSkirmishGameInfo->reset();
 	TheSkirmishGameInfo->enterGame();
 
+	/* Watching costs no seat.  GameLogic::startNewGame always adds a "ReplayObserver" side after
+		 the slots, and PlayerList::newGame makes the first human side the local player - so a slot
+		 list with nothing but AI in it leaves that observer holding the camera, exactly the way a
+		 replay does.  Spending a slot on the observer instead would cost a bot, because MAX_SLOTS is
+		 8 and that is also the most start positions a map has. */
+	const Bool observing = TheGlobalData->m_autoSkirmishObserver;
 	UnicodeString localName;
 	localName.translate( AsciiString( "Player" ) );
 	for( Int i = 0; i < numPlayers; i++ )
 	{
 		GameSlot slot;
-		if (i == 0)
+		if (i == 0 && !observing)
 		{
 			slot.setState( SLOT_PLAYER, localName );
 			slot.setName( localName );
-			/* An observer has no units and no base, so the eight seats a map has all go to the AI:
-				 the local slot only carries the camera. */
-			slot.setPlayerTemplate( TheGlobalData->m_autoSkirmishObserver ? PLAYERTEMPLATE_OBSERVER
-																																	 : PLAYERTEMPLATE_RANDOM );
+			slot.setPlayerTemplate( PLAYERTEMPLATE_RANDOM );
 		}
 		else
 		{
@@ -337,9 +340,15 @@ static void startAutoSkirmish( void )
 	TheWritableGlobalData->m_shellMapOn = FALSE;
 	TheWritableGlobalData->m_playIntro = FALSE;
 
-	/* The menu passes the game speed slider's position here; -noFPSLimit has already put 30000 in
-		 m_framesPerSecondLimit, which is what makes this run as fast as the machine can. */
-	const Int maxFPS = TheGlobalData->m_framesPerSecondLimit;
+	/* The menu passes the game speed slider's position here, so pass the same thing and clamp it
+		 the same way reallyDoStart() does: MSG_NEW_GAME rejects anything outside 1..1000 by falling
+		 back to m_framesPerSecondLimit *unclamped*, which is how a stray -fps would still get through.
+		 -noFPSLimit deliberately does not appear here - it uncaps the renderer, not the simulation. */
+	Int maxFPS = TheGlobalData->m_framesPerSecondLimit;
+	if (maxFPS < 15)
+		maxFPS = DEFAULT_MAX_FPS;
+	if (maxFPS > 1000)
+		maxFPS = 1000;
 
 	InitRandom( seed );
 	GameMessage *msg = TheMessageStream->appendMessage( GameMessage::MSG_NEW_GAME );
@@ -348,9 +357,9 @@ static void startAutoSkirmish( void )
 	msg->appendIntegerArgument( 0 );
 	msg->appendIntegerArgument( maxFPS );
 
-	DEBUG_LOG(("-autoskirmish: %d players on '%s', seed %d, up to %d fps, local slot %s\n",
+	DEBUG_LOG(("-autoskirmish: %d slots on '%s', seed %d, up to %d fps, %s\n",
 		numPlayers, mapName.str(), seed, maxFPS,
-		TheGlobalData->m_autoSkirmishObserver ? "observing" : "playing"));
+		observing ? "every slot AI, watching from the free camera" : "slot 0 is the local player"));
 }
 
 /** -----------------------------------------------------------------------------------------------
@@ -787,6 +796,12 @@ void GameEngine::init( int argc, char *argv[] )
 	}
 	catch (ErrorCode ec)
 	{
+		/* Every ErrorCode but ERROR_INVALID_D3D used to leave here without a word, and init then ran
+			 on to its tail with half its subsystems missing - the first frame faulted on a NULL
+			 TheGameLogic and the crash log blamed GameEngine::update() for a failure that happened
+			 during startup.  Say which code it was and where it left the engine. */
+		DEBUG_LOG(("GameEngine::init - ErrorCode %d escaped initialization (TheGameLogic=%p, TheGameClient=%p)\n",
+			(Int)ec, TheGameLogic, TheGameClient));
 		if (ec == ERROR_INVALID_D3D)
 		{
 			RELEASE_CRASHLOCALIZED("ERROR:D3DFailurePrompt", "ERROR:D3DFailureMessage");

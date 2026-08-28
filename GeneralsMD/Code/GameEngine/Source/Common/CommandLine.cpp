@@ -528,17 +528,6 @@ Int parseUseWaveEditor(char *args[], int num)
 }
 
 //=============================================================================
-//=============================================================================
-Int parseFPSLimit(char *args[], int num)
-{
-	if (TheWritableGlobalData && num > 1)
-	{
-		TheWritableGlobalData->m_framesPerSecondLimit = atoi(args[1]);
-	}
-	return 2;
-}
-
-//=============================================================================
 Int parseNoViewLimit(char *args[], int)
 {
 	if (TheWritableGlobalData)
@@ -1110,12 +1099,31 @@ Int parseIgnoreStackTrace(char *args[], int num)
 }
 #endif
 
+/* -fps <n> is the game speed itself: the rate the logic tick is paced at, the command-line twin of
+	 the skirmish menu's game speed slider.  MSG_NEW_GAME only honours 1..1000. */
+
+Int parseFPSLimit(char *args[], int num)
+{
+	if (TheWritableGlobalData && num > 1)
+	{
+		TheWritableGlobalData->m_framesPerSecondLimit = atoi(args[1]);
+	}
+	return 2;
+}
+
+/* -noFPSLimit uncaps the *renderer*, not the simulation.  It used to raise
+	 m_framesPerSecondLimit to 30000 because the old loop ran one logic frame per pass, so the only
+	 way to render freely was to let the logic run freely too - and the game then played at whatever
+	 speed the machine managed.  GameEngine::update() now paces the logic tick against wall clock
+	 and GameEngine::execute() never sleeps for a frame budget, so rendering is already uncapped
+	 unconditionally and m_framesPerSecondLimit means game speed and nothing else.  Raising it here
+	 would just run the match in fast-forward: superweapon and build timers count real seconds off a
+	 clock ticking a thousand times too fast.  Use -fps to ask for that on purpose. */
 Int parseNoFPSLimit(char *args[], int num)
 {
 	if (TheWritableGlobalData)
 	{
 		TheWritableGlobalData->m_useFpsLimit = false;
-		TheWritableGlobalData->m_framesPerSecondLimit = 30000;
 	}
 	return 1;
 }
@@ -1253,7 +1261,6 @@ static CommandLineParam params[] =
 	{ "-noDynamicLOD", parseNoDynamicLOD },
 	{ "-noStaticLOD", parseNoStaticLOD },
 	{ "-useWaveEditor", parseUseWaveEditor },
-	{ "-fps", parseFPSLimit },
 	{ "-wireframe", parseWireframe },
 	{ "-showCollision", parseShowCollision },
 	{ "-noShowClientPhysics", parseNoShowClientPhysics },
@@ -1299,10 +1306,12 @@ static CommandLineParam params[] =
 
 	/* Outside the _DEBUG/_INTERNAL block on purpose: an unattended Release run is driven entirely
 		 from the command line.  -autoskirmish needs a map to play, -seed makes the run repeatable,
-		 and without -noFPSLimit the simulation is held to the frame rate a human watches at. */
+		 -noFPSLimit lets the renderer run free, and -fps is the one knob that changes how fast the
+		 match itself is simulated - the command-line twin of the skirmish menu's game speed slider. */
 	{ "-map", parseMapName },
 	{ "-seed", parseSeed },
 	{ "-noFPSLimit", parseNoFPSLimit },
+	{ "-fps", parseFPSLimit },
 	{ "-autoskirmish", parseAutoSkirmish },
 	{ "-aidiff", parseAIDifficulty },
 	{ "-observer", parseObserver },

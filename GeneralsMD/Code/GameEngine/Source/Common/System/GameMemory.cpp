@@ -1654,6 +1654,10 @@ void* MemoryPool::allocateBlockDoNotZeroImplementation(DECLARE_LITERALSTRING_ARG
 	{
 		if (m_overflowAllocationCount == 0)
 		{
+			// Say which pool ran dry.  The throw unwinds into a catch that swallows it, so without
+			// this the only trace left is a NULL subsystem faulting several frames later.
+			DEBUG_LOG(("MemoryPool '%s' is out of blocks (%d of %d bytes) and may not grow\n",
+				m_poolName, m_initialAllocationCount, m_allocationSize));
 			throw ERROR_OUT_OF_MEMORY;	// this pool is not allowed to grow
 		}
 		else 
@@ -2659,6 +2663,10 @@ MemoryPool *MemoryPoolFactory::createMemoryPool(const char *poolName, Int alloca
 	if (initialAllocationCount <= 0 || overflowAllocationCount < 0)
 	{
 		DEBUG_CRASH(("illegal pool size: %d %d\n",initialAllocationCount,overflowAllocationCount));
+		// A pool name absent from MemoryInit.cpp's table arrives here as -1, -1.  Name it: the
+		// throw unwinds into a catch that swallows it, so otherwise nothing says which pool.
+		DEBUG_LOG(("createMemoryPool - pool '%s' has an illegal size (%d initial, %d overflow)\n",
+			poolName, initialAllocationCount, overflowAllocationCount));
 		throw ERROR_OUT_OF_MEMORY;
 	}
 

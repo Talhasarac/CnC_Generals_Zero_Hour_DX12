@@ -1331,9 +1331,12 @@ void MultiPlayerLoadScreen::init( GameInfo *game )
 	m_loadScreen->winHide(FALSE);
 	m_loadScreen->winBringToTop();
 	m_mapPreview = TheWindowManager->winGetWindowFromId( m_loadScreen,TheNameKeyGenerator->nameToKey( "MultiplayerLoadScreen.wnd:WinMapPreview"));
+	// getLocalSlotNum() is -1 when no slot in the list is the local player - a game watched from
+	// the observer camera rather than played - and getSlot(-1) hands back NULL.  Same guard the
+	// score screen already has.
 	GameSlot *lSlot = game->getSlot(game->getLocalSlotNum());
 	const PlayerTemplate* pt;
-	if (lSlot->getPlayerTemplate() >= 0)
+	if (lSlot && lSlot->getPlayerTemplate() >= 0)
 		pt = ThePlayerTemplateStore->getNthPlayerTemplate(lSlot->getPlayerTemplate());
 	else
 		pt = ThePlayerTemplateStore->findPlayerTemplate( TheNameKeyGenerator->nameToKey("FactionObserver") );
@@ -1534,10 +1537,15 @@ void MultiPlayerLoadScreen::update( Int percent )
 void MultiPlayerLoadScreen::processProgress(Int playerId, Int percentage)
 {
 	
-	if( percentage < 0 || percentage > 100 || playerId >= MAX_SLOTS || playerId < 0 || m_playerLookup[playerId] == -1)
+	// The test named every way playerId can be wrong and then indexed m_playerLookup with
+	// it anyway; in Release the assert is not compiled in at all, so a -1 read past the array.
+	if( percentage < 0 || percentage > 100 || playerId >= MAX_SLOTS || playerId < 0 )
 	{
 		DEBUG_ASSERTCRASH(FALSE, ("Percentage %d was passed in for Player %d\n", percentage, playerId));
+		return;
 	}
+	if( m_playerLookup[playerId] == -1)
+		return;
 	//DEBUG_LOG(("Percentage %d was passed in for Player %d (in loadscreen position %d)\n", percentage, playerId, m_playerLookup[playerId]));
 	if(m_progressBars[m_playerLookup[playerId]])
 		GadgetProgressBarSetProgress(m_progressBars[m_playerLookup[playerId]], percentage );	
@@ -1601,9 +1609,12 @@ void GameSpyLoadScreen::init( GameInfo *game )
 	m_mapPreview = TheWindowManager->winGetWindowFromId( m_loadScreen,TheNameKeyGenerator->nameToKey( "GameSpyLoadScreen.wnd:WinMapPreview"));
 	DEBUG_ASSERTCRASH(TheNetwork, ("Where the Heck is the Network!!!!"));
 	DEBUG_LOG(("NumPlayers %d\n", TheNetwork->getNumPlayers()));
-GameSlot *lSlot = game->getSlot(game->getLocalSlotNum());
+	// getLocalSlotNum() is -1 when no slot in the list is the local player - a game watched from
+	// the observer camera rather than played - and getSlot(-1) hands back NULL.  Same guard the
+	// score screen already has.
+	GameSlot *lSlot = game->getSlot(game->getLocalSlotNum());
 	const PlayerTemplate* pt;
-	if (lSlot->getPlayerTemplate() >= 0)
+	if (lSlot && lSlot->getPlayerTemplate() >= 0)
 		pt = ThePlayerTemplateStore->getNthPlayerTemplate(lSlot->getPlayerTemplate());
 	else
 		pt = ThePlayerTemplateStore->findPlayerTemplate( TheNameKeyGenerator->nameToKey("FactionObserver") );
@@ -1897,10 +1908,15 @@ void GameSpyLoadScreen::update( Int percent )
 void GameSpyLoadScreen::processProgress(Int playerId, Int percentage)
 {
 	
-	if( percentage < 0 || percentage > 100 || playerId >= MAX_SLOTS || playerId < 0 || m_playerLookup[playerId] == -1)
+	// The test named every way playerId can be wrong and then indexed m_playerLookup with
+	// it anyway; in Release the assert is not compiled in at all, so a -1 read past the array.
+	if( percentage < 0 || percentage > 100 || playerId >= MAX_SLOTS || playerId < 0 )
 	{
 		DEBUG_ASSERTCRASH(FALSE, ("Percentage %d was passed in for Player %d\n", percentage, playerId));
+		return;
 	}
+	if( m_playerLookup[playerId] == -1)
+		return;
 	//DEBUG_LOG(("Percentage %d was passed in for Player %d (in loadscreen position %d)\n", percentage, playerId, m_playerLookup[playerId]));
 	if(m_progressBars[m_playerLookup[playerId]])
 		GadgetProgressBarSetProgress(m_progressBars[m_playerLookup[playerId]], percentage );	
@@ -2049,10 +2065,15 @@ void MapTransferLoadScreen::update( Int percent )
 void MapTransferLoadScreen::processProgress(Int playerId, Int percentage, AsciiString stateStr)
 {
 	
-	if( percentage < 0 || percentage > 100 || playerId >= MAX_SLOTS || playerId < 0 || m_playerLookup[playerId] == -1)
+	// The test named every way playerId can be wrong and then indexed m_playerLookup with
+	// it anyway; in Release the assert is not compiled in at all, so a -1 read past the array.
+	if( percentage < 0 || percentage > 100 || playerId >= MAX_SLOTS || playerId < 0 )
 	{
 		DEBUG_ASSERTCRASH(FALSE, ("Percentage %d was passed in for Player %d\n", percentage, playerId));
+		return;
 	}
+	if( m_playerLookup[playerId] == -1)
+		return;
 
 	if (m_oldProgress[playerId] == percentage)
 		return;
