@@ -162,6 +162,26 @@ void View::scrollBy( Coord2D *delta )
 }
 
 /**
+ * SnapCameraRotateTo45: the nearest multiple of 45 degrees.  floor(x + 0.5) is the round for both
+ * signs - the earlier copies of this used floor(x - 0.5) below zero, which is not the nearest one
+ * but the next one away from zero, so a heading of -5 degrees snapped to -45 instead of 0.
+ */
+Real View_snapAngleToEighth( Real angle )
+{
+	const Real step = PI / 4.0f;
+	return ((Real)REAL_TO_INT_FLOOR( angle / step + 0.5f )) * step;
+}
+
+/**
+ * SnapCameraRotateTo45: the eighth that is 'steps' away from the one this angle is nearest to.
+ */
+Real View_stepAngleByEighths( Real angle, Int steps )
+{
+	const Real step = PI / 4.0f;
+	return View_snapAngleToEighth( angle ) + steps * step;
+}
+
+/**
  * Rotate the view around the up axis by the given angle.
  */
 void View::setAngle( Real angle )

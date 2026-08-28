@@ -105,6 +105,7 @@ void LookAtTranslator::stopScrolling( void )
 LookAtTranslator::LookAtTranslator() :
 	m_isScrolling(false),
 	m_isRotating(false),
+	m_freeRotateAngle(0.0f),
 	m_isPitching(false),
 	m_isChangingFOV(false),
 	m_timestamp(0),
@@ -331,6 +332,9 @@ GameMessageDisposition LookAtTranslator::translateGameMessage(const GameMessage 
 			else
 			{
 				m_isRotating = true;
+				// the drag turns this, and under SnapCameraRotateTo45 the camera stands on whichever
+				// eighth it is nearest - so start it where the camera already is.
+				m_freeRotateAngle = TheTacticalView->getAngle();
 			}
 			break;
 		}
@@ -343,7 +347,6 @@ GameMessageDisposition LookAtTranslator::translateGameMessage(const GameMessage 
 			const UnsignedInt CLICK_DURATION = 5;
 			const UnsignedInt PIXEL_OFFSET = 5;
 
-			Bool wasRotating = m_isRotating;
 			m_isRotating = false;
 			if (m_scrollType == SCROLL_MMB)
 				stopScrolling();
@@ -357,14 +360,8 @@ GameMessageDisposition LookAtTranslator::translateGameMessage(const GameMessage 
 				TheTacticalView->setAngleAndPitchToDefault();
 				TheTacticalView->setZoomToDefault();
 			}
-			else if (wasRotating && TheGlobalData->m_snapCameraRotateTo45)
-			{
-				// SnapCameraRotateTo45: let go of a free rotate and the heading clicks to the
-				// nearest eighth, so the map lines up with the screen again.
-				const Real step = PI / 4.0f;
-				Real a = TheTacticalView->getAngle();
-				TheTacticalView->setAngle( ((Real)REAL_TO_INT_FLOOR( a / step + (a >= 0.0f ? 0.5f : -0.5f) )) * step );
-			}
+			// nothing to settle on release: under SnapCameraRotateTo45 the heading was already on an
+			// eighth for the whole drag.
 
 			break;
 		}
@@ -414,7 +411,17 @@ GameMessageDisposition LookAtTranslator::translateGameMessage(const GameMessage 
 
 				Real angle = FACTOR * (m_currentPos.x - m_anchor.x);
 
-				TheTacticalView->setAngle( TheTacticalView->getAngle() + angle );
+				if (TheGlobalData->m_snapCameraRotateTo45)
+				{
+					// discrete heading: the drag turns an angle we keep to ourselves and the camera
+					// jumps to the eighth it is nearest, as the mouse crosses each halfway point.
+					m_freeRotateAngle += angle;
+					TheTacticalView->setAngle( View_snapAngleToEighth( m_freeRotateAngle ) );
+				}
+				else
+				{
+					TheTacticalView->setAngle( TheTacticalView->getAngle() + angle );
+				}
 				m_anchor = msg->getArgument( 0 )->pixel;
 			}
 
@@ -821,6 +828,7 @@ void LookAtTranslator::resetModes()
 {
 	m_isScrolling = FALSE;
 	m_isRotating = FALSE;
+	m_freeRotateAngle = 0.0f;
 	m_isPitching = FALSE;
 	m_isChangingFOV = FALSE;
 }

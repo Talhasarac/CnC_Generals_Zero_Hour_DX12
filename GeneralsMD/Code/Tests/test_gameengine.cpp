@@ -57,6 +57,7 @@
 #include "GameClient/ParticleSys.h"
 #include "GameClient/ControlBar.h"
 #include "GameClient/InGameUI.h"
+#include "GameClient/View.h"
 #include "GameLogic/IncomingDamage.h"
 #include "GameLogic/AIPlayer.h"
 #include "GameLogic/AIPathfind.h"
@@ -4643,4 +4644,56 @@ TEST(a_placed_structures_exit_point_turns_with_the_structure)
 
 	// the two points are distinct, which is what tells the renderer to draw a line and not just a puck
 	CHECK( !(exitLoc == rallyLoc) );
+}
+
+/** SnapCameraRotateTo45 quantizes the camera heading instead of easing to it, so the arithmetic is
+	 the whole feature: the heading is always the nearest eighth, and a rotate key moves it exactly one
+	 eighth from wherever it stands.  Both signs matter - the old copies of this rounded the wrong way
+	 below zero, which put a heading of a few degrees left of north a whole eighth further left. */
+TEST(camera_heading_snaps_to_the_nearest_eighth_on_both_sides_of_zero)
+{
+	const Real step = PI / 4.0f;
+
+	CHECK_NEAR( View_snapAngleToEighth( 0.0f ), 0.0f, 0.0001f );
+	CHECK_NEAR( View_snapAngleToEighth( step ), step, 0.0001f );
+	CHECK_NEAR( View_snapAngleToEighth( -step ), -step, 0.0001f );
+
+	// just off an eighth, either way, stays on it
+	CHECK_NEAR( View_snapAngleToEighth( 0.1f ), 0.0f, 0.0001f );
+	CHECK_NEAR( View_snapAngleToEighth( -0.1f ), 0.0f, 0.0001f );
+	CHECK_NEAR( View_snapAngleToEighth( step + 0.1f ), step, 0.0001f );
+	CHECK_NEAR( View_snapAngleToEighth( -step - 0.1f ), -step, 0.0001f );
+
+	// past the halfway point it belongs to the next one, on both sides
+	CHECK_NEAR( View_snapAngleToEighth( step * 0.6f ), step, 0.0001f );
+	CHECK_NEAR( View_snapAngleToEighth( -step * 0.6f ), -step, 0.0001f );
+	CHECK_NEAR( View_snapAngleToEighth( step * 0.4f ), 0.0f, 0.0001f );
+	CHECK_NEAR( View_snapAngleToEighth( -step * 0.4f ), 0.0f, 0.0001f );
+
+	CHECK_NEAR( View_snapAngleToEighth( 3.0f * step - 0.05f ), 3.0f * step, 0.0001f );
+	CHECK_NEAR( View_snapAngleToEighth( -3.0f * step + 0.05f ), -3.0f * step, 0.0001f );
+}
+
+/** One press of a rotate key is one eighth, from whatever the heading happens to be - including a
+	 heading a script left off the grid, which is snapped first so the key never lands between two
+	 eighths. */
+TEST(a_rotate_key_press_moves_the_camera_exactly_one_eighth)
+{
+	const Real step = PI / 4.0f;
+
+	CHECK_NEAR( View_stepAngleByEighths( 0.0f, 1 ), step, 0.0001f );
+	CHECK_NEAR( View_stepAngleByEighths( 0.0f, -1 ), -step, 0.0001f );
+	CHECK_NEAR( View_stepAngleByEighths( step, 1 ), 2.0f * step, 0.0001f );
+	CHECK_NEAR( View_stepAngleByEighths( -step, -1 ), -2.0f * step, 0.0001f );
+
+	// eight presses come back to where they started
+	Real a = 0.0f;
+	for( Int i = 0; i < 8; ++i )
+		a = View_stepAngleByEighths( a, 1 );
+	CHECK_NEAR( a, 2.0f * PI, 0.0001f );
+
+	// off the grid: snapped first, then stepped, so the result is still an eighth
+	CHECK_NEAR( View_stepAngleByEighths( 0.1f, 1 ), step, 0.0001f );
+	CHECK_NEAR( View_stepAngleByEighths( -0.1f, -1 ), -step, 0.0001f );
+	CHECK_NEAR( View_stepAngleByEighths( 0.0f, 0 ), 0.0f, 0.0001f );
 }

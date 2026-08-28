@@ -335,6 +335,13 @@ class ViewLocation
 		}
 };
 
+// CAMERA HEADING QUANTIZATION ////////////////////////////////////////////////////////////////////
+// SnapCameraRotateTo45 keeps the camera heading on the eighths.  Free functions rather than View
+// methods so the arithmetic can be tested without a View, and so the keyboard rotate and the
+// middle-drag rotate share exactly one copy of it.
+extern Real View_snapAngleToEighth( Real angle );					///< nearest multiple of 45 degrees
+extern Real View_stepAngleByEighths( Real angle, Int steps );	///< snap, then move that many eighths
+
 // EXTERNALS //////////////////////////////////////////////////////////////////////////////////////
 extern View *TheTacticalView;		///< the main tactical interface to the game world
 

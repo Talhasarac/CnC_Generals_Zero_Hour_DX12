@@ -610,8 +610,10 @@ public:  // ********************************************************************
 	Bool isInAttackMoveToMode( void ) const		{ return m_attackMoveToMode; }
 	void clearAttackMoveToMode( void )				{ m_attackMoveToMode = FALSE; }
 	
-	void setCameraRotateLeft( Bool set )		{ m_cameraRotatingLeft = set; }
-	void setCameraRotateRight( Bool set )		{ m_cameraRotatingRight = set; }
+	// zeroing the repeat clock makes the first quantized step happen on the very next update, so a
+	// tap of the key is one eighth and a hold is one eighth every CAMERA_SNAP_REPEAT_MS.
+	void setCameraRotateLeft( Bool set )		{ m_cameraRotatingLeft = set; m_cameraSnapRepeatMs = 0; }
+	void setCameraRotateRight( Bool set )		{ m_cameraRotatingRight = set; m_cameraSnapRepeatMs = 0; }
 	void setCameraZoomIn( Bool set )				{ m_cameraZoomingIn = set; }
 	void setCameraZoomOut( Bool set )				{ m_cameraZoomingOut = set; }
   void setCameraTrackingDrawable( Bool set ) { m_cameraTrackingDrawable = set; }
@@ -970,6 +972,9 @@ protected:
 	// wall clock of the previous update(), so a held camera key can be stepped by elapsed
 	// time instead of by render frames.  0 = no previous update yet.
 	UnsignedInt									m_cameraKeyLastMs;
+
+	// wall clock of the last quantized rotate step under SnapCameraRotateTo45.  0 = step now.
+	UnsignedInt									m_cameraSnapRepeatMs;
 
 	Bool												m_cameraRotatingLeft; 
 	Bool 												m_cameraRotatingRight;

@@ -1065,6 +1065,7 @@ InGameUI::InGameUI()
 	m_hudLastSampleFrame = 0;
 	m_hudLastSampleMs = 0;
 	m_cameraKeyLastMs = 0;
+	m_cameraSnapRepeatMs = 0;
 	m_subtitleFreezeStartMs = 0;
 	m_subtitleFreezeSteps = 0;
 	m_hudFps = 0.0f;
@@ -2118,15 +2119,36 @@ void InGameUI::update( void )
 	if( cameraSteps > 4.0f )
 		cameraSteps = 4.0f;
 
-	if( m_cameraRotatingLeft && !m_cameraRotatingRight )
+	//
+	// SnapCameraRotateTo45 makes the heading discrete rather than smoothed-then-settled: the camera
+	// stands on an eighth and jumps to the next one, so there is no in-between heading to look at
+	// and nothing left to settle when the key comes up.  The angle is therefore not accumulated per
+	// frame at all - a press turns the view one eighth and holding the key repeats that on a fixed
+	// interval, which is what the rotate keys do in Stronghold.
+	//
+	const UnsignedInt CAMERA_SNAP_REPEAT_MS = 250;
+	if( TheGlobalData->m_snapCameraRotateTo45 )
 	{
-		//Keyboard rotate left
-		TheTacticalView->setAngle( TheTacticalView->getAngle() - TheGlobalData->m_keyboardCameraRotateSpeed * cameraSteps );
+		if( (m_cameraRotatingLeft || m_cameraRotatingRight) && m_cameraRotatingLeft != m_cameraRotatingRight
+				&& cameraNowMs - m_cameraSnapRepeatMs >= CAMERA_SNAP_REPEAT_MS )
+		{
+			m_cameraSnapRepeatMs = cameraNowMs;
+			TheTacticalView->setAngle( View_stepAngleByEighths( TheTacticalView->getAngle(),
+																													m_cameraRotatingRight ? 1 : -1 ) );
+		}
 	}
-	if( m_cameraRotatingRight && !m_cameraRotatingLeft )
+	else
 	{
-		//Keyboard rotate right
-		TheTacticalView->setAngle( TheTacticalView->getAngle() + TheGlobalData->m_keyboardCameraRotateSpeed * cameraSteps );
+		if( m_cameraRotatingLeft && !m_cameraRotatingRight )
+		{
+			//Keyboard rotate left
+			TheTacticalView->setAngle( TheTacticalView->getAngle() - TheGlobalData->m_keyboardCameraRotateSpeed * cameraSteps );
+		}
+		if( m_cameraRotatingRight && !m_cameraRotatingLeft )
+		{
+			//Keyboard rotate right
+			TheTacticalView->setAngle( TheTacticalView->getAngle() + TheGlobalData->m_keyboardCameraRotateSpeed * cameraSteps );
+		}
 	}
 	if( m_cameraZoomingIn && !m_cameraZoomingOut )
 	{

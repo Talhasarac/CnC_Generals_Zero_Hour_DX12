@@ -728,6 +728,15 @@ camera went somewhere else instead. The spot under your pointer is now
 held there for the whole glide. Roll the wheel over the far corner of your base and you end up at
 that corner, not in the middle of the screen.
 
+**The camera now turns in whole steps, the way a castle-builder's does.** With 45-degree snapping on,
+the view used to swing freely while you held the key or dragged the mouse and then jump to the
+nearest of the eight headings when you let go — so you spent the turn looking at an angle you were
+never going to keep, and the jump at the end came as a surprise. It turns one eighth at a time now,
+instantly, and holding the key keeps stepping. There is no in-between angle to see and nothing left
+to settle when you release. Turning the other way past north also used to skip a notch: a heading a
+few degrees left of north rounded a whole step further left instead of back to north. Free rotation
+is still there for anyone who wants it — turn the snapping off.
+
 **A skirmish opens zoomed all the way out.** The game used to drop you at the map author's own
 camera height, which is tighter than the wheel will go, so the first thing anyone did on every
 single map was roll the wheel back to see their base and the ground around it. It now opens at the
