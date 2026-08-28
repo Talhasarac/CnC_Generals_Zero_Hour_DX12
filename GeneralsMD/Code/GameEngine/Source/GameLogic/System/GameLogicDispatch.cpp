@@ -1573,7 +1573,7 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 			// get the unit production interface
 			ProductionUpdateInterface *pu = producer->getProductionUpdateInterface();
 			if( pu == NULL )
-				return;
+				break;			// break, not return: the tail of this function destroys currentlySelectedGroup
 
 			// cancel the production
 			pu->cancelUnitCreate( productionID );

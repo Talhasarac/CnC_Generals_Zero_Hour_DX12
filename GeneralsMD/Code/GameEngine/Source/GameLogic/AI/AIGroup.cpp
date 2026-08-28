@@ -264,6 +264,7 @@ Bool AIGroup::removeAnyObjectsNotOwnedByPlayer( const Player *ownerPlayer )
 	for (it = m_memberList.begin(); it != m_memberList.end(); /* empty */) {
 		Object *obj = (*it);
 		if (!obj) {
+			++it;			// the increment is in the body of this loop, so skipping it spins forever
 			continue;
 		}
 
