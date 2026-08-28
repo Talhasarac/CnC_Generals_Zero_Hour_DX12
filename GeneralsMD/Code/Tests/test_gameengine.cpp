@@ -57,6 +57,8 @@
 #include "GameLogic/PolygonTrigger.h"
 #include "Common/TunnelTracker.h"
 #include "Common/StateMachine.h"
+#include "Common/XferCRC.h"
+#include "Common/ObjectStatusTypes.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -3449,4 +3451,59 @@ TEST(gameslot_restores_the_pre_randomization_setup_on_a_restart)
 	fixed.reset();
 	CHECK( !fixed.hasSavedOriginalSetup() );
 	CHECK_EQ( fixed.getOriginalColor(), -1 );
+}
+
+// The game's fingerprint over a BitFlags used to be taken with sizeof(this) - the size of the
+// pointer - so only the first four bytes of any flag set were in it.  ObjectStatusMaskType is 47
+// bits wide, so everything from RIDER1 upwards could differ between two machines without the CRC
+// ever noticing.
+static UnsignedInt crcOfStatusMask( ObjectStatusMaskType mask )
+{
+	XferCRC xfer;
+	xfer.open( "test" );
+	mask.xfer( &xfer );
+	xfer.close();
+	return xfer.getCRC();
+}
+
+TEST(bitflags_crc_covers_every_word_of_the_flag_set)
+{
+	ObjectStatusMaskType empty;
+	empty.clear();
+
+	// a bit inside the first word has always been covered
+	ObjectStatusMaskType low;
+	low.clear();
+	low.set( OBJECT_STATUS_DESTROYED );
+	CHECK_NE( crcOfStatusMask( low ), crcOfStatusMask( empty ) );
+
+	// ...and so is everything past it now
+	CHECK( (Int)OBJECT_STATUS_IMMOBILE >= 32 );
+	ObjectStatusMaskType high;
+	high.clear();
+	high.set( OBJECT_STATUS_IMMOBILE );
+	CHECK_NE( crcOfStatusMask( high ), crcOfStatusMask( empty ) );
+
+	ObjectStatusMaskType deployed;
+	deployed.clear();
+	deployed.set( OBJECT_STATUS_DEPLOYED );
+	CHECK_NE( crcOfStatusMask( deployed ), crcOfStatusMask( empty ) );
+
+	// two different high bits are two different fingerprints, not one
+	CHECK_NE( crcOfStatusMask( high ), crcOfStatusMask( deployed ) );
+
+	// and the same mask still fingerprints the same way twice
+	CHECK_EQ( crcOfStatusMask( high ), crcOfStatusMask( high ) );
+
+	// the whole set is hashed, not a prefix of it: clearing a high bit off a full mask changes it
+	ObjectStatusMaskType full, fullMinusOne;
+	full.clear();
+	fullMinusOne.clear();
+	for( Int i = 0; i < (Int)OBJECT_STATUS_COUNT; ++i )
+	{
+		full.set( i );
+		if( i != (Int)OBJECT_STATUS_DEPLOYED )
+			fullMinusOne.set( i );
+	}
+	CHECK_NE( crcOfStatusMask( full ), crcOfStatusMask( fullMinusOne ) );
 }

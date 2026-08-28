@@ -195,6 +195,14 @@ map. Ctrl+A is still everything at once.
   agreeing — all three had bugs that made one side quietly diverge from the other, and the
   fingerprint itself was checking the same number 128 times instead of the wall it was supposed to
   be checking. Fixed. This is groundwork: network play is still not something this build claims.
+- **The mismatch alarm can see all of a unit now.** Every so often each machine boils the whole
+  world down to a single number and the machines compare notes; if two numbers differ the match
+  stops and says so. That summary was being taken from the first thirty-two switches of each thing
+  it looked at and no further. A unit that was immobilised, disguised, deployed or carrying a
+  different rider on one screen and not on another added up to exactly the same number, and
+  thirty-six of the game's sixty-eight special powers never counted at all. The summary covers the
+  whole of it now. This does not stop two machines drifting apart; it stops them drifting apart
+  quietly, and moves the report back to the frame it actually started on.
 
 - **A network game runs at the speed it says it does.** Playing against other people, the
   simulation was gated by two separate clocks at once — the network's and the game's own — and a

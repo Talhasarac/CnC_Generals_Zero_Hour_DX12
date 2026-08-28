@@ -216,8 +216,10 @@ void BitFlags<NUMBITS>::xfer(Xfer* xfer)
 	else if( xfer->getXferMode() == XFER_CRC )
 	{
 
-		// just call the xfer implementation on the data values
-		xfer->xferUser( this, sizeof( this ) );
+		// just call the xfer implementation on the data values.
+		// sizeof(this) is the size of the pointer - four bytes - so every flag word past the first
+		// was outside the CRC.  ObjectStatusMaskType alone carries fifteen bits past that boundary.
+		xfer->xferUser( this, sizeof( *this ) );
 
 	}  // end else if, crc
 	else
