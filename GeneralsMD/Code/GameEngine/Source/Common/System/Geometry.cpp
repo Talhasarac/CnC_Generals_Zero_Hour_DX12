@@ -186,10 +186,10 @@ void GeometryInfo::calcPitches(const Coord3D& thisPos, const GeometryInfo& that,
 	/** @todo srj -- this could be better, by calcing it for all the corners, not just top-center
 		and bottom-center... oh well */
 	dz = (thatPos.z + that.getMaxHeightAbovePosition()) - thisCenter.z;
-	maxPitch = atan2(dz, dxy);
+	maxPitch = ATan2(dz, dxy);
 
 	dz = (thatPos.z - that.getMaxHeightBelowPosition()) - thisCenter.z;
-	minPitch = atan2(dz, dxy);
+	minPitch = ATan2(dz, dxy);
 }
 
 //=============================================================================
@@ -285,8 +285,8 @@ void GeometryInfo::get2DBounds(const Coord3D& geomCenter, Real angle, Region2D& 
 
 		case GEOMETRY_BOX:
 		{
-			Real c = (Real)cos(angle);
-			Real s = (Real)sin(angle);
+			Real c = (Real)Cos(angle);
+			Real s = (Real)Sin(angle);
 			Real exc = m_majorRadius*c;
 			Real eyc = m_minorRadius*c;
 			Real exs = m_majorRadius*s;

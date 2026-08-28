@@ -51,7 +51,7 @@
 //#define DEBUG_RANDOM_LOGIC
 //#define DEBUG_RANDOM_AUDIO
 
-static const Real theMultFactor = 1.0f / (powf(2, 8 * sizeof(UnsignedInt)) - 1.0f);
+static const Real theMultFactor = 1.0f / 4294967295.0f;	///< 2^32 - 1, the largest UnsignedInt
 
 // Initial seed values.
 static UnsignedInt theGameClientSeed[6] =

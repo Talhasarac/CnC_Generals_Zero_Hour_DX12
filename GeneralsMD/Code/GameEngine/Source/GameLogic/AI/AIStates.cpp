@@ -4290,16 +4290,16 @@ void AIFollowWaypointPathState::computeGoal(Bool useGroupOffsets)
 	if (m_priorWaypoint) {
 		dx = dest.x - m_priorWaypoint->getLocation()->x;
 		dy = dest.y - m_priorWaypoint->getLocation()->y;
-		angle = atan2(dy, dx);
+		angle = ATan2(dy, dx);
 		Real deltaAngle = angle - m_angle;
-		Real s = sin(deltaAngle);
-		Real c = cos(deltaAngle);
+		Real s = Sin(deltaAngle);
+		Real c = Cos(deltaAngle);
 		Real x = m_groupOffset.x * c - m_groupOffset.y * s;
 		Real y = m_groupOffset.y * c + m_groupOffset.x * s;
 		m_groupOffset.x = x;
 		m_groupOffset.y = y;
 	}	else {
-		angle = atan2(dy, dx);
+		angle = ATan2(dy, dx);
 	}
 	m_angle = angle;
 #endif

@@ -203,6 +203,20 @@ map. Ctrl+A is still everything at once.
   picked — so your machine skipped a number every other machine used, and from there on the two were
   playing different games. Same for a player with speech turned off. The take is still identical on
   every screen; it just no longer costs the simulation anything to choose it.
+- **Every machine now works out the same angles.** Adding, subtracting, multiplying and dividing are
+  nailed down to the last digit — every processor ever built agrees on them, and the game was always
+  safe there. Angles are not. When the game needs the sine of a heading it asks Windows, and the
+  answer depends on whose processor is underneath and which build of Windows is installed: Intel and
+  AMD chips have always given different last digits, and the file that answers the question ships
+  with your computer rather than with the game. So two people in the same match could work out
+  slightly different facings for the same tank — and a match where the two sides disagree in the
+  last digit is two different matches a few seconds later, which is how a game ends with "you have
+  been disconnected" and nobody having touched anything. The developers knew: there is a table sitting
+  in the original source written for exactly this, with their own note about "repeatability across
+  different machines" over the top of it, and it was switched off before release — it was too coarse
+  to use, wrong by four hundredths of a degree. Every angle in the game now goes through a new table
+  that lives in the game rather than in your copy of Windows, accurate to seven decimal places, and
+  the same on every machine that runs it. That is one whole category of drift gone.
 - **Two machines playing the same match drift apart less.** Defeating a player, playing a second
   map without restarting, and the fingerprint the game uses to notice that two players have stopped
   agreeing — all three had bugs that made one side quietly diverge from the other, and the

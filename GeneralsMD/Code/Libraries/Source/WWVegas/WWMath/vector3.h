@@ -71,6 +71,7 @@
 #define VECTOR3_H
 
 #include "always.h"
+#include "dettrig.h"
 #include "wwmath.h"
 #include <assert.h>
 #ifdef _UNIX
@@ -698,7 +699,7 @@ WWINLINE void Vector3::Scale(const Vector3 & scale)
  *=============================================================================================*/
 WWINLINE void Vector3::Rotate_X(float angle)
 {
-	Rotate_X(sinf(angle),cosf(angle));
+	Rotate_X(DetTrig::Sin(angle),DetTrig::Cos(angle));
 }
 
 
@@ -738,7 +739,7 @@ WWINLINE void Vector3::Rotate_X(float s_angle,float c_angle)
  *=============================================================================================*/
 WWINLINE void Vector3::Rotate_Y(float angle)
 {
-	Rotate_Y(sinf(angle),cosf(angle));
+	Rotate_Y(DetTrig::Sin(angle),DetTrig::Cos(angle));
 }
 
 
@@ -778,7 +779,7 @@ WWINLINE void Vector3::Rotate_Y(float s_angle,float c_angle)
  *=============================================================================================*/
 WWINLINE void Vector3::Rotate_Z(float angle)
 {
-	Rotate_Z(sinf(angle),cosf(angle));
+	Rotate_Z(DetTrig::Sin(angle),DetTrig::Cos(angle));
 }
 
 

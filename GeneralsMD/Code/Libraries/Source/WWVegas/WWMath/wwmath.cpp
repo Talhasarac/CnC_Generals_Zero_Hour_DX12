@@ -41,6 +41,7 @@
 #include <stdlib.h>
 #include "wwdebug.h"
 #include "wwprofile.h"
+#include "dettrig.h"
 
 // TODO: convert to use loouptablemanager...
 float _FastAcosTable[ARC_TABLE_SIZE];
@@ -54,13 +55,16 @@ void		WWMath::Init(void)
 
 	for (int a=0;a<ARC_TABLE_SIZE;++a) {
 		float cv=float(a-ARC_TABLE_SIZE/2)*(1.0f/(ARC_TABLE_SIZE/2));
-		_FastAcosTable[a]=acos(cv);
-		_FastAsinTable[a]=asin(cv);
+		// DetTrig, not the runtime: these tables are seeded once at startup and then
+		// read for the rest of the run, so a machine whose acos differs in the last
+		// bit would carry that difference through every frame.  See dettrig.h.
+		_FastAcosTable[a]=DetTrig::ACos(cv);
+		_FastAsinTable[a]=DetTrig::ASin(cv);
 	}
 
 	for (int a=0;a<SIN_TABLE_SIZE;++a) {
 		float cv= (float)a * 2.0f * WWMATH_PI / SIN_TABLE_SIZE; //float(a-SIN_TABLE_SIZE/2)*(1.0f/(SIN_TABLE_SIZE/2));
-		_FastSinTable[a]=sin(cv);
+		_FastSinTable[a]=DetTrig::Sin(cv);
 		
 		if (a>0) {
 			_FastInvSinTable[a]=1.0f/_FastSinTable[a];

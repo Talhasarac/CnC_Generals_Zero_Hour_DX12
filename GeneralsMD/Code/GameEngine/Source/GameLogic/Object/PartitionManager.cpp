@@ -5733,7 +5733,7 @@ static void hLineAddThreat(Int x1, Int x2, Int y, void *threatValueParms)
 		if (x < 0 || x >= ThePartitionManager->m_cellCountX)
 			continue;
 
-		distance = sqrt( pow(x - parms->xCenter, 2) + pow(y - parms->yCenter, 2) );
+		distance = sqrt( sqr(x - parms->xCenter) + sqr(y - parms->yCenter) );
 		mulVal = 1 - distance / parms->radius;
 		if (mulVal < 0.0f) 
 			mulVal = 0.0f;
@@ -5761,7 +5761,7 @@ static void hLineRemoveThreat(Int x1, Int x2, Int y, void *threatValueParms)
 		if (x < 0 || x >= ThePartitionManager->m_cellCountX)
 			continue;
 
-		distance = sqrt( pow(x - parms->xCenter, 2) + pow(y - parms->yCenter, 2) );
+		distance = sqrt( sqr(x - parms->xCenter) + sqr(y - parms->yCenter) );
 		mulVal = 1 - distance / parms->radius;
 		if (mulVal < 0.0f) 
 			mulVal = 0.0f;
@@ -5789,7 +5789,7 @@ static void hLineAddValue(Int x1, Int x2, Int y, void *threatValueParms)
 		if (x < 0 || x >= ThePartitionManager->m_cellCountX)
 			continue;
 
-		distance = sqrt( pow(x - parms->xCenter, 2) + pow(y - parms->yCenter, 2) );
+		distance = sqrt( sqr(x - parms->xCenter) + sqr(y - parms->yCenter) );
 		mulVal = 1 - distance / parms->radius;
 		if (mulVal < 0.0f) 
 			mulVal = 0.0f;
@@ -5817,7 +5817,7 @@ static void hLineRemoveValue(Int x1, Int x2, Int y, void *threatValueParms)
 		if (x < 0 || x >= ThePartitionManager->m_cellCountX)
 			continue;
 
-		distance = sqrt( pow(x - parms->xCenter, 2) + pow(y - parms->yCenter, 2) );
+		distance = sqrt( sqr(x - parms->xCenter) + sqr(y - parms->yCenter) );
 		mulVal = 1 - distance / parms->radius;
 		if (mulVal < 0.0f) 
 			mulVal = 0.0f;

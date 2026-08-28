@@ -2675,8 +2675,15 @@ void GameLogic::writeMismatchDump( Int numPlayers )
 		 logic bug.  This number depends on the machine's math and nothing else, so the first thing to
 		 compare between two dumps is this line: same value, the game states diverged; different value,
 		 they were never going to agree and no amount of reading the object table below will say why. */
-	fprintf( fp, "Simulation math fingerprint 0x%8.8X (FPU mode 0x%4.4X, expected 0x%4.4X)\n\n",
+	fprintf( fp, "Simulation math fingerprint 0x%8.8X (FPU mode 0x%4.4X, expected 0x%4.4X)\n",
 		SimulationMathCrc::calculate(), getFPMode(), expectedFPMode() );
+
+	/* The line above is the machine's own C runtime, and it is allowed to differ - the
+		 simulation no longer calls it for anything.  This one is the integer trigonometry the
+		 simulation does run on, and it is the same number on every machine that built the same
+		 source, so two dumps that disagree here have a build problem, not a game problem. */
+	fprintf( fp, "Simulation trig fingerprint 0x%8.8X\n\n",
+		SimulationMathCrc::calculateSimulationTrig() );
 
 	for( std::map<Int, UnsignedInt>::const_iterator crcIt = m_cachedCRCs.begin();
 			 crcIt != m_cachedCRCs.end(); ++crcIt )

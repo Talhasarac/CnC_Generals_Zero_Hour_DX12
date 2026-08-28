@@ -675,8 +675,8 @@ void AISkirmishPlayer::buildAIBaseDefenseStructure(const AsciiString &thingName,
 		// "angle > PI/3" only ever bounded the left side and right-side defenses wrapped past
 		// the intended +/-60 degree arc.
 		if (fabs(angle) > PI/3) break;
-		Real s = sin(angle);
-		Real c = cos(angle);
+		Real s = Sin(angle);
+		Real c = Cos(angle);
 
 	  DEBUG_LOG(("buildAIBaseDefenseStructure -- Angle is %f sin %f, cos %f \n", 180*angle/PI, s, c));
 		DEBUG_LOG(("buildAIBaseDefenseStructure -- Offset is %f  %f, Final Position is %f, %f \n", 
@@ -1053,8 +1053,8 @@ void AISkirmishPlayer::adjustBuildList(BuildListInfo *list)
 	// belongs to the position transform only - baseRotation alone is what the buildings turn by.
 	Real angle = baseRotation + 3*PI/4;
 
-	Real s = sin(angle);
-	Real c = cos(angle);
+	Real s = Sin(angle);
+	Real c = Cos(angle);
 
 	// every entry moves with the base, not just the command center. This loop used to carry a
 	// condition copy-pasted from the search loop above that tested list->getTemplateName() - the

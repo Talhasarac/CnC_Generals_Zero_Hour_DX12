@@ -40,6 +40,7 @@
 #include "pot.h"
 #include "vp.h"
 #include "castres.h"
+#include "dettrig.h"
 
 static const float EPS = 1e-4f;
 
@@ -185,15 +186,16 @@ TEST(wwmath_acos_asin_clamp_out_of_range)
 {
 	ensure_math_init();
 
-	/* WWMath::Acos/Asin are bare wrappers over libm - they do NOT clamp, so a
-	   dot product that lands a hair outside [-1,1] (which normalised vectors
-	   do all the time) yields NaN.  Pinned here so nobody assumes otherwise:
-	   callers have to clamp themselves.  Fast_* inherits it, because outside
-	   +/-0.975 it defers to the exact form. */
-	CHECK(WWMath::Acos(1.0000001f) != WWMath::Acos(1.0000001f));
-	CHECK(WWMath::Asin(-1.0000001f) != WWMath::Asin(-1.0000001f));
-	CHECK(WWMath::Fast_Acos(1.5f) != WWMath::Fast_Acos(1.5f));
-	CHECK(WWMath::Fast_Asin(-1.5f) != WWMath::Fast_Asin(-1.5f));
+	/* Acos and Asin used to be bare wrappers over libm and did NOT clamp, so a
+	   dot product that landed a hair outside [-1,1] - which normalised vectors
+	   do all the time - came back NaN, and Fast_* inherited it because outside
+	   +/-0.975 it defers to the exact form.  They now go through DetTrig, which
+	   clamps its argument, so those calls return the boundary value instead.
+	   That is a behaviour change and this is where it is pinned. */
+	CHECK_EQ(WWMath::Acos(1.0000001f), WWMath::Acos(1.0f));
+	CHECK_EQ(WWMath::Asin(-1.0000001f), WWMath::Asin(-1.0f));
+	CHECK_EQ(WWMath::Fast_Acos(1.5f), WWMath::Fast_Acos(1.0f));
+	CHECK_EQ(WWMath::Fast_Asin(-1.5f), WWMath::Fast_Asin(-1.0f));
 
 	/* Exactly on the boundary is still finite. */
 	CHECK_NEAR(WWMath::Acos(1.0f), 0.0f, EPS);
@@ -1190,4 +1192,235 @@ TEST(vp_clamp_vector4)
 		CHECK_NEAR(dst[i].Z, 0.0f, EPS);
 		CHECK_NEAR(dst[i].W, 0.5f, EPS);
 	}
+}
+
+
+/* ---------------------------------------------------------------------------
+   DetTrig - the trigonometry the simulation runs on.
+
+   The point of these functions is not accuracy, it is that every machine gets
+   the same bits.  The C runtime's sin and cos are not specified bit for bit,
+   they dispatch on the host CPU, and ucrtbase ships with Windows rather than
+   with the game; the x87 FSIN and FCOS that WWMath used to inline here are
+   microcoded differently by Intel and by AMD.  A lockstep match whose two ends
+   disagree about one unit's facing by one bit is two different games a second
+   later.
+
+   So there are two kinds of test below.  The accuracy ones compare against the
+   runtime and are only asking "is the table good enough to replace it"; the
+   bit-stability one is the actual guarantee, and it is the one that fails if a
+   table is regenerated or a scale is changed.
+   --------------------------------------------------------------------------- */
+
+static float dettrig_worst_error(float (*ours)(float), double (*ref)(double),
+	double lo, double hi, int samples)
+{
+	float worst = 0.0f;
+	for (int i = 0; i <= samples; ++i)
+	{
+		float x = float(lo + (hi - lo) * i / double(samples));
+		float err = float(fabs(double(ours(x)) - ref(double(x))));
+		if (err > worst)
+			worst = err;
+	}
+	return worst;
+}
+
+TEST(dettrig_sin_and_cos_track_the_reference_over_several_turns)
+{
+	/* One float epsilon at 1.0 is 1.2e-7, and the table's interpolation budget
+	   is 7.4e-8 on top of the 24-bit value quantization.  The 4096-entry 12-bit
+	   table EA left behind switched off was 7.7e-4 here - 0.04 degrees of
+	   permanent heading error - which is why this is a rewrite, not a revival. */
+	CHECK(dettrig_worst_error(DetTrig::Sin, sin, -20.0, 20.0, 200000) < 3.0e-7f);
+	CHECK(dettrig_worst_error(DetTrig::Cos, cos, -20.0, 20.0, 200000) < 3.0e-7f);
+}
+
+TEST(dettrig_reduces_arguments_far_outside_one_turn)
+{
+	// the reduction runs in double for exactly this reason
+	CHECK(dettrig_worst_error(DetTrig::Sin, sin, -1000.0, 1000.0, 200000) < 3.0e-7f);
+}
+
+TEST(dettrig_sin_and_cos_are_exact_where_they_can_be)
+{
+	CHECK_EQ(DetTrig::Sin(0.0f), 0.0f);
+	CHECK_EQ(DetTrig::Cos(0.0f), 1.0f);
+	CHECK_EQ(DetTrig::Sin(-0.0f), 0.0f);
+}
+
+TEST(dettrig_atan2_covers_every_quadrant)
+{
+	static const float pts[] = { -7.0f, -1.3f, -0.02f, 0.0f, 0.02f, 1.3f, 7.0f };
+	float worst = 0.0f;
+	for (int i = 0; i < 7; ++i)
+	{
+		for (int j = 0; j < 7; ++j)
+		{
+			/* The negative x axis is checked on its own below: atan2 answers
+			   -PI for a negative zero y and this answers +PI for both zeroes. */
+			if (pts[i] == 0.0f && pts[j] < 0.0f)
+				continue;
+			float err = float(fabs(double(DetTrig::ATan2(pts[i], pts[j]))
+				- atan2(double(pts[i]), double(pts[j]))));
+			if (err > worst)
+				worst = err;
+		}
+	}
+	CHECK(worst < 3.0e-7f);
+}
+
+TEST(dettrig_atan2_answers_the_negative_x_axis_as_positive_pi)
+{
+	/* Half a turn is 2^31, which does not fit a signed 32-bit int: fold the
+	   quadrant in 32 bits and this case wraps round to -PI.  It is folded in 64. */
+	CHECK_NEAR(DetTrig::ATan2(0.0f, -1.0f), 3.14159265f, 1.0e-6f);
+	CHECK(DetTrig::ATan2(0.0f, -1.0f) > 0.0f);
+	CHECK_EQ(DetTrig::ATan2(0.0f, 0.0f), 0.0f);
+	CHECK_EQ(DetTrig::ATan2(0.0f, 1.0f), 0.0f);
+}
+
+TEST(dettrig_DEFECT_atan2_ignores_the_sign_of_a_zero_y)
+{
+	/* atan2f(-0.0f, -1.0f) is -PI; this returns +PI, because the quadrant is
+	   picked with (y >= 0.0f) and negative zero compares equal to zero.  Nothing
+	   the simulation computes an angle from produces a negative zero on purpose,
+	   so this is pinned rather than special-cased - a future change to it should
+	   be a decision. */
+	CHECK_EQ(DetTrig::ATan2(-0.0f, -1.0f), DetTrig::ATan2(0.0f, -1.0f));
+}
+
+TEST(dettrig_acos_and_asin_track_the_reference)
+{
+	CHECK(dettrig_worst_error(DetTrig::ACos, acos, -1.0, 1.0, 200000) < 6.0e-7f);
+	CHECK(dettrig_worst_error(DetTrig::ASin, asin, -1.0, 1.0, 200000) < 5.0e-7f);
+
+	CHECK_NEAR(DetTrig::ACos(-1.0f), 3.14159265f, 1.0e-6f);
+	CHECK_EQ(DetTrig::ACos(1.0f), 0.0f);
+	CHECK_NEAR(DetTrig::ASin(1.0f), 1.57079633f, 1.0e-6f);
+	CHECK_NEAR(DetTrig::ASin(-1.0f), -1.57079633f, 1.0e-6f);
+
+	/* Out of domain clamps instead of returning a NaN.  A dot product of two
+	   normalised vectors lands a hair outside [-1,1] all the time, and the
+	   callers have never checked. */
+	CHECK_EQ(DetTrig::ACos(-2.0f), DetTrig::ACos(-1.0f));
+	CHECK_EQ(DetTrig::ASin(2.0f), DetTrig::ASin(1.0f));
+}
+
+TEST(dettrig_acos_keeps_its_accuracy_next_to_one)
+{
+	/* The half-angle form, 2*atan2(sqrt(1-x), sqrt(1+x)), is there for this:
+	   the obvious atan2(sqrt(1 - x*x), x) has cancelled its significant bits
+	   away by the time x reaches 0.9999. */
+	static const float near_one[] = { 0.99f, 0.9999f, 0.999999f, -0.99f, -0.9999f };
+	for (int i = 0; i < 5; ++i)
+		CHECK_NEAR(DetTrig::ACos(near_one[i]), acos(double(near_one[i])), 3.0e-7);
+}
+
+TEST(dettrig_tan_matches_the_reference_away_from_the_poles)
+{
+	for (int i = -1000; i <= 1000; ++i)
+	{
+		float x = float(i) * 0.0014f;		// stays inside +-1.4, clear of PI/2
+		CHECK_NEAR(DetTrig::Tan(x), tan(double(x)), 4.0e-6);
+	}
+}
+
+TEST(dettrig_identities_hold)
+{
+	for (int i = 0; i < 3000; ++i)
+	{
+		float a = float(i) * 0.00419f - 6.0f;
+		float s = DetTrig::Sin(a);
+		float c = DetTrig::Cos(a);
+		CHECK_NEAR(s * s + c * c, 1.0f, 5.0e-7f);
+
+		if (a > -3.14f && a < 3.14f)
+			CHECK_NEAR(DetTrig::ATan2(s, c), a, 5.0e-7f);
+	}
+}
+
+TEST(dettrig_is_repeatable)
+{
+	// no state, no table built at startup, no dependence on the rounding mode
+	for (int i = 0; i < 500; ++i)
+	{
+		float a = float(i) * 0.017f;
+		CHECK_EQ(DetTrig::Sin(a), DetTrig::Sin(a));
+		CHECK_EQ(DetTrig::ATan2(a, 1.0f - a), DetTrig::ATan2(a, 1.0f - a));
+		CHECK_EQ(DetTrig::ACos(a * 0.002f), DetTrig::ACos(a * 0.002f));
+	}
+}
+
+TEST(dettrig_output_is_bit_stable)
+{
+	/* The whole point of the exercise: this number is a property of the source
+	   and not of the machine.  Two builds of the same tree must produce it on
+	   any CPU and any Windows.  If it changes after an edit to dettrig.cpp or
+	   to Tools/gentrigtables.py, that edit moved every angle in the simulation
+	   and invalidated every replay along with it. */
+	unsigned int sum = 2166136261u;
+	for (int i = 0; i < 4096; ++i)
+	{
+		float a = float(i) * 0.0031415f - 6.2831f;
+		float vals[6];
+		vals[0] = DetTrig::Sin(a);
+		vals[1] = DetTrig::Cos(a);
+		vals[2] = DetTrig::Tan(a * 0.2f);
+		vals[3] = DetTrig::ATan2(a, 1.7f - a);
+		vals[4] = DetTrig::ACos(a * 0.15f);
+		vals[5] = DetTrig::ASin(a * 0.15f);
+		for (int k = 0; k < 6; ++k)
+		{
+			unsigned int bits;
+			memcpy(&bits, &vals[k], sizeof(bits));
+			sum = (sum ^ bits) * 16777619u;
+		}
+	}
+
+	const unsigned int expected = 0xD70EF14Bu;
+	if (sum != expected)
+		printf("    dettrig fingerprint is 0x%08X, expected 0x%08X\n", sum, expected);
+	CHECK_EQ(sum, expected);
+}
+
+TEST(wwmath_trig_is_dettrig)
+{
+	// WWMath::Sin and Cos were inline x87 FSIN/FCOS - the literal hazard here.
+	for (int i = 0; i < 200; ++i)
+	{
+		float a = float(i) * 0.031f - 3.1f;
+		CHECK_EQ(WWMath::Sin(a), DetTrig::Sin(a));
+		CHECK_EQ(WWMath::Cos(a), DetTrig::Cos(a));
+		CHECK_EQ(WWMath::Atan2(a, 1.3f), DetTrig::ATan2(a, 1.3f));
+		CHECK_EQ(WWMath::Acos(a * 0.3f), DetTrig::ACos(a * 0.3f));
+		CHECK_EQ(WWMath::Asin(a * 0.3f), DetTrig::ASin(a * 0.3f));
+	}
+}
+
+TEST(rotation_helpers_go_through_dettrig)
+{
+	/* This is the one that matters to the game: an object's facing round trips
+	   through Matrix3D::Rotate_Z on the way in and Get_Z_Rotation on the way
+	   out, every logic frame.  Both are WWMath's, which is why the table lives
+	   here and not in GameEngine. */
+	const float theta = 0.7f;
+
+	Matrix3D m;
+	m.Make_Identity();
+	m.Rotate_Z(theta);
+	CHECK_EQ(m[0][0], DetTrig::Cos(theta));
+	CHECK_EQ(m[1][0], DetTrig::Sin(theta));
+	CHECK_EQ(m.Get_Z_Rotation(),
+		DetTrig::ATan2(DetTrig::Sin(theta), DetTrig::Cos(theta)));
+
+	Matrix3x3 m3;
+	m3.Make_Identity();
+	m3.Rotate_X(theta);
+	CHECK_EQ(m3[1][1], DetTrig::Cos(theta));
+
+	Vector3 v(1.0f, 0.0f, 0.0f);
+	v.Rotate_Z(theta);
+	CHECK_EQ(v.X, DetTrig::Cos(theta));
+	CHECK_EQ(v.Y, DetTrig::Sin(theta));
 }

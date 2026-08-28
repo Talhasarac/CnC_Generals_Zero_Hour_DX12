@@ -43,6 +43,7 @@
 #define WWMATH_H
 
 #include "always.h"
+#include "dettrig.h"
 #include <math.h>
 #include <float.h>
 #include <assert.h>
@@ -146,8 +147,15 @@ static WWINLINE float Fast_Asin(float val);
 static WWINLINE float Asin(float val);
 
 
-static float		Atan(float x) { return static_cast<float>(atan(x)); }
-static float		Atan2(float y,float x) { return static_cast<float>(atan2(y,x)); }
+// Sin, Cos, Atan, Atan2, Acos and Asin all go through DetTrig, which is the
+// same integer table on every machine.  The C runtime is not: it dispatches on
+// the host CPU and ships with Windows rather than with the game, and the x87
+// FSIN and FCOS instructions that used to be inlined here are microcoded
+// differently by Intel and by AMD.  An object's facing round trips through
+// Matrix3D::Rotate_Z and Get_Z_Rotation every frame, so those differences land
+// straight in the simulation.  See dettrig.h.
+static float		Atan(float x) { return DetTrig::ATan(x); }
+static float		Atan2(float y,float x) { return DetTrig::ATan2(y,x); }
 static float		Sign(float val);
 static float		Ceil(float val) { return ceilf(val); }
 static float		Floor(float val) { return floorf(val); }
@@ -341,45 +349,19 @@ WWINLINE long WWMath::Float_To_Long(double f)
 // Cos
 // ----------------------------------------------------------------------------
 
-#if defined(_MSC_VER) && defined(_M_IX86)
 WWINLINE float WWMath::Cos(float val)
 {
-	float retval;
-	__asm {
-		fld [val]
-		fcos
-		fstp [retval]
-	}
-	return retval;
+	return DetTrig::Cos(val);
 }
-#else
-WWINLINE float WWMath::Cos(float val)
-{
-	return cosf(val);
-}
-#endif
 
 // ----------------------------------------------------------------------------
 // Sin
 // ----------------------------------------------------------------------------
 
-#if defined(_MSC_VER) && defined(_M_IX86)
 WWINLINE float WWMath::Sin(float val)
 {
-	float retval;
-	__asm {
-		fld [val]
-		fsin
-		fstp [retval]
-	}
-	return retval;
+	return DetTrig::Sin(val);
 }
-#else
-WWINLINE float WWMath::Sin(float val)
-{
-	return sinf(val);
-}
-#endif
 
 // ----------------------------------------------------------------------------
 // Fast, table based sin
@@ -509,7 +491,7 @@ WWINLINE float WWMath::Fast_Acos(float val)
 
 WWINLINE float WWMath::Acos(float val)
 {
-	return (float)acos(val);
+	return DetTrig::ACos(val);
 }
 
 // ----------------------------------------------------------------------------
@@ -546,7 +528,7 @@ WWINLINE float WWMath::Fast_Asin(float val)
 
 WWINLINE float WWMath::Asin(float val)
 {
-	return (float)asin(val);
+	return DetTrig::ASin(val);
 }
 
 // ----------------------------------------------------------------------------

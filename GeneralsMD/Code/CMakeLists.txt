@@ -46,6 +46,13 @@ if(MSVC)
   # sources in a single project and was the long pole.  /FS above is what makes this
   # safe - the PDB writes are serialized in the compilers.
   add_compile_options(/MP)
+  # /arch:SSE2 is already the 32-bit default on this compiler; it is written down because
+  # the simulation now depends on it.  x87 carries 80-bit intermediates whose spills round
+  # a second time, and FPUControl.cpp pins the control word to 24-bit precision, which would
+  # cut the double-precision argument reduction in WWMath/dettrig.cpp down to float and give
+  # a different angle on a machine that spilled at a different point.  SSE2 arithmetic is
+  # done at the declared width, so every machine gets the same bits.  See dettrig.h.
+  add_compile_options(/arch:SSE2)
   add_link_options(/DEBUG)
 endif()
 
@@ -73,6 +80,7 @@ add_library(wwmath STATIC
   ${WW}/WWMath/colmathobbox.cpp   ${WW}/WWMath/colmathobbtri.cpp
   ${WW}/WWMath/colmathplane.cpp   ${WW}/WWMath/colmathsphere.cpp
   ${WW}/WWMath/cullsys.cpp        ${WW}/WWMath/curve.cpp
+  ${WW}/WWMath/dettrig.cpp
   ${WW}/WWMath/euler.cpp          ${WW}/WWMath/frustum.cpp
   ${WW}/WWMath/gridcull.cpp       ${WW}/WWMath/hermitespline.cpp
   ${WW}/WWMath/lineseg.cpp        ${WW}/WWMath/lookuptable.cpp
@@ -533,6 +541,10 @@ add_lib_test(test_gameengine gameengine)
 # GameEngineDevice, which Phase 4 ports; stand-ins until then.
 target_sources(test_gameengine PRIVATE ${TESTS}/test_gameengine_stubs.cpp)
 set_target_properties(test_gameengine PROPERTIES CXX_STANDARD 17)
+# simulation_uses_no_runtime_trig reads the engine's own sources back off disk to prove nothing in
+# GameLogic or Common has gone back to calling sinf().
+target_compile_definitions(test_gameengine PRIVATE
+  GAMEENGINE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/GameEngine")
 
 # The three hand-written self-checks predate the harness; run them from ctest
 # too so one command covers everything.

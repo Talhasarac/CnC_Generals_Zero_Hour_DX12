@@ -4282,3 +4282,234 @@ TEST(listbox_scroll_offset_survives_a_list_taller_than_a_signed_short)
 	CHECK_EQ( list.displayPos, 59800 );
 	CHECK( list.displayPos > 0 );
 }
+
+// ------------------------------------------------------------------------------------------------
+// The trigonometry the simulation runs on.
+//
+// IEEE 754 pins +, -, *, / and sqrt: every machine rounds those identically, so the simulation was
+// always safe there.  It says nothing at all about sin, cos, atan2, asin, acos or pow, and the
+// implementations duly differ - ucrtbase dispatches on the host CPU and ships with Windows rather
+// than with the game, and x87's FSIN and FCOS are microcoded differently by Intel and by AMD.  In a
+// lockstep simulation one bit of disagreement about a unit's facing is two different games a second
+// later.  Those calls now go through WWMath's DetTrig, which is an integer table.
+// ------------------------------------------------------------------------------------------------
+
+/* The trig fingerprint is the other half of the mismatch dump.  The first number in that dump is
+	 the machine's C runtime and is allowed to differ between two players; this one is not, because
+	 it is what the simulation actually computes with.  If it ever differs across two machines the
+	 desync is in the arithmetic and nowhere else. */
+TEST(simulation_trig_fingerprint_is_pinned)
+{
+	setFPMode();
+
+	const UnsignedInt fingerprint = SimulationMathCrc::calculateSimulationTrig();
+
+	/* Pinned to a literal on purpose: a table regenerated from Tools/gentrigtables.py, a changed
+		 scale in dettrig.cpp, or a compiler that starts contracting the interpolation differently all
+		 move every angle in the simulation, and this is where that gets noticed rather than in
+		 somebody's replay.  Update it deliberately, never to make the build green. */
+	const UnsignedInt expected = 0xEACAF02Bu;
+	if (fingerprint != expected)
+		printf("    simulation trig fingerprint is 0x%8.8X, expected 0x%8.8X\n", fingerprint, expected);
+	CHECK_EQ(fingerprint, expected);
+
+	// and, like the runtime one, it must not depend on the FPU mode the caller was in
+	CHECK_EQ(SimulationMathCrc::calculateSimulationTrig(), fingerprint);
+	_controlfp(_PC_53, _MCW_PC);
+	CHECK_EQ(SimulationMathCrc::calculateSimulationTrig(), fingerprint);
+	_controlfp(_PC_64 | _RC_CHOP, _MCW_PC | _MCW_RC);
+	CHECK_EQ(SimulationMathCrc::calculateSimulationTrig(), fingerprint);
+
+	setFPMode();
+	CHECK_EQ(getFPMode(), expectedFPMode());
+}
+
+/* Strip C and C++ comments and the contents of string and character literals, so the scanner below
+	 reads code and nothing else.  EA's own comments talk about sin() and acos() in several places. */
+static void stripCommentsAndLiterals(char *text, size_t length)
+{
+	size_t i = 0;
+	while (i < length)
+	{
+		if (text[i] == '/' && i + 1 < length && text[i + 1] == '/')
+		{
+			while (i < length && text[i] != '\n')
+				text[i++] = ' ';
+		}
+		else if (text[i] == '/' && i + 1 < length && text[i + 1] == '*')
+		{
+			text[i++] = ' ';
+			text[i++] = ' ';
+			while (i < length && !(text[i] == '*' && i + 1 < length && text[i + 1] == '/'))
+				text[i] = (text[i] == '\n') ? '\n' : ' ', ++i;
+			if (i < length) text[i++] = ' ';
+			if (i < length) text[i++] = ' ';
+		}
+		else if (text[i] == '"' || text[i] == '\'')
+		{
+			const char quote = text[i];
+			text[i++] = ' ';
+			while (i < length && text[i] != quote)
+			{
+				if (text[i] == '\\' && i + 1 < length)
+					text[i++] = ' ';
+				if (i < length)
+					text[i++] = ' ';
+			}
+			if (i < length) text[i++] = ' ';
+		}
+		else
+		{
+			++i;
+		}
+	}
+}
+
+static bool isIdentChar(char c)
+{
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
+}
+
+/* The C runtime names the simulation may not call.  Everything here is implementation-defined;
+	 sqrt, fabs, floor, ceil and fmod are absent because IEEE pins them and they are fine.
+
+	 Bare "log" is absent too, and that is a compromise: <math.h>'s log collides with the engine's
+	 own logging methods, so scanning for it is all false positives.  logf and log10 cover the form
+	 anything doing real math would actually write. */
+static const char *const theForbiddenMathNames[] = {
+	"sin", "sinf", "cos", "cosf", "tan", "tanf",
+	"asin", "asinf", "acos", "acosf", "atan", "atanf", "atan2", "atan2f",
+	"pow", "powf", "exp", "expf", "logf", "log10", "log10f",
+	"sinh", "sinhf", "cosh", "coshf", "tanh", "tanhf",
+	NULL
+};
+
+static int scanSourceForRuntimeMath(const char *path, const char *displayName)
+{
+	FILE *fp = fopen(path, "rb");
+	if (fp == NULL)
+		return 0;
+
+	fseek(fp, 0, SEEK_END);
+	long size = ftell(fp);
+	fseek(fp, 0, SEEK_SET);
+
+	char *text = (char *)malloc((size_t)size + 1);
+	size_t got = fread(text, 1, (size_t)size, fp);
+	fclose(fp);
+	text[got] = 0;
+
+	stripCommentsAndLiterals(text, got);
+
+	int hits = 0;
+	for (int n = 0; theForbiddenMathNames[n] != NULL; ++n)
+	{
+		const char *name = theForbiddenMathNames[n];
+		const size_t len = strlen(name);
+		const char *at = text;
+		while ((at = strstr(at, name)) != NULL)
+		{
+			const char *after = at + len;
+			const char *before = (at == text) ? NULL : at - 1;
+
+			// a whole identifier, called: nothing glued to either end, an open paren after it
+			bool wholeWord = (before == NULL || !isIdentChar(*before)) && !isIdentChar(*after);
+			const char *p = after;
+			while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') ++p;
+			bool called = (*p == '(');
+
+			/* Not a member: "->log(", ".log(" and "::log(" are the engine's own, and a declaration
+				 like "void log(" is one too - only a call has a value in front of it. */
+			const char *q = before;
+			while (q != NULL && q > text && (*q == ' ' || *q == '\t')) --q;
+			bool member = (q != NULL && (*q == '.' || *q == '>' || *q == ':'));
+
+			if (wholeWord && called && !member)
+			{
+				if (hits < 4)
+				{
+					int line = 1;
+					for (const char *c = text; c < at; ++c)
+						if (*c == '\n') ++line;
+					printf("    %s:%d calls %s()\n", displayName, line, name);
+				}
+				++hits;
+			}
+			at = after;
+		}
+	}
+
+	free(text);
+	return hits;
+}
+
+static int scanTreeForRuntimeMath(const char *dir, const char *display, int *filesScanned)
+{
+	char pattern[MAX_PATH];
+	sprintf(pattern, "%s\\*", dir);
+
+	WIN32_FIND_DATAA find;
+	HANDLE h = FindFirstFileA(pattern, &find);
+	if (h == INVALID_HANDLE_VALUE)
+		return 0;
+
+	int hits = 0;
+	do
+	{
+		if (find.cFileName[0] == '.')
+			continue;
+
+		char child[MAX_PATH];
+		char childDisplay[MAX_PATH];
+		sprintf(child, "%s\\%s", dir, find.cFileName);
+		sprintf(childDisplay, "%s/%s", display, find.cFileName);
+
+		if (find.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+		{
+			hits += scanTreeForRuntimeMath(child, childDisplay, filesScanned);
+			continue;
+		}
+
+		const char *dot = strrchr(find.cFileName, '.');
+		if (dot == NULL || (strcmp(dot, ".cpp") != 0 && strcmp(dot, ".h") != 0))
+			continue;
+
+		/* SimulationMathCrc.cpp is the deliberate exception: its whole job is to fingerprint the
+			 machine's own runtime math, so it has to call it.  MiniLog defines a method named log. */
+		if (strcmp(find.cFileName, "SimulationMathCrc.cpp") == 0
+			|| strcmp(find.cFileName, "MiniLog.cpp") == 0
+			|| strcmp(find.cFileName, "MiniLog.h") == 0)
+			continue;
+
+		++(*filesScanned);
+		hits += scanSourceForRuntimeMath(child, childDisplay);
+	}
+	while (FindNextFileA(h, &find));
+
+	FindClose(h);
+	return hits;
+}
+
+/* Promised by Libraries/Include/Lib/Trig.h, and the only thing that keeps the conversion from
+	 rotting: nothing stops the next person from typing sinf(). */
+TEST(simulation_uses_no_runtime_trig)
+{
+	static const char *const roots[] = {
+		"Source\\GameLogic", "Source\\Common", "Include\\GameLogic", "Include\\Common", NULL
+	};
+
+	int filesScanned = 0;
+	int hits = 0;
+	for (int i = 0; roots[i] != NULL; ++i)
+	{
+		char dir[MAX_PATH];
+		sprintf(dir, "%s\\%s", GAMEENGINE_SOURCE_DIR, roots[i]);
+		hits += scanTreeForRuntimeMath(dir, roots[i], &filesScanned);
+	}
+
+	// a scanner that found nothing because it looked nowhere would pass silently
+	CHECK(filesScanned > 500);
+	if (hits != 0)
+		printf("    %d runtime math call(s) in the simulation; use Lib/Trig.h\n", hits);
+	CHECK_EQ(hits, 0);
+}

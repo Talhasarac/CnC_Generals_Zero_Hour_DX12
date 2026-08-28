@@ -924,7 +924,7 @@ UnsignedInt WeaponTemplate::fireWeaponTemplate
 			targetPos.set( victimPos );
 		}
 		Real reAngle = getWeaponRecoilAmount();
-		Real reDir = reAngle != 0.0f ? (atan2(victimPos->y - sourcePos->y, victimPos->x - sourcePos->x)) : 0.0f;
+		Real reDir = reAngle != 0.0f ? (ATan2(victimPos->y - sourcePos->y, victimPos->x - sourcePos->x)) : 0.0f;
 		VeterancyLevel v = sourceObj->getVeterancyLevel();
 		const FXList* fx = isProjectileDetonation ? getProjectileDetonateFX(v) : getFireFX(v);
 		
@@ -2077,7 +2077,7 @@ Bool Weapon::computeApproachTarget(const Object *source, const Object *target, c
 		if (source->isAboveTerrain())
 		{
 			// Don't do a 180 degree turn.
-			Real angle = atan2(-dir.y, -dir.x);
+			Real angle = ATan2(-dir.y, -dir.x);
 			// both inputs are already in [-PI,PI], so the difference is in [-2PI,2PI] and the
 			// old >2PI / <-2PI clamps could never fire: two headings 0.3 rad apart around the
 			// +/-PI seam measured as ~6 rad and read as "facing away".
@@ -2091,7 +2091,7 @@ Bool Weapon::computeApproachTarget(const Object *source, const Object *target, c
 
 		if (angleOffset != 0.0f)
 		{
-			Real angle = atan2(dir.y, dir.x);
+			Real angle = ATan2(dir.y, dir.x);
 			dir.x = (Real)Cos(angle + angleOffset);
 			dir.y = (Real)Sin(angle + angleOffset);
 		}
@@ -2138,7 +2138,7 @@ Bool Weapon::computeApproachTarget(const Object *source, const Object *target, c
 
 		if (angleOffset != 0.0f)
 		{
-			Real angle = atan2(dir.y, dir.x);
+			Real angle = ATan2(dir.y, dir.x);
 			dir.x = (Real)Cos(angle + angleOffset);
 			dir.y = (Real)Sin(angle + angleOffset);
 		}

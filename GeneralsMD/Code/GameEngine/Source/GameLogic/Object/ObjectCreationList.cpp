@@ -368,7 +368,7 @@ public:
 			}
 
 
-			Real orient = atan2( moveToPos.y - startPos.y, moveToPos.x - startPos.x);
+			Real orient = ATan2( moveToPos.y - startPos.y, moveToPos.x - startPos.x);
 			if( m_data.m_distToTarget > 0 )
 			{
 				const Real SLOP = 1.5f;
@@ -1119,7 +1119,7 @@ protected:
 
 				objUp->applyForce(&force);
 				if (m_orientInForceDirection)
-					orientation = atan2(force.y, force.x);
+					orientation = ATan2(force.y, force.x);
 
 			}
 		}
@@ -1207,7 +1207,7 @@ protected:
 				objUp->applyForce(&force);
 				if (m_orientInForceDirection)
 				{
-					orientation = atan2(force.y, force.x);
+					orientation = ATan2(force.y, force.x);
 				}
 				DUMPREAL(orientation);
 				objUp->setAngles(orientation, 0, 0);
