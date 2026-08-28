@@ -36,6 +36,8 @@
 #include "GameNetwork/CushionMetrics.h"
 #include "GameNetwork/LinkSimulation.h"
 #include "Common/Energy.h"
+#include "Common/RandomValue.h"
+#include "GameLogic/LogicRandomValue.h"
 #include "GameNetwork/CrcAgreement.h"
 #include <float.h>
 #include "GameClient/Water.h"
@@ -2674,6 +2676,71 @@ TEST(crcagreement_a_room_with_nobody_left_in_it_is_not_a_mismatch)
 	// one player alone in the room agrees with themselves
 	reported[0] = TRUE; connected[0] = TRUE; crc[0] = 0x99u;
 	CHECK_EQ( crcAgreement( reported, crc, connected, 2, 1 ), CRC_AGREEMENT_AGREE );
+}
+
+// ---------------------------------------------------------------------------------------------
+// Reading the shared random stream without spending it.  Client-side effects - a sound the player
+// muted, a particle the detail settings threw away - used to roll from the logic stream, so
+// whether they happened at all changed how the simulation unfolded on that machine.
+// ---------------------------------------------------------------------------------------------
+
+TEST(logicrandom_unchanged_does_not_move_the_shared_seed)
+{
+	InitGameLogicRandom( 12345 );
+	const UnsignedInt before = GetGameLogicRandomSeedCRC();
+
+	for (int i = 0; i < 50; ++i)
+	{
+		GetGameLogicRandomValueUnchanged( 0, 99 );
+		GetGameLogicRandomValueRealUnchanged( 0.0f, 1.0f );
+	}
+
+	// the whole point: a machine that made these calls and a machine that skipped them are still
+	// holding the same seed, so they still agree about the next thing the simulation rolls.
+	CHECK_EQ( GetGameLogicRandomSeedCRC(), before );
+
+	// and the ordinary call still does move it, or the check above proves nothing
+	GetGameLogicRandomValue( 0, 99, __FILE__, __LINE__ );
+	CHECK_NE( GetGameLogicRandomSeedCRC(), before );
+}
+
+TEST(logicrandom_unchanged_is_the_same_answer_on_every_machine)
+{
+	InitGameLogicRandom( 777 );
+	const Int first = GetGameLogicRandomValueUnchanged( 0, 1000000 );
+
+	// same seed state, same answer - repeatedly, because it does not consume anything
+	for (int i = 0; i < 10; ++i)
+		CHECK_EQ( GetGameLogicRandomValueUnchanged( 0, 1000000 ), first );
+
+	// a second machine that reached this point through the same logic holds the same seed and gets
+	// the same answer, which is what made this safe to use for a scripted sound's variant pick
+	InitGameLogicRandom( 777 );
+	CHECK_EQ( GetGameLogicRandomValueUnchanged( 0, 1000000 ), first );
+
+	// once the simulation itself rolls, the answer moves on with it
+	GetGameLogicRandomValue( 0, 99, __FILE__, __LINE__ );
+	InitGameLogicRandom( 778 );
+	CHECK_NE( GetGameLogicRandomValueUnchanged( 0, 1000000 ), first );
+}
+
+TEST(logicrandom_unchanged_honours_its_bounds)
+{
+	InitGameLogicRandom( 4242 );
+	for (int i = 0; i < 200; ++i)
+	{
+		GetGameLogicRandomValue( 0, 99, __FILE__, __LINE__ );	// walk the seed along
+
+		const Int n = GetGameLogicRandomValueUnchanged( 7, 11 );
+		CHECK( n >= 7 && n <= 11 );
+
+		const Real r = GetGameLogicRandomValueRealUnchanged( -2.0f, 2.0f );
+		CHECK( r >= -2.0f && r <= 2.0f );
+	}
+
+	// degenerate ranges answer the way the ordinary versions do
+	CHECK_EQ( GetGameLogicRandomValueUnchanged( 5, 5 ), 5 );
+	CHECK_EQ( GetGameLogicRandomValueRealUnchanged( 3.0f, 3.0f ), 3.0f );
 }
 
 // ---------------------------------------------------------------------------------------------

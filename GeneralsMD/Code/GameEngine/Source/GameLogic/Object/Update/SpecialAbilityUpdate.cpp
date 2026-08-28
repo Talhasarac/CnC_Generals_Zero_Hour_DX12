@@ -1411,7 +1411,9 @@ void SpecialAbilityUpdate::triggerAbilityEffect()
           if (sys)
           {
             Coord3D offs = {0,0,0};
-            target->getGeometryInfo().makeRandomOffsetWithinFootprint( offs );
+            // Client stream: this offset is only ever reached when the particle system was actually
+            // created, which the local detail settings decide.  See EMPUpdate for the same fix.
+            target->getGeometryInfo().makeRandomOffsetWithinFootprint( offs, TRUE );
 
             sys->attachToObject(target);
             sys->setPosition( &offs );

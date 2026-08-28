@@ -234,6 +234,45 @@ DEBUG_LOG(( "%d: GetGameLogicRandomValue = %d (%d - %d), %s line %d\n",
 }
 
 //
+// Integer random value read from the logic stream without advancing it.
+//
+// Every machine in a game holds the same logic seed, so a value rolled from a copy of it is the
+// same everywhere - but the shared seed does not move, so a machine that never makes the call at
+// all stays in step.  That is what client-side effects need: they are allowed to want a number
+// that everybody agrees on without being allowed to decide how the simulation unfolds.
+//
+Int GetGameLogicRandomValueUnchanged( int lo, int hi )
+{
+	UnsignedInt delta = hi - lo + 1;
+
+	if (delta == 0)
+		return hi;
+
+	UnsignedInt seedCopy[6];
+	for (int i = 0; i < 6; ++i)
+		seedCopy[i] = theGameLogicSeed[i];
+
+	return ((Int)(randomValue(seedCopy) % delta)) + lo;
+}
+
+//
+// Real random value read from the logic stream without advancing it.  See above.
+//
+Real GetGameLogicRandomValueRealUnchanged( Real lo, Real hi )
+{
+	Real delta = hi - lo;
+
+	if (delta <= 0.0f)
+		return hi;
+
+	UnsignedInt seedCopy[6];
+	for (int i = 0; i < 6; ++i)
+		seedCopy[i] = theGameLogicSeed[i];
+
+	return ((Real)(randomValue(seedCopy)) * theMultFactor ) * delta + lo;
+}
+
+//
 // Integer random value
 //
 Int GetGameClientRandomValue( int lo, int hi, char *file, int line )

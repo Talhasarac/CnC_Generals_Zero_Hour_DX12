@@ -178,7 +178,13 @@ public:
 	void get2DBounds(const Coord3D& geomCenter, Real angle, Region2D& bounds	) const;
 
 	/// note that the pt is generated using game logic random, not game client random!
-	void makeRandomOffsetWithinFootprint(Coord3D& pt) const;
+	/**
+		Pick a random point inside this footprint.  Pass useClientRandom when the point is only ever
+		going to be looked at - a particle, a spark - because whether that effect exists at all is a
+		decision the player's detail settings get to make, and the simulation may not depend on it.
+		Anything that places a real object keeps the default and rolls from the shared logic stream.
+	*/
+	void makeRandomOffsetWithinFootprint(Coord3D& pt, Bool useClientRandom = FALSE) const;
 	void makeRandomOffsetOnPerimeter(Coord3D& pt) const; //Chooses a random point on the extent border.
 
 	void clipPointToFootprint(const Coord3D& geomCenter, Coord3D& ptToClip) const;

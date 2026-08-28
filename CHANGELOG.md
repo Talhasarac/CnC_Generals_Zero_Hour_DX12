@@ -178,6 +178,12 @@ map. Ctrl+A is still everything at once.
   the desktop and the player who had been sabotaged began the new map blacked out — no radar, no
   defences, nothing building — for the first sixteen minutes of it, and only on the machines that
   had watched the sabotage happen.
+- **Turning your sound off no longer desyncs the game.** Missions and maps play scripted sounds, and
+  the game picks which take of a sound to play from the same shared number sequence that decides
+  everything else in the match. If you had sound effects muted, that sound never got as far as being
+  picked — so your machine skipped a number every other machine used, and from there on the two were
+  playing different games. Same for a player with speech turned off. The take is still identical on
+  every screen; it just no longer costs the simulation anything to choose it.
 - **Two machines playing the same match drift apart less.** Defeating a player, playing a second
   map without restarting, and the fingerprint the game uses to notice that two players have stopped
   agreeing — all three had bugs that made one side quietly diverge from the other, and the

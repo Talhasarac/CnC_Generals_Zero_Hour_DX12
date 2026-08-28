@@ -34,6 +34,7 @@
 #include "Common/Geometry.h"
 #include "Common/INI.h"
 #include "Common/RandomValue.h"
+#include "GameClient/ClientRandomValue.h"
 #include "Common/Xfer.h"
 
 #ifdef _INTERNAL
@@ -381,7 +382,13 @@ Bool GeometryInfo::isPointInFootprint(const Coord3D& geomCenter, const Coord3D& 
 }
 
 //=============================================================================
-void GeometryInfo::makeRandomOffsetWithinFootprint(Coord3D& pt) const
+static Real footprintRandom(Real lo, Real hi, Bool useClientRandom)
+{
+	return useClientRandom ? GameClientRandomValueReal(lo, hi) : GameLogicRandomValueReal(lo, hi);
+}
+
+//=============================================================================
+void GeometryInfo::makeRandomOffsetWithinFootprint(Coord3D& pt, Bool useClientRandom) const
 {
 	switch(m_type)
 	{
@@ -395,8 +402,8 @@ void GeometryInfo::makeRandomOffsetWithinFootprint(Coord3D& pt) const
 			Real distSqr;
 			do
 			{
-				pt.x = GameLogicRandomValueReal(-m_majorRadius, m_majorRadius);
-				pt.y = GameLogicRandomValueReal(-m_majorRadius, m_majorRadius);
+				pt.x = footprintRandom(-m_majorRadius, m_majorRadius, useClientRandom);
+				pt.y = footprintRandom(-m_majorRadius, m_majorRadius, useClientRandom);
 				pt.z = 0.0f;
 				distSqr = sqr(pt.x) + sqr(pt.y);
 			} while (distSqr > maxDistSqr);
@@ -412,8 +419,8 @@ void GeometryInfo::makeRandomOffsetWithinFootprint(Coord3D& pt) const
 
 		case GEOMETRY_BOX:
 		{
-			pt.x = GameLogicRandomValueReal(-m_majorRadius, m_majorRadius);
-			pt.y = GameLogicRandomValueReal(-m_minorRadius, m_minorRadius);
+			pt.x = footprintRandom(-m_majorRadius, m_majorRadius, useClientRandom);
+			pt.y = footprintRandom(-m_minorRadius, m_minorRadius, useClientRandom);
 			pt.z = 0.0f;
 			break;
 		}

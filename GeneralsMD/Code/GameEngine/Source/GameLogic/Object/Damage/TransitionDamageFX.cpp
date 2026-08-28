@@ -30,6 +30,8 @@
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
 
+#include "GameClient/ClientRandomValue.h"
+
 #include "Common/Xfer.h"
 #include "GameClient/Drawable.h"
 #include "GameClient/FXList.h"
@@ -256,7 +258,7 @@ void TransitionDamageFX::onDelete( void )
 /** Given an FXLoc info struct, return the effect position that we are supposed to use. 
 	* The position is local to to the object */
 //-------------------------------------------------------------------------------------------------
-static Coord3D getLocalEffectPos( const FXLocInfo *locInfo, Drawable *draw )
+static Coord3D getLocalEffectPos( const FXLocInfo *locInfo, Drawable *draw, Bool useClientRandom = FALSE )
 {
 
 	DEBUG_ASSERTCRASH( locInfo, ("getLocalEffectPos: locInfo is NULL\n") );
@@ -293,7 +295,8 @@ static Coord3D getLocalEffectPos( const FXLocInfo *locInfo, Drawable *draw )
 				return locInfo->loc;
 
 			// pick one of the bone positions
-			Int pick = GameLogicRandomValue( 0, boneCount - 1 );
+			Int pick = useClientRandom ? GameClientRandomValue( 0, boneCount - 1 )
+															 : GameLogicRandomValue( 0, boneCount - 1 );
 			return positions[ pick ];
 
 		}  // end else
@@ -397,7 +400,10 @@ void TransitionDamageFX::onBodyDamageStateChange( const DamageInfo* damageInfo,
 					{
 			
 						// get the what is the position we're going to playe the effect at
-						pos = getLocalEffectPos( &modData->m_particleSystem[ newState ][ i ].locInfo, draw );
+						// Client stream: we are inside "if (pSystem)", and whether the particle manager
+						// had room for this system is a local decision.  Rolling the bone pick from the
+						// shared logic stream let a player's particle cap desync the whole game.
+						pos = getLocalEffectPos( &modData->m_particleSystem[ newState ][ i ].locInfo, draw, TRUE );
 
 						//
 						// set position on system given any bone position provided, the bone position is

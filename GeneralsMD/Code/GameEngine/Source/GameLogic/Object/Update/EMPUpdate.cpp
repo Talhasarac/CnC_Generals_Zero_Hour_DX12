@@ -30,6 +30,8 @@
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
 
+#include "GameClient/ClientRandomValue.h"
+
 #include "Common/Thing.h"
 #include "Common/ThingTemplate.h"
 #include "Common/INI.h"
@@ -315,8 +317,12 @@ void EMPUpdate::doDisableAttack( void )
 						if (sys)
 						{
 							Coord3D offs = {0,0,0};
-							curVictim->getGeometryInfo().makeRandomOffsetWithinFootprint( offs );
-							offs.z = GameLogicRandomValue(3, victimHeight);
+							// These sparks only exist when createParticleSystem() had room for them, and that
+							// depends on the particle cap and the detail settings of the machine we are on.
+							// Rolling them from the shared logic stream made every player's graphics options
+							// part of the simulation.
+							curVictim->getGeometryInfo().makeRandomOffsetWithinFootprint( offs, TRUE );
+							offs.z = GameClientRandomValue(3, victimHeight);
 
 							//This puts all the sparks within a quadrahemicycloid (rectangular dome) volume
 							//The same shape as a four cornered camping dome tent, for those with less Greek
