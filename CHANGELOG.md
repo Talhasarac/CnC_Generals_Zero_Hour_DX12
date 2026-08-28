@@ -1200,5 +1200,9 @@ gets a third look.
 
 - **The intro and mission videos do not play** — the video decoder is a licensed component that was
   never part of the released source.
+- **Random maps are half-built.** A skirmish map — hills, start positions, supply docks — can now
+  be created from a number instead of loaded from a file, and every player who types the same
+  number gets exactly the same map. What is missing is the part you would actually touch: an
+  entry in the map list to pick it with, and a button for the host to roll a new one.
 - **Online and LAN play are untested.**
 - You need to own the game. No game data ships here.

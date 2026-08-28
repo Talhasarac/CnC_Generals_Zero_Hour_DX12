@@ -26,6 +26,9 @@
 #include "Common/INI.h"
 #include "Common/INIException.h"
 #include "Common/STLTypedefs.h"
+#include "Common/DataChunk.h"
+#include "Common/MapObject.h"
+#include "Common/RandomMapGenerator.h"
 #include "Common/StackDump.h"
 #include "GameNetwork/Connection.h"
 #include "GameLogic/CRCSnapshotRing.h"
@@ -4864,4 +4867,410 @@ TEST(a_plan_dies_without_an_explosion_but_a_building_does_not)
 	CHECK( Object_deathIsSilent( TRUE, 0.5f ) == FALSE );			// half up, it blows up like a building
 	CHECK( Object_deathIsSilent( TRUE, 100.0f ) == FALSE );		// the last frame of construction
 	CHECK( Object_deathIsSilent( FALSE, 0.0f ) == FALSE );		// finished: percent means nothing here
+}
+
+//////////////////////////////////////////////////////////////////////////////
+// Random map generator
+//////////////////////////////////////////////////////////////////////////////
+
+/* What the engine's own chunk reader made of a generated map. */
+struct RMGParse
+{
+	Int m_width, m_height, m_border, m_boundaryX, m_boundaryY, m_dataSize;
+	Int m_blendDataSize, m_numBitmapTiles, m_numBlendedTiles, m_numCliffInfo;
+	Int m_numTextureClasses, m_firstTile, m_numTiles, m_tileWidth;
+	Int m_numSides, m_numTeams, m_numObjects;
+	Int m_weather, m_compression;
+	AsciiString m_textureName;
+	std::vector<AsciiString> m_waypointNames;
+	std::vector<Coord3D> m_waypointPositions;
+	std::vector<AsciiString> m_objectNames;
+	std::vector<UnsignedByte> m_heights;
+	std::vector<Short> m_tiles;
+
+	RMGParse() :
+		m_width(0), m_height(0), m_border(0), m_boundaryX(0), m_boundaryY(0), m_dataSize(0),
+		m_blendDataSize(0), m_numBitmapTiles(0), m_numBlendedTiles(0), m_numCliffInfo(0),
+		m_numTextureClasses(0), m_firstTile(0), m_numTiles(0), m_tileWidth(0),
+		m_numSides(0), m_numTeams(0), m_numObjects(0), m_weather(-1), m_compression(-1) { }
+};
+static RMGParse theRMGParse;
+
+static Bool RMGParseHeightMap( DataChunkInput &file, DataChunkInfo *info, void * )
+{
+	theRMGParse.m_width = file.readInt();
+	theRMGParse.m_height = file.readInt();
+	theRMGParse.m_border = file.readInt();
+
+	Int numBoundaries = file.readInt();
+	for( Int i = 0; i < numBoundaries; i++ )
+	{
+		theRMGParse.m_boundaryX = file.readInt();
+		theRMGParse.m_boundaryY = file.readInt();
+	}
+
+	theRMGParse.m_dataSize = file.readInt();
+	theRMGParse.m_heights.resize( theRMGParse.m_dataSize );
+	file.readArrayOfBytes( (char *)&theRMGParse.m_heights[0], theRMGParse.m_dataSize );
+	return TRUE;
+}
+
+static Bool RMGParseBlendTile( DataChunkInput &file, DataChunkInfo *info, void * )
+{
+	Int len = file.readInt();
+	theRMGParse.m_blendDataSize = len;
+
+	theRMGParse.m_tiles.resize( len );
+	file.readArrayOfBytes( (char *)&theRMGParse.m_tiles[0], len * sizeof(Short) );
+
+	std::vector<Short> scratch( len );
+	file.readArrayOfBytes( (char *)&scratch[0], len * sizeof(Short) );	// blend tiles
+	file.readArrayOfBytes( (char *)&scratch[0], len * sizeof(Short) );	// extra blend tiles
+	file.readArrayOfBytes( (char *)&scratch[0], len * sizeof(Short) );	// cliff info
+
+	theRMGParse.m_numBitmapTiles = file.readInt();
+	theRMGParse.m_numBlendedTiles = file.readInt();
+	theRMGParse.m_numCliffInfo = file.readInt();
+
+	theRMGParse.m_numTextureClasses = file.readInt();
+	theRMGParse.m_firstTile = file.readInt();
+	theRMGParse.m_numTiles = file.readInt();
+	theRMGParse.m_tileWidth = file.readInt();
+	file.readInt();										// legacy field
+	theRMGParse.m_textureName = file.readAsciiString();
+	return TRUE;
+}
+
+static Bool RMGParseWorldInfo( DataChunkInput &file, DataChunkInfo *info, void * )
+{
+	Dict d = file.readDict();
+	theRMGParse.m_weather = d.getInt( NAMEKEY( "weather" ) );
+	theRMGParse.m_compression = d.getInt( NAMEKEY( "compression" ) );
+	return TRUE;
+}
+
+static Bool RMGParseSides( DataChunkInput &file, DataChunkInfo *info, void * )
+{
+	theRMGParse.m_numSides = file.readInt();
+	Int i;
+	for( i = 0; i < theRMGParse.m_numSides; i++ )
+	{
+		file.readDict();
+		Int buildListCount = file.readInt();
+		CHECK_EQ( buildListCount, 0 );
+	}
+
+	theRMGParse.m_numTeams = file.readInt();
+	for( i = 0; i < theRMGParse.m_numTeams; i++ )
+		file.readDict();
+
+	return TRUE;
+}
+
+static Bool RMGParseObject( DataChunkInput &file, DataChunkInfo *info, void * )
+{
+	Coord3D loc;
+	loc.x = file.readReal();
+	loc.y = file.readReal();
+	loc.z = file.readReal();
+	file.readReal();									// angle
+	file.readInt();										// flags
+	AsciiString name = file.readAsciiString();
+	Dict d = file.readDict();
+
+	theRMGParse.m_numObjects++;
+	theRMGParse.m_objectNames.push_back( name );
+
+	if( d.getType( NAMEKEY( "waypointID" ) ) == Dict::DICT_INT )
+	{
+		theRMGParse.m_waypointNames.push_back( d.getAsciiString( NAMEKEY( "waypointName" ) ) );
+		theRMGParse.m_waypointPositions.push_back( loc );
+	}
+	return TRUE;
+}
+
+static Bool RMGParseObjects( DataChunkInput &file, DataChunkInfo *info, void *userData )
+{
+	file.registerParser( AsciiString( "Object" ), info->label, RMGParseObject );
+	return file.parse( userData );
+}
+
+/* Runs the engine's own DataChunkInput over a generated map, straight out of
+	memory - the same reader WorldHeightMap and MapUtil use on a real .map. */
+static void parseGeneratedMap( std::vector<char>& bytes )
+{
+	theRMGParse = RMGParse();
+
+	MemoryChunkInputStream stream( &bytes[0], bytes.size() );
+	DataChunkInput input( &stream );
+
+	input.registerParser( AsciiString( "HeightMapData" ), AsciiString::TheEmptyString, RMGParseHeightMap );
+	input.registerParser( AsciiString( "BlendTileData" ), AsciiString::TheEmptyString, RMGParseBlendTile );
+	input.registerParser( AsciiString( "WorldInfo" ), AsciiString::TheEmptyString, RMGParseWorldInfo );
+	input.registerParser( AsciiString( "SidesList" ), AsciiString::TheEmptyString, RMGParseSides );
+	input.registerParser( AsciiString( "ObjectsList" ), AsciiString::TheEmptyString, RMGParseObjects );
+
+	CHECK( input.parse( NULL ) == TRUE );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The whole point of generating a map from a seed instead of shipping a file: every machine in
+	the game has to build identical bytes, or the map CRC that guards the lobby is worthless.
+	Nothing but the settings may reach the generator - no clock, no rand(), no options file. */
+//-------------------------------------------------------------------------------------------------
+TEST(a_seed_generates_the_same_map_bytes_every_single_time)
+{
+	CHECK( bootOnce() );
+
+	RandomMapSettings settings;
+	settings.m_seed = 12345;
+	settings.m_playableCells = 96;
+	settings.m_numPlayers = 4;
+
+	std::vector<char> first, second;
+	RandomMapGenerator::generate( settings, first );
+	RandomMapGenerator::generate( settings, second );
+
+	CHECK( first.size() > 0 );
+	CHECK_EQ( (Int)first.size(), (Int)second.size() );
+	CHECK_MEM( &first[0], &second[0], (Int)first.size() );
+
+	// ...and a different seed is a different map, or the seed is not doing anything.
+	std::vector<char> other;
+	settings.m_seed = 12346;
+	RandomMapGenerator::generate( settings, other );
+	CHECK( other.size() != first.size() || memcmp( &other[0], &first[0], first.size() ) != 0 );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Generating bytes is easy; generating bytes the game will read is the job.  Run the engine's own
+	chunk reader over the result and check the fields the terrain and map code go looking for. */
+//-------------------------------------------------------------------------------------------------
+TEST(a_generated_map_reads_back_through_the_engines_own_chunk_reader)
+{
+	CHECK( bootOnce() );
+
+	RandomMapSettings settings;
+	settings.m_seed = 777;
+	settings.m_playableCells = 96;
+	settings.m_numPlayers = 4;
+
+	std::vector<char> bytes;
+	RandomMapGenerator::generate( settings, bytes );
+	parseGeneratedMap( bytes );
+
+	// The playable area is what the boundary says; the rest is border the camera looks across.
+	CHECK_EQ( theRMGParse.m_boundaryX, 96 );
+	CHECK_EQ( theRMGParse.m_boundaryY, 96 );
+	CHECK( theRMGParse.m_border > 0 );
+	CHECK_EQ( theRMGParse.m_width, 96 + 2 * theRMGParse.m_border );
+	CHECK_EQ( theRMGParse.m_height, theRMGParse.m_width );
+	CHECK_EQ( theRMGParse.m_dataSize, theRMGParse.m_width * theRMGParse.m_height );
+	CHECK_EQ( (Int)theRMGParse.m_heights.size(), theRMGParse.m_dataSize );
+
+	// ParseBlendTileData throws ERROR_CORRUPT_FILE_FORMAT unless these two agree.
+	CHECK_EQ( theRMGParse.m_blendDataSize, theRMGParse.m_dataSize );
+
+	CHECK_EQ( theRMGParse.m_numTextureClasses, 1 );
+	CHECK_EQ( theRMGParse.m_firstTile, 0 );
+	CHECK_EQ( theRMGParse.m_numTiles, 4 );
+	CHECK_EQ( theRMGParse.m_tileWidth, 2 );
+	CHECK_EQ( theRMGParse.m_numBitmapTiles, 4 );
+	CHECK_EQ( theRMGParse.m_numBlendedTiles, 1 );		// entry 0 is the default, no blends
+	CHECK_EQ( theRMGParse.m_numCliffInfo, 1 );			// entry 0 is the default, no cliff faces
+	CHECK_STR( theRMGParse.m_textureName.str(), "GrassType1" );
+
+	CHECK_EQ( theRMGParse.m_weather, 0 );
+	CHECK_EQ( theRMGParse.m_compression, 0 );
+
+	// Neutral plus the civilian and skirmish sides, one default team each.
+	CHECK_EQ( theRMGParse.m_numSides, 14 );
+	CHECK_EQ( theRMGParse.m_numTeams, 14 );
+
+	// One start waypoint and two supply docks per player.
+	CHECK_EQ( theRMGParse.m_numObjects, 4 * 3 );
+	CHECK_EQ( (Int)theRMGParse.m_waypointNames.size(), 4 );
+	CHECK_STR( theRMGParse.m_waypointNames[0].str(), "Player_1_Start" );
+	CHECK_STR( theRMGParse.m_waypointNames[3].str(), "Player_4_Start" );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Every tile index has to name a tile the map actually loaded.  WorldHeightMap packs four grid
+	quadrants into each source tile, so the index is (sourceTile<<2)|quadrant and the source tile
+	has to land inside the one texture class the map declares. */
+//-------------------------------------------------------------------------------------------------
+TEST(every_generated_tile_index_names_a_tile_the_map_declared)
+{
+	CHECK( bootOnce() );
+
+	RandomMapSettings settings;
+	settings.m_seed = 4242;
+	settings.m_playableCells = 64;
+	settings.m_numPlayers = 2;
+
+	std::vector<char> bytes;
+	RandomMapGenerator::generate( settings, bytes );
+	parseGeneratedMap( bytes );
+
+	CHECK( theRMGParse.m_tiles.size() > 0 );
+
+	Int worstSource = -1;
+	Int quadrantsSeen = 0;
+	for( Int i = 0; i < (Int)theRMGParse.m_tiles.size(); i++ )
+	{
+		Int source = theRMGParse.m_tiles[i] >> 2;
+		Int quadrant = theRMGParse.m_tiles[i] & 3;
+		if( source > worstSource )
+			worstSource = source;
+		quadrantsSeen |= (1 << quadrant);
+	}
+
+	CHECK( worstSource >= 0 );
+	CHECK( worstSource < theRMGParse.m_numTiles );
+	CHECK_EQ( quadrantsSeen, 0xf );		// all four quadrants of the sheet get used
+}
+
+//-------------------------------------------------------------------------------------------------
+/** A map nobody can walk across is not a map.  The engine derives passability from the height
+	field alone (BlendTileData below version 7 makes it run initCliffFlagsFromHeights), marking a
+	cell impassable when its four corners span more than PATHFIND_CLIFF_SLOPE_LIMIT_F world units.
+	The generated hills have to stay under that everywhere, and still be hills. */
+//-------------------------------------------------------------------------------------------------
+TEST(generated_terrain_rolls_without_ever_becoming_a_cliff)
+{
+	CHECK( bootOnce() );
+
+	const Real PATHFIND_CLIFF_SLOPE_LIMIT = 9.8f;		// WorldHeightMap.cpp
+
+	RandomMapSettings settings;
+	settings.m_playableCells = 96;
+	settings.m_numPlayers = 4;
+
+	for( Int seed = 1; seed <= 8; seed++ )
+	{
+		settings.m_seed = seed * 7919;
+
+		std::vector<char> bytes;
+		RandomMapGenerator::generate( settings, bytes );
+		parseGeneratedMap( bytes );
+
+		Int width = theRMGParse.m_width;
+		Int height = theRMGParse.m_height;
+		Int lowest = 255, highest = 0;
+		Real steepest = 0.0f;
+
+		for( Int y = 0; y < height - 1; y++ )
+		{
+			for( Int x = 0; x < width - 1; x++ )
+			{
+				Int a = theRMGParse.m_heights[y * width + x];
+				Int b = theRMGParse.m_heights[y * width + x + 1];
+				Int c = theRMGParse.m_heights[(y + 1) * width + x];
+				Int d = theRMGParse.m_heights[(y + 1) * width + x + 1];
+
+				Int lo = a, hi = a;
+				if( b < lo ) lo = b;
+				if( b > hi ) hi = b;
+				if( c < lo ) lo = c;
+				if( c > hi ) hi = c;
+				if( d < lo ) lo = d;
+				if( d > hi ) hi = d;
+
+				Real span = (Real)(hi - lo) * MAP_HEIGHT_SCALE;
+				if( span > steepest )
+					steepest = span;
+
+				if( lo < lowest ) lowest = lo;
+				if( hi > highest ) highest = hi;
+			}
+		}
+
+		CHECK( steepest <= PATHFIND_CLIFF_SLOPE_LIMIT );
+		CHECK( highest > lowest + 8 );		// terrain, not a parade ground
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Start positions have to sit inside the playable area with room for a base, spread around the
+	map rather than piled together, and each one needs its supply docks.  World coordinates run
+	from the playable corner, so the border is not part of the arithmetic. */
+//-------------------------------------------------------------------------------------------------
+TEST(start_positions_land_inside_the_map_with_room_between_them)
+{
+	CHECK( bootOnce() );
+
+	RandomMapSettings settings;
+	settings.m_playableCells = 128;
+
+	for( Int players = 2; players <= 8; players++ )
+	{
+		settings.m_numPlayers = players;
+		settings.m_seed = 1000 + players;
+
+		std::vector<char> bytes;
+		RandomMapGenerator::generate( settings, bytes );
+		parseGeneratedMap( bytes );
+
+		CHECK_EQ( (Int)theRMGParse.m_waypointPositions.size(), players );
+		CHECK_EQ( theRMGParse.m_numObjects, players * 3 );
+
+		Real extent = 128.0f * MAP_XY_FACTOR;
+		Real margin = 20.0f * MAP_XY_FACTOR;		// enough ground for a base
+
+		Int i, j;
+		for( i = 0; i < players; i++ )
+		{
+			const Coord3D& p = theRMGParse.m_waypointPositions[i];
+			CHECK( p.x > margin && p.x < extent - margin );
+			CHECK( p.y > margin && p.y < extent - margin );
+		}
+
+		// No two players may start on top of each other.
+		for( i = 0; i < players; i++ )
+		{
+			for( j = i + 1; j < players; j++ )
+			{
+				Real dx = theRMGParse.m_waypointPositions[i].x - theRMGParse.m_waypointPositions[j].x;
+				Real dy = theRMGParse.m_waypointPositions[i].y - theRMGParse.m_waypointPositions[j].y;
+				CHECK( sqrtf( dx * dx + dy * dy ) > 30.0f * MAP_XY_FACTOR );
+			}
+		}
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The ground under a start position is flattened so a base can actually be laid out there.
+	Check the cells around each start are level, not merely passable. */
+//-------------------------------------------------------------------------------------------------
+TEST(each_start_position_gets_flat_ground_to_build_on)
+{
+	CHECK( bootOnce() );
+
+	RandomMapSettings settings;
+	settings.m_seed = 31337;
+	settings.m_playableCells = 96;
+	settings.m_numPlayers = 3;
+
+	std::vector<char> bytes;
+	RandomMapGenerator::generate( settings, bytes );
+	parseGeneratedMap( bytes );
+
+	Int border = theRMGParse.m_border;
+	Int width = theRMGParse.m_width;
+
+	for( Int i = 0; i < (Int)theRMGParse.m_waypointPositions.size(); i++ )
+	{
+		Int cx = (Int)(theRMGParse.m_waypointPositions[i].x / MAP_XY_FACTOR) + border;
+		Int cy = (Int)(theRMGParse.m_waypointPositions[i].y / MAP_XY_FACTOR) + border;
+
+		Int at = theRMGParse.m_heights[cy * width + cx];
+		for( Int dy = -10; dy <= 10; dy++ )
+		{
+			for( Int dx = -10; dx <= 10; dx++ )
+			{
+				Int h = theRMGParse.m_heights[(cy + dy) * width + cx + dx];
+				CHECK_EQ( h, at );
+			}
+		}
+	}
 }
