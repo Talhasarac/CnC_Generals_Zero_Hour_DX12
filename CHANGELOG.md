@@ -163,6 +163,11 @@ map. Ctrl+A is still everything at once.
 - **Loading a save remembers what your guards were guarding.** The guard order was written to the
   file one slot too far and overwrote the position it was guarding, so units restored from a save
   could come back watching the wrong place.
+- **A power sabotage does not follow you into the next game.** Shutting a base's power down set a
+  timer, and nothing cleared that timer when the match ended. Start another game without quitting to
+  the desktop and the player who had been sabotaged began the new map blacked out — no radar, no
+  defences, nothing building — for the first sixteen minutes of it, and only on the machines that
+  had watched the sabotage happen.
 - **Two machines playing the same match drift apart less.** Defeating a player, playing a second
   map without restarting, and the fingerprint the game uses to notice that two players have stopped
   agreeing — all three had bugs that made one side quietly diverge from the other, and the

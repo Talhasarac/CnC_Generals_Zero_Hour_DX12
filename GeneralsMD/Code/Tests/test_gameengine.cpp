@@ -35,6 +35,7 @@
 #include "GameNetwork/KeepAliveSchedule.h"
 #include "GameNetwork/CushionMetrics.h"
 #include "GameNetwork/LinkSimulation.h"
+#include "Common/Energy.h"
 #include <float.h>
 #include "GameClient/Water.h"
 #include "GameLogic/Module/PhysicsUpdate.h"
@@ -2603,6 +2604,26 @@ TEST(linksim_the_modulation_has_the_period_it_says_it_has)
 	UnsignedInt d = linkSimDeliveryTime( late + 1, 200, amp, period, 0 ) - (late + 1);
 	CHECK( c >= 100u && c <= 300u );
 	CHECK( (c > d ? c - d : d - c) <= 1u );
+}
+
+// ---------------------------------------------------------------------------------------------
+// Per-game state that a reused Player has to give back.
+// ---------------------------------------------------------------------------------------------
+
+TEST(energy_a_new_game_does_not_inherit_the_last_games_sabotage)
+{
+	Energy e;
+
+	// a sabotage that runs to frame 30000 of the game that is being left
+	e.setPowerSabotagedTillFrame( 30000 );
+	CHECK_EQ( e.getPowerSabotagedTillFrame(), 30000u );
+
+	// the Player array is reused, so the next game gets init() rather than a constructor.  EA left
+	// the stamp behind: the new game's frame counter starts at 0, so 30000 is still in the future
+	// and that player produced no power at all until frame 30000 - on the machines that saw the
+	// sabotage, and nowhere else.
+	e.init( NULL );
+	CHECK_EQ( e.getPowerSabotagedTillFrame(), 0u );
 }
 
 // ---------------------------------------------------------------------------------------------

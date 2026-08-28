@@ -73,6 +73,12 @@ public:
 	{
 		m_energyProduction = 0;
 		m_energyConsumption = 0;
+		// The Player objects are a fixed array that is reused for every game, and init() is what a
+		// new game gets instead of a fresh constructor.  EA reset the two counters here but not the
+		// sabotage stamp, so a player who was power sabotaged in one game started the next one with
+		// a stamp that is still in the future of a frame counter that has gone back to zero - no
+		// power at all, on the machines that saw the sabotage and nowhere else.
+		m_powerSabotagedTillFrame = 0;
 		m_owner = owner;
 	}
 
