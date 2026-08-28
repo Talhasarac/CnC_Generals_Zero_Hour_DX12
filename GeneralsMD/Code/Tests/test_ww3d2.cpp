@@ -1699,3 +1699,68 @@ TEST(fontchars_returns_its_glyph_buffers_to_the_pool)
 	CHECK_EQ(theW3DPoolFrees - frees, theW3DPoolAllocs - allocs);
 	CHECK_EQ(theW3DPoolBadFrees, 0);
 }
+
+// ---------------------------------------------------------------------------------------------
+// SurfaceClass::DrawPixel takes a Get_Description, a one-pixel LockRect and an UnlockRect for
+// every call.  Draw_Pixel writes the same byte, with the same truncation, into a buffer the
+// caller locked once.  These pin the address arithmetic and the masks against DrawPixel's.
+// ---------------------------------------------------------------------------------------------
+#include "surfaceclass.h"
+
+TEST(surface_draw_pixel_lands_where_the_pitch_says)
+{
+	const int pitch = 40;		/* deliberately wider than 8 pixels * 4 bytes */
+	unsigned char buf[ 40 * 4 ];
+	memset( buf, 0, sizeof( buf ) );
+
+	SurfaceClass::Draw_Pixel( 3, 2, 0xAABBCCDD, 4, buf, pitch );
+	CHECK_EQ( *(unsigned int *)( buf + 2 * pitch + 3 * 4 ), 0xAABBCCDD );
+
+	/* nothing outside that one pixel was touched */
+	unsigned int written = 0;
+	for( unsigned int i = 0; i < sizeof( buf ); ++i )
+		if( buf[ i ] != 0 ) ++written;
+	CHECK_EQ( written, 4 );
+}
+
+TEST(surface_draw_pixel_truncates_the_colour_the_way_drawpixel_did)
+{
+	unsigned char buf[ 64 ];
+
+	/* one byte per pixel: the low byte of the colour, and the row stride is the pitch */
+	memset( buf, 0, sizeof( buf ) );
+	SurfaceClass::Draw_Pixel( 5, 1, 0x11223344, 1, buf, 16 );
+	CHECK_EQ( buf[ 16 + 5 ], 0x44 );
+
+	/* two bytes per pixel: the low half word */
+	memset( buf, 0, sizeof( buf ) );
+	SurfaceClass::Draw_Pixel( 5, 1, 0x11223344, 2, buf, 16 );
+	CHECK_EQ( *(unsigned short *)( buf + 16 + 5 * 2 ), 0x3344 );
+
+	/* an unsupported pixel size writes nothing at all, exactly as the switch used to */
+	memset( buf, 0, sizeof( buf ) );
+	SurfaceClass::Draw_Pixel( 5, 1, 0x11223344, 3, buf, 16 );
+	unsigned int written = 0;
+	for( unsigned int i = 0; i < sizeof( buf ); ++i )
+		if( buf[ i ] != 0 ) ++written;
+	CHECK_EQ( written, 0 );
+}
+
+TEST(surface_draw_h_line_fills_the_run_inclusive_at_both_ends)
+{
+	const int pitch = 32;
+	unsigned char buf[ 32 * 3 ];
+	memset( buf, 0, sizeof( buf ) );
+
+	SurfaceClass::Draw_H_Line( 1, 2, 5, 0x000000FF, 4, buf, pitch );
+
+	unsigned int *row = (unsigned int *)( buf + pitch );
+	CHECK_EQ( row[ 1 ], 0 );				/* one before the run */
+	for( unsigned int x = 2; x <= 5; ++x )
+		CHECK_EQ( row[ x ], 0x000000FF );
+	CHECK_EQ( row[ 6 ], 0 );				/* one past it */
+
+	/* and no other row moved */
+	CHECK_EQ( *(unsigned int *)buf, 0 );
+	CHECK_EQ( *(unsigned int *)( buf + 2 * pitch ), 0 );
+}

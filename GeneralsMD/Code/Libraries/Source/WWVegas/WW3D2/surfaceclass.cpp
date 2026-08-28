@@ -857,6 +857,49 @@ void SurfaceClass::DrawPixel(const unsigned int x,const unsigned int y, unsigned
  *   4/9/2001   hy : Created.                                                                  *
  *   4/9/2001   hy : Created.                                                                  *
  *=============================================================================================*/
+unsigned int SurfaceClass::Get_Bytes_Per_Pixel(void)
+{
+	SurfaceDescription sd;
+	Get_Description(sd);
+
+	return PixelSize(sd);
+}
+
+/*
+** The loop bodies of DrawPixel and DrawHLine, against a surface the caller has already locked.
+** bits and pitch are what Lock() handed back, so the origin is the surface origin and the row
+** stride is the whole surface's - unlike DrawPixel, which locks the single pixel's rectangle and
+** gets a pointer to that.  The masks match DrawPixel's exactly: the assumption throughout is that
+** whenever a pixel has alpha it is in the MSB.
+*/
+void SurfaceClass::Draw_Pixel(const unsigned int x, const unsigned int y, const unsigned int color,
+	const unsigned int bytes_per_pixel, void *bits, const int pitch)
+{
+	unsigned char *row = (unsigned char *)bits + y * pitch;
+
+	switch (bytes_per_pixel)
+	{
+	case 1:
+		*(unsigned char *)(row + x) = (unsigned char)(color & 0xFF);
+		break;
+	case 2:
+		*(unsigned short *)(row + x * 2) = (unsigned short)(color & 0xFFFF);
+		break;
+	case 4:
+		*(unsigned int *)(row + x * 4) = color;
+		break;
+	}
+}
+
+void SurfaceClass::Draw_H_Line(const unsigned int y, const unsigned int x1, const unsigned int x2,
+	const unsigned int color, const unsigned int bytes_per_pixel, void *bits, const int pitch)
+{
+	for (unsigned int x = x1; x <= x2; x++)
+	{
+		Draw_Pixel(x, y, color, bytes_per_pixel, bits, pitch);
+	}
+}
+
 void SurfaceClass::DrawHLine(const unsigned int y,const unsigned int x1, const unsigned int x2, unsigned int color)
 { 
 	SurfaceDescription sd;

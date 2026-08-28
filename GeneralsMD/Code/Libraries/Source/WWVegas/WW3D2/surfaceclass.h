@@ -131,6 +131,17 @@ class SurfaceClass : public W3DMPO, public RefCountClass
 
 		void DrawPixel(const unsigned int x,const unsigned int y, unsigned int color);
 
+		// DrawPixel and DrawHLine each do a Get_Description, a LockRect of the one rectangle they
+		// touch and an UnlockRect of their own, every call.  In a loop over a whole texture that is
+		// one driver round trip per pixel.  Lock() the surface once, ask Get_Bytes_Per_Pixel() once,
+		// and call these instead - they write the same bytes, with the same truncation.
+		static void Draw_Pixel(const unsigned int x, const unsigned int y, const unsigned int color,
+			const unsigned int bytes_per_pixel, void *bits, const int pitch);
+		static void Draw_H_Line(const unsigned int y, const unsigned int x1, const unsigned int x2,
+			const unsigned int color, const unsigned int bytes_per_pixel, void *bits, const int pitch);
+
+		unsigned int Get_Bytes_Per_Pixel(void);
+
 		// get pixel function .. to be used infrequently
 		void Get_Pixel(Vector3 &rgb, int x,int y);
 

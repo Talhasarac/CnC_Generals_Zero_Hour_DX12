@@ -627,6 +627,12 @@ void W3DRadar::renderObjectList( const RadarObject *listHead, TextureClass *text
 	// get surface for texture to render into
 	SurfaceClass *surface = texture->Get_Surface_Level();
 
+	// this runs every radar refresh and draws four pixels per object.  DrawPixel locks and
+	// unlocks the texture for each one of them, so lock once for the whole list instead.
+	Int surfacePitch;
+	void *surfaceBits = surface->Lock( &surfacePitch );
+	const UnsignedInt bytesPerPixel = surface->Get_Bytes_Per_Pixel();
+
 	// loop through all objects and draw
 	ICoord2D radarPoint;
 
@@ -722,21 +728,22 @@ void W3DRadar::renderObjectList( const RadarObject *listHead, TextureClass *text
 		
 		// draw the blip, but make sure the points are legal
 		if( legalRadarPoint( radarPoint.x, radarPoint.y ) )
-			surface->DrawPixel( radarPoint.x, radarPoint.y, c );
+			surface->Draw_Pixel( radarPoint.x, radarPoint.y, c, bytesPerPixel, surfaceBits, surfacePitch );
 
 		radarPoint.y++;
 		if( legalRadarPoint( radarPoint.x, radarPoint.y ) )
-			surface->DrawPixel( radarPoint.x, radarPoint.y, c );
+			surface->Draw_Pixel( radarPoint.x, radarPoint.y, c, bytesPerPixel, surfaceBits, surfacePitch );
 
 		radarPoint.x++;
 		if( legalRadarPoint( radarPoint.x, radarPoint.y ) )
-			surface->DrawPixel( radarPoint.x, radarPoint.y, c );
+			surface->Draw_Pixel( radarPoint.x, radarPoint.y, c, bytesPerPixel, surfaceBits, surfacePitch );
 
 		radarPoint.y--;
 		if( legalRadarPoint( radarPoint.x, radarPoint.y ) )
-			surface->DrawPixel( radarPoint.x, radarPoint.y, c );
+			surface->Draw_Pixel( radarPoint.x, radarPoint.y, c, bytesPerPixel, surfaceBits, surfacePitch );
 
 	}  // end for
+	surface->Unlock();
 	REF_PTR_RELEASE(surface);
 
 }  // end renderObjectList
@@ -1038,6 +1045,11 @@ void W3DRadar::buildTerrainTexture( TerrainLogic *terrain )
 	surface = m_terrainTexture->Get_Surface_Level();
 	DEBUG_ASSERTCRASH( surface, ("W3DRadar: Can't get surface for terrain texture\n") );
 
+	// one lock for the whole texture - see the note below about what EA measured here
+	Int surfacePitch;
+	void *surfaceBits = surface->Lock( &surfacePitch );
+	const UnsignedInt bytesPerPixel = surface->Get_Bytes_Per_Pixel();
+
 	// build the terrain
 	RGBColor sampleColor;
 	RGBColor color;
@@ -1240,16 +1252,21 @@ void W3DRadar::buildTerrainTexture( TerrainLogic *terrain )
 			// the sampling and interpolation algorithm for generating pretty looking terrain
 			// and water for the radar is just, well, expensive.
 			//
-			surface->DrawPixel( x, y, GameMakeColor( color.red * 255, 
-																							 color.green * 255,
-																							 color.blue * 255,
-																							 255 ) );
+			// That was measured against a 2003 driver writing straight to an AGP surface.  Here
+			// every LockRect crosses d3d8to9 into the Direct3D 9 runtime, so the lock is hoisted
+			// anyway - the sampling above is still the expensive half, and is untouched.
+			surface->Draw_Pixel( x, y, GameMakeColor( color.red * 255,
+																							  color.green * 255,
+																							  color.blue * 255,
+																							  255 ),
+												 bytesPerPixel, surfaceBits, surfacePitch );
 
 		}  // end for x
 
 	}  // end for y
 
 	// all done with the surface
+	surface->Unlock();
 	REF_PTR_RELEASE(surface);
 
 }  // end buildTerrainTexture

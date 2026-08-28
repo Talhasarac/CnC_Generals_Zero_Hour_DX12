@@ -1019,6 +1019,13 @@ the entire map that way, one dot after another. The picture is now kept in ordin
 dot costs nothing, and handed over once a frame — only the rectangle that actually changed, and
 nothing at all on a frame where nothing moved.
 
+**And the coloured dots on it.** The same picture carries a dot for every unit and building you can
+see, and it is repainted several times a second. Each dot was handed to the graphics card and taken
+back on its own, four times over, once per thing on the map -- so the busier the match got, the
+bigger the hiccup, and it landed on a regular beat rather than spreading out. The whole minimap is
+now handed over once and painted in one go. The map's terrain picture, redrawn whenever a bridge
+comes down, works the same way instead of a hundred thousand separate trips.
+
 **And scrolling across a big map.** Every frame the camera moves, the game sweeps the whole terrain
 looking for its lowest point. It was reading that grid across the grain — every step landing in a
 different part of memory — and it is read along the grain now. Same answer, a fraction of the work,
