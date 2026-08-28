@@ -1044,7 +1044,7 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 		case GameMessage::MSG_META_CREATE_TEAM9:
 		{
 			Int group = t - GameMessage::MSG_META_CREATE_TEAM0;
-			if ( group >= 0 && group < 10 )
+			if ( isValidHotkeySquadIndex( group ) )
 			{
 				DEBUG_LOG(("META: create team %d\n",group));
 				// Assign selected items to a group
@@ -1076,7 +1076,7 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 		case GameMessage::MSG_META_SELECT_TEAM9:
 		{
 			Int group = t - GameMessage::MSG_META_SELECT_TEAM0;
-			if ( group >= 0 && group < 10 )
+			if ( isValidHotkeySquadIndex( group ) )
 			{
 				DEBUG_LOG(("META: select team %d\n",group));
 
@@ -1149,7 +1149,7 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 		case GameMessage::MSG_META_ADD_TEAM9:
 		{
 			Int group = t - GameMessage::MSG_META_ADD_TEAM0;
-			if ( group >= 0 && group < 10 )
+			if ( isValidHotkeySquadIndex( group ) )
 			{
 				DEBUG_LOG(("META: select team %d\n",group));
 
@@ -1230,7 +1230,7 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 		case GameMessage::MSG_META_VIEW_TEAM9:
 		{
 			Int group = t - GameMessage::MSG_META_VIEW_TEAM0;
-			if ( group >= 1 && group <= 10 )
+			if ( isValidHotkeySquadIndex( group ) )
 			{
 				DEBUG_LOG(("META: view team %d\n",group));
 				Player *player = ThePlayerList->getLocalPlayer();

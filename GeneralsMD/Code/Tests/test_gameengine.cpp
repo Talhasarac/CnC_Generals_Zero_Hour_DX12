@@ -60,6 +60,7 @@
 #include "Common/StateMachine.h"
 #include "Common/XferCRC.h"
 #include "Common/ObjectStatusTypes.h"
+#include "Common/Player.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -3544,4 +3545,30 @@ TEST(network_command_ids_are_ordered_across_the_sixteen_bit_wrap)
 	}
 	CHECK( allOrdered );
 	CHECK_EQ( (Int)id, 64 );					// the run really did cross the wrap
+}
+
+//////////////////////////////////////////////////////////////////////////////
+// Control groups
+//////////////////////////////////////////////////////////////////////////////
+
+/* The ten control group keys produce squad numbers 0..NUM_HOTKEY_SQUADS-1.  The camera-jump
+	 handler tested "1 through 10" instead, so the 0 key never centred on its group and the number
+	 it did accept was one past the last squad.  All four handlers ask this one function now. */
+TEST(hotkey_squad_index_covers_group_zero_and_stops_at_the_last_squad)
+{
+	CHECK_EQ( (Int)NUM_HOTKEY_SQUADS, 10 );
+
+	CHECK( isValidHotkeySquadIndex( 0 ) );					// the "0" key, the one that was dropped
+	CHECK( isValidHotkeySquadIndex( 1 ) );
+	CHECK( isValidHotkeySquadIndex( NUM_HOTKEY_SQUADS - 1 ) );
+
+	CHECK( !isValidHotkeySquadIndex( NUM_HOTKEY_SQUADS ) );	// the one it used to accept
+	CHECK( !isValidHotkeySquadIndex( -1 ) );
+
+	// every squad the keys can name is a squad Player::getHotkeySquad will actually look up
+	Bool allInRange = TRUE;
+	for( Int group = 0; group < 10; ++group )
+		if( !isValidHotkeySquadIndex( group ) )
+			allInRange = FALSE;
+	CHECK( allInRange );
 }

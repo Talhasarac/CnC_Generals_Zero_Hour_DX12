@@ -590,6 +590,9 @@ original code, and each one was proved by putting the bug back and watching the 
   for five seconds and take another three to fade it, so what you did eight seconds ago was still
   sitting there under everything you had done since. It reads for two and a half seconds and fades
   in about one.
+- **Double-tapping 0 never jumped the camera to that group.** Nine of the ten control groups took
+  you to their units; the 0 group answered the key that selects it and ignored the key that finds
+  it.
 - **The mouse wheel cancelled whatever camera move was in progress** — zoom while panning, the most
   common camera gesture there is, fought you every time.
 

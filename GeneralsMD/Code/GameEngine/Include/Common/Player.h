@@ -114,6 +114,16 @@ static const Int NUM_HOTKEY_SQUADS = 10;
 
 enum { NO_HOTKEY_SQUAD = -1 };
 
+//
+// The control group keys hand out squad numbers 0 through NUM_HOTKEY_SQUADS-1, and every place
+// that turns a key message into a squad number has to say so the same way.  One of them said
+// "1 through 10" instead, which is the same count of numbers and none of the right ones.
+//
+inline Bool isValidHotkeySquadIndex( Int squadNumber )
+{
+	return squadNumber >= 0 && squadNumber < NUM_HOTKEY_SQUADS;
+}
+
 // ------------------------------------------------------------------------------------------------
 typedef Int PlayerIndex;
 #define PLAYER_INDEX_INVALID -1
