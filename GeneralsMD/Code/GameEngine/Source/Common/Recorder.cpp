@@ -953,41 +953,25 @@ AsciiString RecorderClass::getCurrentReplayFilename( void )
 	return AsciiString::TheEmptyString;
 }
 
-class CRCInfo
-{
-public:
-	CRCInfo();
-	void addCRC(UnsignedInt val);
-	UnsignedInt readCRC(void);
-
-	void setLocalPlayer(UnsignedInt index) { m_localPlayer = index; }
-	UnsignedInt getLocalPlayer(void) { return m_localPlayer; }
-
-	void setSawCRCMismatch(void) { m_sawCRCMismatch = TRUE; }
-	Bool sawCRCMismatch(void) { return m_sawCRCMismatch; }
-
-protected:
-
-	Bool m_sawCRCMismatch;
-	Bool m_skippedOne;
-	std::list<UnsignedInt> m_data;
-	UnsignedInt m_localPlayer;
-};
-
 CRCInfo::CRCInfo()
 {
 	m_localPlayer = ~0;
-	m_skippedOne = FALSE;
+	m_skipOneCRC = FALSE;
 	m_sawCRCMismatch = FALSE;
+}
+
+Bool replayIsMissingFirstCRC( Int originalGameMode )
+{
+	return originalGameMode == GAME_LAN || originalGameMode == GAME_INTERNET;
 }
 
 void CRCInfo::addCRC(UnsignedInt val)
 {
-	//if (!m_skippedOne)
-	//{
-	//	m_skippedOne = TRUE;
-	//	return;
-	//}
+	if (m_skipOneCRC)
+	{
+		m_skipOneCRC = FALSE;
+		return;
+	}
 
 	m_data.push_back(val);
 	//DEBUG_LOG(("CRCInfo::addCRC() - crc %8.8X pushes list to %d entries (full=%d)\n", val, m_data.size(), !m_data.empty()));
@@ -1030,6 +1014,12 @@ void RecorderClass::handleCRCMessage(UnsignedInt newCRC, Int playerIndex, Bool f
 		if (TheGameLogic->getFrame() > 0 && newCRC != playbackCRC && !m_crcInfo->sawCRCMismatch())
 		{
 			m_crcInfo->setSawCRCMismatch();
+
+			/* The DEBUG_CRASH below is compiled out of a release build, so a replay that played back a
+				 different game than the one that was recorded used to do it in complete silence.  Say so in
+				 the log, which release builds do write. */
+			DEBUG_LOG(("Replay has gone out of sync on frame %d: recorded %8.8X, played back %8.8X\n",
+				TheGameLogic->getFrame(), playbackCRC, newCRC));
 
 			//Kris: Patch 1.01 November 10, 2003 (integrated changes from Matt Campbell)
 			// Since we don't seem to have any *visible* desyncs when replaying games, but get this warning
@@ -1170,6 +1160,11 @@ Bool RecorderClass::playbackFile(AsciiString filename)
 	fread(&maxFPS, sizeof(maxFPS), 1, m_file);
 
 	DEBUG_LOG(("RecorderClass::playbackFile() - original game was mode %d\n", m_originalGameMode));
+
+	if (replayIsMissingFirstCRC( m_originalGameMode ))
+	{
+		m_crcInfo->skipFirstCRC();
+	}
 
 	readNextFrame();
 

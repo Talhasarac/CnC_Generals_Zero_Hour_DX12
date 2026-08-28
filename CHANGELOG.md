@@ -1158,7 +1158,13 @@ gives up the reason.
 **And it can play itself over a network.** Two copies of the game on one machine, on opposite ends
 of a real connection, playing the same match against each other with no lobby and nobody clicking
 anything. That is the only way to reach the faults that live in a multiplayer game and nowhere else
-— the ones where two machines quietly stop agreeing about what just happened.
+— the ones where two machines quietly stop agreeing about what just happened. It turned one up on
+its first outing, and not the one it was sent to look for: every recorded multiplayer game had been
+accusing itself of falling out of step when you watched it back, since 2003, on virtually every
+replay. None of them ever had. The recordings were right; the check reading them back was a single
+moment out, from the first frame of every match, and the original team wrote that suspicion into a
+comment and left it there. Multiplayer replays are trustworthy now, and on the day one really does
+go wrong it says so out loud instead of silently.
 
 **Every fix was proved non-vacuous.** Put the bug back, watch the exact test fail, restore the fix.
 A test that passes both ways is worth nothing, and there are none of those here.

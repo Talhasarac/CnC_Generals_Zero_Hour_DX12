@@ -51,6 +51,7 @@
 #include "GameLogic/GameLogic.h"
 #include "Common/EarlyCommandLine.h"
 #include "GameNetwork/NetworkUtil.h"
+#include "Common/Recorder.h"
 #include "Common/RadarShroudCache.h"
 #include "GameClient/Gadget.h"
 #include "GameNetwork/NetworkUtil.h"
@@ -5390,4 +5391,42 @@ TEST(a_netgame_slot_list_is_the_player_order_on_every_machine)
 
 	// a stray separator is not a slot - the list is whatever stands between the commas
 	CHECK_EQ( 2, ResolveHostList( "10.0.0.1,,10.0.0.2", ips, MAX_SLOTS ) );
+}
+
+/* A replay is checked by comparing the CRCs it carries against the ones playback recomputes, one
+	 for one, out of a queue.  A game played over a network never gets its frame 0 CRC into the file
+	 - the logic makes it after that frame's commands have already gone out, so it is never sent,
+	 never executed and never recorded - and playback, having no network to lose it to, makes one
+	 anyway.  Unless playback throws that one away every comparison after it is a frame out, and a
+	 replay that is perfectly in sync reports a desync on its first interval frame. */
+TEST(replay_crc_queue_drops_the_frame_the_network_never_recorded)
+{
+	// only a game that was played over a network is missing that first CRC
+	CHECK( replayIsMissingFirstCRC( GAME_LAN ) );
+	CHECK( replayIsMissingFirstCRC( GAME_INTERNET ) );
+	CHECK( !replayIsMissingFirstCRC( GAME_SKIRMISH ) );
+	CHECK( !replayIsMissingFirstCRC( GAME_SINGLE_PLAYER ) );
+	CHECK( !replayIsMissingFirstCRC( GAME_REPLAY ) );
+	CHECK( !replayIsMissingFirstCRC( GAME_SHELL ) );
+	CHECK( !replayIsMissingFirstCRC( GAME_NONE ) );
+
+	// left alone the queue hands back what it was given, in order
+	CRCInfo solo;
+	solo.addCRC( 0x11111111 );
+	solo.addCRC( 0x22222222 );
+	solo.addCRC( 0x33333333 );
+	CHECK_EQ( 0x11111111, solo.readCRC() );
+	CHECK_EQ( 0x22222222, solo.readCRC() );
+	CHECK_EQ( 0x33333333, solo.readCRC() );
+	CHECK_EQ( 0, solo.readCRC() );		// an empty queue reads as 0
+
+	// armed, it swallows exactly one - the frame the recording is missing - and no more
+	CRCInfo net;
+	net.skipFirstCRC();
+	net.addCRC( 0x11111111 );
+	net.addCRC( 0x22222222 );
+	net.addCRC( 0x33333333 );
+	CHECK_EQ( 0x22222222, net.readCRC() );
+	CHECK_EQ( 0x33333333, net.readCRC() );
+	CHECK_EQ( 0, net.readCRC() );
 }

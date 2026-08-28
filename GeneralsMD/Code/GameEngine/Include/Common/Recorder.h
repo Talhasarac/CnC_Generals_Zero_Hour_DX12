@@ -25,6 +25,7 @@
 
 #pragma once
 
+#include <list>
 #include "Common/MessageStream.h"
 #include "GameNetwork/GameInfo.h"
 
@@ -51,7 +52,45 @@ enum RecorderModeType {
 	RECORDERMODETYPE_NONE // this is a valid state to be in on the shell map, or in saved games
 };
 
-class CRCInfo;
+/**
+  * The CRCs of a replay.  Playback recomputes the logic CRC on every interval frame and pushes
+	* it here; every CRC that comes back out of the replay file is compared against the front of
+	* the queue.  The two streams therefore have to line up entry for entry.
+	*/
+class CRCInfo
+{
+public:
+	CRCInfo();
+	void addCRC(UnsignedInt val);
+	UnsignedInt readCRC(void);
+
+	void setLocalPlayer(UnsignedInt index) { m_localPlayer = index; }
+	UnsignedInt getLocalPlayer(void) { return m_localPlayer; }
+
+	void setSawCRCMismatch(void) { m_sawCRCMismatch = TRUE; }
+	Bool sawCRCMismatch(void) { return m_sawCRCMismatch; }
+
+	/// throw the next CRC away instead of queueing it - see replayIsMissingFirstCRC()
+	void skipFirstCRC(void) { m_skipOneCRC = TRUE; }
+
+protected:
+
+	Bool m_sawCRCMismatch;
+	Bool m_skipOneCRC;
+	std::list<UnsignedInt> m_data;
+	UnsignedInt m_localPlayer;
+};
+
+/**
+  * TRUE if a replay recorded in this game mode has no CRC for frame 0.  A network game's CRCs
+	* travel as commands, and the one the logic makes on frame 0 is generated after that frame's
+	* commands have already gone out, so it is never sent, never executed and never recorded - the
+	* replay's CRC stream starts at frame 1.  Playback has no network to lose it to and produces a
+	* frame 0 CRC of its own, so without dropping one the whole comparison sits one frame out and a
+	* replay that is perfectly in sync reports a desync on its first interval frame.  Games recorded
+	* off the network - solo and skirmish - keep their frame 0 CRC and must not be shifted.
+	*/
+Bool replayIsMissingFirstCRC( Int originalGameMode );
 
 class RecorderClass : public SubsystemInterface {
 public:
