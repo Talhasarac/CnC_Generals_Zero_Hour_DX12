@@ -98,7 +98,7 @@ PlayerList::~PlayerList()
 //-----------------------------------------------------------------------------
 Player *PlayerList::getNthPlayer(Int i) 
 { 
-	if( i < 0 || i >= MAX_PLAYER_COUNT )
+	if( !isValidPlayerIndex( i ) )
 	{
 //		DEBUG_CRASH( ("Illegal player index\n") );
 		return NULL;

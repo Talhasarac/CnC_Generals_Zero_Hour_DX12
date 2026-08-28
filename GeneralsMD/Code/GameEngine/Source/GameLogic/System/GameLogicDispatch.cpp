@@ -405,10 +405,22 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 	DEBUG_ASSERTCRASH(msg != NULL && msg != (GameMessage*)0xdeadbeef, ("bad msg"));
 #endif
 
+	//
+	// This used to be an assertion, which is nothing at all in a release build, and the very next
+	// thing the function does with a network message is thisPlayer->getCurrentSelectionAsAIGroup().
+	// The index is not generated here for anything that comes from outside: a replay file supplies it
+	// with a raw fread whose failure leaves the -1 it was seeded with, and a network command gets it
+	// from the sending machine.  An index naming nobody is a command that cannot be carried out, so
+	// drop it rather than dereference the NULL.
+	//
 	Player *thisPlayer = ThePlayerList->getNthPlayer( msg->getPlayerIndex() );
-	DEBUG_ASSERTCRASH( thisPlayer, ("logicMessageDispatcher: Processing message from unknown player (player index '%d')\n", 
-																	msg->getPlayerIndex()) );
-	
+	if( thisPlayer == NULL )
+	{
+		DEBUG_CRASH( ("logicMessageDispatcher: Processing message from unknown player (player index '%d')",
+			msg->getPlayerIndex()) );
+		return;
+	}
+
 	AIGroup *currentlySelectedGroup = NULL;
 
 	if (isInGame())
@@ -2204,7 +2216,7 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 			ScienceType science = (ScienceType)msg->getArgument( 0 )->integer;
 
 			// sanity
-			if( science == SCIENCE_INVALID || thisPlayer == NULL )
+			if( science == SCIENCE_INVALID )
 				break;
 			
 			thisPlayer->attemptToPurchaseScience(science);

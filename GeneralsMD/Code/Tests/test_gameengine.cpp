@@ -3721,3 +3721,27 @@ TEST(a_command_may_only_name_an_object_its_sender_controls)
 	CHECK( !isPlayerCommandingOwnObject( NULL, alice ) );
 	CHECK( !isPlayerCommandingOwnObject( NULL, NULL ) );
 }
+
+/* A player index that arrives from outside this machine is only a number: the replay reader freads
+	 it over a -1 and never checks the read, and a network command carries whatever the sending
+	 machine put in it.  getNthPlayer answers NULL for anything outside the list, and the logic
+	 dispatcher used to assert - i.e. do nothing in a release build - and dereference it anyway. */
+TEST(a_player_index_from_outside_this_machine_is_bounded_before_use)
+{
+	// the whole list, and nothing either side of it
+	CHECK( isValidPlayerIndex( 0 ) );
+	CHECK( isValidPlayerIndex( MAX_PLAYER_COUNT - 1 ) );
+	CHECK( !isValidPlayerIndex( MAX_PLAYER_COUNT ) );
+	CHECK( !isValidPlayerIndex( -1 ) );		// what a failed fread of a replay leaves behind
+
+	// a truncated or hostile value off the wire
+	CHECK( !isValidPlayerIndex( 0x7fffffff ) );
+	CHECK( !isValidPlayerIndex( (Int)0x80000000 ) );
+	CHECK( !isValidPlayerIndex( -12345 ) );
+
+	Bool acceptedOnlyTheList = TRUE;
+	for( Int i = -64; i < 64; ++i )
+		if( isValidPlayerIndex( i ) != (i >= 0 && i < MAX_PLAYER_COUNT) )
+			acceptedOnlyTheList = FALSE;
+	CHECK( acceptedOnlyTheList );
+}

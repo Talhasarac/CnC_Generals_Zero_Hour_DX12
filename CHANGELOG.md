@@ -799,6 +799,13 @@ looks right to you.
 - **Ordering a Jarmen Kell to snipe an empty bike** — one whose rider you already shot — was a
   crash rather than a refusal. So was a formation move that included something which cannot drive
   itself, and telling a hacker to step out of the way at the exact moment it stood up.
+- **An order had to say who sent it, and nobody ever checked.** Every command carries the number of
+  the player who gave it, and that number arrives from the other machine or out of a replay file —
+  it is not something this copy of the game works out for itself. The check that it named a real
+  player was written as a debug-only assertion, which means it was not there at all in the version
+  you play, and the very next thing the game does is ask that player what they have selected. A
+  damaged replay, or a command from a player who had already left the game, was a crash. Now the
+  order is simply dropped.
 
 And when something does go wrong, it now writes a readable crash report instead of the window
 silently vanishing.

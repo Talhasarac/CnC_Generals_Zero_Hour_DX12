@@ -113,6 +113,16 @@ enum
 	MAX_PLAYER_COUNT = 16											///< max number of Players.
 };
 
+//
+// A player index that arrives from outside this machine - off the wire, or out of a replay file -
+// is only a number, and nothing on the way in bounds it.  Everything that turns one into a Player
+// asks this first; a number that fails it names nobody and the command carrying it is dropped.
+//
+inline Bool isValidPlayerIndex( Int playerIndex )
+{
+	return playerIndex >= 0 && playerIndex < MAX_PLAYER_COUNT;
+}
+
 // ----------------------------------------------------------------------------------------------
 /**
 	a bitmask that can uniquely represent each player.

@@ -173,10 +173,17 @@ GameMessage *NetGameCommandMsg::constructGameMessage()
 {
 	GameMessage *retval = newInstance(GameMessage)(m_type);
 
+	//
+	// The player id comes off the wire, and the name it builds does not have to match anybody: a
+	// command that arrives while the player list is being torn down, or one naming a slot this room
+	// never filled, finds nothing.  findPlayerWithNameKey returns NULL for that and the result was
+	// dereferenced on the spot.  Hand the message an index that names nobody instead and let the
+	// logic dispatcher drop it, which is what it does with any index outside the player list.
+	//
 	AsciiString name;
 	name.format("player%d", getPlayerID());
-	retval->friend_setPlayerIndex( ThePlayerList->findPlayerWithNameKey(TheNameKeyGenerator->nameToKey(name))->getPlayerIndex());
-//	retval->friend_setPlayerIndex(indexFromMask(ThePlayerList->findPlayerWithNameKey(TheNameKeyGenerator->nameToKey(name))->getPlayerMask()));
+	Player *sender = ThePlayerList->findPlayerWithNameKey(TheNameKeyGenerator->nameToKey(name));
+	retval->friend_setPlayerIndex( sender ? sender->getPlayerIndex() : -1 );
 
 	GameMessageArgument *arg = m_argList;
 	while (arg != NULL) {
