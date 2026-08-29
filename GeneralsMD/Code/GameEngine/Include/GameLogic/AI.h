@@ -264,7 +264,8 @@ public:
 		IGNORE_INSIGNIFICANT_BUILDINGS		= 1 << 2,
 		ATTACK_BUILDINGS									= 1 << 3,
 		WITHIN_ATTACK_RANGE								= 1 << 4,
-		UNFOGGED													= 1 << 5
+		UNFOGGED													= 1 << 5,
+		PREFER_HIGH_THREAT								= 1 << 6		///< pick the biggest threat in range, not the nearest thing
 	};
 	Object *findClosestEnemy( const Object *me, Real range, UnsignedInt qualifiers, 
 		const AttackPriorityInfo *info=NULL, PartitionFilter *optionalFilter=NULL);

@@ -4715,6 +4715,17 @@ Object* AIUpdateInterface::getNextMoodTarget( Bool calledByAI, Bool calledDuring
 		flags |= AI::UNFOGGED;
 	}
 
+	//
+	// A caller that closes with what it finds picks the biggest threat in range instead of the
+	// nearest thing (see AI_threatScore).  Walking up to a dozer while the artillery next to it
+	// keeps firing is only sensible for a unit that cannot move to a better target - and this
+	// caller can.
+	//
+	if (allowOutOfWeaponRangeTargets)
+	{
+		flags |= AI::PREFER_HIGH_THREAT;
+	}
+
 	Object *newVictim = TheAI->findClosestEnemy(obj, rangeToFindWithin, flags, getAttackInfo());
 
 /*

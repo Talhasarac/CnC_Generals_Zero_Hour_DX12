@@ -980,6 +980,55 @@ TEST(attack_move_turns_on_whoever_is_shooting_it)
 	CHECK( !AIAttackMove_shouldRetaliate( 0xffffffff, 0xfffffff0, WINDOW, false, true ) );
 }
 
+/* AI.cpp: on attack move the scan ranks what it finds by threat instead of handing
+   back the nearest thing. */
+extern Int AI_threatScore( Int templateThreatValue, Int buildCost, Bool threatensMe,
+													 Real dist, Real distanceModifier );
+
+TEST(attack_move_shoots_the_biggest_threat_first)
+{
+	const Real MOD = 100.0f;		/* AttackPriorityDistanceModifier, shipped value */
+	const Real HERE = 0.0f;
+
+	/* a mod that sets ThreatValue decides outright; build cost only stands in for it. */
+	CHECK( AI_threatScore( 50, 4000, false, HERE, MOD ) > AI_threatScore( 40, 5000, false, HERE, MOD ) );
+
+	/* the shipped INI sets ThreatValue nowhere, so cost has to do the ranking:
+	   an Overlord-priced tank over a Humvee-priced one. */
+	CHECK( AI_threatScore( 0, 1200, true, HERE, MOD ) > AI_threatScore( 0, 700, true, HERE, MOD ) );
+
+	/* anything that can shoot back outranks anything that cannot, whatever it cost -
+	   a Command Center is worth more than a Gattling tank and is still not what is
+	   killing us - and no distance may move a target out of its group, or a unit would
+	   walk past the artillery firing at it to reach a far off barracks. */
+	CHECK( AI_threatScore( 0, 1, true, HERE, MOD ) > AI_threatScore( 0, 5000, false, HERE, MOD ) );
+	CHECK( AI_threatScore( 1, 0, true, HERE, MOD ) > AI_threatScore( 9999, 0, false, HERE, MOD ) );
+	CHECK( AI_threatScore( 0, 1, true, 9999.0f, MOD ) > AI_threatScore( 0, 5000, false, HERE, MOD ) );
+
+	/* free civilian junk still scores, otherwise a scan that found only that would
+	   report "nothing here" and the unit would walk past what it was told to clear. */
+	CHECK( AI_threatScore( 0, 0, false, HERE, MOD ) > 0 );
+	CHECK( AI_threatScore( 0, 0, false, 9999.0f, MOD ) > 0 );
+
+	/* worth halves every modifier of distance. */
+	CHECK_EQ( AI_threatScore( 0, 1000, false, MOD, MOD ), 500 );
+	CHECK_EQ( AI_threatScore( 0, 1000, false, 3.0f*MOD, MOD ), 250 );
+
+	/* so the same unit closer up wins, and a big enough threat still outranks a cheap
+	   one underfoot: an Overlord a modifier away beats a Ranger at our feet. */
+	CHECK( AI_threatScore( 0, 1200, true, 10.0f, MOD ) > AI_threatScore( 0, 1200, true, 200.0f, MOD ) );
+	CHECK( AI_threatScore( 0, 2000, true, MOD, MOD ) > AI_threatScore( 0, 225, true, HERE, MOD ) );
+
+	/* equal threats at equal range must tie exactly: the scan is sorted near to far and
+	   keeps the first of a tie, which is how "then the closest one" gets honoured. */
+	CHECK_EQ( AI_threatScore( 0, 900, true, 50.0f, MOD ), AI_threatScore( 0, 900, true, 50.0f, MOD ) );
+
+	/* the modifier is 0 until the AI INI is read, and a target can measure as behind us
+	   from a bounding sphere: neither may divide by zero or invert the ranking. */
+	CHECK_EQ( AI_threatScore( 0, 1000, false, 500.0f, 0.0f ), 1000 );
+	CHECK_EQ( AI_threatScore( 0, 1000, false, -5.0f, MOD ), 1000 );
+}
+
 //////////////////////////////////////////////////////////////////////////////
 // Particle ground collision
 //

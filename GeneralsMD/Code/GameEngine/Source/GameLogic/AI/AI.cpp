@@ -604,6 +604,57 @@ static void priorityFunc(Object *obj, void *userData)
 
 //-----------------------------------------------------------------------------
 /**
+ * How much an enemy is worth shooting before the others, with no Object involved so
+ * test_gameengine can link straight to it - the same trick as AIAttackMove_shouldRetaliate
+ * in AIStates.cpp.
+ *
+ * Attack move used to hand out whatever the scan found first, which is the nearest thing:
+ * a group ordered through an enemy base stopped for the first dozer it passed while the
+ * artillery beside it kept firing. Ranking by threat fixes the order of business.
+ *
+ * 'ThreatValue' is the INI field the threat map already feeds on, so a mod that sets it
+ * decides this outright; the shipped Zero Hour INI never sets it (it is absent from every
+ * file in INIZH.big), so build cost stands in - EA's own price is the only per-unit measure
+ * of dangerousness the shipped data has, and it tracks it well enough (an Overlord costs
+ * five times a Humvee).
+ *
+ * Anything that can shoot back at *us* outranks anything that cannot, whatever it cost: a
+ * Command Center is worth more than a Gattling tank and is still not what is killing us.
+ * That is what AI_THREAT_ARMED_BONUS buys - it is larger than any build cost in the game, so
+ * the two groups never interleave, and distance never moves a target out of its group either.
+ *
+ * Within a group distance does decide, because a threat we have to cross the field to reach is
+ * not the one hurting us now: the worth of a target falls off with range, halving every
+ * 'distanceModifier' world units away. That is the same knob the scripted attack priorities use
+ * (AI INI's AttackPriorityDistanceModifier, 100.0 in the shipped data), so both notions of "worth
+ * shooting" fade over the same distance. It is 0 until that INI is read - and the ctor default -
+ * so a zero (or a negative, or a distance behind us) means no falloff at all rather than a
+ * divide by zero.
+ */
+enum { AI_THREAT_ARMED_BONUS = 1000000 };		///< larger than any build cost in the game
+
+Int AI_threatScore( Int templateThreatValue, Int buildCost, Bool threatensMe,
+										Real dist, Real distanceModifier )
+{
+	Int score = (templateThreatValue > 0) ? templateThreatValue : buildCost;
+	if (score < 1)
+		score = 1;					// a free civilian car is still worth more than nothing at all
+
+	if (distanceModifier > 0.0f && dist > 0.0f)
+	{
+		score = REAL_TO_INT( score * distanceModifier / (distanceModifier + dist) );
+		if (score < 1)
+			score = 1;				// however far off it is, it still beats finding nothing
+	}
+
+	if (threatensMe)
+		score += AI_THREAT_ARMED_BONUS;
+
+	return score;
+}
+
+//-----------------------------------------------------------------------------
+/**
  * Return the closest enemy, according to the qualifiers.
  */
 Object *AI::findClosestEnemy( const Object *me, Real range, UnsignedInt qualifiers, 
@@ -696,6 +747,39 @@ Object *AI::findClosestEnemy( const Object *me, Real range, UnsignedInt qualifie
 
 	if (info == NULL || info == TheScriptEngine->getDefaultAttackInfo()) 
 	{
+		if (qualifiers & PREFER_HIGH_THREAT)
+		{
+			// Biggest threat in range wins; the iteration is sorted near to far, so a strict
+			// improvement keeps the nearest of equal threats - which is the whole priority
+			// order the caller wants: what shoots us (its own check, before we are called),
+			// then what is worth shooting, then what is closest.
+			Real distanceModifier = TheAI->getAiData()->m_attackPriorityDistanceModifier;
+			Object *bestThreat = NULL;
+			Int bestScore = 0;
+			ObjectIterator *threatIter = ThePartitionManager->iterateObjectsInRange(me, range, FROM_BOUNDINGSPHERE_2D, filters, ITER_SORTED_NEAR_TO_FAR);
+			MemoryPoolObjectHolder threatHolder(threatIter);
+			for (Object *theEnemy = threatIter->first(); theEnemy; theEnemy = threatIter->next())
+			{
+				Bool threatensMe = theEnemy->isAbleToAttack();		// cheap bit test, and required before the call below
+				if (threatensMe)
+				{
+					CanAttackResult r = theEnemy->getAbleToAttackSpecificObject( ATTACK_NEW_TARGET, me, CMD_FROM_AI );
+					threatensMe = (r == ATTACKRESULT_POSSIBLE || r == ATTACKRESULT_POSSIBLE_AFTER_MOVING);
+				}
+
+				Real dist = sqrt( ThePartitionManager->getDistanceSquared(me, theEnemy, FROM_BOUNDINGSPHERE_2D) );
+				Int score = AI_threatScore( theEnemy->getTemplate()->getThreatValue(),
+																		theEnemy->getTemplate()->calcCostToBuild( theEnemy->getControllingPlayer() ),
+																		threatensMe, dist, distanceModifier );
+				if (score > bestScore)
+				{
+					bestScore = score;
+					bestThreat = theEnemy;
+				}
+			}
+			return bestThreat;
+		}
+
 		// No additional attack info, so just return the closest one.
 		Object* o = ThePartitionManager->getClosestObject( me, range, FROM_BOUNDINGSPHERE_2D, filters );
 		return o;

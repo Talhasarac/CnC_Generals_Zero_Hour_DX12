@@ -35,6 +35,7 @@ found and fixed — EA's own, not port damage.**
 - Aircraft make their pass, fly home, rearm and resume your order.
 - Nothing walks off the map chasing a target that keeps retreating.
 - A unit turns onto whatever is actually shooting it, then resumes the advance.
+- Otherwise it picks the worst thing in range: anything armed before anything that is not, then the more dangerous of the two, and worth fades with distance so it is never the far one it walks the field for. A group ordered through a base no longer stops for the first dozer it passes while the artillery beside it keeps firing.
 - Ctrl on the attack-move click no longer shells the ground instead.
 - Troop Crawlers wait for their squad to climb back in, up to ten seconds.
 - One man who cannot get back aboard no longer parks the Crawler for the rest of the attack move.
