@@ -227,6 +227,7 @@ found and fixed — EA's own, not port damage.**
 - Zoom toward the cursor works; the spot under your pointer stays there.
 - The camera turns in whole 45-degree steps, instantly, while you hold the key.
 - Edge scrolling works windowed, and scroll speed no longer follows your frame rate.
+- Taking over another base no longer squeezes the picture into the top four fifths of the screen.
 - A skirmish opens zoomed all the way out (`StartAtMaxZoom = No` restores the old opening).
 - Hold Ctrl and roll the wheel to turn a building before placing it.
 - Buildings snap to the pathfinder's own grid (`GridBuildPlacement = No` for the old way).

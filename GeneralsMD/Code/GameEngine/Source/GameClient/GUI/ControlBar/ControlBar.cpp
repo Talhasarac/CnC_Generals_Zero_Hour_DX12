@@ -3678,7 +3678,14 @@ void ControlBar::switchControlBarStage( ControlBarStages stage )
 void ControlBar::setDefaultControlBarConfig( void )
 {
 	m_currentControlBarStage = CONTROL_BAR_STAGE_DEFAULT;
-	TheTacticalView->setHeight((Int)(TheDisplay->getHeight() * 0.80f)); 
+	//
+	// Full height, like the low stage and like ShowControlBar: the bar is drawn over the world and
+	// does not crop it.  Retail cropped the view to 80% here, and since the stage is reset every
+	// time the HUD scheme is rebuilt - taking over another player, a player dying into the observer
+	// bar - that shrank the viewport in the middle of a match and slid the picture, for good:
+	// nothing put the height back once ShowControlBar had run at the start of the game.
+	//
+	TheTacticalView->setHeight((Int)(TheDisplay->getHeight())); 
 	m_contextParent[ CP_MASTER ]->winSetPosition(m_defaultControlBarPosition.x, m_defaultControlBarPosition.y);
 	m_contextParent[ CP_MASTER ]->winHide(FALSE);
 	repopulateBuildTooltipLayout();
