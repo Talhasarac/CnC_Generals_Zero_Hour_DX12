@@ -409,11 +409,6 @@ file(GLOB_RECURSE GAMEENGINEDEVICE_SOURCES ${GED}/Source/*.cpp)
 # shipping build uses the Win32 message mouse instead).
 list(REMOVE_ITEM GAMEENGINEDEVICE_SOURCES
   ${GED}/Source/Win32Device/GameClient/Win32DIMouse.cpp)
-# Bink is a binary-only SDK that is not in the release, so its device is
-# replaced by the null device in Stubs/ (PLAN.md Phase 4: skipped movies).
-list(REMOVE_ITEM GAMEENGINEDEVICE_SOURCES
-  ${GED}/Source/VideoDevice/Bink/BinkVideoPlayer.cpp)
-
 # Miles is binary-only too, but the game ships mss32.dll and it exports
 # decorated stdcall names (_AIL_startup@0, ...), so MilesAudioManager can bind
 # to the real DLL through an import library - real audio, no SDK.  Thyme's
@@ -422,6 +417,16 @@ list(REMOVE_ITEM GAMEENGINEDEVICE_SOURCES
 # lib makes the exe resolve those names from whatever mss32.dll sits next to
 # it at runtime - the game's real one.  (`lib /def` alone can't produce this
 # import lib: it prepends a second underscore to the already-decorated names.)
+# Bink is binary-only too, and the same trick works: the game ships BINKW32.DLL
+# and it exports decorated stdcall names (_BinkOpen@8, ...), so BinkVideoPlayer
+# binds to the real DLL through the import library of a no-op stub built as
+# binkw32.dll.  Real movies, no SDK.  The stub dll in build/Release/ must never
+# be copied to Run/ - the loader has to find the game's own BINKW32.DLL there.
+add_library(binkstub SHARED
+  ${WW}/Bink/stub/bink.c ${WW}/Bink/stub/bink.def)
+set_target_properties(binkstub PROPERTIES OUTPUT_NAME binkw32)
+target_include_directories(binkstub PRIVATE ${WW}/Bink/include)
+
 add_library(milesstub SHARED
   ${WW}/Miles6/stub/miles.c ${WW}/Miles6/stub/miles.def)
 set_target_properties(milesstub PROPERTIES OUTPUT_NAME mss32)
@@ -431,9 +436,9 @@ add_library(gameenginedevice STATIC ${GAMEENGINEDEVICE_SOURCES})
 
 target_include_directories(gameenginedevice PUBLIC
   ${GED}/Include ${STUBS} ${CMAKE_CURRENT_SOURCE_DIR}/Main
-  ${WW}/Miles6/include)
+  ${WW}/Miles6/include ${WW}/Bink/include)
 set_target_properties(gameenginedevice PROPERTIES CXX_STANDARD 17)
-target_link_libraries(gameenginedevice PUBLIC gameengine ww3d2 milesstub)
+target_link_libraries(gameenginedevice PUBLIC gameengine ww3d2 milesstub binkstub)
 
 # ---- generals.exe ---------------------------------------------------------
 # BuildVersion.h and GeneratedVersion.h are normally written by Tools/
@@ -558,6 +563,14 @@ add_custom_command(TARGET dx8_smoke POST_BUILD
 add_dependencies(dx8_smoke d3d8to9)
 add_test(NAME dx8_smoke COMMAND dx8_smoke)
 add_test(NAME dx8_smoke_d3d12 COMMAND dx8_smoke -d3d12)
+
+# bink_smoke validates the hand-reconstructed Bink ABI against the real
+# BINKW32.DLL the game ships - it loads that DLL by path, so it does not link
+# binkstub and it has to run from Run/.  Without game data it prints "skip".
+add_executable(bink_smoke ${TESTS}/bink_smoke.c)
+target_include_directories(bink_smoke PRIVATE ${WW}/Bink/include)
+add_test(NAME bink_smoke COMMAND bink_smoke
+         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../Run)
 # "-msaa": a multisampled back buffer, and the plain render target + non-multisampled depth
 # buffer pairing that DX8Wrapper::_Get_Non_MultiSampled_Depth_Buffer hands the screen filters.
 add_test(NAME dx8_smoke_msaa COMMAND dx8_smoke -msaa 4)

@@ -209,6 +209,7 @@ found and fixed — EA's own, not port damage.**
 
 - Widescreen resolutions are back in the options menu.
 - Zoom further out, with the whole map drawn instead of black corners.
+- The zoom-out ceiling is the same for everyone; no setting buys you a wider view.
 - Zoom toward the cursor works; the spot under your pointer stays there.
 - The camera turns in whole 45-degree steps, instantly, while you hold the key.
 - Edge scrolling works windowed, and scroll speed no longer follows your frame rate.
@@ -280,6 +281,7 @@ found and fixed — EA's own, not port damage.**
 ## Sound, video, and getting it to start at all
 
 - Audio is real, through the audio library the retail game ships with.
+- The videos play: the intro, the sizzle reel, the mission briefings, the general portraits.
 - About 5,600 graphics calls are translated to a modern path, none of them touched.
 - No disc, no registry keys, no retail installer — a normal install works.
 - The 1.04 patch content is reachable again.
@@ -307,7 +309,6 @@ found and fixed — EA's own, not port damage.**
 
 ## Not there yet
 
-- The intro and mission videos do not play; the decoder was never released.
 - Random maps generate and can be played — a number picks the map and the match starts on it —
   but there is still no menu entry and no reroll button.
 - Online and LAN play are untested.
