@@ -199,6 +199,12 @@ private:
 
 	DisconnectManager *m_disconnectManager;						///< Controls the disconnect dialog.
 
+	/* The frame the logic is currently stuck on, and how long it has been stuck, so a frame whose
+		 FRAMEINFO was lost can be asked for again instead of waited out - see FrameResendPolicy.h. */
+	UnsignedInt m_resendWatchFrame;										///< frame allCommandsReady last blocked on
+	time_t m_resendWatchSince;												///< when it started blocking
+	time_t m_resendLastRequest;												///< when we last asked for it; 0 = not asked
+
 	FrameDataManager *m_frameData[MAX_SLOTS];
 
 	NetCommandList *m_pendingCommands;

@@ -33,6 +33,7 @@
 #include "GameNetwork/Connection.h"
 #include "GameLogic/CRCSnapshotRing.h"
 #include "GameNetwork/GameDataMatch.h"
+#include "GameNetwork/FrameResendPolicy.h"
 #include "GameLogic/FPUControl.h"
 #include "GameNetwork/StallJudgement.h"
 #include "GameNetwork/KeepAliveSchedule.h"
@@ -3503,6 +3504,41 @@ TEST(the_run_ahead_covers_the_trip_it_is_sized_for)
 			CHECK( (Real)runAhead / (Real)fps >= (latency / 2.0f) );
 		}
 	}
+}
+
+/* The other half of that match: nothing ever asked for the lost frame.  FrameData escalates to
+	 FRAMEDATA_RESEND only when it holds more commands than were announced, so a missing announcement
+	 waits for ever - zero FRAMERESENDREQUEST commands went out in the whole game, and what freed it
+	 was the disconnect screen's twenty-second handshake. */
+TEST(a_missing_frame_is_asked_for_again_once_the_wire_has_had_its_chance)
+{
+	const UnsignedInt retry = 227;			// the retry timeout that match measured
+	const UnsignedInt wait = frameResendWaitMS( retry );
+
+	/* Every frame in the run-ahead window is legitimately not ready for a while.  Asking inside that
+		 window is pure traffic, and traffic is what loses packets in the first place. */
+	CHECK( shouldRequestFrameResend( 0, 0, retry ) == FALSE );
+	CHECK( shouldRequestFrameResend( wait - 1, wait - 1, retry ) == FALSE );
+
+	/* past it, ask - "not asked yet" is sinceLastRequestMS == stalledMS */
+	CHECK( shouldRequestFrameResend( wait, wait, retry ) == TRUE );
+	CHECK( shouldRequestFrameResend( 20000, 20000, retry ) == TRUE );
+
+	/* having asked, do not ask again until the answer has had time to arrive */
+	CHECK( shouldRequestFrameResend( 20000, 0, retry ) == FALSE );
+	CHECK( shouldRequestFrameResend( 20000, wait - 1, retry ) == FALSE );
+	CHECK( shouldRequestFrameResend( 20000, wait, retry ) == TRUE );
+
+	/* the wait comes from the link, not from a constant, and a wild measurement cannot run away
+		 with it in either direction */
+	CHECK( frameResendWaitMS( 500 ) > frameResendWaitMS( 120 ) );
+	CHECK_EQ( (Int)frameResendWaitMS( 0 ),
+						(Int)(FRAME_RESEND_MIN_TIMEOUT_MS * FRAME_RESEND_TIMEOUTS_TO_WAIT) );
+	CHECK_EQ( (Int)frameResendWaitMS( 999999 ),
+						(Int)(FRAME_RESEND_MAX_TIMEOUT_MS * FRAME_RESEND_TIMEOUTS_TO_WAIT) );
+
+	/* and the whole point: the twenty seconds that match lost become one wait */
+	CHECK( wait < 1000 );
 }
 
 TEST(the_run_ahead_carries_a_margin_the_percentage_alone_cannot_give)

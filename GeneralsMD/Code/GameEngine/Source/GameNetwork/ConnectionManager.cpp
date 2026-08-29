@@ -42,6 +42,7 @@
 #include "GameClient/GameText.h"
 #include "GameClient/MessageBox.h"
 #include "GameNetwork/ConnectionManager.h"
+#include "GameNetwork/FrameResendPolicy.h"
 #include "GameNetwork/StallJudgement.h"
 #include "GameNetwork/KeepAliveSchedule.h"
 #include "GameNetwork/CushionMetrics.h"
@@ -147,6 +148,9 @@ ConnectionManager::ConnectionManager(void)
 	m_netCommandWrapperList = NULL;
 	m_localUser = NULL;
 	m_localUser = newInstance(User);
+	m_resendWatchFrame = 0;
+	m_resendWatchSince = 0;
+	m_resendLastRequest = 0;
 }
 
 /**
@@ -164,6 +168,12 @@ void ConnectionManager::init()
 	for (i = 0; i < NUM_CONNECTIONS; ++i) {
 		m_connections[i] = NULL;
 	}
+
+	/* A fresh game means nothing is stuck yet; leaving the old stamps behind would make the
+		 first blocking frame of the new match look like it had been waiting since the last one. */
+	m_resendWatchFrame = 0;
+	m_resendWatchSince = 0;
+	m_resendLastRequest = 0;
 
 	if (m_pendingCommands == NULL) {
 		m_pendingCommands = newInstance(NetCommandList);
@@ -1587,7 +1597,9 @@ Int commandsReadyDebugSpewage = 0;
  */
 Bool ConnectionManager::allCommandsReady(UnsignedInt frame, Bool justTesting /* = FALSE */) {
 	Bool retval = TRUE;
-	FrameDataReturnType frameRetVal;
+	/* Read after the loop, and the loop can exit before ever assigning it. */
+	FrameDataReturnType frameRetVal = FRAMEDATA_READY;
+	Int notReadyPlayer = -1;
 //	retval = FALSE;  // ****for testing purposes only!!!!!!****
 	// i is used after the loop; VC6 for-scope let it escape.
 	Int i;
@@ -1607,6 +1619,7 @@ Bool ConnectionManager::allCommandsReady(UnsignedInt frame, Bool justTesting /* 
 
 			frameRetVal = m_frameData[i]->allCommandsReady(frame, (frame != commandsReadyDebugSpewage) && (justTesting == FALSE));
 			if (frameRetVal == FRAMEDATA_NOTREADY) {
+				notReadyPlayer = i;
 				retval = FALSE;
 			} else if (frameRetVal == FRAMEDATA_RESEND) {
 				requestFrameDataResend(i, frame);
@@ -1621,6 +1634,37 @@ Bool ConnectionManager::allCommandsReady(UnsignedInt frame, Bool justTesting /* 
 			if ((m_frameData[i] != NULL) && (i != m_localSlot)) {
 				m_frameData[i]->resetFrame(frame, FALSE);
 			}
+		}
+	}
+
+	/* A frame that never got its FRAMEINFO stays NOTREADY for ever on its own - FrameData escalates
+		 to FRAMEDATA_RESEND only when it holds more commands than were announced, never when the
+		 announcement is the thing that was lost.  Ask for it.  See FrameResendPolicy.h for why the
+		 wait is the connection's own retry timeout rather than a constant. */
+	if ((notReadyPlayer >= 0) && (justTesting == FALSE)) {
+		time_t now = timeGetTime();
+
+		if (frame != m_resendWatchFrame) {
+			m_resendWatchFrame = frame;
+			m_resendWatchSince = now;
+			m_resendLastRequest = 0;			// nothing asked for this frame yet
+		}
+
+		UnsignedInt stalledMS = (UnsignedInt)(now - m_resendWatchSince);
+		UnsignedInt sinceLastRequestMS = (m_resendLastRequest == 0)
+			? stalledMS
+			: (UnsignedInt)(now - m_resendLastRequest);
+
+		UnsignedInt retryTimeoutMS = FRAME_RESEND_MIN_TIMEOUT_MS;
+		if (m_connections[notReadyPlayer] != NULL) {
+			retryTimeoutMS = m_connections[notReadyPlayer]->getRetryTimeMS();
+		}
+
+		if (shouldRequestFrameResend(stalledMS, sinceLastRequestMS, retryTimeoutMS)) {
+			DEBUG_LOG(("ConnectionManager::allCommandsReady - frame %d still missing from player %d after %d ms, asking again (retry timeout %d ms)\n",
+				frame, notReadyPlayer, stalledMS, retryTimeoutMS));
+			requestFrameDataResend(notReadyPlayer, frame);
+			m_resendLastRequest = now;
 		}
 	}
 

@@ -116,6 +116,10 @@ public:
 	void setQuitting( void );
 	Bool isQuitting( void ) { return m_isQuitting; }
 
+	/** This connection's measured retry timeout, in milliseconds.  How long a packet on this link is
+		  given before it is worth sending again - see FrameResendPolicy.h. */
+	UnsignedInt getRetryTimeMS( void ) const { return (UnsignedInt)m_retryTime; }
+
 #if defined(_DEBUG) || defined(_INTERNAL)
 	void debugPrintCommands();
 #endif
