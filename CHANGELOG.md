@@ -39,7 +39,7 @@ found and fixed — EA's own, not port damage.**
 - Troop Crawlers wait for their squad to climb back in, up to ten seconds.
 - Their squad stays out until the area is clear, instead of piling back in after every kill.
 - Every man aboard gets out to fight; nobody sits out the battle waiting to be patched up.
-- An emptied Crawler carries on with your order instead of idling behind the fight.
+- A Crawler that has lost its whole squad carries on with your order instead of idling.
 - Attack-move state is saved now, instead of coming back as random memory.
 
 ## Your units stop shooting corpses

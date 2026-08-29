@@ -64,10 +64,12 @@ Bool AssaultTransport_shouldRetrieveMembers( Bool membersOutside, Bool membersFi
 
 //-------------------------------------------------------------------------------------------------
 /** Is the transport standing there attacking with nobody left to put on the ground?
-  * Its own weapon only deploys troops, so once it is empty the attack is theatre - drive on. */
-Bool AssaultTransport_nothingLeftToDeploy( Bool isAttacking, Bool anyoneInside )
+  * Its own weapon only deploys troops, so once it is empty the attack is theatre - drive on.
+  * Not while the squad it dropped is still alive out there, though: that fight is the whole
+  * point of having stopped, and driving off would leave them chasing the transport. */
+Bool AssaultTransport_nothingLeftToDeploy( Bool isAttacking, Bool anyoneInside, Bool membersAlive )
 {
-	return isAttacking && !anyoneInside;
+	return isAttacking && !anyoneInside && !membersAlive;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -265,8 +267,10 @@ UpdateSleepTime AssaultTransportAIUpdate::update( void )
 	}
 
 	//Nobody left to put on the ground: stop posing with the deploy weapon and get on with the order.
+	//m_currentMembers only counts our living troops, so with the hold empty they are all outside.
 	if( AssaultTransport_nothingLeftToDeploy( transport->testStatus( OBJECT_STATUS_IS_ATTACKING ),
-																						contain && contain->getContainCount() > 0 ) )
+																						contain && contain->getContainCount() > 0,
+																						m_currentMembers > 0 ) )
 	{
 		if( m_isAttackMove && getAIStateType() != AI_ATTACK_MOVE_TO )
 		{

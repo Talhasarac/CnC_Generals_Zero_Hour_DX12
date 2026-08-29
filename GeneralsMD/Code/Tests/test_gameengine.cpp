@@ -785,19 +785,22 @@ TEST(ctrl_is_force_fire_only_while_the_attack_move_cursor_is_down)
    orders now board on this one rule. */
 extern Bool AssaultTransport_shouldRetrieveMembers( Bool membersOutside, Bool membersFighting, Bool areaClear );
 extern Bool AssaultTransport_waitingForBoarding( Bool membersOutside, UnsignedInt framesRemaining );
-extern Bool AssaultTransport_nothingLeftToDeploy( Bool isAttacking, Bool anyoneInside );
+extern Bool AssaultTransport_nothingLeftToDeploy( Bool isAttacking, Bool anyoneInside, Bool membersAlive );
 
 TEST(troop_crawler_drives_on_once_it_is_empty)
 {
-	/* attacking with an empty hold: the crawler's own weapon only unloads troops, so it is
-	   standing there doing nothing - resume the order instead. */
-	CHECK( AssaultTransport_nothingLeftToDeploy( true, false ) );
+	/* attacking with an empty hold and no squad left alive: the crawler's own weapon only unloads
+	   troops, so it is standing there doing nothing - resume the order instead. */
+	CHECK( AssaultTransport_nothingLeftToDeploy( true, false, false ) );
+
+	/* the squad it dropped is still out there fighting: hold, or they would be left behind. */
+	CHECK( !AssaultTransport_nothingLeftToDeploy( true, false, true ) );
 
 	/* somebody still aboard: stay put, he is about to be deployed. */
-	CHECK( !AssaultTransport_nothingLeftToDeploy( true, true ) );
+	CHECK( !AssaultTransport_nothingLeftToDeploy( true, true, false ) );
 
 	/* not attacking at all: whatever it is doing is not our business. */
-	CHECK( !AssaultTransport_nothingLeftToDeploy( false, false ) );
+	CHECK( !AssaultTransport_nothingLeftToDeploy( false, false, false ) );
 }
 
 TEST(troop_crawler_picks_its_troops_back_up_only_when_the_fight_is_over)
