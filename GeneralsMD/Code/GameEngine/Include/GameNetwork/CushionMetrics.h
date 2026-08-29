@@ -93,6 +93,29 @@ enum
 Int computeRunAhead( Real latencySumSeconds, Int fps, UnsignedInt slackPercent,
 										 Int minRunAhead, Int maxRunAhead );
 
+/* A latency sample is the wall time between sending a frame's commands and the ack coming back, so
+	 it measures the link only while both machines are running.  Let the logic stop - a lost packet,
+	 a player alt-tabbing, a map that took a moment - and the same stopwatch keeps running, and the
+	 stall is filed as round trip time.  It is not: it is the answer to a question the run-ahead is
+	 not asking.  A real match recorded 1.79 s and then 7.64 s on a link whose measured srtt was
+	 51 ms; the run-ahead sized on them went from its usual 5 frames to 29 and then 64 - 2.1 seconds
+	 of input delay - and stayed there while the sample sat in the average.
+
+	 So a sample past any plausible round trip is discarded down to the ceiling rather than trusted.
+	 A link genuinely that slow is not playable anyway, and clamping costs nothing there; the point
+	 is that a stall can no longer buy a permanent delay for everyone.
+
+	 Half a second of round trip is past where this game is playable, and it is what the clamp
+	 has to be worth: two players pinned at the ceiling still only buy 18 frames of
+	 run-ahead - 0.6 s - against the 64 frames the raw samples bought.  A link genuinely slower
+	 than this loses at most 33 ms of one-way window, which RUNAHEAD_JITTER_FRAMES already covers.
+	 ponytail: one ceiling for every link.  The self-calibrating version is the connection's own
+	 srtt + 4*rttvar (Connection.h has both), if a real link is ever found that this undersizes. */
+const Real MAX_PLAUSIBLE_LATENCY_SECONDS = 0.5f;
+
+/** Fold a raw round-trip measurement into the range a round trip can actually occupy. */
+Real sanitizeLatencySample( Real seconds, Real ceilingSeconds );
+
 /* The room's logic rate is set by the packet router to the slowest rate any player reports, and
 	 every machine then paces its own logic on it (Network::timeForNewFrame).  The trap is that the
 	 rate a player reports is the rate they *achieved*, and a player pinned at the room's rate

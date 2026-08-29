@@ -3506,6 +3506,43 @@ TEST(the_run_ahead_covers_the_trip_it_is_sized_for)
 	}
 }
 
+/* Measured in a real LAN match: the host lost one FRAMEINFO packet, sat on the frame for twenty
+	 seconds, and its own latency samples came back as 1.79 s and then 7.64 s on a link whose srtt was
+	 51 ms.  The run-ahead sized on them went 5 -> 29 -> 64 frames, which is 2.1 seconds of input
+	 delay, and it stayed there while the samples sat in the average. */
+TEST(a_stalled_frame_is_not_filed_as_round_trip_time)
+{
+	/* an ordinary link passes through untouched - the clamp must not be a tax on healthy games */
+	CHECK_NEAR( sanitizeLatencySample( 0.051f, MAX_PLAUSIBLE_LATENCY_SECONDS ), 0.051f, 0.0001f );
+	CHECK_NEAR( sanitizeLatencySample( 0.300f, MAX_PLAUSIBLE_LATENCY_SECONDS ), 0.300f, 0.0001f );
+	CHECK( MAX_PLAUSIBLE_LATENCY_SECONDS <= 0.5f );		// a slower link than this is not a game
+	CHECK_NEAR( sanitizeLatencySample( MAX_PLAUSIBLE_LATENCY_SECONDS, MAX_PLAUSIBLE_LATENCY_SECONDS ),
+							MAX_PLAUSIBLE_LATENCY_SECONDS, 0.0001f );
+
+	/* the two the match actually recorded */
+	CHECK_NEAR( sanitizeLatencySample( 1.785224f, MAX_PLAUSIBLE_LATENCY_SECONDS ),
+							MAX_PLAUSIBLE_LATENCY_SECONDS, 0.0001f );
+	CHECK_NEAR( sanitizeLatencySample( 7.636834f, MAX_PLAUSIBLE_LATENCY_SECONDS ),
+							MAX_PLAUSIBLE_LATENCY_SECONDS, 0.0001f );
+
+	/* a clock that ran backwards says nothing; it must not read as a zero-latency link */
+	CHECK_NEAR( sanitizeLatencySample( -3.0f, MAX_PLAUSIBLE_LATENCY_SECONDS ), 0.0f, 0.0001f );
+
+	/* and the point of all of it: what the run-ahead does with the clamped numbers.  Two players at
+		 the ceiling still cost far less than the 64 frames the raw samples bought. */
+	Real clamped = sanitizeLatencySample( 7.636834f, MAX_PLAUSIBLE_LATENCY_SECONDS )
+								 + sanitizeLatencySample( 1.785224f, MAX_PLAUSIBLE_LATENCY_SECONDS );
+	Int runAhead = computeRunAhead( clamped, 30, 10, MIN_RUNAHEAD, MAX_FRAMES_AHEAD / 2 );
+	CHECK( runAhead < 64 );
+	CHECK( runAhead <= 18 );			// 0.6 s at 30 Hz, and only with both players at the ceiling
+	CHECK( runAhead <= (Int)(MAX_PLAUSIBLE_LATENCY_SECONDS * 30.0f * 1.2f) + RUNAHEAD_JITTER_FRAMES );
+
+	/* a LAN is untouched by any of this */
+	CHECK_EQ( computeRunAhead( sanitizeLatencySample( 0.051f, MAX_PLAUSIBLE_LATENCY_SECONDS ) * 2.0f,
+														 30, 10, MIN_RUNAHEAD, MAX_FRAMES_AHEAD / 2 ),
+						computeRunAhead( 0.102f, 30, 10, MIN_RUNAHEAD, MAX_FRAMES_AHEAD / 2 ) );
+}
+
 /* The other half of that match: nothing ever asked for the lost frame.  FrameData escalates to
 	 FRAMEDATA_RESEND only when it holds more commands than were announced, so a missing announcement
 	 waits for ever - zero FRAMERESENDREQUEST commands went out in the whole game, and what freed it

@@ -28,6 +28,7 @@
 
 #include "GameNetwork/FrameMetrics.h"
 #include "GameNetwork/NetworkUtil.h"
+#include "GameNetwork/CushionMetrics.h"
 
 /** -----------------------------------------------------------------------------------------------
  * The fps number the run-ahead equation wants: logic frames per second, from the logic frame the
@@ -148,7 +149,10 @@ void FrameMetrics::processLatencyResponse(UnsignedInt frame) {
 
 	Int latencyListIndex = frame % TheGlobalData->m_networkLatencyHistoryLength;
 	m_averageLatency -= m_latencyList[latencyListIndex] / TheGlobalData->m_networkLatencyHistoryLength;
-	m_latencyList[latencyListIndex] = (Real)timeDiff / (Real)1000; // convert to seconds from milliseconds.
+	/* A stalled frame keeps this stopwatch running long after the packet landed, and the number
+		 comes back as round trip time.  See sanitizeLatencySample in CushionMetrics.h. */
+	m_latencyList[latencyListIndex] = sanitizeLatencySample( (Real)timeDiff / (Real)1000,
+		MAX_PLAUSIBLE_LATENCY_SECONDS );
 	m_averageLatency += m_latencyList[latencyListIndex] / TheGlobalData->m_networkLatencyHistoryLength;
 
 	if (frame % 16 == 0) {

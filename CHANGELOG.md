@@ -86,6 +86,8 @@ found and fixed — EA's own, not port damage.**
 - A single lost packet no longer freezes the match for twenty seconds. The game now asks for the
   missing frame back after a fifth of a second instead of waiting out the disconnect timer, so
   nobody sits in front of a vote screen for a player who never went anywhere.
+- A freeze no longer costs everyone two seconds of input delay for the rest of the match: time
+  spent stalled is not mistaken for how slow the connection is.
 - A player leaving is reported as a player leaving, not a desync.
 - A desync now writes a per-object report on both machines for comparison.
 - LAN refuses to start between two machines whose game files differ.
