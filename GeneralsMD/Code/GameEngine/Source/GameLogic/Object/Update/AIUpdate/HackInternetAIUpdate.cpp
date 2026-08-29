@@ -62,6 +62,7 @@ AIStateMachine* HackInternetAIUpdate::makeStateMachine()
 HackInternetAIUpdate::HackInternetAIUpdate( Thing *thing, const ModuleData* moduleData ) : AIUpdateInterface( thing, moduleData )
 {
 	m_hasPendingCommand = false;	
+	m_hackProgress = -1.0f;
 } 
 
 //-------------------------------------------------------------------------------------------------
@@ -461,6 +462,7 @@ StateReturnType HackInternetState::onEnter()
 																				 MAKE_MODELCONDITION_MASK( MODELCONDITION_FIRING_A ) );
 
 	m_framesRemaining = ai->getCashUpdateDelay();
+	ai->setHackProgress( 0.0f );
 
 	return STATE_CONTINUE;
 }
@@ -479,6 +481,17 @@ StateReturnType HackInternetState::update()
 	{
 		//Don't hack while hacked, hehe.
 		return STATE_CONTINUE;
+	}
+
+	//
+	// Where the next payout has got to, so a bar can fill over the hacker's head (see
+	// Drawable::drawHealthBar). The delay is the only clock the player has on this and it was
+	// entirely invisible - a hacker either dropped cash or looked idle.
+	//
+	{
+		UnsignedInt full = ai->getCashUpdateDelay();
+		ai->setHackProgress( full > 0 ? 1.0f - INT_TO_REAL( m_framesRemaining ) / INT_TO_REAL( full )
+																	: -1.0f );
 	}
 
 	if( m_framesRemaining > 0 )
@@ -602,4 +615,9 @@ void HackInternetState::onExit( StateExitType status )
 {
 	Object *owner = getMachineOwner();
 	owner->clearModelConditionState( MODELCONDITION_FIRING_A );
+
+	// packed up: no payout is on the way, so take the bar down with the animation
+	HackInternetAIUpdate *ai = (HackInternetAIUpdate*)owner->getAIUpdateInterface();
+	if( ai )
+		ai->setHackProgress( -1.0f );
 }

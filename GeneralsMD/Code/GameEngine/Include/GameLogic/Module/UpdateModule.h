@@ -275,6 +275,11 @@ public:
 class DockUpdateInterface
 {
 public:
+	/** What this dock is still holding, in cash, or -1 when it is not a supply source at all.
+		* Supply piles and docks keep boxes; everything else that can be docked with (refineries,
+		* repair pads, prisons) has nothing to report. */
+	virtual Int getSupplyCashValue( void ) const { return -1; }
+
 	/** Returns true if it is okay for the docker to approach and prepare to dock.
 			False could mean the queue is full, for example.
 	*/

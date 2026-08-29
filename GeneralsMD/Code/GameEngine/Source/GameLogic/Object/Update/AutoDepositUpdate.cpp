@@ -143,6 +143,40 @@ void AutoDepositUpdate::awardInitialCaptureBonus( Player *player )
 
 //-------------------------------------------------------------------------------------------------
 //-------------------------------------------------------------------------------------------------
+UnsignedInt AutoDepositUpdate::getDepositFramesLeft( void ) const
+{
+	const AutoDepositUpdateModuleData *modData = getAutoDepositUpdateModuleData();
+	UnsignedInt now = TheGameLogic->getFrame();
+
+	if( modData->m_depositFrame == 0 || modData->m_depositAmount <= 0 )
+		return 0;
+	if( getObject()->isNeutralControlled() )
+		return 0;
+	if( getObject()->getConstructionPercent() != CONSTRUCTION_COMPLETE )
+		return 0;
+	if( m_depositOnFrame <= now )
+		return 0;
+
+	return m_depositOnFrame - now;
+}
+
+//-------------------------------------------------------------------------------------------------
+//-------------------------------------------------------------------------------------------------
+Real AutoDepositUpdate::getDepositProgress( void ) const
+{
+	UnsignedInt left = getDepositFramesLeft();
+	if( left == 0 )
+		return -1.0f;
+
+	const UnsignedInt full = getAutoDepositUpdateModuleData()->m_depositFrame;
+	if( left > full )
+		return -1.0f;
+
+	return 1.0f - INT_TO_REAL( left ) / INT_TO_REAL( full );
+}
+
+//-------------------------------------------------------------------------------------------------
+//-------------------------------------------------------------------------------------------------
 UpdateSleepTime AutoDepositUpdate::update( void )
 {
 	const AutoDepositUpdateModuleData *modData = getAutoDepositUpdateModuleData();

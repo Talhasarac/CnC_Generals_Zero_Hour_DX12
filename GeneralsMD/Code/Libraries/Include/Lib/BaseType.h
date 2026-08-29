@@ -224,22 +224,34 @@ __forceinline float fast_float_trunc(float f)
   return f;
 }
 
+/* floor and ceil, off the truncation above.
+ *
+ * EA's versions nudged the value by 0.99999994 (the largest float below one) in the direction they
+ * wanted and then truncated.  That is exact only while the nudge survives the addition, and it does
+ * not: for any f of 2 or more the sum f + 0.99999994 has no representable neighbour that close, so
+ * it rounds to f + 1 and the "ceil" of an exact integer came back one too high.  ceil(10.0f) was 11.
+ *
+ * Nobody noticed in the simulation, where the arguments are cell arithmetic on positions that are
+ * almost never whole - but every countdown on screen is a whole number of seconds by construction,
+ * so the build time over a war factory and the seconds over a structure going up were both a second
+ * long.
+ *
+ * Truncation already rounds toward zero, so the correction is one comparison and no magic constant.
+ *
+ * Pinned by ceil_and_floor_are_exact_on_whole_numbers in test_gameengine.cpp. */
+
 // same here, fast floor function
 __forceinline float fast_float_floor(float f)
 {
-  static unsigned almost1=(126<<23)|0x7fffff;
-  if (*(unsigned *)&f &0x80000000)
-    f-=*(float *)&almost1;
-  return fast_float_trunc(f);
+  float t = fast_float_trunc(f);
+  return (t > f) ? t - 1.0f : t;
 }
 
 // same here, fast ceil function
 __forceinline float fast_float_ceil(float f)
 {
-  static unsigned almost1=(126<<23)|0x7fffff;
-  if ( (*(unsigned *)&f &0x80000000)==0)
-    f+=*(float *)&almost1;
-  return fast_float_trunc(f);
+  float t = fast_float_trunc(f);
+  return (t < f) ? t + 1.0f : t;
 }
 
 //-------------------------------------------------------------------------------------------------

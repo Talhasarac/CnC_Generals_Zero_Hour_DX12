@@ -62,6 +62,9 @@
 #include "GameLogic/Module/ContainModule.h"
 #include "GameLogic/Module/PhysicsUpdate.h"
 #include "GameLogic/Module/ProductionUpdate.h"
+#include "GameLogic/Module/AutoDepositUpdate.h"
+#include "GameLogic/Module/HackInternetAIUpdate.h"
+#include "GameLogic/Module/SupplyTruckAIUpdate.h"
 #include "Common/Upgrade.h"
 #include "GameLogic/Module/StealthUpdate.h"
 #include "GameLogic/Module/StickyBombUpdate.h"
@@ -415,6 +418,10 @@ Drawable::Drawable( const ThingTemplate *thingTemplate, DrawableStatus statusBit
 	m_expirationDate = 0;  // 0 == never expires
 
 	m_lastConstructDisplayed = -1.0f;
+	m_supplyCashDisplayString = NULL;
+	m_lastSupplyCashDisplayed = -1;
+	m_costDisplayString = NULL;
+	m_lastCostDisplayed = -1;
 	
 	//Added By Sadullah Nader
 	//Fix for the building percent
@@ -574,6 +581,14 @@ Drawable::~Drawable()
 	if( m_constructDisplayString )
 		TheDisplayStringManager->freeDisplayString( m_constructDisplayString );
 	m_constructDisplayString = NULL;
+
+	if( m_supplyCashDisplayString )
+		TheDisplayStringManager->freeDisplayString( m_supplyCashDisplayString );
+	m_supplyCashDisplayString = NULL;
+
+	if( m_costDisplayString )
+		TheDisplayStringManager->freeDisplayString( m_costDisplayString );
+	m_costDisplayString = NULL;
 
 	if ( m_captionDisplayString )
 		TheDisplayStringManager->freeDisplayString( m_captionDisplayString );
@@ -2861,6 +2876,8 @@ void Drawable::drawIconUI( void )
 
 		drawCaption( healthBarRegion );
 		drawConstructPercent( healthBarRegion );
+		drawSupplyCash( healthBarRegion );
+		drawUnitCost( healthBarRegion );
 
 		//All Icons Below only draw on ALIVE things, so  bail here -------------------------
 		if( obj->isEffectivelyDead() || obj->isKindOf( KINDOF_IGNORED_IN_GUI )) // object explicitly wants nothing to do with these icons, so...
@@ -3858,6 +3875,120 @@ void Drawable::drawConstructPercent( const IRegion2D *healthBarRegion )
 
 }  // end drawConstructPercent
 
+//-------------------------------------------------------------------------------------------------
+/** How much money is still in a supply pile, written over it.  The piles were readable only as
+	* art - a full one and a nearly-empty one differ by a few boxes on the model - so deciding which
+	* one to send workers to, or whether an expansion is worth taking, meant guessing.  Written as
+	* cash rather than as boxes because cash is the number the decision is actually about. */
+//-------------------------------------------------------------------------------------------------
+void Drawable::drawSupplyCash( const IRegion2D *healthBarRegion )
+{
+	Object *obj = getObject();
+	DockUpdateInterface *dock = obj ? obj->getDockUpdateInterface() : NULL;
+	Int cash = dock ? dock->getSupplyCashValue() : -1;
+
+	if( cash <= 0 )
+	{
+		// not a supply source, or picked clean - drop the string rather than leave "$0" behind
+		if( m_supplyCashDisplayString )
+		{
+			TheDisplayStringManager->freeDisplayString( m_supplyCashDisplayString );
+			m_supplyCashDisplayString = NULL;
+			m_lastSupplyCashDisplayed = -1;
+		}
+		return;
+	}
+
+	// shrouded ground keeps its secrets: what was there when you last looked is not news
+	if( obj->getShroudedStatus( ThePlayerList->getLocalPlayer()->getPlayerIndex() ) != OBJECTSHROUD_CLEAR )
+		return;
+
+	if( m_supplyCashDisplayString == NULL )
+	{
+		m_supplyCashDisplayString = TheDisplayStringManager->newDisplayString();
+		m_supplyCashDisplayString->setFont( TheFontLibrary->getFont( TheInGameUI->getDrawableCaptionFontName(),
+											TheGlobalLanguageData->adjustFontSize( TheInGameUI->getDrawableCaptionPointSize() ),
+											TheInGameUI->isDrawableCaptionBold() ) );
+	}
+
+	if( m_lastSupplyCashDisplayed != cash )
+	{
+		UnicodeString buffer;
+		buffer.format( L"$%d", cash );
+		m_supplyCashDisplayString->setText( buffer );
+		m_lastSupplyCashDisplayed = cash;
+	}
+
+	Coord3D pos;
+	obj->getHealthBoxPosition( pos );
+	ICoord2D screen;
+	if( !TheTacticalView->worldToScreen( &pos, &screen ) )
+		return;
+
+	Int width, height;
+	m_supplyCashDisplayString->getSize( &width, &height );
+	screen.x -= width / 2;
+	screen.y -= height;
+
+	m_supplyCashDisplayString->draw( screen.x, screen.y,
+																	 GameMakeColor( 90, 220, 90, 255 ),
+																	 GameMakeColor( 0, 0, 0, 255 ) );
+
+}  // end drawSupplyCash
+
+//-------------------------------------------------------------------------------------------------
+/** What this thing cost to build, written off its top right corner.  The price of everything on
+	* the field is otherwise only visible in the command bar, and only for what you can build right
+	* now - so "is that push worth trading for" and "what did he just lose" were questions you
+	* answered from memory.  It is the owner's price, so a faction discount shows.
+	*
+	* Anything the player never bought - scenery, wreckage, projectiles, civilians - prices at zero
+	* and says nothing, which is the whole filter this needs. */
+//-------------------------------------------------------------------------------------------------
+void Drawable::drawUnitCost( const IRegion2D *healthBarRegion )
+{
+	if( healthBarRegion == NULL )
+		return;
+
+	Object *obj = getObject();
+	if( obj == NULL || obj->isEffectivelyDead() || obj->isKindOf( KINDOF_IGNORED_IN_GUI ) )
+		return;
+
+	// shrouded ground keeps its secrets: what was there when you last looked is not news
+	if( obj->getShroudedStatus( ThePlayerList->getLocalPlayer()->getPlayerIndex() ) != OBJECTSHROUD_CLEAR )
+		return;
+
+	Int cost = getTemplate() ? getTemplate()->calcCostToBuild( obj->getControllingPlayer() ) : 0;
+	if( cost <= 0 )
+		return;
+
+	if( m_costDisplayString == NULL )
+	{
+		m_costDisplayString = TheDisplayStringManager->newDisplayString();
+		m_costDisplayString->setFont( TheFontLibrary->getFont( TheInGameUI->getDrawableCaptionFontName(),
+											TheGlobalLanguageData->adjustFontSize( TheInGameUI->getDrawableCaptionPointSize() - 2 ),
+											FALSE ) );
+	}
+
+	if( m_lastCostDisplayed != cost )
+	{
+		UnicodeString buffer;
+		buffer.format( L"$%d", cost );
+		m_costDisplayString->setText( buffer );
+		m_lastCostDisplayed = cost;
+	}
+
+	Int width, height;
+	m_costDisplayString->getSize( &width, &height );
+
+	// hangs off the right end of the health bar, above it - clear of the veterancy chevron on the
+	// bar's own right end and of the queue count that is right-aligned onto it
+	m_costDisplayString->draw( healthBarRegion->hi.x + 2, healthBarRegion->lo.y - height,
+														 GameMakeColor( 235, 210, 120, 255 ),
+														 GameMakeColor( 0, 0, 0, 255 ) );
+
+}  // end drawUnitCost
+
 
 //-------------------------------------------------------------------------------------------------
 /** Draw caption */
@@ -4114,9 +4245,97 @@ void Drawable::drawHealthBar(const IRegion2D* healthBarRegion)
 			TheDisplay->drawFillRect( healthBarRegion->lo.x, healthBarRegion->lo.y - 2, healthBoxWidth + 1, 1,
 																GameMakeColor( 255, 255, 255, 255 ) );
 
+		// bars stack upwards from just above the health bar, each clearing the seconds written over
+		// the one below it
+		Int stackY = healthBarRegion->lo.y - 3;
+
+		// own producers show a yellow production-progress bar above the (selection) line, with seconds left at its top-left
+		ProductionUpdateInterface *pu = obj->isLocallyControlled() ? obj->getProductionUpdateInterface() : NULL;
+		const ProductionEntry *pe = pu ? pu->firstProduction() : NULL;
+		if( pe )
+		{
+			Int prodY = stackY - healthBoxHeight;
+			// the entry keeps counting past 100% while the finished unit waits for a free exit door, so clamp
+			Real pct = pe->getPercentComplete();
+			if( pct > 100.0f )
+				pct = 100.0f;
+			else if( pct < 0.0f )
+				pct = 0.0f;
+			TheDisplay->drawOpenRect( healthBarRegion->lo.x, prodY, healthBoxWidth, healthBoxHeight,
+																healthBoxOutlineSize, GameMakeColor( 128, 128, 0, 255 ) );
+			TheDisplay->drawFillRect( healthBarRegion->lo.x + 1, prodY + 1,
+																(healthBoxWidth - 2) * pct * 0.01f, healthBoxHeight - 2,
+																GameMakeColor( 255, 255, 0, 255 ) );
+
+			Player *player = obj->getControllingPlayer();
+			Int totalFrames = pe->getProductionType() == PRODUCTION_UNIT
+												? pe->getProductionObject()->calcTimeToBuild( player )
+												: pe->getProductionUpgrade()->calcTimeToBuild( player );
+			// real seconds: the logic runs at the game-speed rate, not at a fixed 30 frames a second
+			Int logicFps = TheGameEngine ? TheGameEngine->getFramesPerSecondLimit() : 0;
+			if( logicFps <= 0 )
+				logicFps = LOGICFRAMES_PER_SECOND;
+			Int secondsLeft = REAL_TO_INT_CEIL( totalFrames * (1.0f - pct * 0.01f) / logicFps );
+
+			// everything behind the head of the queue has not started yet, so each costs its full
+			// build time (an entry builds its whole quantity at once, so quantity does not scale it)
+			Int queuedFrames = 0;
+			for( const ProductionEntry *q = pu->nextProduction( pe ); q != NULL; q = pu->nextProduction( q ) )
+				queuedFrames += q->getProductionType() == PRODUCTION_UNIT
+												? q->getProductionObject()->calcTimeToBuild( player )
+												: q->getProductionUpgrade()->calcTimeToBuild( player );
+
+			// one shared string: draw() renders immediately, and the manager lives for the whole app
+			static DisplayString *prodTimeString = NULL;
+			if( prodTimeString == NULL )
+			{
+				prodTimeString = TheDisplayStringManager->newDisplayString();
+				prodTimeString->setFont( TheFontLibrary->getFont( TheInGameUI->getDrawableCaptionFontName(),
+																TheGlobalLanguageData->adjustFontSize( TheInGameUI->getDrawableCaptionPointSize() - 2 ),
+																FALSE ) );
+			}
+			// "52s (70s)": this one, then the whole queue. Nothing behind it, no parentheses.
+			UnicodeString text;
+			if( queuedFrames > 0 )
+				text.format( L"%ds (%ds)", secondsLeft,
+										 secondsLeft + REAL_TO_INT_CEIL( INT_TO_REAL( queuedFrames ) / logicFps ) );
+			else
+				text.format( L"%ds", secondsLeft );
+			if( prodTimeString->getText().compare( text ) != 0 )
+				prodTimeString->setText( text );
+			Int textW, textH;
+			prodTimeString->getSize( &textW, &textH );
+			prodTimeString->draw( healthBarRegion->lo.x, prodY - textH,
+														GameMakeColor( 255, 255, 255, 255 ), GameMakeColor( 0, 0, 0, 255 ) );
+
+			// whatever comes next goes above the seconds, not through them
+			stackY = prodY - textH - 1;
+
+			// how many entries the queue holds, right-aligned on the bar (one is not worth saying)
+			if( pu->getProductionCount() > 1 )
+			{
+				static DisplayString *prodCountString = NULL;
+				if( prodCountString == NULL )
+				{
+					prodCountString = TheDisplayStringManager->newDisplayString();
+					prodCountString->setFont( prodTimeString->getFont() );
+				}
+				UnicodeString countText;
+				countText.format( L"x%d", pu->getProductionCount() );
+				if( prodCountString->getText().compare( countText ) != 0 )
+					prodCountString->setText( countText );
+				Int countW, countH;
+				prodCountString->getSize( &countW, &countH );
+				prodCountString->draw( healthBarRegion->hi.x - countW, prodY - countH,
+															 GameMakeColor( 255, 255, 255, 255 ), GameMakeColor( 0, 0, 0, 255 ) );
+			}
+		}
+
 		//
 		// A superweapon charging, or a building on a timed payout (the supply drop zone), gets the
-		// same yellow bar the production queue uses. Only powers that carry a public timer count -
+		// same yellow bar the production queue uses - stacked above it rather than on top of it,
+		// which is what a Chinese nuclear silo researching an upgrade while its missile charges used
+		// to draw: two bars and two countdowns in the same row of pixels. Only powers that carry a public timer count -
 		// that is the flag the superweapon list in the corner goes by.
 		//
 		// A power only counts while it is really counting down towards something the player can
@@ -4190,9 +4409,52 @@ void Drawable::drawHealthBar(const IRegion2D* healthBarRegion)
 				}
 			}
 
+			//
+			// Nothing charging?  Then show what the thing is doing for a living instead: a worker
+			// fetching or handing over a box of supplies, a hacker waiting out the delay before the
+			// next payout, a black market or oil derrick on its deposit clock.  All three of those
+			// are money arriving on a timer that the player had no way at all to see - the cash just
+			// appeared - and the worker one doubles as "yes, it really is working".
+			//
+			// No seconds are written over these: chargeFramesLeft is left at zero on purpose, the
+			// bar is the whole message.
+			//
+			if( chargePct < 0.0f )
+			{
+				Real workPct = -1.0f;
+
+				AIUpdateInterface *ai = obj->getAIUpdateInterface();
+				if( ai != NULL )
+				{
+					SupplyTruckAIInterface *supply = ai->getSupplyTruckAIInterface();
+					if( supply != NULL )
+						workPct = supply->getDockActionProgress();
+
+					if( workPct < 0.0f )
+					{
+						HackInternetAIInterface *hack = ai->getHackInternetAIInterface();
+						if( hack != NULL )
+							workPct = hack->getHackProgress();
+					}
+				}
+
+				if( workPct < 0.0f )
+				{
+					static const NameKeyType key_autoDeposit = NAMEKEY( "AutoDepositUpdate" );
+					AutoDepositUpdate *deposit = (AutoDepositUpdate*)obj->findUpdateModule( key_autoDeposit );
+					if( deposit != NULL )
+						workPct = deposit->getDepositProgress();
+				}
+
+				if( workPct > 1.0f )
+					workPct = 1.0f;
+				if( workPct >= 0.0f )
+					chargePct = workPct * 100.0f;
+			}
+
 			if( chargePct >= 0.0f )
 			{
-				Int chargeY = healthBarRegion->lo.y - 3 - healthBoxHeight;
+				Int chargeY = stackY - healthBoxHeight;
 				TheDisplay->drawOpenRect( healthBarRegion->lo.x, chargeY, healthBoxWidth, healthBoxHeight,
 																	healthBoxOutlineSize, GameMakeColor( 128, 128, 0, 255 ) );
 				TheDisplay->drawFillRect( healthBarRegion->lo.x + 1, chargeY + 1,
@@ -4235,84 +4497,6 @@ void Drawable::drawHealthBar(const IRegion2D* healthBarRegion)
 			}
 		}
 
-		// own producers show a yellow production-progress bar above the (selection) line, with seconds left at its top-left
-		ProductionUpdateInterface *pu = obj->isLocallyControlled() ? obj->getProductionUpdateInterface() : NULL;
-		const ProductionEntry *pe = pu ? pu->firstProduction() : NULL;
-		if( pe )
-		{
-			Int prodY = healthBarRegion->lo.y - 3 - healthBoxHeight;
-			// the entry keeps counting past 100% while the finished unit waits for a free exit door, so clamp
-			Real pct = pe->getPercentComplete();
-			if( pct > 100.0f )
-				pct = 100.0f;
-			else if( pct < 0.0f )
-				pct = 0.0f;
-			TheDisplay->drawOpenRect( healthBarRegion->lo.x, prodY, healthBoxWidth, healthBoxHeight,
-																healthBoxOutlineSize, GameMakeColor( 128, 128, 0, 255 ) );
-			TheDisplay->drawFillRect( healthBarRegion->lo.x + 1, prodY + 1,
-																(healthBoxWidth - 2) * pct * 0.01f, healthBoxHeight - 2,
-																GameMakeColor( 255, 255, 0, 255 ) );
-
-			Player *player = obj->getControllingPlayer();
-			Int totalFrames = pe->getProductionType() == PRODUCTION_UNIT
-												? pe->getProductionObject()->calcTimeToBuild( player )
-												: pe->getProductionUpgrade()->calcTimeToBuild( player );
-			// real seconds: the logic runs at the game-speed rate, not at a fixed 30 frames a second
-			Int logicFps = TheGameEngine ? TheGameEngine->getFramesPerSecondLimit() : 0;
-			if( logicFps <= 0 )
-				logicFps = LOGICFRAMES_PER_SECOND;
-			Int secondsLeft = REAL_TO_INT_CEIL( totalFrames * (1.0f - pct * 0.01f) / logicFps );
-
-			// everything behind the head of the queue has not started yet, so each costs its full
-			// build time (an entry builds its whole quantity at once, so quantity does not scale it)
-			Int queuedFrames = 0;
-			for( const ProductionEntry *q = pu->nextProduction( pe ); q != NULL; q = pu->nextProduction( q ) )
-				queuedFrames += q->getProductionType() == PRODUCTION_UNIT
-												? q->getProductionObject()->calcTimeToBuild( player )
-												: q->getProductionUpgrade()->calcTimeToBuild( player );
-
-			// one shared string: draw() renders immediately, and the manager lives for the whole app
-			static DisplayString *prodTimeString = NULL;
-			if( prodTimeString == NULL )
-			{
-				prodTimeString = TheDisplayStringManager->newDisplayString();
-				prodTimeString->setFont( TheFontLibrary->getFont( TheInGameUI->getDrawableCaptionFontName(),
-																TheGlobalLanguageData->adjustFontSize( TheInGameUI->getDrawableCaptionPointSize() - 2 ),
-																FALSE ) );
-			}
-			// "52s (70s)": this one, then the whole queue. Nothing behind it, no parentheses.
-			UnicodeString text;
-			if( queuedFrames > 0 )
-				text.format( L"%ds (%ds)", secondsLeft,
-										 secondsLeft + REAL_TO_INT_CEIL( INT_TO_REAL( queuedFrames ) / logicFps ) );
-			else
-				text.format( L"%ds", secondsLeft );
-			if( prodTimeString->getText().compare( text ) != 0 )
-				prodTimeString->setText( text );
-			Int textW, textH;
-			prodTimeString->getSize( &textW, &textH );
-			prodTimeString->draw( healthBarRegion->lo.x, prodY - textH,
-														GameMakeColor( 255, 255, 255, 255 ), GameMakeColor( 0, 0, 0, 255 ) );
-
-			// how many entries the queue holds, right-aligned on the bar (one is not worth saying)
-			if( pu->getProductionCount() > 1 )
-			{
-				static DisplayString *prodCountString = NULL;
-				if( prodCountString == NULL )
-				{
-					prodCountString = TheDisplayStringManager->newDisplayString();
-					prodCountString->setFont( prodTimeString->getFont() );
-				}
-				UnicodeString countText;
-				countText.format( L"x%d", pu->getProductionCount() );
-				if( prodCountString->getText().compare( countText ) != 0 )
-					prodCountString->setText( countText );
-				Int countW, countH;
-				prodCountString->getSize( &countW, &countH );
-				prodCountString->draw( healthBarRegion->hi.x - countW, prodY - countH,
-															 GameMakeColor( 255, 255, 255, 255 ), GameMakeColor( 0, 0, 0, 255 ) );
-			}
-		}
 	}  // end if
 
 }  // end drawHealthBar

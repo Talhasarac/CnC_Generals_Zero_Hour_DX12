@@ -868,6 +868,7 @@ protected:
 	ICoord2D										m_placeAnchorStart;											///< place angle anchor start
 	ICoord2D										m_placeAnchorEnd;												///< place angle anchor end
 	Real												m_placeAngleOffset;											///< wheel-chosen heading, added to every structure's own view angle
+	const ThingTemplate *				m_placeAngleType;												///< the structure that heading was chosen for; another type starts square again
 	Bool												m_placementLegal;												///< last legality verdict for the spot under the structure being placed
 	Coord3D											m_placementNudge;												///< how far the last legality check had to slide the structure to make it fit
 	Int													m_selectCount;													///< Number of objects currently "selected"

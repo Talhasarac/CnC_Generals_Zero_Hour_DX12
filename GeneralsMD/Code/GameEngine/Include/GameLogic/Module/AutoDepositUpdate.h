@@ -122,6 +122,13 @@ public:
 	void awardInitialCaptureBonus( Player *player );	// Test and award the initial capture bonus
 	virtual UpdateSleepTime update( void );
 
+	/** How far along the wait for the next payout is, 0..1, or negative when this thing is not
+		* actually paying anyone (neutral, still under construction, or set to deposit nothing).
+		* Only so a bar can be drawn over it - the black market and the oil derricks pay on a clock
+		* the player otherwise cannot see. */
+	Real getDepositProgress( void ) const;
+	UnsignedInt getDepositFramesLeft( void ) const;
+
 protected:
 
 	Int getUpgradedSupplyBoost() const;

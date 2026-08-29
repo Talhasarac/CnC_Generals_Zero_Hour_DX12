@@ -1036,6 +1036,7 @@ InGameUI::InGameUI()
 	m_placeAnchorEnd.x = m_placeAnchorEnd.y = 0;
 	m_placeAnchorInProgress = FALSE;
 	m_placeAngleOffset = 0.0f;
+	m_placeAngleType = NULL;
 	m_placementLegal = TRUE;
 	m_placementNudge.zero();
 
@@ -2251,6 +2252,7 @@ void InGameUI::reset( void )
 	// remove any build available status
 	placeBuildAvailable( NULL, NULL );
 	m_placeAngleOffset = 0.0f;
+	m_placeAngleType = NULL;
 
 	// free any message resources allocated
 	freeMessageResources();
@@ -3344,6 +3346,19 @@ void InGameUI::placeBuildAvailable( const ThingTemplate *build, Drawable *buildD
 	//
 	if( m_pendingPlaceType != NULL && build != NULL )
 		placeBuildAvailable( NULL, NULL );
+
+	//
+	// The wheeled/dragged heading is carried from one placement to the next so a row of walls or
+	// bunkers goes down facing the same way. It belongs to that one structure though: turning a
+	// bunker used to leave every later building - a supply centre, a war factory - wearing the same
+	// offset off its own designed view angle, which reads as the building coming out backwards. A
+	// different type starts square again.
+	//
+	if( build != NULL && build != m_placeAngleType )
+	{
+		m_placeAngleOffset = 0.0f;
+		m_placeAngleType = build;
+	}
 
 	//
 	// keep a record of what we are trying to place, if we are already trying to

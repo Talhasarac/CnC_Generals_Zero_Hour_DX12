@@ -712,6 +712,10 @@ private:
 	ModelConditionFlags	m_conditionState;				///< The Drawables current behavior state
 	Real								m_lastConstructDisplayed;						///< last construct percent used to make the string
 	DisplayString*			m_constructDisplayString;  ///< string to display construction % complete
+	DisplayString*			m_supplyCashDisplayString; ///< string to display the cash left in a supply pile
+	Int									m_lastSupplyCashDisplayed; ///< so the string is only rebuilt when the pile shrinks
+	DisplayString*			m_costDisplayString;			 ///< string to display what this thing cost to build
+	Int									m_lastCostDisplayed;			 ///< so the string is built once and not every frame
 	DisplayString*			m_captionDisplayString;		///< string to display caption
 	DisplayString*			m_groupNumber;						///< string to display the group number of this drawable
 
@@ -752,6 +756,8 @@ public:
 private:
 	// "icon" drawing methods **************
 	void drawConstructPercent( const IRegion2D *healthBarRegion );  ///< display % construction complete
+	void drawSupplyCash( const IRegion2D *healthBarRegion );				///< display the cash left in a supply pile
+	void drawUnitCost( const IRegion2D *healthBarRegion );					///< display what this thing cost to build
 	void drawCaption( const IRegion2D *healthBarRegion );						///< draw caption
 	void drawAmmo( const IRegion2D *healthBarRegion );							///< draw icons
 	void drawContained( const IRegion2D *healthBarRegion );					///< draw icons

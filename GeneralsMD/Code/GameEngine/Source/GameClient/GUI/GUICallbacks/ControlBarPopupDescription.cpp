@@ -383,7 +383,7 @@ void ControlBar::populateBuildTooltipLayout( const CommandButton *commandButton,
 						  commandButton->getCommandType() == GUI_COMMAND_OBJECT_UPGRADE )
 					{
 						ProductionUpdateInterface *pui = selectedObject->getProductionUpdateInterface();
-						if( pui && pui->getProductionCount() == MAX_BUILD_QUEUE_BUTTONS )
+						if( pui && pui->getProductionCount() >= pui->getMaxQueueEntries() )
 						{
 							descrip.concat( L"\n\n" );
 							descrip.concat( TheGameText->fetch( "TOOLTIP:TooltipCannotPurchaseBecauseQueueFull" ) );

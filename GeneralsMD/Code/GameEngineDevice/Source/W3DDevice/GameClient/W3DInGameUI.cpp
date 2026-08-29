@@ -608,7 +608,7 @@ void W3DInGameUI::drawBuildGrid( void )
 		return;
 
 	// how many cells each way around the cursor we light up
-	enum { GRID_RADIUS = 14 };
+	enum { GRID_RADIUS = 28 };
 	enum { GRID_CELLS = GRID_RADIUS * 2 + 1, GRID_POINTS = GRID_CELLS + 1 };
 
 	// half the width of a painted line, in world units - a cell is PLACEMENT_CELL (10) across
@@ -621,10 +621,13 @@ void W3DInGameUI::drawBuildGrid( void )
 	const Int cellX = REAL_TO_INT_FLOOR( (center->x + 0.5f) / PATHFIND_CELL_SIZE_F ) - GRID_RADIUS;
 	const Int cellY = REAL_TO_INT_FLOOR( (center->y + 0.5f) / PATHFIND_CELL_SIZE_F ) - GRID_RADIUS;
 
-	// sample the terrain once per grid corner, rather than once per quad corner
+	// sample the terrain once per grid corner, rather than once per quad corner.  Static, not
+	// automatic: at this radius the two square tables are ~27k together, which is more than a
+	// render-path stack frame should be carrying (the quad batch below is static for the same
+	// reason).
 	Real gx[ GRID_POINTS ], gy[ GRID_POINTS ];
-	Real gz[ GRID_POINTS ][ GRID_POINTS ];
-	Real fade[ GRID_POINTS ][ GRID_POINTS ];
+	static Real gz[ GRID_POINTS ][ GRID_POINTS ];
+	static Real fade[ GRID_POINTS ][ GRID_POINTS ];
 	Int ix, iy;
 
 	for( ix = 0; ix < GRID_POINTS; ++ix )

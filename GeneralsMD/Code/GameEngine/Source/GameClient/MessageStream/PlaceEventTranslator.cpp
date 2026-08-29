@@ -89,6 +89,24 @@ static Bool getPlacementDrag( ICoord2D *start, ICoord2D *end )
 }  // end getPlacementDrag
 
 //-------------------------------------------------------------------------------------------------
+/** The object that is to do the building.  Normally the one the placement was started from, but
+	* with nothing selected the command bar is being driven by a stand-in builder that is not part of
+	* any selection - and that one is free to die, finish its job or be replaced between two clicks of
+	* a shift-held run of structures.  When it is gone, ask the command bar for the current stand-in
+	* rather than dropping out of placement mode: the logic picks the idle builder nearest the site
+	* anyway (MSG_DOZER_CONSTRUCT), so any builder will do to keep the ghost on the cursor. */
+//-------------------------------------------------------------------------------------------------
+static Object *resolvePlacementBuilder( void )
+{
+	Object *builder = TheGameLogic->findObjectByID( TheInGameUI->getPendingPlaceSourceObjectID() );
+	if( builder != NULL && !builder->isEffectivelyDead() )
+		return builder;
+
+	Drawable *standIn = TheControlBar ? TheControlBar->findStandInBuilder( FALSE ) : NULL;
+	return standIn ? standIn->getObject() : NULL;
+}
+
+//-------------------------------------------------------------------------------------------------
 PlaceEventTranslator::PlaceEventTranslator() : m_frameOfUpButton(-1), m_stripClickTaken(FALSE)
 {
 }
@@ -154,9 +172,9 @@ GameMessageDisposition PlaceEventTranslator::translateGameMessage(const GameMess
 				// placing things causes a dozer to go over and build it ... get the dozer in question
 				// from the in game UI
 				//
-				Object *builderObject = TheGameLogic->findObjectByID( TheInGameUI->getPendingPlaceSourceObjectID() );
+				Object *builderObject = resolvePlacementBuilder();
 
-				// if our source object is gone cancel this whole placement process
+				// if there is no builder left at all, cancel this whole placement process
 				if( builderObject == NULL )
 				{
 
@@ -266,7 +284,7 @@ GameMessageDisposition PlaceEventTranslator::translateGameMessage(const GameMess
 
 				// get the source object ID of the thing that is "building" the object 
 				ObjectID builderID = INVALID_ID;
-				Object *builderObj = TheGameLogic->findObjectByID( TheInGameUI->getPendingPlaceSourceObjectID() );
+				Object *builderObj = resolvePlacementBuilder();
 				if( builderObj )
 					builderID = builderObj->getID();
 
@@ -392,10 +410,18 @@ GameMessageDisposition PlaceEventTranslator::translateGameMessage(const GameMess
 
 					pickAndPlayUnitVoiceResponse( TheInGameUI->getAllSelectedDrawables(), placeMsg->getType() );
 
+					//
 					// get out of pending placement mode, this will also clear the arrow anchor status -
-					// unless shift is held, which keeps placing the same structure until released
-					if( TheKeyboard && TheKeyboard->isShift() && builderObj && builderObj->getDrawable() )
-						TheInGameUI->placeBuildAvailable( build, builderObj->getDrawable() );
+					// unless shift is held, which keeps placing the same structure until released.
+					// The builder it re-arms on is whatever resolvePlacementBuilder found, so a run of
+					// structures placed with nothing selected carries on across the stand-in builder
+					// going off to build the one just ordered.
+					//
+					Drawable *nextBuilder = builderObj ? builderObj->getDrawable() : NULL;
+					if( TheKeyboard && TheKeyboard->isShift() && nextBuilder == NULL && TheControlBar )
+						nextBuilder = TheControlBar->findStandInBuilder( FALSE );
+					if( TheKeyboard && TheKeyboard->isShift() && nextBuilder )
+						TheInGameUI->placeBuildAvailable( build, nextBuilder );
 					else
 						TheInGameUI->placeBuildAvailable( NULL, NULL );
 

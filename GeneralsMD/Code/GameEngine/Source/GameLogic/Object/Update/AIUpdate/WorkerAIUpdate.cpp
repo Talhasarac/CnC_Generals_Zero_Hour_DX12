@@ -119,6 +119,8 @@ WorkerAIUpdate::WorkerAIUpdate( Thing *thing, const ModuleData* moduleData ) :
 	m_dockBeforeBuilding = INVALID_ID;
 	m_forcePending = FALSE;
 	m_forcedBusyPending = FALSE;
+	m_dockActionStartFrame = 0;
+	m_dockActionEndFrame = 0;
 
 	m_workerMachine = NULL;
 
@@ -235,6 +237,23 @@ UnsignedInt WorkerAIUpdate::getActionDelayForDock( Object *dock )
 	}
 
 	return 0;
+}
+
+//----------------------------------------------------------------------------------------
+void WorkerAIUpdate::noteDockActionWindow( UnsignedInt frames )
+{
+	m_dockActionStartFrame = TheGameLogic->getFrame();
+	m_dockActionEndFrame = m_dockActionStartFrame + frames;
+}
+
+//----------------------------------------------------------------------------------------
+/** How far through fetching or handing over the current box we are, for the bar drawn over the
+	* worker's head.  Negative once the window has run out, which is also what a worker that is not
+	* docked reads: nothing refreshes the window but the dock state. */
+//----------------------------------------------------------------------------------------
+Real WorkerAIUpdate::getDockActionProgress() const
+{
+	return dockActionProgress( TheGameLogic->getFrame(), m_dockActionStartFrame, m_dockActionEndFrame );
 }
 
 //-------------------------------------------------------------------------------------------------

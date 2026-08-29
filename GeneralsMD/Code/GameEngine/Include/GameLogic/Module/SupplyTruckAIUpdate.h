@@ -35,6 +35,20 @@
 #include "GameLogic/Module/AIUpdate.h"
 
 //-------------------------------------------------------------------------------------------------
+/** How far through a dock action (fetching or handing over one box) frame 'now' is, given the
+	* window the dock state announced.  Negative outside the window - which is also what a docker
+	* that is not docked reads, since nothing but the dock state ever moves the window.  Shared by
+	* SupplyTruckAIUpdate and WorkerAIUpdate, which implement the same interface side by side. */
+//-------------------------------------------------------------------------------------------------
+inline Real dockActionProgress( UnsignedInt now, UnsignedInt start, UnsignedInt end )
+{
+	if( end <= start || now >= end || now < start )
+		return -1.0f;
+
+	return INT_TO_REAL( now - start ) / INT_TO_REAL( end - start );
+}
+
+//-------------------------------------------------------------------------------------------------
 class SupplyTruckStateMachine : public StateMachine
 {
 	MEMORY_POOL_GLUE_WITH_USERLOOKUP_CREATE( SupplyTruckStateMachine, "SupplyTruckStateMachine" );
@@ -180,6 +194,11 @@ public:
 	virtual ObjectID getPreferredDockID() const = 0;
 	virtual UnsignedInt getActionDelayForDock( Object *dock ) = 0;
 	virtual Int getUpgradedSupplyBoost() const = 0;
+
+	/** The dock state announces how long the box it is working on takes; that window is what the
+		* progress bar over the worker's head fills across.  (See AIDockProcessDockState.) */
+	virtual void noteDockActionWindow( UnsignedInt frames ) = 0;
+	virtual Real getDockActionProgress() const = 0;	///< 0..1 while loading or unloading, negative otherwise
 };
 
 //-------------------------------------------------------------------------------------------------
@@ -218,6 +237,9 @@ public:
 	virtual ObjectID getPreferredDockID() const { return m_preferredDock; }
 	virtual UnsignedInt getActionDelayForDock( Object *dock );
 	virtual Int getUpgradedSupplyBoost() const { return 0; }
+
+	virtual void noteDockActionWindow( UnsignedInt frames );
+	virtual Real getDockActionProgress() const;
 	
 	virtual UpdateSleepTime update();
 
@@ -228,6 +250,8 @@ protected:
 	virtual void privateIdle(CommandSourceType cmdSource);						///< Enter idle state.	
 
 private:
+	UnsignedInt								m_dockActionStartFrame;	///< when the box currently being moved started
+	UnsignedInt								m_dockActionEndFrame;		///< and when it lands; equal means "not docking"
 	SupplyTruckStateMachine*	m_supplyTruckStateMachine;
 	ObjectID									m_preferredDock;			///< Instead of searching, try this one first
 	Int												m_numberBoxes;

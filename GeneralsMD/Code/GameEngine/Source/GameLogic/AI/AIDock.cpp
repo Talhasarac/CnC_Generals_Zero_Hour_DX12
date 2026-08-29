@@ -578,7 +578,10 @@ void AIDockProcessDockState::setNextDockActionFrame()
 	SupplyTruckAIInterface *supplyTruck = getMachineOwner()->getAI()->getSupplyTruckAIInterface();
 	if( supplyTruck )
 	{
-		m_nextDockActionFrame = TheGameLogic->getFrame() + supplyTruck->getActionDelayForDock( getMachineGoalObject() );
+		UnsignedInt delay = supplyTruck->getActionDelayForDock( getMachineGoalObject() );
+		m_nextDockActionFrame = TheGameLogic->getFrame() + delay;
+		// ... and let the docker publish that window, so a bar can fill over it while it works
+		supplyTruck->noteDockActionWindow( delay );
 		return;
 	}
 

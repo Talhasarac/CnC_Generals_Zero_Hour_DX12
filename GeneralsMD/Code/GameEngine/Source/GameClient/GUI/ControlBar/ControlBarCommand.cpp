@@ -1258,10 +1258,15 @@ CommandAvailability ControlBar::getCommandAvailability( const CommandButton *com
 		return COMMAND_RESTRICTED;
 	}
 
-	// >=, not ==: the production queue is far deeper than the number of buttons and a shift-click
-	// queues several at once, so an exact-equality test greyed the button out at exactly
-	// MAX_BUILD_QUEUE_BUTTONS and then stopped firing once the count stepped past it.
-	Bool queueMaxed = pu ? ( pu->getProductionCount() >= MAX_BUILD_QUEUE_BUTTONS ) : FALSE;
+	//
+	// The cap is the queue's own depth (INI MaxQueueEntries, 100 by default here), not the number
+	// of buttons the build-queue strip happens to have room for - those nine buttons are a display
+	// limit and were greying every build button out at nine units.
+	//
+	// >=, not ==: a shift-click queues several at once, so an exact-equality test stopped firing
+	// once the count stepped past the cap.
+	//
+	Bool queueMaxed = pu ? ( pu->getProductionCount() >= pu->getMaxQueueEntries() ) : FALSE;
 
 	switch( command->getCommandType() )
 	{

@@ -37,6 +37,7 @@ found and fixed — EA's own, not port damage.**
 - A unit turns onto whatever is actually shooting it, then resumes the advance.
 - Otherwise it picks the worst thing in range: anything armed before anything that is not, then the more dangerous of the two, and worth fades with distance so it is never the far one it walks the field for. A group ordered through a base no longer stops for the first dozer it passes while the artillery beside it keeps firing.
 - Ctrl on the attack-move click no longer shells the ground instead.
+- A big selection arrives as a crowd. Two hundred units told to attack-move used to spread along a line and three hundred told to move mostly stood still: the group tried to hold its shape all the way in. Now everyone heads for the spot you clicked and takes the nearest free ground to it.
 - Troop Crawlers wait for their squad to climb back in, up to ten seconds.
 - One man who cannot get back aboard no longer parks the Crawler for the rest of the attack move.
 - Their squad stays out until the area is clear, instead of piling back in after every kill.
@@ -192,16 +193,26 @@ found and fixed — EA's own, not port damage.**
 
 ## Placing buildings
 
-- The placement grid is drawn on the ground and follows the slope.
+- The placement grid is drawn on the ground and follows the slope, and reaches twice as far as it used to.
 - Unbuildable ground is a soft red wash, crossed out square by square.
 - Running out of money no longer strands the ghost on the map.
 - Holding shift and clicking out a row of buildings no longer stops halfway and selects one.
+- That row keeps going with no worker selected, too, instead of ending after the first building.
+- Turning a building no longer turns everything you build afterwards. A wheeled heading still carries from one wall to the next, but the next supply centre comes out facing the way it was designed to.
 - A building you point at blocked ground slides to the nearest spot it fits, and lands there.
 - The pointer keeps its build cursor while you place, even passing over your own buildings.
 - GLA defences get a range ring while you site them.
 - A click clears a half-typed building shortcut.
 - The two-key building shortcut survives the command bar's redraw now.
 - Escape cancels what you were doing before it opens the menu.
+
+## Where the money is, and where it is coming from
+
+- Supply piles and docks say what is left in them, in cash, over the pile. No more guessing which expansion is worth taking from the art on the model.
+- Everything on the field prices itself off its top right corner, at its owner's price. What that push cost, and what he just lost.
+- A worker fetching or handing over a box shows a bar while it works.
+- Hackers show how far off the next payout is. So do the black market and the oil derricks.
+- Factories take a hundred units in the queue, not nine. The build queue only ever had nine buttons and that had become the limit.
 
 ## Health bars
 
@@ -213,6 +224,8 @@ found and fixed — EA's own, not port damage.**
 
 ## Twenty-two-year-old bugs, found by testing
 
+- Every countdown on screen was a second too long. Rounding up a whole number of seconds gave a whole number plus one, so a ten second build said eleven - production queues, buildings going up, superweapons, all of it.
+- A Chinese silo researching an upgrade while its missile charged drew both bars and both countdowns in the same row of pixels. They stack now.
 - Units moving diagonally ran up to 40% faster than their own stat sheet.
 - Garrisoned infantry and base defences only ever range-checked one of their weapons.
 - Killing something with poison or toxin credited nobody with experience or score.

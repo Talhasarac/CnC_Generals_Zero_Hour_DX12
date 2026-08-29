@@ -31,6 +31,7 @@
 #include "Common/Player.h"
 #include "Common/ResourceGatheringManager.h"
 #include "Common/ThingTemplate.h"
+#include "GameLogic/GameLogic.h"
 #include "GameLogic/Object.h"
 #include "GameLogic/PartitionManager.h"
 #include "GameLogic/Module/SupplyTruckAIUpdate.h"
@@ -84,6 +85,8 @@ SupplyTruckAIUpdate::SupplyTruckAIUpdate( Thing *thing, const ModuleData* module
 	m_numberBoxes = 0;
 	m_forcePending = FALSE;
 	m_forcedBusyPending = FALSE;
+	m_dockActionStartFrame = 0;
+	m_dockActionEndFrame = 0;
 	m_supplyTruckStateMachine = newInstance(SupplyTruckStateMachine)( getObject() );
 	m_supplyTruckStateMachine->initDefaultState();
 	
@@ -236,6 +239,23 @@ UnsignedInt SupplyTruckAIUpdate::getActionDelayForDock( Object *dock )
 	}
 
 	return 0;
+}
+
+//----------------------------------------------------------------------------------------
+void SupplyTruckAIUpdate::noteDockActionWindow( UnsignedInt frames )
+{
+	m_dockActionStartFrame = TheGameLogic->getFrame();
+	m_dockActionEndFrame = m_dockActionStartFrame + frames;
+}
+
+//----------------------------------------------------------------------------------------
+/** How far through fetching or handing over the current box we are, for the bar drawn over the
+	* worker's head.  Negative once the window has run out, which is also what a worker that is not
+	* docked reads: nothing refreshes the window but the dock state. */
+//----------------------------------------------------------------------------------------
+Real SupplyTruckAIUpdate::getDockActionProgress() const
+{
+	return dockActionProgress( TheGameLogic->getFrame(), m_dockActionStartFrame, m_dockActionEndFrame );
 }
 
 //-------------------------------------------------------------------------------------------------

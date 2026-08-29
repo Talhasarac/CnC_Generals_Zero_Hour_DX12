@@ -184,6 +184,11 @@ class HackInternetAIInterface
 public:
 	virtual Bool isHacking() const = 0;
 	virtual Bool isHackingPackingOrUnpacking() const = 0;
+
+	/** How far along the wait for the next payout is, 0..1, or negative when not hacking.
+		* HackInternetState keeps the countdown; this is only so a bar can be drawn over it. */
+	virtual Real getHackProgress() const = 0;
+	virtual void setHackProgress( Real progress ) = 0;
 };
 
 //-------------------------------------------------------------------------------------------------
@@ -221,12 +226,16 @@ public:
 	virtual Bool isHacking() const;
 	virtual Bool isHackingPackingOrUnpacking() const;
 
+	virtual Real getHackProgress() const { return m_hackProgress; }
+	virtual void setHackProgress( Real progress ) { m_hackProgress = progress; }
+
 protected:
 
 	virtual AIStateMachine* makeStateMachine();
 	
 	AICommandParmsStorage		m_pendingCommand;
 	Bool m_hasPendingCommand;	
+	Real m_hackProgress;			///< 0..1 towards the next payout, negative while not hacking
 };
 
 #endif

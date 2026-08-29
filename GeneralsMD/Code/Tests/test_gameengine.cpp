@@ -66,6 +66,8 @@
 #include "GameClient/ParticleSys.h"
 #include "GameClient/FXList.h"
 #include "GameClient/ControlBar.h"
+#include "GameLogic/Module/ProductionUpdate.h"
+#include "GameLogic/Module/SupplyTruckAIUpdate.h"
 #include "GameClient/InGameUI.h"
 #include "GameClient/View.h"
 #include "GameLogic/IncomingDamage.h"
@@ -1315,39 +1317,6 @@ TEST(income_is_zero_not_negative_when_nothing_comes_in)
 	CHECK_EQ(computeIncomePerMinute(samples, 4, 4, 2), 0);
 }
 
-/*
- * BaseType.h's fast_float_ceil does not ceil an integer.  It adds 0.99999994 and
- * truncates, but 0.99999994 is only a sixteenth of a float ULP once the value is past
- * 1.0, so the sum rounds up to the next whole float before the truncate ever runs:
- * ceil(600) is 601, ceil(1080) is 1081, and so on for every positive whole number.
- * Fractions - what it is normally handed - come out right, which is why this has
- * survived.  Every REAL_TO_INT_CEIL in the codebase inherits it.
- *
- * Pinned rather than fixed: the sum is in a header every translation unit includes and
- * a correcting compare would cost the branch the whole routine exists to avoid, so the
- * blast radius of changing it is the entire game.  Callers that need an exact edge floor
- * and pin it instead - a screen height that ceils to one past the bottom of the screen is
- * where this turned up.
- */
-TEST(realtointceil_DEFECT_overshoots_every_whole_number)
-{
-	CHECK_EQ(REAL_TO_INT_CEIL(1.0f), 2);
-	CHECK_EQ(REAL_TO_INT_CEIL(600.0f), 601);
-	CHECK_EQ(REAL_TO_INT_CEIL(768.0f), 769);
-	CHECK_EQ(REAL_TO_INT_CEIL(1080.0f), 1081);
-	CHECK_EQ(REAL_TO_INT_CEIL(1920.0f), 1921);
-
-	// zero is the one whole number it gets right - 0.99999994 truncates back to it
-	CHECK_EQ(REAL_TO_INT_CEIL(0.0f), 0);
-
-	// genuine fractions round up correctly, which is what callers normally feed it
-	CHECK_EQ(REAL_TO_INT_CEIL(600.5f), 601);
-	CHECK_EQ(REAL_TO_INT_CEIL(1080.25f), 1081);
-
-	// negatives skip the addition entirely and truncate, which really is ceil
-	CHECK_EQ(REAL_TO_INT_CEIL(-600.0f), -600);
-	CHECK_EQ(REAL_TO_INT_CEIL(-600.5f), -600);
-}
 
 //////////////////////////////////////////////////////////////////////////////
 // The in-flight damage ledger
@@ -5737,4 +5706,80 @@ TEST(replay_crc_queue_drops_the_frame_the_network_never_recorded)
 	CHECK_EQ( 0x22222222, net.readCRC() );
 	CHECK_EQ( 0x33333333, net.readCRC() );
 	CHECK_EQ( 0, net.readCRC() );
+}
+
+
+/** The build queue strip has nine buttons, and that number had become the production cap: every
+	 build button greyed out at nine units even though the queue itself is a hundred deep.  The two
+	 numbers are unrelated - one is how many entries fit on screen, the other is how many the factory
+	 will take (INI MaxQueueEntries). */
+TEST(a_factorys_queue_is_as_deep_as_its_ini_says_not_as_wide_as_the_button_strip)
+{
+	ProductionUpdateModuleData data;
+
+	CHECK_EQ( 100, data.m_maxQueueEntries );
+	CHECK( data.m_maxQueueEntries > MAX_BUILD_QUEUE_BUTTONS );
+}
+
+/** The bar over a worker's head while it loads or unloads a box fills across the window the dock
+	 state announced.  Outside that window there is no bar at all - which is how a worker walking
+	 between the pile and the refinery reads, since nothing but the dock state ever moves the
+	 window - and the ends of the window are exclusive so a stale one cannot leave a full bar
+	 hanging over an idle worker. */
+TEST(a_dock_action_bar_fills_across_its_window_and_shows_nothing_outside_it)
+{
+	// half way through a thirty frame box
+	CHECK_NEAR( 0.5f, dockActionProgress( 115, 100, 130 ), 0.0001f );
+	CHECK_NEAR( 0.0f, dockActionProgress( 100, 100, 130 ), 0.0001f );
+
+	// the frame it lands on, and every frame after, is over: no bar
+	CHECK( dockActionProgress( 130, 100, 130 ) < 0.0f );
+	CHECK( dockActionProgress( 400, 100, 130 ) < 0.0f );
+
+	// before it starts, and a window that was never set, are both no bar
+	CHECK( dockActionProgress( 99, 100, 130 ) < 0.0f );
+	CHECK( dockActionProgress( 0, 0, 0 ) < 0.0f );
+
+	// a zero-length window is not a divide by zero
+	CHECK( dockActionProgress( 100, 100, 100 ) < 0.0f );
+}
+
+
+/** EA's floor and ceil nudged the value by the largest float below one and truncated.  The nudge
+	 does not survive the addition: for anything from 2 upwards, f + 0.99999994 rounds to f + 1, so
+	 the "ceil" of a whole number came back one too high - and every countdown drawn over a building
+	 is a whole number of seconds, which is why a ten second build said eleven. */
+TEST(ceil_and_floor_are_exact_on_whole_numbers)
+{
+	// the case that was wrong: a whole number is already its own ceiling.  This used to be pinned
+	// the other way round, as realtointceil_DEFECT_overshoots_every_whole_number - the screen
+	// heights are the values that first turned it up, the seconds over a building are what
+	// finally made it worth the compare.
+	CHECK_EQ( 10, REAL_TO_INT_CEIL( 10.0f ) );
+	CHECK_EQ( 2, REAL_TO_INT_CEIL( 2.0f ) );
+	CHECK_EQ( 1, REAL_TO_INT_CEIL( 1.0f ) );
+	CHECK_EQ( 0, REAL_TO_INT_CEIL( 0.0f ) );
+	CHECK_EQ( 600, REAL_TO_INT_CEIL( 600.0f ) );
+	CHECK_EQ( 768, REAL_TO_INT_CEIL( 768.0f ) );
+	CHECK_EQ( 1080, REAL_TO_INT_CEIL( 1080.0f ) );
+	CHECK_EQ( 1920, REAL_TO_INT_CEIL( 1920.0f ) );
+	CHECK_EQ( -3, REAL_TO_INT_CEIL( -3.0f ) );
+	CHECK_EQ( -600, REAL_TO_INT_CEIL( -600.0f ) );
+
+	// ... and a fraction still rounds away from zero the way ceil must
+	CHECK_EQ( 11, REAL_TO_INT_CEIL( 10.0001f ) );
+	CHECK_EQ( 11, REAL_TO_INT_CEIL( 10.9f ) );
+	CHECK_EQ( 1, REAL_TO_INT_CEIL( 0.001f ) );
+	CHECK_EQ( 601, REAL_TO_INT_CEIL( 600.5f ) );
+	CHECK_EQ( 1081, REAL_TO_INT_CEIL( 1080.25f ) );
+	CHECK_EQ( -10, REAL_TO_INT_CEIL( -10.9f ) );
+	CHECK_EQ( -600, REAL_TO_INT_CEIL( -600.5f ) );
+
+	// floor had the same flaw on the negative side
+	CHECK_EQ( -3, REAL_TO_INT_FLOOR( -3.0f ) );
+	CHECK_EQ( 10, REAL_TO_INT_FLOOR( 10.0f ) );
+	CHECK_EQ( 10, REAL_TO_INT_FLOOR( 10.9f ) );
+	CHECK_EQ( -4, REAL_TO_INT_FLOOR( -3.1f ) );
+	CHECK_EQ( 0, REAL_TO_INT_FLOOR( 0.9f ) );
+	CHECK_EQ( -1, REAL_TO_INT_FLOOR( -0.1f ) );
 }

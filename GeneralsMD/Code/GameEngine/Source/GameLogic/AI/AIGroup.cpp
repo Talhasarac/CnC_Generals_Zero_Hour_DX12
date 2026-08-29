@@ -1578,8 +1578,23 @@ void AIGroup::groupMoveToPosition( const Coord3D *p_posIn, Bool addWaypoint, Com
     isFormation = false;
   }
 
+	//
+	// A player's move order means "everybody go there", and with a big selection the group
+	// machinery was answering a different question. friend_moveInfantryToPos walks the group down
+	// one shared path in three or five columns, and computeIndividualDestination keeps each
+	// member's offset from the group centroid (normalized to a fixed radius, so a wide selection
+	// lands strung out on an arc): two hundred units asked to attack-move drew a line instead of
+	// arriving, and with three hundred most of them never got a workable goal cell at all.
+	//
+	// So the point itself is the goal for every member, and each unit's own move state takes the
+	// nearest free cell to it (Pathfinder::adjustDestination spirals out from there, reserving as
+	// it goes, and the orders are issued nearest-first). They pile onto the spot instead of
+	// holding a shape. Explicit formations - the ones the player asked for by name - still keep
+	// theirs, and the AI still moves its teams the old way.
+	//
+	const Bool gatherOnPoint = ( cmdSource == CMD_FROM_PLAYER && !isFormation );
 
-	if (!addWaypoint && !isFormation) {
+	if (!addWaypoint && !isFormation && !gatherOnPoint) {
 		friend_computeGroundPath(pos, cmdSource);
 		didInfantry = friend_moveInfantryToPos(pos, cmdSource);
 		didVehicles = friend_moveVehicleToPos(pos, cmdSource);
@@ -1588,7 +1603,7 @@ void AIGroup::groupMoveToPosition( const Coord3D *p_posIn, Bool addWaypoint, Com
 		recompute();
 
 	std::list<Object *>::iterator i;
-	if( !isFormation && cmdSource == CMD_FROM_PLAYER && TheGlobalData->m_groupMoveClickToGatherFactor > 0.0f )
+	if( !isFormation && !gatherOnPoint && cmdSource == CMD_FROM_PLAYER && TheGlobalData->m_groupMoveClickToGatherFactor > 0.0f )
 	{
 		ScaleRect2D( &min, &max, TheGlobalData->m_groupMoveClickToGatherFactor );
 
@@ -1723,7 +1738,10 @@ void AIGroup::groupMoveToPosition( const Coord3D *p_posIn, Bool addWaypoint, Com
 			}
 			firstUnit = false;
 		}
-		computeIndividualDestination( &dest, &goalPos, theUnit, &center, isFormation );
+		if (gatherOnPoint)
+			dest = goalPos;		// the clicked spot; the move state finds the nearest free cell to it
+		else
+			computeIndividualDestination( &dest, &goalPos, theUnit, &center, isFormation );
 
 		if( cmdSource == CMD_FROM_PLAYER && theUnit->getStatusBits().test( OBJECT_STATUS_CAN_STEALTH ) && ai->canAutoAcquire() )
 		{
@@ -2348,8 +2366,17 @@ void AIGroup::groupAttackMoveToPosition( const Coord3D *pos, Int maxShotsToFire,
 			firstUnit = false;
 		}
 
+		//
+		// As with a plain move (see groupMoveToPosition): a player's attack move sends everyone to
+		// the point and lets each unit take the nearest free cell to it, rather than holding the
+		// selection's shape on the way in - which a large group could only do by spreading along
+		// an arc.
+		//
 		Coord3D dest;
-		computeIndividualDestination( &dest, &goalPos, theUnit, &center, FALSE );
+		if (cmdSource == CMD_FROM_PLAYER)
+			dest = goalPos;
+		else
+			computeIndividualDestination( &dest, &goalPos, theUnit, &center, FALSE );
 
 		// the speed of the slowest member is picked up by AIAttackMoveToState::onEnter, which runs
 		// inside this order - the move state resets the desired speed, so it cannot be set here.

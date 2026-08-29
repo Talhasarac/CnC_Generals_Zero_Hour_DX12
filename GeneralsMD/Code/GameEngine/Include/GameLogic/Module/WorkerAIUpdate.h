@@ -215,6 +215,9 @@ public:
 	
 	virtual Int getUpgradedSupplyBoost() const;
 
+	virtual void noteDockActionWindow( UnsignedInt frames );
+	virtual Real getDockActionProgress() const;
+
 protected:
 
 // Dozer data
@@ -241,6 +244,9 @@ protected:
 
 // Supply Truck data
 	Int m_numberBoxes;
+	UnsignedInt								m_dockActionStartFrame;	///< when the box currently being moved started
+	UnsignedInt								m_dockActionEndFrame;		///< and when it lands; equal means "not docking"
+
 	ObjectID									m_preferredDock;			///< Instead of searching, try this one first
 	ObjectID									m_dockBeforeBuilding;	///< the dock we left to go build, so we can go back (WorkersReturnToSupply)
 	Bool m_forcePending; // To prevent a function from doing a setState, forceWanting will latch into here until serviced.

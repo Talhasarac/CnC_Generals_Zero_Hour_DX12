@@ -175,6 +175,11 @@ void SupplyWarehouseDockUpdate::setDockCrippled( Bool setting )
 	DockUpdate::setDockCrippled( setting );
 }
 
+Int SupplyWarehouseDockUpdate::getSupplyCashValue( void ) const
+{
+	return m_boxesStored * TheGlobalData->m_baseValuePerSupplyBox;
+}
+
 void SupplyWarehouseDockUpdate::setCashValue( Int cashValue )
 {
 	// A script can tell us our set value, and we need to figure out the boxes needed to provide that.
