@@ -198,19 +198,22 @@ public:
 
 	void xferTheSellList(Xfer *xfer );
 
+	/// will move objects that can move out of the way.
+	/// will return false if there are objects that cannot be moved out of the way.
+	/// 'ignore' is left where it stands - the builder is standing against the footprint on purpose,
+	/// and shoving it away would cancel the very job it just started.
+	Bool moveObjectsForConstruction( const ThingTemplate *whatToBuild,
+																	 const Coord3D *pos, Real angle, Player *playerToBuild,
+																	 const Object *ignore = NULL );
+
 protected:
 
 	/// some objects will be "cleared" automatically when constructing
 	Bool isRemovableForConstruction( Object *obj );
-	
-	/// clear the area of removable objects for construction
-	void clearRemovableForConstruction( const ThingTemplate *whatToBuild, 
-																			const Coord3D *pos, Real angle );
 
-	/// will move objects that can move out of the way.
-	/// will return false if there are objects that cannot be moved out of the way.
-	Bool moveObjectsForConstruction( const ThingTemplate *whatToBuild, 
-																	 const Coord3D *pos, Real angle, Player *playerToBuild );
+	/// clear the area of removable objects for construction
+	void clearRemovableForConstruction( const ThingTemplate *whatToBuild,
+																			const Coord3D *pos, Real angle );
 
 	Coord3D *m_buildPositions;			///< array used to create a line of build locations (think walls)
 	Int m_buildPositionSize;				///< number of elements in the build position array

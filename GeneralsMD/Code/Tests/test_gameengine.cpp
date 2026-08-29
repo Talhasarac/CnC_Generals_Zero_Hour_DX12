@@ -4933,6 +4933,29 @@ TEST(a_structure_the_builder_has_reached_is_drawn_solid)
 	CHECK_NEAR( Drawable_effectiveOpacity( 1.0f, 1.0f, FALSE ), 1.0f, 0.0001f );
 }
 
+/** A plan is not a wall.  Its footprint stays out of the pathfind map until the builder puts the
+	 first percent in, so units walk over a site that is only planned - a structure queued behind a
+	 busy builder used to stand there as a solid obstacle for as long as it waited.  Selling runs the
+	 percent back down through the same call and must not re-lay a footprint that is already down. */
+TEST(a_planned_structure_becomes_an_obstacle_when_its_builder_arrives)
+{
+	// the builder arrives: this is the one transition that lays the footprint
+	CHECK( Object_constructionFootprintGoesDown( TRUE, 0.0f, 0.1f ) == TRUE );
+
+	// still waiting - construct() sets zero on a plan that is already at zero
+	CHECK( Object_constructionFootprintGoesDown( TRUE, 0.0f, 0.0f ) == FALSE );
+
+	// already building: the footprint went down on the first percent, not on every one after it
+	CHECK( Object_constructionFootprintGoesDown( TRUE, 50.0f, 51.0f ) == FALSE );
+
+	// selling a finished building winds it down from 100 to 0 - it is in the map and stays there
+	CHECK( Object_constructionFootprintGoesDown( FALSE, 100.0f, 99.9f ) == FALSE );
+	CHECK( Object_constructionFootprintGoesDown( FALSE, 0.1f, 0.0f ) == FALSE );
+
+	// completion clears the status first and only then sets CONSTRUCTION_COMPLETE (-1)
+	CHECK( Object_constructionFootprintGoesDown( FALSE, 99.9f, CONSTRUCTION_COMPLETE ) == FALSE );
+}
+
 /** The silhouette scales whatever opacity the drawable already asked for instead of replacing it,
 	 so a stealthed or half-faded drawable is not dragged back up to 45% by being a plan, and one
 	 that has been faded all the way out stays out. */

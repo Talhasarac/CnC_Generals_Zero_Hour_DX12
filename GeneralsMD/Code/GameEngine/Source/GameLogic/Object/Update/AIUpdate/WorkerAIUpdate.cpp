@@ -434,8 +434,13 @@ Object *WorkerAIUpdate::construct( const ThingTemplate *what,
 	adjustedPos.z = TheTerrainLogic->getGroundHeight(pos->x, pos->y);
 	obj->setPosition(&adjustedPos);
 
+	//
+	// The footprint is not an obstacle yet: this is a plan standing at zero percent, and until the
+	// worker arrives units walk over the site as if it were empty ground.  Object::setConstructionPercent
+	// puts it in the map on the first percent - after the terrain is flattened, which is what EA's
+	// note below was guarding.
+	//
 	// Note - very important that we add to map AFTER we flatten terrain. jba.
-	TheAI->pathfinder()->addObjectToPathfindMap( obj );
 
 	// "callback" event for structure created (note that it's not yet "complete")
 	owningPlayer->onStructureCreated( getObject(), obj );

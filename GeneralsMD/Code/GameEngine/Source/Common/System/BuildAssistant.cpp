@@ -1445,9 +1445,10 @@ void BuildAssistant::clearRemovableForConstruction( const ThingTemplate *whatToB
 Bool BuildAssistant::moveObjectsForConstruction( const ThingTemplate *whatToBuild, 
 																								 const Coord3D *pos,
 																								 Real angle,
-																								 Player *playerToBuild )
-{	 
-	GeometryInfo gi (GEOMETRY_BOX, false, 10, whatToBuild->getTemplateGeometryInfo().getMajorRadius(), 
+																								 Player *playerToBuild,
+																								 const Object *ignore )
+{
+	GeometryInfo gi (GEOMETRY_BOX, false, 10, whatToBuild->getTemplateGeometryInfo().getMajorRadius(),
 		whatToBuild->getTemplateGeometryInfo().getMajorRadius());
 	if (whatToBuild->getTemplateGeometryInfo().getGeomType()==GEOMETRY_BOX) {
 		gi = whatToBuild->getTemplateGeometryInfo();
@@ -1464,6 +1465,10 @@ Bool BuildAssistant::moveObjectsForConstruction( const ThingTemplate *whatToBuil
 
 	for( Object *them = iter->first(); them; them = iter->next() )
 	{
+		// the builder itself docks against the footprint, so it collides with it by design
+		if (them == ignore)
+			continue;
+
 		//ignore land mines, cluster mines and demo traps, since you can build on them
 		// doing so will damage them during construction, by the way
 		if (them->isKindOf( KINDOF_MINE ))

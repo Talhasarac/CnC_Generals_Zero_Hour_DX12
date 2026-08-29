@@ -67,6 +67,26 @@ class DozerActionStateMachine;
 
 static const Real MIN_ACTION_TOLERANCE = 70.0f;
 
+//-------------------------------------------------------------------------------------------------
+/** Is the builder near enough to a dock point to work from where it stands?  One place, because the
+	* move-to state and the build state have to agree: the move ends when this says yes, so if the
+	* build state asked a stricter question it would send the builder walking to a spot the move
+	* already decided it had reached. */
+//-------------------------------------------------------------------------------------------------
+static Bool dozerHasArrivedAt( const Object *dozer, const Coord3D *goalPos )
+{
+	if( dozer == NULL || goalPos == NULL )
+		return FALSE;
+
+	const Real SLOP = 15.0f;
+	Real distSqr = ThePartitionManager->getDistanceSquared( dozer, goalPos, FROM_BOUNDINGSPHERE_2D );
+	Real allowableDistanceSqr = sqr(max( MIN_ACTION_TOLERANCE,
+																			 dozer->getGeometryInfo().getBoundingSphereRadius() + SLOP ));
+
+	return distSqr <= allowableDistanceSqr;
+
+}  // end dozerHasArrivedAt
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -340,31 +360,14 @@ StateReturnType DozerActionMoveToActionPosState::update( void )
 	}
 
 	// if distance between us and our goal position is close enough
-	const Coord3D *goalPos = getMachine()->getGoalPosition();
-	Real distSqr = ThePartitionManager->getDistanceSquared( dozer, goalPos, FROM_BOUNDINGSPHERE_2D );
-	const Real SLOP = 15.0f;
-	Real allowableDistanceSqr = sqr(max( MIN_ACTION_TOLERANCE, dozer->getGeometryInfo().getBoundingSphereRadius() + SLOP ));
-
-
-	if( distSqr <= allowableDistanceSqr )
-	{
-		if( m_task == DOZER_TASK_BUILD )
-		{
-
-			//
-			// the object is now no longer awaiting construction, it is being constructed ... note
-			// that we might possibly be here multiple times for a single object being built
-			// but the setting of the same model condition doesn't have any adverse effects
-			//
-			goalObject->clearAndSetModelConditionFlags(
-				MAKE_MODELCONDITION_MASK(MODELCONDITION_AWAITING_CONSTRUCTION), 
-				MAKE_MODELCONDITION_MASK2(MODELCONDITION_PARTIALLY_CONSTRUCTED, MODELCONDITION_ACTIVELY_BEING_CONSTRUCTED));
-
-		}  // end if
-
+	//
+	// The scaffold used to go up here, on arrival.  Arrival is not the start of work: the first
+	// percent is, and until it goes in the structure is still a plan drawn as a translucent
+	// silhouette - so the building was seen putting itself up inside its own ghost.  Both now
+	// happen in the same call, Object::setConstructionPercent.
+	//
+	if( dozerHasArrivedAt( dozer, getMachine()->getGoalPosition() ) )
 		return STATE_SUCCESS;
-
-	}  // end if
 
 
 	// if we're in the idle state fail our move
@@ -1794,8 +1797,14 @@ Object *DozerAIUpdate::construct( const ThingTemplate *what,
 	adjustedPos.z = TheTerrainLogic->getGroundHeight(pos->x, pos->y);
 	obj->setPosition(&adjustedPos);
 	
+	//
+	// The footprint is not an obstacle yet: this is a plan standing at zero percent, and until the
+	// builder arrives units walk over the site as if it were empty ground.  Object::setConstructionPercent
+	// puts it in the map on the first percent - after the terrain is flattened, which is what EA's
+	// note below was guarding.
+	//
 	// Note - very important that we add to map AFTER we flatten terrain. jba.
-	TheAI->pathfinder()->addObjectToPathfindMap( obj );
+
 	// "callback" event for structure created (note that it's not yet "complete")
 	owningPlayer->onStructureCreated( getObject(), obj );
 

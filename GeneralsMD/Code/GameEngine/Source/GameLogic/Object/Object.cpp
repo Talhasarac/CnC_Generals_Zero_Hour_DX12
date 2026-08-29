@@ -3073,7 +3073,40 @@ void Object::setConstructionPercent( Real percent )
 	Real delta = percent - m_constructionPercent;
 	if( delta > 0.0f )
 		m_constructionRateAccum += delta;
+
+	//
+	// A structure that has only been planned is not on the ground yet, so it is not in the pathfind
+	// map either (see DozerAIUpdate/WorkerAIUpdate::construct) - a plan waiting for a free builder
+	// stood there as a solid wall units had to walk around, which is a wall around a building that
+	// does not exist.  The footprint goes in here, on the first percent, which is every builder's
+	// path into the ground: the dozer and the worker both come through this one call.
+	//
+	const Bool underConstruction = getStatusBits().test( OBJECT_STATUS_UNDER_CONSTRUCTION );
+	const Real wasPercent = m_constructionPercent;
 	m_constructionPercent = percent;
+
+	if( Object_constructionFootprintGoesDown( underConstruction, wasPercent, percent ) )
+	{
+		// whoever wandered into the site while it was only a plan gets out of the way now, exactly
+		// as they would have when it was first placed - all but the builder, which is standing there
+		// because it is the one building it
+		TheBuildAssistant->moveObjectsForConstruction( getTemplate(), getPosition(), getOrientation(),
+																									 getControllingPlayer(),
+																									 TheGameLogic->findObjectByID( m_builderID ) );
+
+		TheAI->pathfinder()->addObjectToPathfindMap( this );
+
+		//
+		// and the building starts putting itself up.  This is the same frame the silhouette goes
+		// solid (Drawable::getEffectiveOpacity asks Object_isAwaitingBuilder, which asks this very
+		// percent), so the scaffold and the ghost never overlap - the builder arriving is not the
+		// start of work, the first percent is.
+		//
+		clearAndSetModelConditionFlags(
+			MAKE_MODELCONDITION_MASK( MODELCONDITION_AWAITING_CONSTRUCTION ),
+			MAKE_MODELCONDITION_MASK2( MODELCONDITION_PARTIALLY_CONSTRUCTED,
+																 MODELCONDITION_ACTIVELY_BEING_CONSTRUCTED ) );
+	}
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -5248,6 +5281,19 @@ void Object::setVisionRange( Real newVisionRange )
 Bool Object_isAwaitingBuilder( Bool underConstruction, Real constructionPercent )
 {
 	return underConstruction && constructionPercent <= 0.0f;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The moment a plan stops being a plan: the builder has arrived and put the first percent in, so
+	* the structure is now really standing there and its footprint becomes solid to pathfinding.  Up
+	* to here it was walk-through ground - a plan waiting for a free builder must not wall a base in
+	* around a building nobody has started.  Selling runs the percent back down and must not count:
+	* the structure is already in the map and stays in it until it is gone. */
+//-------------------------------------------------------------------------------------------------
+Bool Object_constructionFootprintGoesDown( Bool underConstruction, Real wasPercent, Real nowPercent )
+{
+	return Object_isAwaitingBuilder( underConstruction, wasPercent ) &&
+				 !Object_isAwaitingBuilder( underConstruction, nowPercent );
 }
 
 //-------------------------------------------------------------------------------------------------

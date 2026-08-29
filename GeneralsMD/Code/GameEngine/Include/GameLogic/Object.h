@@ -166,6 +166,10 @@ enum CrushSquishTestType
 //-------------------------------------------------------------------------------------------------
 extern Bool Object_isAwaitingBuilder( Bool underConstruction, Real constructionPercent );
 
+///< has the builder just arrived, so the plan's footprint becomes solid to pathfinding now?
+extern Bool Object_constructionFootprintGoesDown( Bool underConstruction, Real wasPercent,
+																								  Real nowPercent );
+
 ///< how far a structure clears shroud, given where it is in its construction
 extern Real Object_shroudClearingRange( Real ownRange, Bool underConstruction, Real constructionPercent,
 																				Real boundingCircleRadius );
