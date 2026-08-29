@@ -510,11 +510,26 @@ StateReturnType DozerActionDoActionState::update( void )
 			if( dozerAI->getBuildSubTask() == DOZER_SELECT_BUILD_DOCK_LOCATION )
 			{
 				const Coord3D *dockLocation = dozerAI->getDockPoint( m_task, DOZER_DOCK_POINT_ACTION );
-				if( dockLocation )
+
+				//
+				// The action dock point is the same spot the builder was just sent to (see newTask),
+				// so ordering the walk again only bought a second approach and a wait for the move
+				// to settle into idle - the builder stood at the site doing nothing while the plan
+				// sat at zero percent.  Standing there already means it can start from where it is.
+				//
+				if( dockLocation == NULL || dozerHasArrivedAt( dozer, dockLocation ) )
+				{
+					dozerAI->setBuildSubTask( DOZER_DO_BUILD_AT_DOCK );
+					dozerAI->startBuildingSound( goalObject->getTemplate()->getPerUnitSound( "UnderConstruction" ),
+																			 goalObject->getID() );
+				}
+				else
+				{
 					ai->aiMoveToPosition( dockLocation, CMD_FROM_AI );
 
-				// we're now moving to the dock location
-				dozerAI->setBuildSubTask( DOZER_MOVING_TO_BUILD_DOCK_LOCATION );
+					// we're now moving to the dock location
+					dozerAI->setBuildSubTask( DOZER_MOVING_TO_BUILD_DOCK_LOCATION );
+				}
 
 			}  // end if
 			
