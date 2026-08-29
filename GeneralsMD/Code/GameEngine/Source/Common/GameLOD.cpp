@@ -368,6 +368,7 @@ void GameLODManager::init(void)
 	TheWritableGlobalData->m_snapBuildPlacementTo45 = optionPref.getSnapBuildPlacementTo45();
 	TheWritableGlobalData->m_snapCameraRotateTo45 = optionPref.getSnapCameraRotateTo45();
 	TheWritableGlobalData->m_gridBuildPlacement = optionPref.getGridBuildPlacement();
+	TheWritableGlobalData->m_nudgeBuildPlacement = optionPref.getNudgeBuildPlacement();
 	TheWritableGlobalData->m_middleMousePans = optionPref.getMiddleMousePans();
 	TheWritableGlobalData->m_zoomToCursor = optionPref.getZoomToCursor();
 	TheWritableGlobalData->m_showHudOverlay = optionPref.getShowHudOverlay();

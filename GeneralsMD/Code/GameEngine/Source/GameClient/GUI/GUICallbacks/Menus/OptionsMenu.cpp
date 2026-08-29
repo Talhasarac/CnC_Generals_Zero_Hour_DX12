@@ -772,6 +772,18 @@ Bool OptionPreferences::getGridBuildPlacement(void)
 	return stricmp(it->second.str(), "yes") == 0;
 }
 
+Bool OptionPreferences::getNudgeBuildPlacement(void)
+{
+	// Options.ini key.  A structure whose spot is blocked slides to the nearest one it does fit
+	// instead of just going red under the cursor, so a base can be laid out by pointing roughly at
+	// where each building goes.  Off restores the retail "find the legal pixel yourself" placement.
+	OptionPreferences::const_iterator it = find("NudgeBuildPlacement");
+	if (it == end())
+		return TheGlobalData->m_nudgeBuildPlacement;
+
+	return stricmp(it->second.str(), "yes") == 0;
+}
+
 Bool OptionPreferences::getMiddleMousePans(void)
 {
 	OptionPreferences::const_iterator it = find("MiddleMousePans");

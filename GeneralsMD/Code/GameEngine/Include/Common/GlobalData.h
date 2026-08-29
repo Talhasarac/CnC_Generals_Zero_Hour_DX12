@@ -334,6 +334,7 @@ public:
 	Bool m_snapBuildPlacementTo45;		///< quantize the drag-to-rotate build placement angle to 45 degrees
 	Bool m_snapCameraRotateTo45;		///< quantize the camera heading to 45 degrees when a middle-drag rotate ends
 	Bool m_gridBuildPlacement;			///< quantize structure placement to the pathfinder's build grid
+	Bool m_nudgeBuildPlacement;			///< slide a blocked structure to the nearest spot it does fit
 	Bool m_middleMousePans;				///< middle-button drag pans the camera instead of rotating it
 	Bool m_zoomToCursor;				///< the mouse wheel zooms toward whatever the cursor is over
 	Bool m_showHudOverlay;				///< draw the fps / elapsed time / income line in the corner

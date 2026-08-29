@@ -1514,6 +1514,58 @@ TEST(command_availability_rank_is_not_the_enum_order)
 	CHECK_EQ((Int)best, (Int)COMMAND_AVAILABLE);
 }
 
+/*
+ * NudgeBuildPlacement.  The whole promise of the feature is "nearest spot that fits", and the
+ * only thing that makes "first candidate that fits" mean that is the order the candidates come
+ * out in.  Ring by ring is not that order - from three rings out a ring's own diagonal is
+ * farther than the next ring's straight neighbour - and the square has to be filled in, not
+ * just sampled along the eight compass directions, or the search walks past the gap one cell
+ * to the side of them.
+ */
+TEST(placement_nudge_offsets_come_out_nearest_first)
+{
+	const Real step = (Real)InGameUI::PLACEMENT_CELL;
+	const Int rings = InGameUI::PLACEMENT_NUDGE_RINGS;
+	Real dx[ InGameUI::PLACEMENT_NUDGE_TRIES ], dy[ InGameUI::PLACEMENT_NUDGE_TRIES ];
+	Int i, j;
+
+	for (i = 0; i < InGameUI::PLACEMENT_NUDGE_TRIES; i++)
+		InGameUI::placementNudgeOffset(i, step, &dx[i], &dy[i]);
+
+	/* nearest first, and never standing still - the cursor's own spot is the one that failed */
+	for (i = 0; i < InGameUI::PLACEMENT_NUDGE_TRIES; i++)
+	{
+		Real d = dx[i] * dx[i] + dy[i] * dy[i];
+
+		CHECK(d > 0.0f);
+		if (i > 0)
+			CHECK(d >= dx[i-1] * dx[i-1] + dy[i-1] * dy[i-1] - 0.0001f);
+	}
+
+	/* the first move offered is one cell straight, not a diagonal */
+	CHECK_NEAR(dx[0] * dx[0] + dy[0] * dy[0], step * step, 0.0001f);
+
+	/* the whole square is covered, once each: every cell of it is in the list exactly once, so
+	 * a gap one cell to the side of a compass direction is found like any other */
+	CHECK_EQ(InGameUI::PLACEMENT_NUDGE_TRIES, (2 * rings + 1) * (2 * rings + 1) - 1);
+	for (i = 0; i < InGameUI::PLACEMENT_NUDGE_TRIES; i++)
+		for (j = i + 1; j < InGameUI::PLACEMENT_NUDGE_TRIES; j++)
+			CHECK(fabsf(dx[i] - dx[j]) > 0.0001f || fabsf(dy[i] - dy[j]) > 0.0001f);
+
+	/* every candidate lands on the same build grid the snap uses, so a nudged structure still
+	 * shares its edges with the ones already down, and none of them leaves the square */
+	for (i = 0; i < InGameUI::PLACEMENT_NUDGE_TRIES; i++)
+	{
+		CHECK_NEAR(dx[i] / step, (Real)REAL_TO_INT_FLOOR(dx[i] / step + 0.5f), 0.0001f);
+		CHECK_NEAR(dy[i] / step, (Real)REAL_TO_INT_FLOOR(dy[i] / step + 0.5f), 0.0001f);
+		CHECK(fabsf(dx[i]) <= rings * step + 0.0001f && fabsf(dy[i]) <= rings * step + 0.0001f);
+	}
+
+	/* and the far corner really is last - the list is the whole search, not a prefix of it */
+	CHECK_NEAR(fabsf(dx[InGameUI::PLACEMENT_NUDGE_TRIES - 1]), rings * step, 0.0001f);
+	CHECK_NEAR(fabsf(dy[InGameUI::PLACEMENT_NUDGE_TRIES - 1]), rings * step, 0.0001f);
+}
+
 TEST(placement_grid_snap_puts_footprint_edges_on_cell_lines)
 {
 	const Real cell = 10.0f;

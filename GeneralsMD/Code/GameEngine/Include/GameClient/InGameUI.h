@@ -483,6 +483,70 @@ public:  // ********************************************************************
 
 		return ((Real)REAL_TO_INT_FLOOR( (v - offset) / cell + 0.5f )) * cell + offset;
 	}
+	/** NudgeBuildPlacement: when the spot under the cursor is blocked, slide the structure to the
+		* nearest one it does fit and show it there, so the ghost answers "here, then" instead of just
+		* going red.  Moves 'world' and returns TRUE if it found somewhere; leaves it alone otherwise. */
+	virtual Bool nudgePlacementToLegal( Coord3D *world, const ThingTemplate *what, Real angle,
+																			Object *builderObject ) const;
+
+	/** What the ghost asks of a spot before it goes green.  One place, because the nudge search has
+		* to ask exactly the same question or it would offer a spot the ghost then paints red. */
+	static UnsignedInt placementCheckOptions( void );
+	enum { PLACEMENT_NUDGE_PATHFINDS = 12 };						///< unreachable candidates tolerated before the search gives up
+
+	/** The offsets that search tries: every cell of a square this many rings across, ordered by
+		* true distance so that "the first one that fits" is "the nearest one that fits".  Ring by
+		* ring would not be that ordering - from three rings out, a ring's own diagonal (1.41 cells)
+		* is farther than the next ring's straight neighbour - and sampling only the eight compass
+		* directions, as this first did, walks straight past the gap one cell to the side of them.
+		* The table is built and sorted once, on the first placement of the session.  Inline and
+		* static so a test can check the ordering without linking the whole in-game UI. */
+	enum { PLACEMENT_NUDGE_RINGS = 10 };								///< how far out to look, in grid cells
+	enum { PLACEMENT_NUDGE_SPAN = 2 * PLACEMENT_NUDGE_RINGS + 1 };
+	enum { PLACEMENT_NUDGE_TRIES = PLACEMENT_NUDGE_SPAN * PLACEMENT_NUDGE_SPAN - 1 };
+	static void placementNudgeOffset( Int index, Real step, Real *dx, Real *dy )
+	{
+		static Int cellX[ PLACEMENT_NUDGE_TRIES ];
+		static Int cellY[ PLACEMENT_NUDGE_TRIES ];
+		static Bool ordered = FALSE;
+
+		if( ordered == FALSE )
+		{
+			Int n = 0;
+			for( Int y = -PLACEMENT_NUDGE_RINGS; y <= PLACEMENT_NUDGE_RINGS; y++ )
+				for( Int x = -PLACEMENT_NUDGE_RINGS; x <= PLACEMENT_NUDGE_RINGS; x++ )
+					if( x != 0 || y != 0 )		// the spot the player is pointing at is the one that failed
+					{
+						cellX[ n ] = x;
+						cellY[ n ] = y;
+						n++;
+					}
+
+			// insertion sort by distance; it runs once for the whole session, and being in distance
+			// order is the entire contract of this list
+			for( Int i = 1; i < PLACEMENT_NUDGE_TRIES; i++ )
+			{
+				const Int keyX = cellX[ i ];
+				const Int keyY = cellY[ i ];
+				const Int keyD = keyX * keyX + keyY * keyY;
+				Int j = i - 1;
+
+				while( j >= 0 && cellX[ j ] * cellX[ j ] + cellY[ j ] * cellY[ j ] > keyD )
+				{
+					cellX[ j + 1 ] = cellX[ j ];
+					cellY[ j + 1 ] = cellY[ j ];
+					j--;
+				}
+				cellX[ j + 1 ] = keyX;
+				cellY[ j + 1 ] = keyY;
+			}
+
+			ordered = TRUE;
+		}
+
+		*dx = cellX[ index ] * step;
+		*dy = cellY[ index ] * step;
+	}
 	virtual void setPlacementAngle( Real angle );											///< aim the structure on the cursor, and keep that heading for the next one
 	virtual Bool rotatePendingPlacement( Int steps );									///< turn the structure on the cursor by 45 degrees a step
 
@@ -805,6 +869,7 @@ protected:
 	ICoord2D										m_placeAnchorEnd;												///< place angle anchor end
 	Real												m_placeAngleOffset;											///< wheel-chosen heading, added to every structure's own view angle
 	Bool												m_placementLegal;												///< last legality verdict for the spot under the structure being placed
+	Coord3D											m_placementNudge;												///< how far the last legality check had to slide the structure to make it fit
 	Int													m_selectCount;													///< Number of objects currently "selected"
 	Int													m_maxSelectCount;												///< Max number of objects to select
 	UnsignedInt									m_frameSelectionChanged;								///< Frame when the selection last changed.

@@ -82,6 +82,7 @@
 #include "GameLogic/Object.h"
 #include "GameLogic/GameLogic.h"
 #include "GameLogic/PartitionManager.h"
+#include "GameLogic/TerrainLogic.h"
 #include "GameLogic/ScriptEngine.h"
 #include "GameLogic/Module/ContainModule.h"
 #include "GameLogic/Module/ProductionUpdate.h"
@@ -1036,6 +1037,7 @@ InGameUI::InGameUI()
 	m_placeAnchorInProgress = FALSE;
 	m_placeAngleOffset = 0.0f;
 	m_placementLegal = TRUE;
+	m_placementNudge.zero();
 
 	m_videoStream = NULL;
 	m_videoBuffer = NULL;
@@ -1636,6 +1638,21 @@ void InGameUI::handleBuildPlacements( void )
 		to do is set a simple angle and have it automatically change, ug! */
 		TheTacticalView->screenToTerrain( &loc, &world );
 		snapPlacementToGrid( &world, m_pendingPlaceType, angle );
+
+		//
+		// NudgeBuildPlacement: the ghost sits where the last legality check found room, which is
+		// the cursor itself whenever the cursor works.  The check below runs every other frame and
+		// always measures from the cursor, never from an already-nudged spot, so the offset cannot
+		// walk away from the mouse; the ghost is at most one frame behind it.
+		//
+		const Coord3D cursorWorld = world;
+		if( m_placementNudge.x != 0.0f || m_placementNudge.y != 0.0f )
+		{
+			world.x += m_placementNudge.x;
+			world.y += m_placementNudge.y;
+			world.z = TheTerrainLogic->getGroundHeight( world.x, world.y );
+		}
+
 		m_placeIcon[ 0 ]->setPosition( &world );
 		m_placeIcon[ 0 ]->setOrientation( angle );
 
@@ -1654,18 +1671,45 @@ void InGameUI::handleBuildPlacements( void )
 
 			Object *builderObject = TheGameLogic->findObjectByID( getPendingPlaceSourceObjectID() );
 
+			const UnsignedInt checkOptions = placementCheckOptions();
+			Coord3D spot = cursorWorld;
 			LegalBuildCode lbc;
-			lbc = TheBuildAssistant->isLocationLegalToBuild( &world,
-																											 m_pendingPlaceType,
-																											 angle,
-																											 BuildAssistant::USE_QUICK_PATHFIND |
-																											 BuildAssistant::TERRAIN_RESTRICTIONS | 
-																											 BuildAssistant::CLEAR_PATH |
-																											 BuildAssistant::NO_OBJECT_OVERLAP |
-																											 BuildAssistant::SHROUD_REVEALED |
-																											 BuildAssistant::IGNORE_STEALTHED,
-																											 builderObject,
-																											 NULL );
+			lbc = TheBuildAssistant->isLocationLegalToBuild( &spot, m_pendingPlaceType, angle,
+																											 checkOptions, builderObject, NULL );
+
+			//
+			// Blocked: look for the nearest spot that is not, and move the ghost there - the click
+			// does the same search (see PlaceEventTranslator), so what you see is where it lands.
+			// Shroud is left alone on purpose: unscouted ground is not a placement mistake to fix,
+			// and hunting around in it would answer questions about ground you cannot see.
+			//
+			m_placementNudge.zero();
+			if( lbc != LBC_OK && lbc != LBC_SHROUD )
+			{
+				const Bool moved = nudgePlacementToLegal( &spot, m_pendingPlaceType, angle,
+																									builderObject );
+
+				//
+				// Either way the search has just painted a red bib on everything it bumped into on
+				// the way out, which is a report on spots nobody is proposing.  Clear them, and if
+				// there was nowhere to go, ask about the spot under the cursor once more so the one
+				// bib that does explain the refusal comes back.
+				//
+				TheTerrainVisual->removeAllBibs();
+
+				if( moved )
+				{
+					m_placementNudge.x = spot.x - cursorWorld.x;
+					m_placementNudge.y = spot.y - cursorWorld.y;
+					lbc = LBC_OK;
+				}
+				else
+				{
+					TheBuildAssistant->isLocationLegalToBuild( &cursorWorld, m_pendingPlaceType, angle,
+																										 checkOptions, builderObject, NULL );
+				}
+			}
+
 			// the cursor reads this too - see createCommandHint's MOUSEMODE_BUILD_PLACE case
 			m_placementLegal = ( lbc == LBC_OK );
 
@@ -3330,6 +3374,7 @@ void InGameUI::placeBuildAvailable( const ThingTemplate *build, Drawable *buildD
 		{
 			m_mouseMode = MOUSEMODE_BUILD_PLACE;
 			m_placementLegal = TRUE;
+			m_placementNudge.zero();
 			m_mouseModeCursor = placementCursor( TRUE );
 
 			Drawable *draw;
@@ -3575,6 +3620,94 @@ void InGameUI::snapPlacementToGrid( Coord3D *world, const ThingTemplate *what, R
 	world->y = snapPlacementAxis( world->y, major * sn + minor * c );
 
 }  // end snapPlacementToGrid
+
+//-------------------------------------------------------------------------------------------------
+/** The legality question asked of the spot under the ghost, in one place - the nudge search asks it
+	* of every candidate too.  IGNORE_STEALTHED is deliberate: a structure you cannot put down is a
+	* place a stealthed unit is standing, and the placement cursor is not a detector.  The click
+	* re-asks with FAIL_STEALTHED_WITHOUT_FEEDBACK, which is where that actually gets decided. */
+//-------------------------------------------------------------------------------------------------
+UnsignedInt InGameUI::placementCheckOptions( void )
+{
+	return BuildAssistant::USE_QUICK_PATHFIND |
+				 BuildAssistant::TERRAIN_RESTRICTIONS |
+				 BuildAssistant::CLEAR_PATH |
+				 BuildAssistant::NO_OBJECT_OVERLAP |
+				 BuildAssistant::SHROUD_REVEALED |
+				 BuildAssistant::IGNORE_STEALTHED;
+
+}  // end placementCheckOptions
+
+//-------------------------------------------------------------------------------------------------
+/** NudgeBuildPlacement (Options.ini): the spot under the cursor is blocked - a rock, a neighbour's
+	* bib, ground too steep by a hair - so find the nearest one that is not and put the structure
+	* there instead of turning it red and leaving the player to hunt for the legal pixel by hand.
+	*
+	* Nearest is meant literally: candidates come out of placementNudgeOffset in distance order, so
+	* the first one that fits is the closest one that fits.  A step is one pathfinder cell, which is
+	* also what GridBuildPlacement snaps to, so a nudged structure stays on the same grid as the ones
+	* already down.
+	*
+	* The cost is in the pathfind, not in the ground: EA's own comment on the caller says the check
+	* is too expensive to run every frame, and that is the CLEAR_PATH half of it.  So the sweep asks
+	* the cheap questions first - shroud, overlap, terrain - across all PLACEMENT_NUDGE_TRIES cells,
+	* and only spends a pathfind on a cell that already passed those.
+	*
+	* ponytail: reaches PLACEMENT_NUDGE_RINGS cells (100 units) and gives up, and gives up sooner
+	* after PLACEMENT_NUDGE_PATHFINDS unreachable candidates.  Both are flat numbers; scale them off
+	* the structure's own footprint if a supply centre still ends up hunting too far. */
+//-------------------------------------------------------------------------------------------------
+Bool InGameUI::nudgePlacementToLegal( Coord3D *world, const ThingTemplate *what, Real angle,
+																			Object *builderObject ) const
+{
+	if( world == NULL || what == NULL || TheGlobalData->m_nudgeBuildPlacement == FALSE )
+		return FALSE;
+
+	// a wall tiles from the two points you dragged between; sliding one end off that line is not help
+	if( TheBuildAssistant->isLineBuildTemplate( what ) )
+		return FALSE;
+
+	// CLEAR_PATH is the pathfind, and USE_QUICK_PATHFIND only says which one it uses
+	const UnsignedInt fullOptions = placementCheckOptions();
+	const UnsignedInt groundOptions = fullOptions & ~BuildAssistant::CLEAR_PATH;
+	Int pathfinds = 0;
+
+	for( Int i = 0; i < PLACEMENT_NUDGE_TRIES; i++ )
+	{
+		Real dx, dy;
+		placementNudgeOffset( i, (Real)PLACEMENT_CELL, &dx, &dy );
+
+		Coord3D test = *world;
+		test.x += dx;
+		test.y += dy;
+		test.z = TheTerrainLogic->getGroundHeight( test.x, test.y );
+
+		// is there room at all?  cheap, and it throws out all but a handful of the candidates
+		if( TheBuildAssistant->isLocationLegalToBuild( &test, what, angle, groundOptions,
+																									 builderObject, NULL ) != LBC_OK )
+			continue;
+
+		// there is - can the builder actually walk to it?
+		if( TheBuildAssistant->isLocationLegalToBuild( &test, what, angle, fullOptions,
+																									 builderObject, NULL ) == LBC_OK )
+		{
+			*world = test;
+			return TRUE;
+		}
+
+		//
+		// Room the builder cannot reach - across a cliff, behind a wall.  A few of those are
+		// normal near the edge of a base; a lot of them means the whole neighbourhood is cut off,
+		// and there is no sense pathfinding to every cell of it twice a frame.
+		//
+		if( ++pathfinds >= PLACEMENT_NUDGE_PATHFINDS )
+			break;
+
+	}  // end for i
+
+	return FALSE;
+
+}  // end nudgePlacementToLegal
 
 
 //-------------------------------------------------------------------------------------------------

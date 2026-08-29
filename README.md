@@ -117,6 +117,7 @@ All of these live in `Options.ini`, in your Zero Hour Data folder. Back it up fi
 | `StaticGameLOD = Custom` + `MaxParticleCount = 10000` | four times the High preset — much denser explosions and smoke |
 | `DynamicLOD = no` | the game never silently downgrades quality mid-match |
 | `GridBuildPlacement = No` | restores free building placement |
+| `NudgeBuildPlacement = No` | a blocked building stays red under the cursor instead of sliding to the nearest spot that fits |
 
 The rest of the quality switches, all worth turning on: `UseShadowVolumes`, `UseShadowDecals`,
 `UseCloudMap`, `UseLightMap`, `ShowSoftWaterEdge`, `ExtraAnimations`, `HeatEffects`, `ShowTrees`,

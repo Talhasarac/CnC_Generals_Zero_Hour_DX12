@@ -308,18 +308,27 @@ GameMessageDisposition PlaceEventTranslator::translateGameMessage(const GameMess
 				} 
 
 				// check to see if this is a legal location to build something at
+				// what the ghost was asking all along, plus the one question it does not ask: the
+				// placement cursor ignores stealthed units, committing to the spot does not
+				const UnsignedInt placeOptions = InGameUI::placementCheckOptions() |
+																				 BuildAssistant::FAIL_STEALTHED_WITHOUT_FEEDBACK;
 				LegalBuildCode lbc;
-				lbc = TheBuildAssistant->isLocationLegalToBuild( &world,
-																												 build,
-																												 angle,
-																												 BuildAssistant::USE_QUICK_PATHFIND |
-																												 BuildAssistant::TERRAIN_RESTRICTIONS | 
-																												 BuildAssistant::CLEAR_PATH |
-																												 BuildAssistant::NO_OBJECT_OVERLAP |
-																												 BuildAssistant::SHROUD_REVEALED |
-																												 BuildAssistant::IGNORE_STEALTHED |
-																												 BuildAssistant::FAIL_STEALTHED_WITHOUT_FEEDBACK,
+				lbc = TheBuildAssistant->isLocationLegalToBuild( &world, build, angle, placeOptions,
 																												 builderObj, NULL );
+
+				//
+				// NudgeBuildPlacement: blocked where they clicked, so build at the nearest spot that
+				// is not - the same search the ghost was already showing them (InGameUI::update ->
+				// handleBuildPlacements), so the structure goes down where they were looking.  The
+				// verdict is taken again at the new spot rather than assumed: this check is the
+				// stricter one, it fails on a stealthed unit the ghost is told to ignore.
+				//
+				if( lbc != LBC_OK && lbc != LBC_SHROUD &&
+						TheInGameUI->nudgePlacementToLegal( &world, build, angle, builderObj ) )
+				{
+					lbc = TheBuildAssistant->isLocationLegalToBuild( &world, build, angle, placeOptions,
+																													 builderObj, NULL );
+				}
 				if( lbc == LBC_OK )
 				{
 					//Are we building this structure via the special power system? (special case for sneak attack)

@@ -191,6 +191,7 @@ GlobalData* GlobalData::m_theOriginal = NULL;
 	{ "SnapBuildPlacementTo45",		INI::parseBool,				NULL,			offsetof( GlobalData, m_snapBuildPlacementTo45 ) },
 	{ "SnapCameraRotateTo45",			INI::parseBool,				NULL,			offsetof( GlobalData, m_snapCameraRotateTo45 ) },
 	{ "GridBuildPlacement",				INI::parseBool,				NULL,			offsetof( GlobalData, m_gridBuildPlacement ) },
+	{ "NudgeBuildPlacement",			INI::parseBool,				NULL,			offsetof( GlobalData, m_nudgeBuildPlacement ) },
 	{ "MiddleMousePans",					INI::parseBool,				NULL,			offsetof( GlobalData, m_middleMousePans ) },
 	{ "ZoomToCursor",							INI::parseBool,				NULL,			offsetof( GlobalData, m_zoomToCursor ) },
 	{ "ShowHudOverlay",						INI::parseBool,				NULL,			offsetof( GlobalData, m_showHudOverlay ) },
@@ -1037,6 +1038,7 @@ GlobalData::GlobalData()
 	m_snapBuildPlacementTo45 = TRUE;
 	m_snapCameraRotateTo45 = TRUE;
 	m_gridBuildPlacement = TRUE;
+	m_nudgeBuildPlacement = TRUE;
 	// middle-drag stays a rotate by default (it snaps to 45 degrees on release); pan is opt-in
 	m_middleMousePans = FALSE;
 	m_zoomToCursor = TRUE;
