@@ -130,7 +130,10 @@ m_dozerQueuedForRepair(false),
 m_supplySourceAttackCheckFrame(0),
 m_attackedSupplyCenter(INVALID_ID),
 m_teamSeconds(10),
-m_curWarehouseID(INVALID_ID)
+m_curWarehouseID(INVALID_ID),
+m_scoutID(INVALID_ID),
+m_scoutTimer(1),
+m_scoutTarget(0)
 {
 	m_frameLastBuildingBuilt = TheGameLogic->getFrame();
 	p->setCanBuildUnits(false); // turn off ai production by default.
@@ -3161,6 +3164,8 @@ void AIPlayer::update( void )
 
 	updateBridgeRepair(); // Handle any bridge repairs.
 
+	doScouting(); // Keep one unit looking at the map.
+
 }
 
 //----------------------------------------------------------------------------------------------------------
@@ -3280,6 +3285,215 @@ Bool AIPlayer::dozerInQueue( void )
 		}
 	}
 	return false;
+}
+
+//----------------------------------------------------------------------------------------------------------
+/** How often the scout is looked at.  It only ever gets an order when it has arrived, so this is a
+	* check, not a repath. */
+static const Int SCOUT_CHECK_RATE = 2 * LOGICFRAMES_PER_SECOND;
+
+/** The cheapest thing this player could build that can walk somewhere and is not needed elsewhere.
+	* Faction-agnostic on purpose - it lands on the Ranger, the Red Guard, the Rebel and the
+	* Technical without a per-side table to keep, and on whatever a mod's cheapest unit is. */
+static const ThingTemplate *cheapestScoutTemplate( Player *player )
+{
+	const ThingTemplate *best = NULL;
+	Int bestCost = 0;
+
+	for( const ThingTemplate *t = TheThingFactory->firstTemplate(); t; t = t->friend_getNextTemplate() )
+	{
+		if( !t->isKindOf( KINDOF_INFANTRY ) && !t->isKindOf( KINDOF_VEHICLE ) )
+			continue;
+		if( t->isKindOf( KINDOF_DOZER ) || t->isKindOf( KINDOF_HARVESTER ) )
+			continue;		// those have a job
+		if( t->isKindOf( KINDOF_AIRCRAFT ) || t->isKindOf( KINDOF_IMMOBILE ) )
+			continue;
+		if( !player->canBuild( t ) )
+			continue;
+
+		Int cost = t->calcCostToBuild( player );
+		if( cost <= 0 )
+			continue;
+		if( best == NULL || cost < bestCost )
+		{
+			best = t;
+			bestCost = cost;
+		}
+	}
+	return best;
+}
+
+//----------------------------------------------------------------------------------------------------------
+/**
+ * A unit of ours that is free to go and look at things.  The default team is where anything built
+ * outside the team system lands - the scout queued below, and the odd leftover - so nothing here is
+ * taken off a team that has a mission.
+ */
+Object *AIPlayer::findScout( void )
+{
+	Team *team = m_player->getDefaultTeam();
+	if( team == NULL )
+		return NULL;
+
+	for( DLINK_ITERATOR<Object> iter = team->iterate_TeamMemberList(); !iter.done(); iter.advance() )
+	{
+		Object *obj = iter.cur();
+		if( obj == NULL || obj->isEffectivelyDead() )
+			continue;
+		//
+		// A positive test, not a list of exclusions: the default team also holds everything the
+		// player has in flight, and a missile is mobile, carries an AIUpdate and belongs to no
+		// team - the first draft of this went scouting with a Patriot missile several times a
+		// minute, and never with anything that could actually go and look.
+		//
+		if( !obj->isKindOf( KINDOF_INFANTRY ) && !obj->isKindOf( KINDOF_VEHICLE ) )
+			continue;
+		if( obj->isKindOf( KINDOF_PROJECTILE ) || obj->isKindOf( KINDOF_IMMOBILE ) )
+			continue;
+		if( obj->isKindOf( KINDOF_DOZER ) || obj->isKindOf( KINDOF_HARVESTER ) )
+			continue;		// the economy is not a scout
+		if( obj->isKindOf( KINDOF_AIRCRAFT ) )
+			continue;
+		if( obj->getAI() == NULL )
+			continue;
+		return obj;
+	}
+	return NULL;
+}
+
+//----------------------------------------------------------------------------------------------------------
+Bool AIPlayer::scoutInQueue( void )
+{
+	for( DLINK_ITERATOR<TeamInQueue> iter = iterate_TeamBuildQueue(); !iter.done(); iter.advance() )
+	{
+		TeamInQueue *team = iter.cur();
+		if( team == NULL )
+			continue;
+		for( WorkOrder *order = team->m_workOrders; order; order = order->m_next )
+			if( order->m_isScout )
+				return true;
+	}
+	return false;
+}
+
+//----------------------------------------------------------------------------------------------------------
+/**
+ * Put one cheap unit on order to do the looking.  Same shape as queueDozer: a one-order priority
+ * team on the player's default team, so it never disturbs the team the AI is massing.
+ */
+void AIPlayer::queueScout( void )
+{
+	if( scoutInQueue() )
+		return;
+
+	const ThingTemplate *tTemplate = cheapestScoutTemplate( m_player );
+	if( tTemplate == NULL )
+		return;
+
+	// scouting must never be what stops a base going up, so it waits for spare change
+	if( m_player->getMoney()->countMoney() < 2 * tTemplate->calcCostToBuild( m_player ) )
+		return;
+
+	Bool canBuildUnits = m_player->getCanBuildUnits();
+	m_player->setCanBuildUnits( true );
+
+	Object *factory = findFactory( tTemplate, true );
+	if( factory )
+	{
+		WorkOrder *order = newInstance(WorkOrder);
+		order->m_thing = tTemplate;
+		order->m_factoryID = INVALID_ID;
+		order->m_numRequired = 1;
+		order->m_required = true;
+		order->m_isResourceGatherer = FALSE;
+		order->m_isScout = TRUE;
+		order->m_next = NULL;
+
+		TeamInQueue *team = newInstance(TeamInQueue);
+		prependTo_TeamBuildQueue( team );
+		team->m_priorityBuild = true;
+		team->m_workOrders = order;
+		team->m_frameStarted = TheGameLogic->getFrame();
+		team->m_team = m_player->getDefaultTeam();
+
+		AsciiString msg = "SCOUT - building one at the ";
+		msg.concat( factory->getTemplate()->getName() );
+		TheScriptEngine->AppendDebugMessage( msg, false );
+
+		m_teamDelay = 0;
+		startTraining( order, team->m_priorityBuild, team->m_team->getName() );
+	}
+
+	m_player->setCanBuildUnits( canBuildUnits );
+}
+
+//----------------------------------------------------------------------------------------------------------
+/**
+ * The next enemy start position to go and look at.  Everyone knows where the start positions are;
+ * what is on them is what has to be found out.  The list is walked round and round, so the same one
+ * unit that opens the map keeps it up to date for the rest of the match.
+ */
+Bool AIPlayer::nextScoutTarget( Coord3D *pos )
+{
+	const Int count = ThePlayerList->getPlayerCount();
+	for( Int tries = 0; tries < count; ++tries )
+	{
+		m_scoutTarget = (m_scoutTarget + 1) % count;
+
+		Player *p = ThePlayerList->getNthPlayer( m_scoutTarget );
+		if( p == NULL || p == m_player )
+			continue;
+		if( m_player->getRelationship( p->getDefaultTeam() ) != ENEMIES )
+			continue;
+		if( playerStartPosition( m_scoutTarget, pos ) )
+			return TRUE;
+	}
+	return FALSE;
+}
+
+//----------------------------------------------------------------------------------------------------------
+/**
+ * Keep one unit looking at the map.  Cheap by construction: one unit, ordered only when it has
+ * arrived somewhere, replaced out of spare change when it dies.  Every difficulty scouts - an AI
+ * that never looks reads as broken rather than as easy; what difficulty should change is how fast
+ * it acts on what it finds.
+ */
+void AIPlayer::doScouting( void )
+{
+	if( --m_scoutTimer > 0 )
+		return;
+	m_scoutTimer = SCOUT_CHECK_RATE;
+
+	Object *scout = TheGameLogic->findObjectByID( m_scoutID );
+	if( scout && (scout->isEffectivelyDead() || scout->getControllingPlayer() != m_player) )
+		scout = NULL;
+
+	if( scout == NULL )
+	{
+		m_scoutID = INVALID_ID;
+		scout = findScout();
+		if( scout )
+		{
+			m_scoutID = scout->getID();
+			// once per scout, so the log says whether this is working at all without saying it twice
+			DEBUG_LOG(("AI player %d scouting with a '%s'\n", m_player->getPlayerIndex(),
+								 scout->getTemplate()->getName().str()));
+		}
+	}
+
+	if( scout == NULL )
+	{
+		queueScout();
+		return;
+	}
+
+	AIUpdateInterface *ai = scout->getAI();
+	if( ai == NULL || !ai->isIdle() )
+		return;			// still on its way
+
+	Coord3D goal;
+	if( nextScoutTarget( &goal ) )
+		ai->aiMoveToPosition( &goal, CMD_FROM_AI );
 }
 
 //----------------------------------------------------------------------------------------------------------
@@ -3440,7 +3654,7 @@ void AIPlayer::xfer( Xfer *xfer )
 {
 
 	// version
-	XferVersion currentVersion = 1;
+	XferVersion currentVersion = 2;		// 2: the scout
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
@@ -3593,6 +3807,14 @@ void AIPlayer::xfer( Xfer *xfer )
 	xfer->xferCoord3D( &m_baseCenter );
 	xfer->xferBool( &m_baseCenterSet );
 	xfer->xferReal( &m_baseRadius );
+
+	// the scout, so a loaded game does not go blind or start a second one
+	if( version >= 2 )
+	{
+		xfer->xferObjectID( &m_scoutID );
+		xfer->xferInt( &m_scoutTimer );
+		xfer->xferInt( &m_scoutTarget );
+	}
 
 	xfer->xferUser( m_structuresToRepair, sizeof( ObjectID ) * MAX_STRUCTURES_TO_REPAIR );
 	xfer->xferObjectID( &m_repairDozer );
@@ -3879,7 +4101,7 @@ void WorkOrder::xfer( Xfer *xfer )
 {
 
 	// version
-	XferVersion currentVersion = 1;
+	XferVersion currentVersion = 2;		// 2: the scout flag
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
@@ -3903,6 +4125,10 @@ void WorkOrder::xfer( Xfer *xfer )
 
 	// is resource gatherer
 	xfer->xferBool( &m_isResourceGatherer );
+
+	// is the map-watching scout
+	if( version >= 2 )
+		xfer->xferBool( &m_isScout );
 
 }  // end xfer
 

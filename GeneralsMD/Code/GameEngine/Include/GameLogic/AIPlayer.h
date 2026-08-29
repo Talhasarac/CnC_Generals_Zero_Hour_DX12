@@ -55,7 +55,7 @@ class WorkOrder : public MemoryPoolObject,
 
 public:
 
-	WorkOrder():m_thing(NULL), m_factoryID(INVALID_ID), m_isResourceGatherer(false), m_numCompleted(0), m_numRequired(1), m_next(NULL) {};
+	WorkOrder():m_thing(NULL), m_factoryID(INVALID_ID), m_isResourceGatherer(false), m_isScout(false), m_numCompleted(0), m_numRequired(1), m_next(NULL) {};
 
 	Bool isWaitingToBuild( void );		///< return true if nothing is yet building this unit
 	void validateFactory( Player *thisPlayer );			///< verify factoryID still refers to an active object
@@ -69,6 +69,7 @@ public:
 	Int			m_numRequired;					  ///< Number needed.
 	Bool		m_required;								///< True if part of minimum requirement.
 	Bool		m_isResourceGatherer;			///< True if resource gatherer.
+	Bool		m_isScout;								///< True if this is the one unit kept for looking at the map.
 
 protected:
 
@@ -225,6 +226,16 @@ protected:
 	virtual void xfer( Xfer *xfer );
 	virtual void loadPostProcess( void );
 
+	/** Look at the map.  There was no concept of scouting in the AI at all - it did not need one
+		* while every strategic decision read the enemy's object list straight out of the game (see
+		* the observer index on getPlayerStructureBounds).  One cheap unit, replaced when it dies,
+		* touring the enemy start positions: that is what turns fog back into information. */
+	virtual void doScouting(void);
+	Object *findScout(void);						///< a spare unit of ours that can do the touring
+	void queueScout(void);							///< ... or build the cheapest one that can
+	Bool scoutInQueue(void);						///< one is already on order
+	Bool nextScoutTarget(Coord3D *pos);	///< the next enemy start position to go and look at
+
 	virtual void doBaseBuilding(void);
 	virtual void checkReadyTeams(void);
 	virtual void checkQueuedTeams(void);
@@ -292,6 +303,10 @@ protected:
 protected:	 
 
 	Player *m_player;									///< the Player we represent
+
+	ObjectID	m_scoutID;							///< the unit currently touring the map for us
+	Int				m_scoutTimer;						///< frames until the next scouting check
+	Int				m_scoutTarget;					///< which player's start position the scout is walking to
 
 	Bool		m_readyToBuildTeam;				///< True if the team select timer has expired.
 	Bool		m_readyToBuildStructure;	///< True if the buildDelay timer has expired.
