@@ -647,6 +647,11 @@ void GameEngine::init( int argc, char *argv[] )
     
     
 		initSubsystem(TheFXListStore,"TheFXListStore", MSGNEW("GameEngineSubsystem") FXListStore(), &xferCRC, "Data\\INI\\Default\\FXList.ini", "Data\\INI\\FXList.ini");
+		/* The fork's own detonation light, on top of EA's list.  It is a separate file rather than a
+			 loose copy of FXList.ini because a loose copy shadows the whole 190K shipped file: it goes
+			 stale against every patch, it cannot be reviewed, and - since it lands in the INI CRC below -
+			 it silently refuses every multiplayer join from a machine that does not have the same one. */
+		ini.load( AsciiString( "Data\\INI\\FXListReborn.ini" ), INI_LOAD_OVERWRITE, &xferCRC );
 		initSubsystem(TheWeaponStore,"TheWeaponStore", MSGNEW("GameEngineSubsystem") WeaponStore(), &xferCRC, NULL, "Data\\INI\\Weapon.ini");
 		initSubsystem(TheObjectCreationListStore,"TheObjectCreationListStore", MSGNEW("GameEngineSubsystem") ObjectCreationListStore(), &xferCRC, "Data\\INI\\Default\\ObjectCreationList.ini", "Data\\INI\\ObjectCreationList.ini");
 		initSubsystem(TheLocomotorStore,"TheLocomotorStore", MSGNEW("GameEngineSubsystem") LocomotorStore(), &xferCRC, NULL, "Data\\INI\\Locomotor.ini");

@@ -489,6 +489,12 @@ add_custom_command(TARGET generals POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
           ${CMAKE_CURRENT_SOURCE_DIR}/Data/INI/CommandMap.ini
           ${CMAKE_CURRENT_SOURCE_DIR}/../Run/Data/INI/
+  # The fork's detonation light, loaded after EA's FXList.ini.  It is inside the
+  # multiplayer INI CRC, so it has to be here, in the zip, and identical on every
+  # machine in a game.
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          ${CMAKE_CURRENT_SOURCE_DIR}/Data/INI/FXListReborn.ini
+          ${CMAKE_CURRENT_SOURCE_DIR}/../Run/Data/INI/
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
           ${CMAKE_CURRENT_SOURCE_DIR}/Data/Patch.str
           ${CMAKE_CURRENT_SOURCE_DIR}/../Run/Data/)
@@ -548,8 +554,11 @@ target_sources(test_gameengine PRIVATE ${TESTS}/test_gameengine_stubs.cpp)
 set_target_properties(test_gameengine PROPERTIES CXX_STANDARD 17)
 # simulation_uses_no_runtime_trig reads the engine's own sources back off disk to prove nothing in
 # GameLogic or Common has gone back to calling sinf().
+# fxlist_reborn_ini_parses_and_keeps_its_light runs the fork's own FXList file through the real
+# INI parser, so it needs the tracked master rather than whatever sits in Run/.
 target_compile_definitions(test_gameengine PRIVATE
-  GAMEENGINE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/GameEngine")
+  GAMEENGINE_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/GameEngine"
+  FXLIST_REBORN_INI="${CMAKE_CURRENT_SOURCE_DIR}/Data/INI/FXListReborn.ini")
 
 # The three hand-written self-checks predate the harness; run them from ctest
 # too so one command covers everything.

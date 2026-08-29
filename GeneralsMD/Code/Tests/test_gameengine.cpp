@@ -63,6 +63,7 @@
 #include "GameClient/GameClient.h"
 #include "Common/GameEngine.h"
 #include "GameClient/ParticleSys.h"
+#include "GameClient/FXList.h"
 #include "GameClient/ControlBar.h"
 #include "GameClient/InGameUI.h"
 #include "GameClient/View.h"
@@ -391,6 +392,59 @@ TEST(ini_unknown_block_aborts_the_file)
 	CHECK_EQ( WaterSettings[ TIME_OF_DAY_EVENING ].m_waterRepeatCount, -1 );
 
 	remove( TEST_INI );
+}
+
+/* Data\INI\FXListReborn.ini is the fork's own explosion light: 89 of EA's FXLists, each repeated
+	 whole with one LightPulse added.  Whole, because FXListStore::parseFXListDefinition clears an
+	 entry before re-reading it - a half-copied block does not add a light, it deletes an explosion.
+	 GameEngine::init loads the file and folds it into the multiplayer INI CRC, so both ways of
+	 getting it wrong are expensive: a malformed block throws and takes the whole startup down, and
+	 a regeneration that loses the LightPulse ships a file that lights nothing and still refuses
+	 every player who does not have that exact copy. */
+TEST(fxlist_reborn_ini_parses_and_keeps_its_light)
+{
+	CHECK( bootOnce() );
+
+	if( TheFXListStore == NULL )
+		TheFXListStore = NEW FXListStore;
+
+	/* through the game's own parser, not a lookalike */
+	CHECK( loadIni( FXLIST_REBORN_INI ) );
+
+	/* the blocks landed in the store, under the names the game looks them up by */
+	CHECK( TheFXListStore->findFXList( "ScudStormMissileDetonation" ) != NULL );
+	CHECK( TheFXListStore->findFXList( "FX_BombExplosion" ) != NULL );
+	CHECK( TheFXListStore->findFXList( "NoSuchFXListIsDeclaredAnywhere" ) == NULL );
+
+	/* and every block in the file still carries the light it exists for */
+	FILE *fp = fopen( FXLIST_REBORN_INI, "rb" );
+	CHECK( fp != NULL );
+
+	Int blocks = 0, lit = 0, open = 0, hasLight = 0;
+	char line[ 512 ];
+	while( fgets( line, sizeof( line ), fp ) != NULL )
+	{
+		if( strncmp( line, "FXList ", 7 ) == 0 )
+		{
+			++blocks;
+			open = 1;
+			hasLight = 0;
+		}
+		else if( open && strstr( line, "LightPulse" ) != NULL )
+		{
+			hasLight = 1;
+		}
+		else if( open && strncmp( line, "End", 3 ) == 0 )
+		{
+			/* column 0 closes the FXList; the nuggets inside are indented */
+			lit += hasLight;
+			open = 0;
+		}
+	}
+	fclose( fp );
+
+	CHECK_EQ( blocks, 89 );
+	CHECK_EQ( lit, blocks );
 }
 
 /* ReleaseCrashInfo.txt's stack trace is the only stack this port gets - there is

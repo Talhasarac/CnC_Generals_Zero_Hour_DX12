@@ -251,6 +251,9 @@ found and fixed — EA's own, not port damage.**
 
 - `Bloom = 60` in `Options.ini` makes bright things bleed light into the air.
 - Off until you add that line; `BloomThreshold` sets how much of the picture joins in.
+- Explosions light what is around them: 89 of them, from a tank shell to the Scud Storm,
+  throw a warm flash that fades over a third of a second. A night fight used to be muzzle
+  smoke over unlit ground.
 
 ## It does not crash
 
