@@ -1063,13 +1063,38 @@ static void updateHeadlessRun( void )
 
 	static DWORD runStartTime = 0;
 	static UnsignedInt runStartFrame = 0;
+	static Int peakUnits[ MAX_PLAYER_COUNT ];
 	if (runStartTime == 0)
 	{
 		runStartTime = timeGetTime();
 		runStartFrame = TheGameLogic->getFrame();
+		for( Int i = 0; i < MAX_PLAYER_COUNT; ++i )
+			peakUnits[ i ] = 0;
 	}
 
 	const UnsignedInt frame = TheGameLogic->getFrame();
+
+	/* The biggest army each side ever fielded, sampled once a second.  The end-of-match counts are
+		 cumulative and cannot tell an AI that massed and traded evenly from one that trickled units
+		 out and lost them one at a time.  Once a second is one walk of each player's object list per
+		 second, which is nothing next to the logic frame it rides on. */
+	if ((frame % LOGICFRAMES_PER_SECOND) == 0)
+	{
+		KindOfMaskType nothing;
+		nothing.clear();
+		for( Int i = 0; i < ThePlayerList->getPlayerCount() && i < MAX_PLAYER_COUNT; ++i )
+		{
+			Player *p = ThePlayerList->getNthPlayer( i );
+			if (!p->isPlayableSide() || p->isPlayerObserver())
+				continue;
+			Int units = p->countObjects( MAKE_KINDOF_MASK( KINDOF_INFANTRY ), nothing ) +
+									p->countObjects( MAKE_KINDOF_MASK( KINDOF_VEHICLE ), nothing ) +
+									p->countObjects( MAKE_KINDOF_MASK( KINDOF_AIRCRAFT ), nothing );
+			if (units > peakUnits[ i ])
+				peakUnits[ i ] = units;
+		}
+	}
+
 	const char *why = GameEngine_headlessRunResult( frame, TheVictoryConditions->getEndFrame(),
 																									TheGlobalData->m_maxGameFrames );
 	if (why == NULL)
@@ -1092,13 +1117,14 @@ static void updateHeadlessRun( void )
 			continue;
 
 		ScoreKeeper *score = p->getScoreKeeper();
-		DEBUG_LOG(("HEADLESS PLAYER %d '%ls': %s | score %d | money %d earned %d spent | units %d built %d lost %d killed | buildings %d built %d lost\n",
+		DEBUG_LOG(("HEADLESS PLAYER %d '%ls': %s | score %d | money %d earned %d spent | units %d built %d lost %d killed peak %d | buildings %d built %d lost\n",
 							 i, p->getPlayerDisplayName().str(),
 							 TheVictoryConditions->hasAchievedVictory(p) ? "WON" :
 								 (TheVictoryConditions->hasSinglePlayerBeenDefeated(p) ? "eliminated" : "alive"),
 							 score->calculateScore(),
 							 score->getTotalMoneyEarned(), score->getTotalMoneySpent(),
 							 score->getTotalUnitsBuilt(), score->getTotalUnitsLost(), score->getTotalUnitsDestroyed(),
+							 peakUnits[ i ],
 							 score->getTotalBuildingsBuilt(), score->getTotalBuildingsLost()));
 	}
 
