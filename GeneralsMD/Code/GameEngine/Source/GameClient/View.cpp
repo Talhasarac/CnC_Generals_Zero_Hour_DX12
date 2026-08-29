@@ -131,8 +131,8 @@ View *View::prependViewToList( View *list )
 //
 // EA's step was 10 world units.  The reachable band is roughly 100 (MinCameraHeight) to 480
 // (MaxCameraHeight * ZOOM_OUT_LIMIT_FACTOR), so crossing it took about 38 notches - most of a
-// wheel's travel to go from the ground to the whole map.  30 puts it at about 13.
-#define ZOOM_STEP_HEIGHT (30.0f)
+// wheel's travel to go from the ground to the whole map.  60 puts it at about six.
+#define ZOOM_STEP_HEIGHT (60.0f)
 
 void View::zoomIn( Real steps )
 {
