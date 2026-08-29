@@ -108,13 +108,11 @@ public:
 	Bool isAssaultAreaClear() const;	//Nothing hostile left near the transport?
 	void retrieveMembers();
 	void giveFinalOrders();
-  Bool isAttackPointless() const;
 
 protected:
 
   ObjectID					m_memberIDs[ MAX_TRANSPORT_SLOTS ];
 	Bool							m_memberHealing[ MAX_TRANSPORT_SLOTS ];
-	Bool							m_newMember[ MAX_TRANSPORT_SLOTS ];
   Coord3D						m_attackMoveGoalPos;
   mutable ObjectID	m_designatedTarget;
 	AssaultStateTypes	m_state;
@@ -122,7 +120,6 @@ protected:
 	Int								m_currentMembers;
 	Bool							m_isAttackMove;
 	Bool							m_isAttackObject;
-	Bool							m_newOccupantsAreNewMembers;
 };
 
 #endif

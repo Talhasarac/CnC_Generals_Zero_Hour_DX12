@@ -63,6 +63,15 @@ Bool AssaultTransport_shouldRetrieveMembers( Bool membersOutside, Bool membersFi
 }
 
 //-------------------------------------------------------------------------------------------------
+/** Does this passenger get out and fight?
+  * Everybody aboard does, whatever he is and however scratched he is - the only man who stays in
+  * is one who is still being patched up. */
+Bool AssaultTransport_shouldDeployMember( Bool contained, Bool beingHealed )
+{
+	return contained && !beingHealed;
+}
+
+//-------------------------------------------------------------------------------------------------
 /** Does the transport hold still this frame instead of driving on with the attack move?
   * Only while troops are still outside and the boarding wait has not run out; see
   * AssaultTransport_shouldRetrieveMembers above. */
@@ -89,7 +98,6 @@ void AssaultTransportAIUpdate::reset()
 	{
 		m_memberIDs[ i ] = INVALID_ID;
 		m_memberHealing[ i ] = FALSE;
-		m_newMember[ i ] = FALSE;
 	}
 	m_currentMembers = 0;
   m_attackMoveGoalPos.zero();
@@ -98,7 +106,6 @@ void AssaultTransportAIUpdate::reset()
 	m_framesRemaining = 0;
 	m_isAttackMove = FALSE;
 	m_isAttackObject = FALSE;
-	m_newOccupantsAreNewMembers = FALSE;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -195,14 +202,12 @@ UpdateSleepTime AssaultTransportAIUpdate::update( void )
 					//Move the last slot to this slot to keep array contiguous.
 					m_memberIDs[ i ]			= m_memberIDs[ m_currentMembers - 1 ];
 					m_memberHealing[ i ]	= m_memberHealing[ m_currentMembers - 1 ];
-					m_newMember[ i ]			= m_newMember[ m_currentMembers - 1 ];
 				}
 				else
 				{
 					//Just clean out last slot.
 					m_memberIDs[ i ]			= INVALID_ID;
 					m_memberHealing[ i ]	= FALSE;
-					m_newMember[ i ]			= FALSE;
 				}
 				if( ai )
 				{
@@ -263,22 +268,10 @@ UpdateSleepTime AssaultTransportAIUpdate::update( void )
 				{
 					m_memberHealing[ m_currentMembers ] = TRUE;
 				}
-				if( m_newOccupantsAreNewMembers )
-				{
-					//New members won't eject out until a new attack order is issued.
-					m_newMember[ m_currentMembers ] = TRUE;
-				}
 
 				m_currentMembers++;
 			}
 		}
-		m_newOccupantsAreNewMembers = TRUE;
-	}
-
-	if( isAttackPointless() )
-	{
-		aiIdle( CMD_FROM_AI );
-		return UPDATE_SLEEP_NONE;
 	}
 
 	//Keep track of the average position of all combat units assigned to me.
@@ -305,19 +298,26 @@ UpdateSleepTime AssaultTransportAIUpdate::update( void )
 			{
 				Bool contained = member->isContained();
 				Bool wounded = isMemberWounded( member );
-				if( contained && isMemberHealthy( member ) && !m_newMember[ i ] )
+				if( isMemberHealthy( member ) )
 				{
-					//This contained member is healthy so order him to exit to start fighting!
-					//New members are exempt!
+					//Patched up - he is a fighter again.
+					m_memberHealing[ i ] = FALSE;
+				}
+				if( AssaultTransport_shouldDeployMember( contained, m_memberHealing[ i ] ) )
+				{
+					//Everyone rides out to fight - a scratch or a late boarding used to keep a man
+					//inside for the whole battle.
 					ai->aiExit( transport, CMD_FROM_AI );
 				}
 				if( !contained ) 
 				{
 					if( wounded )
 					{
+						//Order wounded members back to get healed, and keep them in until they are
+						//whole again rather than bouncing them straight back out.
+						m_memberHealing[ i ] = TRUE;
 						if( ai->getAIStateType() != AI_ENTER )
 						{
-							//Order wounded members back to get healed.
 							ai->aiEnter( transport, CMD_FROM_AI );
 						}
 					}
@@ -458,31 +458,6 @@ UpdateSleepTime AssaultTransportAIUpdate::update( void )
 	//return (mine < ret) ? mine : ret;
 	/// @todo srj -- someday, make sleepy. for now, must not sleep.
 	return UPDATE_SLEEP_NONE;
-}
-
-//-------------------------------------------------------------------------------------------------
-Bool AssaultTransportAIUpdate::isAttackPointless() const
-{
-	//If all members are new members (thus can't attack), and the transport itself
-	//is still attacking, stop!
-	const Object *transport = getObject();
-	if( transport->testStatus( OBJECT_STATUS_IS_ATTACKING ) )
-	{
-		for( int i = 0; i < m_currentMembers; i++ )
-		{
-			if( !m_newMember[ i ] )
-			{
-				//We have a non-new member, so attack is valid.
-				return FALSE;
-			}
-		}
-
-		//We are trying to attack, but can't because all our members are new.
-		return TRUE;
-	}
-
-	//We aren't trying to attack, so everything is good.
-	return FALSE;
 }
 
 //-------------------------------------------------------------------------------------------------
