@@ -568,6 +568,16 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 				const CommandButton *command = TheInGameUI->getGUICommand();
 
 				Bool ignoreCommand = FALSE;
+
+				//
+				// A structure riding the cursor owns the pointer - InGameUI::createCommandHint's
+				// MOUSEMODE_BUILD_PLACE case keeps it on the build cursor.  Moving over a building
+				// used to turn it into the selection hand here, on top of that, which reads as "this
+				// click selects" when the click still places.
+				//
+				if( TheInGameUI->getPendingPlaceType() )
+					ignoreCommand = TRUE;
+
 				if( command )
 				{
 					if( command->getCommandType() == GUI_COMMAND_ATTACK_MOVE ||
