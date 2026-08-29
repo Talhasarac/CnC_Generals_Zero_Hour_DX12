@@ -33,6 +33,8 @@
 #include "GameClient/TerrainVisual.h" // for TERRAIN_LOD_MIN definition
 #include "GameClient/GameText.h"
 #include "GameNetwork/GameInfo.h" // for the SlotState -autoskirmish hands the AI slots
+#include "Common/FileSystem.h"
+#include "Common/RandomMapGenerator.h" // for -randommap
 
 #ifdef _INTERNAL
 // for occasional debugging...
@@ -402,6 +404,57 @@ Int parseMapName(char *args[], int num)
 		return 2;
 	}
 	return 1;
+}
+
+// parseRandomMap =============================================================
+/** -randommap <seed> [players] [cells]: generate a skirmish map from the seed and write it into
+	the user map directory as "RMG_<seed>", then point -map at it.  Nothing downstream has to know
+	it was generated: the map cache walks that directory on startup, so it shows up in the skirmish
+	map list like any hand-made map, and -autoskirmish starts on it.  The same seed gives the same
+	map on every machine, so both sides of a network game can be handed the same command line. */
+//=============================================================================
+Int parseRandomMap(char *args[], int num)
+{
+	if (TheWritableGlobalData == NULL || num < 2)
+		return 1;
+
+	RandomMapSettings settings;
+	settings.m_seed = atoi( args[1] );
+	// Generate all the start positions the map is allowed to hold, so any -autoskirmish count
+	// fits regardless of which of the two options came first on the command line.
+	settings.m_numPlayers = RandomMapGenerator::MAX_PLAYERS;
+
+	// players and cells are optional and positional, so only eat what still looks like a number.
+	Int eaten = 2;
+	if (num > eaten && isdigit((UnsignedByte)args[eaten][0]))
+		settings.m_numPlayers = atoi( args[eaten++] );
+	if (num > eaten && isdigit((UnsignedByte)args[eaten][0]))
+		settings.m_playableCells = atoi( args[eaten++] );
+
+	std::vector<char> mapBytes;
+	RandomMapGenerator::generate( settings, mapBytes );
+
+	// The map cache expects "<user maps>\<name>\<name>.map" - the directory carries the name.
+	AsciiString mapsDir, dir, path;
+	mapsDir.format( "%sMaps", TheGlobalData->getPath_UserData().str() );
+	dir.format( "%s\\RMG_%d", mapsDir.str(), settings.m_seed );
+	path.format( "%s\\RMG_%d.map", dir.str(), settings.m_seed );
+	TheFileSystem->createDirectory( mapsDir );		// createDirectory is one level at a time
+	TheFileSystem->createDirectory( dir );
+
+	FILE *fp = fopen( path.str(), "wb" );
+	if (fp == NULL)
+	{
+		DEBUG_LOG(("-randommap: could not write '%s'\n", path.str()));
+		return eaten;
+	}
+	fwrite( &mapBytes[0], 1, mapBytes.size(), fp );
+	fclose( fp );
+
+	TheWritableGlobalData->m_mapName = path;
+	DEBUG_LOG(("-randommap: wrote '%s' - %d players, %d cells, %d bytes\n",
+		path.str(), settings.m_numPlayers, settings.m_playableCells, mapBytes.size()));
+	return eaten;
 }
 
 Int parseXRes(char *args[], int num)
@@ -1391,6 +1444,7 @@ static CommandLineParam params[] =
 		 -noFPSLimit lets the renderer run free, and -fps is the one knob that changes how fast the
 		 match itself is simulated - the command-line twin of the skirmish menu's game speed slider. */
 	{ "-map", parseMapName },
+	{ "-randommap", parseRandomMap },
 	{ "-seed", parseSeed },
 	{ "-noFPSLimit", parseNoFPSLimit },
 	{ "-fps", parseFPSLimit },
