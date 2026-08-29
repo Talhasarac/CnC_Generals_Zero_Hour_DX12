@@ -12,3 +12,6 @@ __pycache__/
 build.bat
 
 CLAUDE.md
+
+# graphify knowledge-graph output + extraction cache (derived, ~230 MB)
+**/graphify-out/
