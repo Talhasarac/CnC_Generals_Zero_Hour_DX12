@@ -498,7 +498,7 @@ void AISkirmishPlayer::acquireEnemy(void)
 
 			Coord3D enemyPos = m_baseCenter;
 			Region2D bounds;
-			getPlayerStructureBounds(&bounds, i);
+			getPlayerStructureBounds(&bounds, i, FALSE, m_player->getPlayerIndex());
 			enemyPos.x = bounds.lo.x + bounds.width()/2;
 			enemyPos.y = bounds.lo.y + bounds.height()/2;
 			Real curDistSqr = sqr(enemyPos.x-m_baseCenter.x) + sqr(enemyPos.y-m_baseCenter.y);
@@ -621,7 +621,7 @@ void AISkirmishPlayer::buildAIBaseDefenseStructure(const AsciiString &thingName,
 		} else {
 			if (flank) return;
 			Region2D bounds;
-			getPlayerStructureBounds(&bounds, getMyEnemyPlayerIndex());
+			getPlayerStructureBounds(&bounds, getMyEnemyPlayerIndex(), FALSE, m_player->getPlayerIndex());
 			goalPos.x = bounds.lo.x + bounds.width()/2;
 			goalPos.y = bounds.lo.y + bounds.height()/2;
 		}
@@ -1152,7 +1152,7 @@ Bool AISkirmishPlayer::computeSuperweaponTarget(const SpecialPowerTemplate *powe
 {
 
 	Region2D bounds;
-	getPlayerStructureBounds(&bounds, playerNdx);
+	getPlayerStructureBounds(&bounds, playerNdx, FALSE, m_player->getPlayerIndex());
 
 	if( power->getSpecialPowerType() == SPECIAL_CLUSTER_MINES || power->getSpecialPowerType() == NUKE_SPECIAL_CLUSTER_MINES )
 	{
@@ -1173,7 +1173,7 @@ Bool AISkirmishPlayer::computeSuperweaponTarget(const SpecialPowerTemplate *powe
 			goalPos = *way->getLocation();
 		} else {
 			Region2D bounds;
-			getPlayerStructureBounds(&bounds, getMyEnemyPlayerIndex());
+			getPlayerStructureBounds(&bounds, getMyEnemyPlayerIndex(), FALSE, m_player->getPlayerIndex());
 			goalPos.x = bounds.lo.x + bounds.width()/2;
 			goalPos.y = bounds.lo.y + bounds.height()/2;
 		}

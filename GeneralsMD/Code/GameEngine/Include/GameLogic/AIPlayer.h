@@ -238,7 +238,10 @@ protected:
 	virtual Bool isAGoodIdeaToBuildTeam( TeamPrototype *proto );		///< return true if team should be built
 	virtual void processBaseBuilding( void );		///< do base-building behaviors
 	virtual void processTeamBuilding( void );		///< do team-building behaviors
- 	static Int getPlayerSuperweaponValue( Coord3D *center, Int playerNdx, Real radius, Bool includeMilitaryUnits = TRUE );
+ 	/** These two read another player's estate.  observerNdx is who is allowed to know: pass a
+ 		* player index and only what that player can see (or, for a building, has ever seen) is
+ 		* counted; -1 keeps the omniscient answer for a caller that is not a player's own thinking. */
+ 	static Int getPlayerSuperweaponValue( Coord3D *center, Int playerNdx, Real radius, Bool includeMilitaryUnits = TRUE, Int observerNdx = -1 );
 // End of aiplayer interface. 
 
 protected:
@@ -284,7 +287,7 @@ protected:
 	void updateBridgeRepair(void);
 	Bool dozerInQueue(void);
 	Object *findSupplyCenter(Int minSupplies);
-	static void getPlayerStructureBounds(Region2D *bounds, Int playerNdx, Bool conservative = FALSE );
+	static void getPlayerStructureBounds(Region2D *bounds, Int playerNdx, Bool conservative = FALSE, Int observerNdx = -1 );
 
 protected:	 
 

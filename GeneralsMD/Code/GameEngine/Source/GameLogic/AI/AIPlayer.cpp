@@ -72,6 +72,47 @@
 
 #define USE_DOZER 1
 
+/** Does 'observerNdx' know this thing is there?
+	*
+	* The partition manager already draws exactly the line wanted here.  A player's shroud status for
+	* an object is SHROUDED until that player has seen it; once seen, an *immobile* object stays
+	* FOGGED when the vision leaves it (PartitionData::friend_calcActualShroudedStatus) while anything
+	* that can move goes back to SHROUDED.  So "not SHROUDED" already means "I can see it now, or it
+	* is a building I have seen and buildings do not walk away" - which is the whole information model
+	* the AI needs, with no memory of its own to keep, save or desync.
+	*
+	* observerNdx < 0 is the old omniscient answer, for callers that are not one player's thinking. */
+static Bool observerKnowsAbout( const Object *obj, Int observerNdx )
+{
+	if( obj == NULL )
+		return FALSE;
+	if( observerNdx < 0 )
+		return TRUE;
+	return obj->getShroudedStatus( observerNdx ) != OBJECTSHROUD_SHROUDED;
+}
+
+/** Where a player started, from the map's own Player_N_Start waypoint.  This is the one thing about
+	* an enemy that is public without scouting - it is on the map preview in the lobby, every human
+	* sees it before the match begins - so it is what an AI that has not scouted yet is allowed to
+	* aim at.  Without it a fogged AI has no coordinates for the enemy at all and every attack team
+	* walks to the map corner. */
+static Bool playerStartPosition( Int playerNdx, Coord3D *pos )
+{
+	Player *p = ThePlayerList ? ThePlayerList->getNthPlayer( playerNdx ) : NULL;
+	if( p == NULL || p->getMpStartIndex() < 0 || TheTerrainLogic == NULL )
+		return FALSE;
+
+	AsciiString name;
+	name.format( "Player_%d_Start", p->getMpStartIndex() + 1 );		// the waypoints are 1-based
+	Waypoint *way = TheTerrainLogic->getWaypointByName( name );
+	if( way == NULL )
+		return FALSE;
+
+	*pos = *way->getLocation();
+	return TRUE;
+}
+
+
 // ------------------------------------------------------------------------------------------------
 // ------------------------------------------------------------------------------------------------
 AIPlayer::AIPlayer( Player *p ) :
@@ -927,7 +968,7 @@ void AIPlayer::guardSupplyCenter( Team *team, Int minSupplies )
 		offset.zero();
 		if (skirmishEnemy)
 		{
-			getPlayerStructureBounds(&bounds, skirmishEnemy->getPlayerIndex());
+			getPlayerStructureBounds(&bounds, skirmishEnemy->getPlayerIndex(), FALSE, m_player->getPlayerIndex());
 			offset.x = location.x - (bounds.lo.x+bounds.hi.x)*0.5f;
 			offset.y = location.y - (bounds.lo.y+bounds.hi.y)*0.5f;
 			offset.normalize();
@@ -1170,7 +1211,7 @@ Bool AIPlayer::computeSuperweaponTarget(const SpecialPowerTemplate *power, Coord
   Bool success = FALSE;
 
 	Region2D bounds;
-	getPlayerStructureBounds(&bounds, playerNdx);
+	getPlayerStructureBounds(&bounds, playerNdx, FALSE, m_player->getPlayerIndex());
 
 	if( bounds.hi.x == 0 
 		&& bounds.lo.x == 0 
@@ -1257,7 +1298,7 @@ Bool AIPlayer::computeSuperweaponTarget(const SpecialPowerTemplate *power, Coord
 			pos.x = bounds.lo.x + ( bounds.width() * xIndex ) / xCount;
 			pos.y = bounds.lo.y + ( bounds.height() * yIndex ) / yCount;
 			pos.z = 0;
-			Int curCash = getPlayerSuperweaponValue( &pos, playerNdx, 2*weaponRadius, targetMilitaryUnits );
+			Int curCash = getPlayerSuperweaponValue( &pos, playerNdx, 2*weaponRadius, targetMilitaryUnits, m_player->getPlayerIndex() );
 			if ( curCash > cash) 
 			{
 				cash = curCash;
@@ -1279,7 +1320,7 @@ Bool AIPlayer::computeSuperweaponTarget(const SpecialPowerTemplate *power, Coord
 			pos.x = bestPos.x + (x-5)*(weaponRadius/10);
 			pos.y = bestPos.y + (y-5)*(weaponRadius/10);	// was (x-5): only the diagonal was scanned
 			pos.z = 0;
-			Int curCash = getPlayerSuperweaponValue( &pos, playerNdx, weaponRadius, targetMilitaryUnits );
+			Int curCash = getPlayerSuperweaponValue( &pos, playerNdx, weaponRadius, targetMilitaryUnits, m_player->getPlayerIndex() );
 			if ( curCash > cash) 
 			{
 				cash = curCash;
@@ -1313,7 +1354,7 @@ Bool AIPlayer::computeSuperweaponTarget(const SpecialPowerTemplate *power, Coord
 /**
  * Get the target value for structures in an area.
  */
-Int AIPlayer::getPlayerSuperweaponValue(Coord3D *center, Int playerNdx, Real radius, Bool includeMilitaryUnits )
+Int AIPlayer::getPlayerSuperweaponValue(Coord3D *center, Int playerNdx, Real radius, Bool includeMilitaryUnits, Int observerNdx )
 {
 	if (radius < 4*PATHFIND_CELL_SIZE_F) 
 	{
@@ -1337,6 +1378,8 @@ Int AIPlayer::getPlayerSuperweaponValue(Coord3D *center, Int playerNdx, Real rad
 				Object *pObj = iter.cur();
 				if (!pObj) 
 					continue;
+				if (!observerKnowsAbout(pObj, observerNdx))
+					continue;			// a superweapon is aimed at what has been scouted, not at the object list
 
 				Bool applyNegValue = FALSE;
 				if( !includeMilitaryUnits )
@@ -1899,7 +1942,7 @@ void AIPlayer::buildBySupplies(Int minimumCash, const AsciiString& thingName)
 			Player *skirmishEnemy = TheScriptEngine->getSkirmishEnemyPlayer();	// can be NULL
 			if (skirmishEnemy)
 			{
-				getPlayerStructureBounds(&bounds, skirmishEnemy->getPlayerIndex());
+				getPlayerStructureBounds(&bounds, skirmishEnemy->getPlayerIndex(), FALSE, m_player->getPlayerIndex());
 				offset.x = location.x - (bounds.lo.x+bounds.hi.x)*0.5f;
 				offset.y = location.y - (bounds.lo.y+bounds.hi.y)*0.5f;
 				offset.normalize();
@@ -2214,7 +2257,7 @@ Object *AIPlayer::findSupplyCenter(Int minimumCash)
 	Region2D bounds;
 	Player *enemy = getAiEnemy();
 	if (enemy) {
-		getPlayerStructureBounds(&bounds, enemy->getPlayerIndex());
+		getPlayerStructureBounds(&bounds, enemy->getPlayerIndex(), FALSE, m_player->getPlayerIndex());
 		enemyCenter.set( (bounds.lo.x+bounds.hi.x)*0.5f, (bounds.lo.y+bounds.hi.y)*0.5f, 0);
 	}
 
@@ -2223,6 +2266,9 @@ Object *AIPlayer::findSupplyCenter(Int minimumCash)
 		{
 			if (!obj->isKindOf(KINDOF_STRUCTURE)) continue;
 			if (!obj->isKindOf(KINDOF_SUPPLY_SOURCE)) continue;
+			// ... and one this AI has laid eyes on. This loop walks every object on the map, so
+			// without the test the AI expands to docks in shroud it has never been near.
+			if (!observerKnowsAbout(obj, m_player->getPlayerIndex())) continue;
 			static const NameKeyType key_warehouseUpdate = NAMEKEY("SupplyWarehouseDockUpdate");
 			SupplyWarehouseDockUpdate *warehouseModule = (SupplyWarehouseDockUpdate*)obj->findUpdateModule( key_warehouseUpdate );
 			if( warehouseModule )	{	 
@@ -3873,7 +3919,7 @@ void WorkOrder::loadPostProcess( void )
 /**
  * Get the bounds for a player's structure.
  */
-void AIPlayer::getPlayerStructureBounds( Region2D *bounds, Int playerNdx, Bool conservative )
+void AIPlayer::getPlayerStructureBounds( Region2D *bounds, Int playerNdx, Bool conservative, Int observerNdx )
 {
 	Player::PlayerTeamList::const_iterator it;
 	Bool firstObject = true;
@@ -3897,6 +3943,8 @@ void AIPlayer::getPlayerStructureBounds( Region2D *bounds, Int playerNdx, Bool c
 				Object *pObj = iter.cur();
 				if (!pObj) 
 					continue;
+				if (!observerKnowsAbout(pObj, observerNdx))
+					continue;			// this player has not found it yet
 				const Bool isStructure = pObj->isKindOf(KINDOF_STRUCTURE);
 
 				if( isStructure && conservative && pObj->isKindOf( KINDOF_CONSERVATIVE_BUILDING ) )
@@ -3949,6 +3997,19 @@ void AIPlayer::getPlayerStructureBounds( Region2D *bounds, Int playerNdx, Bool c
 				}
 			}
 		}
+	}
+	if (firstStructure && firstObject && observerNdx >= 0) {
+		//
+		// The observer has seen nothing of this player at all - the opening minutes, before anyone
+		// has scouted.  Everyone knows where the start positions are, so aim at theirs rather than
+		// at the (0,0) corner this function would otherwise report.
+		//
+		Coord3D start;
+		if (playerStartPosition(playerNdx, &start)) {
+			bounds->lo.x = bounds->hi.x = start.x;
+			bounds->lo.y = bounds->hi.y = start.y;
+		}
+		return;
 	}
 	if (firstStructure && !firstObject) {
 		// Player had no structures, so use unit bounds.
