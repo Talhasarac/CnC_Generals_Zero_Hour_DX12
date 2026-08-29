@@ -4710,12 +4710,18 @@ Object* AIUpdateInterface::getNextMoodTarget( Bool calledByAI, Bool calledDuring
 		flags |= AI::WITHIN_ATTACK_RANGE;
 	}
 	
+	//
 	// Instead of shroud affecting the ability to attack, it affects the ability to target.
 	// The same checks apply as the old WeaponSet check (now commented out, search for getShroudedStatus)
-	if( calledByAI
-			&& obj->getControllingPlayer() 
-			&& obj->getControllingPlayer()->getPlayerType() == PLAYER_HUMAN
-		)
+	//
+	// This used to carry "&& getPlayerType() == PLAYER_HUMAN", which is not a balance knob but a
+	// hard if on who is playing: a computer player's units auto-acquired targets standing in fog it
+	// could not see, and a human player's could not.  UNFOGGED is the only thing that engages
+	// PartitionFilterFreeOfFog, and getNextMoodTarget is the shared path - attack states, guard, mob
+	// members and base defence turrets all route through here - so the exemption covered every one
+	// of them.  The AI now sees what a player sees, which is also what makes stealth work against it.
+	//
+	if( calledByAI && obj->getControllingPlayer() )
 	{
 		flags |= AI::UNFOGGED;
 	}

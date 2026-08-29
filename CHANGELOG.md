@@ -25,6 +25,7 @@ found and fixed — EA's own, not port damage.**
 - The AI checks ten seconds of supply-line damage, not a third of one.
 - One AI decision read leftover memory, so identical matches played out differently.
 - Difficulty and AI money change build pace again; every order was pinned at three seconds.
+- The computer no longer shoots at what it cannot see. Its units, and its base defences, used to auto-target through the fog of war - a hard exemption written into the code for computer players only. Stealth works against it now, and so does anything it has not scouted.
 
 ## Attack-move actually attacks
 
