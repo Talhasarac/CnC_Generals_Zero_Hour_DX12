@@ -1144,12 +1144,17 @@ void InitSkirmishGameGadgets( void )
       GadgetComboBoxSetItemData(comboBoxPlayer[i], 0, (void *)SLOT_OPEN);
 			GadgetComboBoxAddEntry(comboBoxPlayer[i],TheGameText->fetch("GUI:Closed"),white);  // leave this first
       GadgetComboBoxSetItemData(comboBoxPlayer[i], 1, (void *)SLOT_CLOSED);
+			// A seat with no AI behind it, for testing: Shift-Ctrl-T in game hands it to you.
+			GadgetComboBoxAddEntry(comboBoxPlayer[i],TheGameText->fetch("GUI:HumanSlot"),white);
+      GadgetComboBoxSetItemData(comboBoxPlayer[i], 2, (void *)SLOT_TAKEOVER);
 			GadgetComboBoxAddEntry(comboBoxPlayer[i],TheGameText->fetch("GUI:EasyAI"),white);
-      GadgetComboBoxSetItemData(comboBoxPlayer[i], 2, (void *)SLOT_EASY_AI);
+      GadgetComboBoxSetItemData(comboBoxPlayer[i], 3, (void *)SLOT_EASY_AI);
 			GadgetComboBoxAddEntry(comboBoxPlayer[i],TheGameText->fetch("GUI:MediumAI"),white);
-      GadgetComboBoxSetItemData(comboBoxPlayer[i], 3, (void *)SLOT_MED_AI);
+      GadgetComboBoxSetItemData(comboBoxPlayer[i], 4, (void *)SLOT_MED_AI);
 			GadgetComboBoxAddEntry(comboBoxPlayer[i],TheGameText->fetch("GUI:HardAI"),white);
-      GadgetComboBoxSetItemData(comboBoxPlayer[i], 4, (void *)SLOT_BRUTAL_AI);
+      GadgetComboBoxSetItemData(comboBoxPlayer[i], 5, (void *)SLOT_BRUTAL_AI);
+			// six entries now, one more than the layout's list box was sized for
+			GadgetComboBoxSetMaxDisplay(comboBoxPlayer[i], 6);
 			GadgetComboBoxSetSelectedPos(comboBoxPlayer[i],0);
 
 		}

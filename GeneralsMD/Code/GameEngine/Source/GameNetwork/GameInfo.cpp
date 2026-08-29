@@ -202,7 +202,10 @@ void GameSlot::setMapAvailability( Bool hasMap )
 
 void GameSlot::setState( SlotState state, UnicodeString name, UnsignedInt IP )
 {
-	if (!(isAI() &&  (state == SLOT_EASY_AI || state == SLOT_MED_AI || state == SLOT_BRUTAL_AI)))
+	// An opponent seat keeps its colour, faction, team and start spot while it stays an opponent
+	// seat - SLOT_TAKEOVER included, or the menu's own refresh (which re-sends the state to the
+	// slot) would wipe the faction and team the moment you picked them.
+	if (!(isAI() &&  (state == SLOT_EASY_AI || state == SLOT_MED_AI || state == SLOT_BRUTAL_AI || state == SLOT_TAKEOVER)))
 	{
 		m_color = -1;
 		m_startPos = -1;
@@ -239,6 +242,9 @@ void GameSlot::setState( SlotState state, UnicodeString name, UnsignedInt IP )
 		case SLOT_BRUTAL_AI:
 			m_name = TheGameText->fetch("GUI:HardAI");
 			break;
+		case SLOT_TAKEOVER:
+			m_name = TheGameText->fetch("GUI:HumanSlot");
+			break;
 		case SLOT_CLOSED:
 		default:
 			m_name = TheGameText->fetch("GUI:Closed");
@@ -257,12 +263,15 @@ Bool GameSlot::isHuman( void ) const
 
 Bool GameSlot::isOccupied( void ) const
 {
-	return m_state == SLOT_PLAYER || m_state == SLOT_EASY_AI || m_state == SLOT_MED_AI || m_state == SLOT_BRUTAL_AI;
+	return m_state == SLOT_PLAYER || isAI();
 }
 
 Bool GameSlot::isAI( void ) const
 {
-	return m_state == SLOT_EASY_AI || m_state == SLOT_MED_AI || m_state == SLOT_BRUTAL_AI;
+	// SLOT_TAKEOVER counts here on purpose: to the lobby it is an ordinary opponent seat that the
+	// host owns and that no network peer is expected to check in from.  It differs in one place
+	// only - the player it creates is human (GameLogic::startNewGame), so no AI is ever attached.
+	return m_state == SLOT_EASY_AI || m_state == SLOT_MED_AI || m_state == SLOT_BRUTAL_AI || m_state == SLOT_TAKEOVER;
 }
 
 Bool GameSlot::isPlayer( AsciiString userName ) const
@@ -966,7 +975,9 @@ AsciiString GameInfoToAsciiString( const GameInfo *game )
 		else if (slot && slot->isAI())
 		{
 			Char c;
-			if (slot->getState() == SLOT_EASY_AI)
+			if (slot->getState() == SLOT_TAKEOVER)
+				c = 'P';
+			else if (slot->getState() == SLOT_EASY_AI)
 				c = 'E';
 			else if (slot->getState() == SLOT_MED_AI)
 				c = 'M';
@@ -1332,6 +1343,11 @@ Bool ParseAsciiStringToGameInfo(GameInfo *game, AsciiString options)
 								{
 									newSlot[i].setState(SLOT_MED_AI);
 									//DEBUG_LOG(("ParseAsciiStringToGameInfo - Medium AI\n"));
+								}
+								break;
+								case 'P':
+								{
+									newSlot[i].setState(SLOT_TAKEOVER);
 								}
 								break;
 								case 'H':

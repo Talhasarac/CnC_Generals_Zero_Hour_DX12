@@ -816,6 +816,8 @@ public:
 	void setArrowImage( const Image *arrowImage ){ m_genArrow = arrowImage;	}
 	
 	void initSpecialPowershortcutBar( Player *player);
+	///< put the general's powers bar on screen now, filled in, with no slide-in (control changed hands)
+	void showSpecialPowerShortcutInstantly( Player *player );
 
 	void triggerRadarAttackGlow( void );
 

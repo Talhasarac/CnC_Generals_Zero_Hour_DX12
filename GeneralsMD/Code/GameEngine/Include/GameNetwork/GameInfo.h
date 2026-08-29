@@ -43,7 +43,11 @@ enum SlotState
 	SLOT_EASY_AI,
 	SLOT_MED_AI,
 	SLOT_BRUTAL_AI,
-	SLOT_PLAYER
+	SLOT_PLAYER,
+	// fork: an opponent seat with nothing behind it - no AI is ever created for it and you take
+	// it over in game with Shift-Ctrl-T.  Appended on purpose: the values above are written into
+	// save games and replays.
+	SLOT_TAKEOVER
 };
 
 enum
@@ -117,6 +121,7 @@ public:
 	Bool isHuman( void ) const;															///< Is this slot occupied by a human player?
 	Bool isOccupied( void ) const;													///< Is this slot occupied (by a human or an AI)?
 	Bool isAI( void ) const;																///< Is this slot occupied by an AI?
+	Bool isTakeover( void ) const { return m_state == SLOT_TAKEOVER; }	///< An AI seat with no AI: the player drives it
 	Bool isPlayer( AsciiString userName ) const;						///< Does this slot contain the given user?
 	Bool isPlayer( UnicodeString userName ) const;					///< Does this slot contain the given user?
 	Bool isPlayer( UnsignedInt ip ) const;									///< Is this slot at this IP?

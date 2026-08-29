@@ -312,3 +312,8 @@ END
 GUI:ShortcutSlot08Description
 "Presses the eighth button of the general's power bar in the top right corner."
 END
+
+// Skirmish lobby: an opponent seat with no AI behind it (Shift-Ctrl-T takes it over).
+GUI:HumanSlot
+"Human"
+END

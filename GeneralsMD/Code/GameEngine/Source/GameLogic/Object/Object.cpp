@@ -5060,6 +5060,18 @@ void Object::look()
 						}
 					}
 					
+					/* Single-player test hook: a base with nobody driving it - a Human seat from the
+						 skirmish screen, or a player taken over with Shift-Ctrl-T - shares its eyes with
+						 whoever is at the keyboard, so you can watch it without switching to it.  Both
+						 ways round: switch to that base and your first one keeps feeding you its sight.
+						 Off in a network game, where the logic must not depend on who is looking. */
+					if( getControllingPlayer()->getPlayerType() == PLAYER_HUMAN
+							&& !TheGameLogic->isInMultiplayerGame()
+							&& ThePlayerList->getLocalPlayer() )
+					{
+						lookingMask |= ThePlayerList->getLocalPlayer()->getPlayerMask();
+					}
+
 					// Other players can also be looking through our eyes.
 					lookingMask |= m_visionSpiedMask;
 				}

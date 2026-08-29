@@ -129,4 +129,10 @@ extern void pickAndPlayUnitVoiceResponse( const DrawableList *list, GameMessage:
 ///< does the stop key cancel a building that is going up, rather than stopping a unit?
 extern Bool Command_stopMeansCancelConstruction( Int selectionCount, Bool locallyControlled, Bool underConstruction );
 
+class Player;
+/** Single-player test hook: make this player the one at the keyboard, throwing away any AI behind
+  * it first.  FALSE if that player cannot be played (yourself, neutral, observer, beaten) or this
+  * is not a single-player game.  Bound to Shift-Ctrl-T, and to clicking a base nobody is driving. */
+extern Bool takeControlOfPlayer( Player *p );
+
 #endif

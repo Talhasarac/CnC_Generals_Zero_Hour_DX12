@@ -635,6 +635,28 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 				break;
 			}
 
+			/* Single-player test hook: a click that is not a command (nothing of yours selected, or
+				 nothing to do to it) on a base that nobody is driving - a Human seat from the skirmish
+				 screen, or a player you already took over - hands you that player, so the command bar,
+				 the money and the shroud become its own.  Computer opponents are left alone; only
+				 Shift-Ctrl-T takes one of those. */
+			for (DrawableListIt cit = drawablesThatWillSelect.begin(); cit != drawablesThatWillSelect.end(); ++cit)
+			{
+				Object *clicked = (*cit) ? (*cit)->getObject() : NULL;
+				Player *owner = clicked ? clicked->getControllingPlayer() : NULL;
+				if (owner == NULL || owner->getPlayerType() != PLAYER_HUMAN)
+					continue;
+
+				if (takeControlOfPlayer(owner))
+				{
+					selectSingleDrawableWithoutSound(*cit);
+					disp = DESTROY_MESSAGE;
+				}
+				break;
+			}
+			if (disp == DESTROY_MESSAGE)
+				break;
+
 			// There isn't a context command, so this is a selection thing. Now, based on the keys, 
 			// determine whether or not we should create a new group, or append these guys to our existing
 			// group.

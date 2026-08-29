@@ -2365,6 +2365,44 @@ GameMessage::Type CommandTranslator::evaluateContextCommand( Drawable *draw,
 }  // end evaluateContextCommand
 
 
+//-------------------------------------------------------------------------------------------------
+/** Single-player test hook: make this player the one at the keyboard.  Any AI behind it is thrown
+  * away first, so nothing fights you for its units, and the HUD, money and shroud become its own.
+  * Returns FALSE for a player you cannot sensibly play: yourself, the neutral side, an observer,
+  * a beaten player - and for anything that is not a single-player game. */
+//-------------------------------------------------------------------------------------------------
+Bool takeControlOfPlayer( Player *p )
+{
+	if (p == NULL || !TheGameLogic->isInGame() || TheGameLogic->isInMultiplayerGame() || TheGameLogic->isInReplayGame())
+		return FALSE;
+	if (p == ThePlayerList->getLocalPlayer() || p == ThePlayerList->getNeutralPlayer())
+		return FALSE;
+	if (!p->isPlayerActive() || !p->isPlayableSide())
+		return FALSE;
+
+	p->setPlayerType(PLAYER_HUMAN, FALSE);	// throws away its AIPlayer, if it had one
+	ThePlayerList->setLocalPlayer(p);
+	TheInGameUI->deselectAllDrawables();
+
+	/* Every driverless base feeds its sight to whoever is at the keyboard (Object::handleShroud), and
+		 that mask was worked out the last time each object looked - which for a building is when it was
+		 built.  Make them all look again, or the base you just left goes dark behind you. */
+	for (Object *obj = TheGameLogic->getFirstObject(); obj; obj = obj->getNextObject())
+		obj->handlePartitionCellMaintenance();
+
+	ThePartitionManager->refreshShroudForLocalPlayer();
+	TheControlBar->initSpecialPowershortcutBar(p);
+	TheControlBar->setControlBarSchemeByPlayer(p);
+	// initSpecialPowershortcutBar only builds the bar, hidden.  Left alone it is filled in by the
+	// control bar's next update and then slid in over half a second: this puts the general's
+	// powers up on this frame instead.
+	TheControlBar->showSpecialPowerShortcutInstantly(p);
+	TheControlBar->markUIDirty();
+	TheGameClient->updateFakeDrawables();
+	TheInGameUI->message(UnicodeString(L"Now playing: %s"), p->getPlayerDisplayName().str());
+	return TRUE;
+}
+
 // ------------------------------------------------------------------------------------------------
 // ------------------------------------------------------------------------------------------------
 //====================================================================================
@@ -3965,35 +4003,21 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 			 player's teams about; kill the script lists too if that ever gets in the way. */
 		case GameMessage::MSG_META_SWITCH_CONTROL:
 		{
-			if (TheGameLogic->isInGame() && !TheGameLogic->isInMultiplayerGame() && !TheGameLogic->isInReplayGame())
+			Int count = ThePlayerList->getPlayerCount();
+			Int idx = 0;
+			for (Int i = 0; i < count; ++i)
 			{
-				Int count = ThePlayerList->getPlayerCount();
-				Int idx = 0;
-				for (Int i = 0; i < count; ++i)
+				if (ThePlayerList->getNthPlayer(i) == ThePlayerList->getLocalPlayer())
 				{
-					if (ThePlayerList->getNthPlayer(i) == ThePlayerList->getLocalPlayer())
-					{
-						idx = i;
-						break;
-					}
-				}
-
-				for (Int i = 1; i < count; ++i)
-				{
-					Player *p = ThePlayerList->getNthPlayer((idx + i) % count);
-					if (p == NULL || p == ThePlayerList->getNeutralPlayer() || !p->isPlayerActive() || !p->isPlayableSide())
-						continue;
-
-					p->setPlayerType(PLAYER_HUMAN, FALSE);	// throws away its AIPlayer, if it had one
-					ThePlayerList->setLocalPlayer(p);
-					TheInGameUI->deselectAllDrawables();
-					ThePartitionManager->refreshShroudForLocalPlayer();
-					TheControlBar->initSpecialPowershortcutBar(p);
-					TheControlBar->setControlBarSchemeByPlayer(p);
-					TheGameClient->updateFakeDrawables();
-					TheInGameUI->message(UnicodeString(L"Now playing: %s"), p->getPlayerDisplayName().str());
+					idx = i;
 					break;
 				}
+			}
+
+			for (Int i = 1; i < count; ++i)
+			{
+				if (takeControlOfPlayer(ThePlayerList->getNthPlayer((idx + i) % count)))
+					break;
 			}
 			disp = DESTROY_MESSAGE;
 			break;

@@ -457,7 +457,19 @@ void UpdateSlotList( GameInfo *myGame, GameWindow *comboPlayer[],
 			}
 			else
 			{				
-				GadgetComboBoxSetSelectedPos(comboPlayer[i], slot->getState(), TRUE);
+				/* The LAN and online menus fill this box in SlotState order and count on position ==
+					 state; the skirmish one has an extra entry and tags every line with its state, so
+					 ask the box first and fall back to the plain state when no line claims it. */
+				Int pos = slot->getState();
+				for (Int item = 0; comboPlayer[i] && item < GadgetComboBoxGetLength(comboPlayer[i]); ++item)
+				{
+					if ((Int)GadgetComboBoxGetItemData(comboPlayer[i], item) == slot->getState())
+					{
+						pos = item;
+						break;
+					}
+				}
+				GadgetComboBoxSetSelectedPos(comboPlayer[i], pos, TRUE);
         if( buttonAccept &&  buttonAccept[i] )
 				  buttonAccept[i]->winHide(TRUE);
 			}

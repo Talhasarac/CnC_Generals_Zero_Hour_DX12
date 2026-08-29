@@ -3933,6 +3933,22 @@ void ControlBar::initSpecialPowershortcutBar( Player *player)
 
 }
 
+//-------------------------------------------------------------------------------------------------
+/** Control of a player changed mid-game, so the general's powers bar has to be there this frame.
+  * populateSpecialPowerShortcut() slides it in over half a second whenever it finds it hidden -
+  * unhiding it first means it simply appears, already filled in. */
+//-------------------------------------------------------------------------------------------------
+void ControlBar::showSpecialPowerShortcutInstantly( Player *player )
+{
+	if( m_specialPowerShortcutParent && player
+			&& (player->hasAnyShortcutSpecialPower() || hasAnyShortcutSelection())
+			&& m_contextParent[ CP_MASTER ] && !m_contextParent[ CP_MASTER ]->winIsHidden() )
+	{
+		m_specialPowerShortcutParent->winHide( FALSE );
+	}
+	populateSpecialPowerShortcut( player );
+}
+
 void ControlBar::populateSpecialPowerShortcut( Player *player)
 {
 	const CommandSet *commandSet;

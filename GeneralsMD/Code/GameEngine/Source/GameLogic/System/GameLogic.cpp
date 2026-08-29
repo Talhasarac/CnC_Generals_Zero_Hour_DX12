@@ -1332,7 +1332,9 @@ void GameLogic::startNewGame( Bool loadingSaveGame )
 			AsciiString playerName;
 			playerName.format("player%d", i);
 			d.setAsciiString(TheKey_playerName, playerName);
-			d.setBool(TheKey_playerIsHuman, slot->isHuman());
+			// A takeover seat is an AI slot everywhere in the lobby, but the player it makes is human:
+			// no AIPlayer is attached, so its base just sits there until you take it over in game.
+			d.setBool(TheKey_playerIsHuman, slot->isHuman() || slot->isTakeover());
 			d.setUnicodeString(TheKey_playerDisplayName, slot->getName());
 			const PlayerTemplate* pt;
 			if (slot->getPlayerTemplate() >= 0)
