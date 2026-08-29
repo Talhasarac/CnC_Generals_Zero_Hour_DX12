@@ -236,7 +236,12 @@ void DisconnectManager::updateDisconnectStatus(ConnectionManager *conMgr) {
 						m_haveNotifiedOtherPlayersOfCurrentFrame = TRUE;
 					}
 
-					DEBUG_LOG(("DisconnectManager::updateDisconnectStatus - curTime = %d, m_timeOfDisconnectScreenOn = %d, curTime - m_timeOfDisconnectScreenOn = %d\n", curTime, m_timeOfDisconnectScreenOn, curTime - m_timeOfDisconnectScreenOn));
+					/* time_t is eight bytes here and %d eats four, so these three used to print the low
+						 half of curTime, the high half of curTime, and then curTime again - the screen-on
+						 stamp read as a permanent 0 and the difference never moved.  A log that lies costs
+						 more than no log at all. */
+					DEBUG_LOG(("DisconnectManager::updateDisconnectStatus - curTime = %d, m_timeOfDisconnectScreenOn = %d, curTime - m_timeOfDisconnectScreenOn = %d\n",
+						(Int)curTime, (Int)m_timeOfDisconnectScreenOn, (Int)(curTime - m_timeOfDisconnectScreenOn)));
 
 					if (m_timeOfDisconnectScreenOn != 0) {
 						if ((curTime - m_timeOfDisconnectScreenOn) > TheGlobalData->m_networkDisconnectScreenNotifyTime) {
