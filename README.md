@@ -1,114 +1,148 @@
+<div align="center">
 
-# Command & Conquer Generals (inc. Zero Hour) Source Code
+### COMMAND AND CONQUER · GENERALS
+
+# ZERO HOUR: REBORN
+
+**The 2003 source code, brought forward twenty-two years.**
+
+![platform](https://img.shields.io/badge/platform-Windows%20·%20x86-0d1117?style=for-the-badge&labelColor=161b22)
+![build](https://img.shields.io/badge/CMake-Visual%20Studio%202022-0d1117?style=for-the-badge&labelColor=161b22)
+![changes](https://img.shields.io/badge/changes-119-00b894?style=for-the-badge&labelColor=161b22)
+![bugs](https://img.shields.io/badge/EA%20bugs%20fixed-~60-e17055?style=for-the-badge&labelColor=161b22)
+![license](https://img.shields.io/badge/license-GPL--3.0-0d1117?style=for-the-badge&labelColor=161b22)
+
+</div>
+
+---
+
+EA published this source for preservation and stopped there. It does not compile, it does not run,
+and nobody had touched the bugs inside it in twenty-two years.
+
+**Reborn** compiles, runs and plays on a current PC — ~580 engine source files ported to Visual
+Studio 2022, and around sixty original defects found and fixed. Not port damage. EA's own, shipped
+in 2003 and never noticed.
+
+You need to own the game; no game data ships here. Nothing changes unit stats, weapons or balance.
+
+## Then and now
+
+| | The source EA released | Reborn |
+|:--|:--|:--|
+| **Builds** | never; the SDKs it needs were stripped | three commands, VS2022 |
+| **Frame rate** | 33 fps, with game speed tied to it | uncapped picture, rules on their own clock |
+| **Worst logic turn** | `2,976 ms` | `243 ms` |
+| **Long route search** | `55,000` cells · `256 ms` | `10,000` cells · `25 ms` |
+| **Pathfinding, per match** | `11.8 s` | `1.6 s` |
+| **Skirmish AI** | urgent orders and one power plant | builds its base |
+| **Attack-move** | drives past the enemy without firing | engages, rearms, resumes |
+| **Base textures** | Zero Hour's downscaled copies | 481 originals at 4× the resolution |
+| **Infantry shadows** | a flat blob | cast from the pose — arms, head, weapon |
+| **When it crashes** | silence | symbolized report, file and line |
+
+## What you actually notice
+
+- **The frame rate cap is gone — and the game did not get faster.** The picture runs uncapped while
+  the rules keep their own steady clock. A bad moment now costs you a dropped frame instead of a
+  slow-motion match.
+- **The computer opponent builds a base.** One wrong value meant the skirmish AI only ever built
+  what its script marked urgent, plus a single power plant. Every skirmish anyone has played against
+  this code since 2003 was against an opponent that could not build.
+- **Attack-move actually attacks.** Four separate fixes, one of them found by putting probes into a
+  live match: aircraft were being *penalised* for emptying their rack and flying home to rearm.
+- **Long orders stopped hitching.** EA's coarse pathfinder pass never ran, so every long move
+  searched the whole map — and every wall, fence and building permanently held one of the search's
+  scratch records.
+- **Your whole base's production, on one strip.** A single row above the command bar carries
+  everything you are building anywhere, ordered by time left. Click a picture to jump the camera
+  there.
+- **Soldiers cast real shadows**, built from the pose instead of a flat blob. Scud trails, falling
+  bombs, smoke clouds and all 128 tree types cast too — the tree shadows had never been drawn at all.
+- **It fits your monitor.** Widescreen resolutions are back in the options menu, zoom-to-cursor
+  works, and buildings snap to the pathfinder's own grid with the blocked squares crossed out.
+- **It does not crash.** Poison clouds, mine clearing, garrison kills, full transports blowing up,
+  and quitting the game — all traced and fixed.
+
+> [!NOTE]
+> **[CHANGELOG.md](CHANGELOG.md) is the full record** — all 119 changes, what was tried and
+> reverted, and what is still missing.
+
+## How it was proved
+
+No CI, no debugger on the machine. The game tests itself instead:
+
+- **It plays itself.** Eight computer opponents, started from one command line.
+- **Headless, a 23-minute skirmish plays out in 38 seconds** — identically, every run.
+- **It plays itself over a network too**, two copies and one real connection. That is what caught
+  every multiplayer replay falsely accusing itself of desync since 2003.
+- **Every fix was proved by putting the bug back** and watching the exact test go red.
+- **Defects deliberately left alone are pinned by a test** that documents the behaviour, so a future
+  change to them is a decision and not an accident.
+
+---
+
+## Build it
+
+Win32 x86 only — the code is full of 32-bit inline assembly, and an x64 configure is rejected on
+purpose. Visual Studio 2022 with the Desktop C++ workload is all you need.
+
+```console
+cmake -S GeneralsMD/Code -B build -G "Visual Studio 17 2022" -A Win32
+cmake --build build --config Release
+ctest --test-dir build -C Release --output-on-failure
+```
+
+`build.example.bat` wraps all three — copy it to `build.bat` and fill in the paths for your machine.
+
+To play, put your Steam install's Zero Hour `*.big` files next to the built `generals.exe` in
+`GeneralsMD/Run/`, and the **base game's** `*.big` files in `Run/ZH_Generals/` — Zero Hour is not
+standalone and mounts both. No disc, no registry keys, no retail installer.
+
+> [!IMPORTANT]
+> Some third-party sources are not committed — EA stripped them. Drop in zlib 1.1.4, LZH-Light 1.0,
+> a minimal DirectX 8 SDK, the GameSpy SDK and d3d8to9 before the first build. STLport, the 3DSMax 4
+> SDK, NVASM, the Miles and Bink SDKs and the SafeDisk API are **not** needed to build the game —
+> sound and video run through the DLLs your own install already ships.
+
+<details>
+<summary><b>Tuning — a few things are off by default</b></summary>
+
+<br>
+
+All of these live in `Options.ini`, in your Zero Hour Data folder. Back it up first.
+
+| Key | What it does |
+|:--|:--|
+| `Bloom = 60` | bright things bleed light into the air; `BloomThreshold` sets how much of the picture joins in |
+| `StaticGameLOD = Custom` + `MaxParticleCount = 10000` | four times the High preset — much denser explosions and smoke |
+| `DynamicLOD = no` | the game never silently downgrades quality mid-match |
+| `GridBuildPlacement = No` | restores free building placement |
+
+The rest of the quality switches, all worth turning on: `UseShadowVolumes`, `UseShadowDecals`,
+`UseCloudMap`, `UseLightMap`, `ShowSoftWaterEdge`, `ExtraAnimations`, `HeatEffects`, `ShowTrees`,
+`BuildingOcclusion`, `TextureReduction = 0`, `AntiAliasing = 4`.
+
+The new shadows and the opening camera are `GameData.ini` keys instead —
+`UseShadowVolumesForSkins = No` puts the old flat infantry blobs back, and `StartAtMaxZoom = No`
+restores the retail opening view.
+
+</details>
+
+## Not there yet
+
+- Random maps generate and play, but have no menu entry and no reroll button yet.
+- Online and LAN play are untested.
+
+---
+
+<details>
+<summary><b>EA's original README</b></summary>
+
+<br>
 
 This repository includes source code for Command & Conquer Generals, and its expansion pack Zero Hour. This release provides support to the Steam Workshop for both games ([C&C Generals](https://steamcommunity.com/workshop/browse/?appid=2229870) and [C&C Generals - Zero Hour](https://steamcommunity.com/workshop/browse/?appid=2732960)).
 
-
-## What This Fork Changes (Zero Hour)
-
-This fork builds Zero Hour with Visual Studio 2022 (CMake, Win32) and adds
-quality-of-life and modernization changes on top of the retail 1.04 behaviour.
-You still need to own the game — the fork ships no game data.
-
-Everything below is player-visible. Nothing changes unit stats, weapons or
-balance.
-
-### Runs on modern PCs
-
-- **Direct3D 9 renderer.** The game's DirectX 8 calls are translated to DX9 by
-  a `d3d8.dll` built from source and placed next to the exe, so the game runs
-  on current GPUs and drivers without the legacy DX8 runtime.
-- **Real sound.** Music, speech and effects play through the game's own
-  `mss32.dll`, exactly as retail does.
-- **Widescreen resolutions.** The Options menu no longer hides non-4:3 modes —
-  1920x1080, 2560x1440 and the rest of your monitor's native modes are listed
-  and selectable. The view itself keeps retail proportions (same horizontal
-  view as 4:3), which is what 16:9 players have always used.
-- **The 1.04 menu text is back.** "Custom Match" on the Solo Play submenu used
-  to read `MISSING: 'GUI:CustomMission'`; the patch's text overlay is now
-  loaded.
-- **Crash reports are readable.** If the game does die, it writes a full,
-  symbolized report (with file and line numbers) to
-  `Documents\Command and Conquer Generals Zero Hour Data\ReleaseCrashInfo.txt`.
-
-### Framerate and camera
-
-- **Uncapped framerate.** Rendering runs as fast as your machine allows, while
-  the game simulation stays locked at its original rate — so game speed does
-  **not** change with framerate. Scrolling speed and camera shake are now
-  time-based, so they feel identical at 60 or 240 FPS.
-- **Smooth zoom.** Zooming used to update only on the fixed 30 Hz camera step
-  and stuttered on fast displays; it now moves every rendered frame at the same
-  speed as before.
-- **Zoom out further.** The manual zoom-out limit is stretched to 1.6x the
-  retail ceiling. Maps still open framed the way their author intended —
-  default, scripted and reset views are untouched.
-- **Optional: raise the ceiling yourself.** Add `MaxCameraHeight = 465` to
-  `Options.ini` (in your Zero Hour Data folder) to push the cap further. The
-  retail value is the floor, so this can only ever zoom out more, never closer,
-  and it applies at every detail preset.
-
-### Reading the battlefield
-
-- **Health bars are always on.** No need to select or hover a unit — every
-  unit and building shows its health bar (the "Show object health" option still
-  turns the whole system off).
-- **Selection is easier to see.** A selected object's health bar gets a white
-  line above it.
-- **Group numbers are always visible**, not just while selected.
-- **Transport and garrison pips always show**, including empty slots, so you
-  can see capacity at a glance. (They stay hidden on buildings still under
-  construction, which cannot hold anyone yet.)
-- **Construction shows time, not percent.** A building going up displays the
-  seconds remaining — measured from the progress your workers are actually
-  making, so extra builders shorten the number — both as floating text over
-  the site and in the construction panel.
-- **Production progress on the bar.** Your own factories show a yellow
-  production-progress bar with the seconds left on the current unit.
-- **The whole queue is timed.** The production label reads e.g. `52s (70s)`:
-  the current unit first, then everything still queued behind it.
-- **Rally lines draw correctly.** With several buildings selected, every rally
-  line is drawn over the buildings instead of all but the last disappearing
-  behind them.
-
-### Building and commanding
-
-- **Select buildings as a group.** Buildings can be box-selected, shift-added
-  and double-clicked (all of a type on screen), just like units. Units and
-  buildings still never end up in the same selection.
-- **Builds spread across factories.** With several same-type factories
-  selected, each click sends the unit to whichever selected factory has the
-  shortest queue.
-- **Shift-click to queue five.** Holding Shift on a build button queues 5 units
-  in one click, spread across your selected factories.
-- **Units find their own lanes.** Pathfinding now charges a small extra cost
-  for tiles other units have already reserved on their path, so a moving group
-  spreads into parallel lanes instead of stacking into one line.
-
-### Getting more out of your GPU
-
-No engine changes needed — these are `Options.ini` keys (back up the file
-first):
-
-- `StaticGameLOD = Custom` with `MaxParticleCount = 10000` (4x the High
-  preset) for much denser explosions and smoke.
-- Turn every quality toggle on: `UseShadowVolumes`, `UseShadowDecals`,
-  `UseCloudMap`, `UseLightMap`, `ShowSoftWaterEdge`, `ExtraAnimations`,
-  `HeatEffects`, `ShowTrees`, `BuildingOcclusion`, `TextureReduction = 0`,
-  `AntiAliasing = 4`, and `DynamicLOD = no` so the game never silently
-  downgrades quality mid-match.
-
-### Under the hood
-
-Dozens of latent bugs in EA's original code were found and fixed while porting,
-including several that crashed the game outright on modern compilers (inline
-assembly that corrupted CPU registers, buffer overruns in the replay and
-compression code, an unusable crash-stack walker). These are invisible in play
-— they are the reason the game runs at all. They are listed in the
-changelog.
-
-
-## Dependencies
+### Dependencies
 
 If you wish to rebuild the source code and tools successfully you will need to find or write new replacements (or remove the code using them entirely) for the following libraries;
 
@@ -125,8 +159,7 @@ If you wish to rebuild the source code and tools successfully you will need to f
 - ZLib (1.1.4) - (expected path `\Code\Libraries\Source\Compression\ZLib\`)
 - LZH-Light (1.0) - (expected path `\Code\Libraries\Source\Compression\LZHCompress\CompLibSource` and `CompLibHeader`)
 
-
-## Compiling (Win32 Only)
+### Compiling (Win32 Only)
 
 To use the compiled binaries, you must own the game. The C&C Ultimate Collection is available for purchase on [EA App](https://www.ea.com/en-gb/games/command-and-conquer/command-and-conquer-the-ultimate-collection/buy/pc) or [Steam](https://store.steampowered.com/bundle/39394/Command__Conquer_The_Ultimate_Collection/).
 
@@ -136,28 +169,31 @@ If you wish to compile the code under a modern version of Microsoft Visual Studi
 
 NOTE: As modern versions of MSVC enforce newer revisions of the C++ standard, you will need to make extensive changes to the codebase before it successfully compiles, even more so if you plan on compiling for the Win64 platform.
 
-When the workspace has finished building, the compiled binaries will be copied to the folder called `/Run/` found in the root of each games directory. 
+When the workspace has finished building, the compiled binaries will be copied to the folder called `/Run/` found in the root of each games directory.
 
-
-## Known Issues
+### Known Issues
 
 Windows has a policy where executables that contain words “version”, “update” or “install” in their filename will require UAC Elevation to run. This will affect “versionUpdate” and “buildVersionUpdate” projects from running as post-build events. Renaming the output binary name for these projects to not include these words should resolve the issue for you.
 
+### STLport
 
-## STLport
 STLport will require changes to successfully compile this source code. The file [stlport.diff](stlport.diff) has been provided for you so you can review and apply these changes. Please make sure you are using STLport 4.5.3 before attempting to apply the patch.
 
-
-## Contributing
+### Contributing
 
 This repository will not be accepting contributions (pull requests, issues, etc). If you wish to create changes to the source code and encourage collaboration, please create a fork of the repository under your GitHub user/organization space.
 
+### Support
 
-## Support
+This repository is for preservation purposes only and is archived without support.
 
-This repository is for preservation purposes only and is archived without support. 
+</details>
 
+<div align="center">
+<sub>
 
-## License
+GPL v3 with additional terms — see [LICENSE.md](LICENSE.md).
+Preservation release © Electronic Arts.
 
-This repository and its contents are licensed under the GPL v3 license, with additional terms applied. Please see [LICENSE.md](LICENSE.md) for details.
+</sub>
+</div>
