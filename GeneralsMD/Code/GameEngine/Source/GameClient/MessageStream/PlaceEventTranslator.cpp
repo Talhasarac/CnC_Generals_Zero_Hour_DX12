@@ -116,7 +116,16 @@ GameMessageDisposition PlaceEventTranslator::translateGameMessage(const GameMess
 	{
 
 		//---------------------------------------------------------------------------------------------
+		//
+		// Windows sends the second press of a quick pair as WM_LBUTTONDBLCLK, not WM_LBUTTONDOWN,
+		// so it reaches the stream as a double click (see Mouse::createStreamMessages).  Placing a
+		// row of structures with shift held is exactly that: a fast series of clicks.  Without this
+		// label the second one set no placement anchor, the click that followed found none and was
+		// left for the selection translator, and a run of buildings ended with the placement gone
+		// and whatever was under the cursor selected instead.
+		//
 		case GameMessage::MSG_RAW_MOUSE_LEFT_BUTTON_DOWN:
+		case GameMessage::MSG_RAW_MOUSE_LEFT_DOUBLE_CLICK:
 		{
 			//
 			// The global production strip lies over the world rather than inside a window, so

@@ -185,6 +185,7 @@ found and fixed — EA's own, not port damage.**
 - The placement grid is drawn on the ground and follows the slope.
 - Unbuildable ground is a soft red wash, crossed out square by square.
 - Running out of money no longer strands the ghost on the map.
+- Holding shift and clicking out a row of buildings no longer stops halfway and selects one.
 - A building you point at blocked ground slides to the nearest spot it fits, and lands there.
 - The pointer keeps its build cursor while you place, even passing over your own buildings.
 - GLA defences get a range ring while you site them.
