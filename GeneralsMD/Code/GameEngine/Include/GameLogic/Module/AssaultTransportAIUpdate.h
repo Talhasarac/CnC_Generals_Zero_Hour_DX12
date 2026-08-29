@@ -49,7 +49,7 @@ enum AssaultStateTypes
 class AssaultTransportAIUpdateModuleData : public AIUpdateModuleData
 {
 public:
-	Real m_membersGetHealedAtLifeRatio;
+	Real m_membersGetHealedAtLifeRatio;		// parsed for the shipped INI's sake; nobody rides back in to heal any more
 	Real m_clearRangeRequiredToContinueAttackMove;
 
 	AssaultTransportAIUpdateModuleData()
@@ -103,8 +103,6 @@ public:
 	UpdateSleepTime calcSleepTime();
 
 	void reset();
-	Bool isMemberWounded( const Object *member ) const;	//Member requires medical attention?
-	Bool isMemberHealthy( const Object *member ) const; //Member has full health?
 	Bool isAssaultAreaClear() const;	//Nothing hostile left near the transport?
 	void retrieveMembers();
 	void giveFinalOrders();
@@ -112,7 +110,6 @@ public:
 protected:
 
   ObjectID					m_memberIDs[ MAX_TRANSPORT_SLOTS ];
-	Bool							m_memberHealing[ MAX_TRANSPORT_SLOTS ];
   Coord3D						m_attackMoveGoalPos;
   mutable ObjectID	m_designatedTarget;
 	AssaultStateTypes	m_state;

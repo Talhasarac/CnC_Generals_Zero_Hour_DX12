@@ -38,7 +38,8 @@ found and fixed — EA's own, not port damage.**
 - Ctrl on the attack-move click no longer shells the ground instead.
 - Troop Crawlers wait for their squad to climb back in, up to ten seconds.
 - Their squad stays out until the area is clear, instead of piling back in after every kill.
-- Every man aboard gets out to fight; a scratch or a late boarding used to bench him.
+- Every man aboard gets out to fight; nobody sits out the battle waiting to be patched up.
+- An emptied Crawler carries on with your order instead of idling behind the fight.
 - Attack-move state is saved now, instead of coming back as random memory.
 
 ## Your units stop shooting corpses
@@ -211,7 +212,7 @@ found and fixed — EA's own, not port damage.**
 - Widescreen resolutions are back in the options menu.
 - Zoom further out, with the whole map drawn instead of black corners.
 - The zoom-out ceiling is the same for everyone; no setting buys you a wider view.
-- The wheel covers that whole range in about thirteen notches instead of thirty-eight.
+- The wheel covers that whole range in about six notches instead of thirty-eight.
 - Zoom toward the cursor works; the spot under your pointer stays there.
 - The camera turns in whole 45-degree steps, instantly, while you hold the key.
 - Edge scrolling works windowed, and scroll speed no longer follows your frame rate.

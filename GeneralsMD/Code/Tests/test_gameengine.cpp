@@ -785,20 +785,19 @@ TEST(ctrl_is_force_fire_only_while_the_attack_move_cursor_is_down)
    orders now board on this one rule. */
 extern Bool AssaultTransport_shouldRetrieveMembers( Bool membersOutside, Bool membersFighting, Bool areaClear );
 extern Bool AssaultTransport_waitingForBoarding( Bool membersOutside, UnsignedInt framesRemaining );
-extern Bool AssaultTransport_shouldDeployMember( Bool contained, Bool beingHealed );
+extern Bool AssaultTransport_nothingLeftToDeploy( Bool isAttacking, Bool anyoneInside );
 
-TEST(troop_crawler_deploys_everyone_aboard)
+TEST(troop_crawler_drives_on_once_it_is_empty)
 {
-	/* aboard and fit to fight: out he goes, whatever he is and however scratched.  Retail wanted
-	   full health and exempted anyone who boarded after the attack order, so a squad that had
-	   fought once rode the rest of the battle out inside. */
-	CHECK( AssaultTransport_shouldDeployMember( true, false ) );
+	/* attacking with an empty hold: the crawler's own weapon only unloads troops, so it is
+	   standing there doing nothing - resume the order instead. */
+	CHECK( AssaultTransport_nothingLeftToDeploy( true, false ) );
 
-	/* still being patched up: he stays in until whole, or he would bounce straight back out. */
-	CHECK( !AssaultTransport_shouldDeployMember( true, true ) );
+	/* somebody still aboard: stay put, he is about to be deployed. */
+	CHECK( !AssaultTransport_nothingLeftToDeploy( true, true ) );
 
-	/* already outside: nothing to order. */
-	CHECK( !AssaultTransport_shouldDeployMember( false, false ) );
+	/* not attacking at all: whatever it is doing is not our business. */
+	CHECK( !AssaultTransport_nothingLeftToDeploy( false, false ) );
 }
 
 TEST(troop_crawler_picks_its_troops_back_up_only_when_the_fight_is_over)

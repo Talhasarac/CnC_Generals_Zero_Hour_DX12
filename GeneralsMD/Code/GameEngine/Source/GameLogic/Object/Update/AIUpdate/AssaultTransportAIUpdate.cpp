@@ -63,12 +63,11 @@ Bool AssaultTransport_shouldRetrieveMembers( Bool membersOutside, Bool membersFi
 }
 
 //-------------------------------------------------------------------------------------------------
-/** Does this passenger get out and fight?
-  * Everybody aboard does, whatever he is and however scratched he is - the only man who stays in
-  * is one who is still being patched up. */
-Bool AssaultTransport_shouldDeployMember( Bool contained, Bool beingHealed )
+/** Is the transport standing there attacking with nobody left to put on the ground?
+  * Its own weapon only deploys troops, so once it is empty the attack is theatre - drive on. */
+Bool AssaultTransport_nothingLeftToDeploy( Bool isAttacking, Bool anyoneInside )
 {
-	return contained && !beingHealed;
+	return isAttacking && !anyoneInside;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -97,7 +96,6 @@ void AssaultTransportAIUpdate::reset()
 	for( int i = 0; i < m_currentMembers; i++ )
 	{
 		m_memberIDs[ i ] = INVALID_ID;
-		m_memberHealing[ i ] = FALSE;
 	}
 	m_currentMembers = 0;
   m_attackMoveGoalPos.zero();
@@ -200,14 +198,12 @@ UpdateSleepTime AssaultTransportAIUpdate::update( void )
 				if( m_currentMembers - 1 > i )
 				{
 					//Move the last slot to this slot to keep array contiguous.
-					m_memberIDs[ i ]			= m_memberIDs[ m_currentMembers - 1 ];
-					m_memberHealing[ i ]	= m_memberHealing[ m_currentMembers - 1 ];
+					m_memberIDs[ i ] = m_memberIDs[ m_currentMembers - 1 ];
 				}
 				else
 				{
 					//Just clean out last slot.
-					m_memberIDs[ i ]			= INVALID_ID;
-					m_memberHealing[ i ]	= FALSE;
+					m_memberIDs[ i ] = INVALID_ID;
 				}
 				if( ai )
 				{
@@ -262,16 +258,25 @@ UpdateSleepTime AssaultTransportAIUpdate::update( void )
 					//Generally only player commands allow this, so this flag allows AI commands to do the same.
 					passenger->getAI()->setAllowedToChase( TRUE );
 				}
-				
-				//Check if the passenger is wounded below threshhold (if so make sure we heal him before ordering him to fight!)
-				if( isMemberWounded( passenger ) )
-				{
-					m_memberHealing[ m_currentMembers ] = TRUE;
-				}
 
 				m_currentMembers++;
 			}
 		}
+	}
+
+	//Nobody left to put on the ground: stop posing with the deploy weapon and get on with the order.
+	if( AssaultTransport_nothingLeftToDeploy( transport->testStatus( OBJECT_STATUS_IS_ATTACKING ),
+																						contain && contain->getContainCount() > 0 ) )
+	{
+		if( m_isAttackMove && getAIStateType() != AI_ATTACK_MOVE_TO )
+		{
+			aiAttackMoveToPosition( &m_attackMoveGoalPos, NO_MAX_SHOTS_LIMIT, CMD_FROM_AI );
+		}
+		else if( !m_isAttackMove )
+		{
+			aiIdle( CMD_FROM_AI );
+		}
+		return UPDATE_SLEEP_NONE;
 	}
 
 	//Keep track of the average position of all combat units assigned to me.
@@ -296,44 +301,24 @@ UpdateSleepTime AssaultTransportAIUpdate::update( void )
 			
 			if( member && ai )
 			{
-				Bool contained = member->isContained();
-				Bool wounded = isMemberWounded( member );
-				if( isMemberHealthy( member ) )
+				if( member->isContained() )
 				{
-					//Patched up - he is a fighter again.
-					m_memberHealing[ i ] = FALSE;
-				}
-				if( AssaultTransport_shouldDeployMember( contained, m_memberHealing[ i ] ) )
-				{
-					//Everyone rides out to fight - a scratch or a late boarding used to keep a man
-					//inside for the whole battle.
+					//Everyone rides out to fight, however scratched up he is. Retail kept anyone
+					//short of full health inside and sent the wounded back in to be patched up.
 					ai->aiExit( transport, CMD_FROM_AI );
 				}
-				if( !contained ) 
+				else
 				{
-					if( wounded )
-					{
-						//Order wounded members back to get healed, and keep them in until they are
-						//whole again rather than bouncing them straight back out.
-						m_memberHealing[ i ] = TRUE;
-						if( ai->getAIStateType() != AI_ENTER )
-						{
-							ai->aiEnter( transport, CMD_FROM_AI );
-						}
-					}
-					else 
-					{
-						//Increment the number of fighters and their position.
-						fighterCentroidPos.add( member->getPosition() );
-						fightingMembers++;
+					//Increment the number of fighters and their position.
+					fighterCentroidPos.add( member->getPosition() );
+					fightingMembers++;
 
-						if( !ai->isMoving() )
+					if( !ai->isMoving() )
+					{
+						if( ai->getGoalObject() != designatedTarget )
 						{
-							if( ai->getGoalObject() != designatedTarget )
-							{
-								//Okay, this dude is outside and waiting... order him to attack the designated target
-								ai->aiAttackObject( designatedTarget, NO_MAX_SHOTS_LIMIT, CMD_FROM_AI );
-							}
+							//Okay, this dude is outside and waiting... order him to attack the designated target
+							ai->aiAttackObject( designatedTarget, NO_MAX_SHOTS_LIMIT, CMD_FROM_AI );
 						}
 					}
 				}
@@ -461,36 +446,6 @@ UpdateSleepTime AssaultTransportAIUpdate::update( void )
 }
 
 //-------------------------------------------------------------------------------------------------
-Bool AssaultTransportAIUpdate::isMemberWounded( const Object *member ) const
-{
-	const AssaultTransportAIUpdateModuleData *data = getAssaultTransportAIUpdateModuleData();
-	BodyModuleInterface *body = member->getBodyModule();
-	if( body )
-	{
-		Real ratio = body->getHealth() / body->getMaxHealth();
-		if( ratio < data->m_membersGetHealedAtLifeRatio )
-		{
-			return TRUE;
-		}
-	}
-	return FALSE;
-}
-
-//-------------------------------------------------------------------------------------------------
-Bool AssaultTransportAIUpdate::isMemberHealthy( const Object *member ) const
-{
-	BodyModuleInterface *body = member->getBodyModule();
-	if( body )
-	{
-		if( body->getHealth() == body->getMaxHealth() )
-		{
-			return TRUE;
-		}
-	}
-	return FALSE;
-}
-
-//-------------------------------------------------------------------------------------------------
 /** Is there anything left worth fighting near the transport? ClearRangeRequiredToContinueAttackMove
   * is the INI knob EA declared for exactly this and never read. */
 Bool AssaultTransportAIUpdate::isAssaultAreaClear() const
@@ -585,7 +540,8 @@ void AssaultTransportAIUpdate::xfer( Xfer *xfer )
 	for( int i = 0; i < m_currentMembers; i++ )
 	{
 		xfer->xferObjectID( &(m_memberIDs[ i ]) );
-		xfer->xferBool( &(m_memberHealing[ i ]) );
+		Bool obsoleteHealingFlag = FALSE;		// members no longer go back in to heal; keeps the format
+		xfer->xferBool( &obsoleteHealingFlag );
 	}
 
 	xfer->xferCoord3D( &m_attackMoveGoalPos );
