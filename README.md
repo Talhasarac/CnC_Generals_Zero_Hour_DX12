@@ -104,8 +104,8 @@ Dozens of latent bugs in EA's original code were found and fixed while porting,
 including several that crashed the game outright on modern compilers (inline
 assembly that corrupted CPU registers, buffer overruns in the replay and
 compression code, an unusable crash-stack walker). These are invisible in play
-— they are the reason the game runs at all. The full list is in
-[CLAUDE.md](CLAUDE.md); the porting roadmap is in [PLAN.md](PLAN.md).
+— they are the reason the game runs at all. They are listed in the
+changelog.
 
 
 ## Dependencies

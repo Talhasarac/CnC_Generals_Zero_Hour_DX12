@@ -1,4 +1,4 @@
-# CMake build tree (see CLAUDE.md for the configure/build commands)
+# CMake build tree
 build/
 
 # Build/test logs from the CMake port loop
@@ -10,3 +10,5 @@ __pycache__/
 
 # Local copy of build.example.bat, tweaked per machine
 build.bat
+
+CLAUDE.md
