@@ -450,21 +450,43 @@ UpdateSleepTime AssaultTransportAIUpdate::update( void )
 }
 
 //-------------------------------------------------------------------------------------------------
-/** Is there anything left worth fighting near the transport? ClearRangeRequiredToContinueAttackMove
-  * is the INI knob EA declared for exactly this and never read. */
-Bool AssaultTransportAIUpdate::isAssaultAreaClear() const
+/** Anything alive and hostile to the transport within range of this object? */
+static Bool areaClearAround( const Object *around, const Object *transport, Real range )
 {
-	const AssaultTransportAIUpdateModuleData *data = getAssaultTransportAIUpdateModuleData();
-	const Object *transport = getObject();
-
 	PartitionFilterRelationship		filterRelationship( transport, PartitionFilterRelationship::ALLOW_ENEMIES );
 	PartitionFilterAlive					filterAlive;
 	PartitionFilterSameMapStatus	filterMapStatus( transport );
 	PartitionFilter *filters[] = { &filterRelationship, &filterAlive, &filterMapStatus, NULL };
 
-	Object *enemy = ThePartitionManager->getClosestObject( transport, data->m_clearRangeRequiredToContinueAttackMove,
-																												FROM_CENTER_2D, filters );
-	return enemy == NULL;
+	return ThePartitionManager->getClosestObject( around, range, FROM_CENTER_2D, filters ) == NULL;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Is there anything left worth fighting? ClearRangeRequiredToContinueAttackMove is the INI knob
+  * EA declared for exactly this and never read.
+  * Asked around the deployed men as well as the transport: they are allowed to chase, so the fight
+  * routinely ends up outside the transport's own bubble, and asking only there boarded them with an
+  * enemy still standing in front of them. */
+Bool AssaultTransportAIUpdate::isAssaultAreaClear() const
+{
+	const AssaultTransportAIUpdateModuleData *data = getAssaultTransportAIUpdateModuleData();
+	const Object *transport = getObject();
+	Real range = data->m_clearRangeRequiredToContinueAttackMove;
+
+	if( !areaClearAround( transport, transport, range ) )
+	{
+		return FALSE;
+	}
+
+	for( int i = 0; i < m_currentMembers; i++ )
+	{
+		const Object *member = TheGameLogic->findObjectByID( m_memberIDs[ i ] );
+		if( member && !member->isContained() && !areaClearAround( member, transport, range ) )
+		{
+			return FALSE;
+		}
+	}
+	return TRUE;
 }
 
 //-------------------------------------------------------------------------------------------------
