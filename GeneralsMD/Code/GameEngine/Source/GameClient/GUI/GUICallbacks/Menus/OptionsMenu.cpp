@@ -708,21 +708,11 @@ Int OptionPreferences::getParticleCap(void)
 	return factor;
 }
 
-Real OptionPreferences::getMaxCameraHeight(void)
-{
-	// Not written by the options menu - a power-user Options.ini key.  The
-	// GameData.ini value (retail ~310) is the floor: raising it lets you zoom
-	// out further, lowering it below retail is never honored.
-	OptionPreferences::const_iterator it = find("MaxCameraHeight");
-	if (it == end())
-		return TheGlobalData->m_maxCameraHeight;
-
-	Real height = (Real) atof(it->second.str());
-	if (height < TheGlobalData->m_maxCameraHeight)
-		height = TheGlobalData->m_maxCameraHeight;
-
-	return height;
-}
+/* There is deliberately no MaxCameraHeight here.  The zoom ceiling is how much of the battlefield
+	 you can see at once, so a local Options.ini key would hand one player a permanent advantage over
+	 everyone else in the game - and unlike GameData.ini, Options.ini is not covered by the file
+	 mismatch check that refuses to start a LAN game between machines whose data differs.  The
+	 ceiling is fixed for everyone at ZOOM_OUT_LIMIT_FACTOR times the GameData.ini value. */
 
 Bool OptionPreferences::getUseGridHotKeys(void)
 {

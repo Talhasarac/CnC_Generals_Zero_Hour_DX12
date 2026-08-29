@@ -359,9 +359,8 @@ void GameLODManager::init(void)
 		TheWritableGlobalData->m_useTrees = optionPref.getTreesEnabled();
 	}
 
-	// Camera zoom-out is not a detail level: honor the Options.ini override at
-	// every preset, floored at the GameData.ini value (see getMaxCameraHeight).
-	TheWritableGlobalData->m_maxCameraHeight = optionPref.getMaxCameraHeight();
+	// Camera zoom-out is deliberately not settable here: how much of the battlefield you can see
+	// is a competitive advantage, so it stays at the GameData.ini value for everyone.
 
 	// Grid command-bar keys are an input scheme, not a detail level either.
 	TheWritableGlobalData->m_useGridHotKeys = optionPref.getUseGridHotKeys();

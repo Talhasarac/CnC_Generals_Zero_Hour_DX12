@@ -128,14 +128,20 @@ View *View::prependViewToList( View *list )
 // One "step" is what a single mouse wheel notch does, and what one 30Hz frame of a held
 // zoom key does; a caller driving this from a render frame passes the fraction of a logic
 // frame that has actually gone by, so the zoom rate stops depending on the frame rate.
+//
+// EA's step was 10 world units.  The reachable band is roughly 100 (MinCameraHeight) to 480
+// (MaxCameraHeight * ZOOM_OUT_LIMIT_FACTOR), so crossing it took about 38 notches - most of a
+// wheel's travel to go from the ground to the whole map.  30 puts it at about 13.
+#define ZOOM_STEP_HEIGHT (30.0f)
+
 void View::zoomIn( Real steps )
 {
-	setHeightAboveGround(getHeightAboveGround() - 10.0f * steps);
+	setHeightAboveGround(getHeightAboveGround() - ZOOM_STEP_HEIGHT * steps);
 }
 
 void View::zoomOut( Real steps )
 {
-	setHeightAboveGround(getHeightAboveGround() + 10.0f * steps);
+	setHeightAboveGround(getHeightAboveGround() + ZOOM_STEP_HEIGHT * steps);
 }
 
 /**

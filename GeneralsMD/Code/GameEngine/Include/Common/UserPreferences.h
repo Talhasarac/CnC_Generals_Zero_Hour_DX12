@@ -107,7 +107,6 @@ public:
 	Int	 getStaticGameDetail(void);	// detail level selected by the user.
 	Int	 getIdealStaticGameDetail(void);	// detail level detected for user.
  	Real getGammaValue(void);
-	Real getMaxCameraHeight(void);
 	Bool getUseGridHotKeys(void);
 	Bool getEdgeScrollInWindowedMode(void);
 	Bool getSnapBuildPlacementTo45(void);
