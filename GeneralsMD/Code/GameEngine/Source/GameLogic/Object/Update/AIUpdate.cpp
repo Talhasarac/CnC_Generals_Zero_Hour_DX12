@@ -1727,13 +1727,17 @@ Bool AIUpdateInterface::computePath( PathfindServicesInterface *pathServices, Co
 
 	Path *theNewPath = NULL;
 	TheAI->pathfinder()->setIgnoreObstacleID( getIgnoredObstacleID() );
+	TheAI->pathfinder()->setIgnoreUnderConstruction( getDozerAIInterface() != NULL );
 
 	Coord3D originalDestination = *destination;
 	// sanity check - if destination cell is invalid, don't bother pathing
 
 	LocomotorSurfaceTypeMask surfaces = m_locomotorSet.getValidSurfaces();
-	if (!m_isFinalGoal && TheAI->pathfinder()->isLinePassable( getObject(), surfaces, 
+	if (!m_isFinalGoal && TheAI->pathfinder()->isLinePassable( getObject(), surfaces,
 			getObject()->getLayer(), *getObject()->getPosition(), originalDestination, false, true)) {
+		// this way out skips the reset at the bottom, and a flag left on would answer for whoever
+		// asks the pathfinder next
+		TheAI->pathfinder()->setIgnoreUnderConstruction( FALSE );
 		return computeQuickPath(destination);
 	}
 
@@ -1760,6 +1764,7 @@ Bool AIUpdateInterface::computePath( PathfindServicesInterface *pathServices, Co
 		m_retryPath = true;
 	}
 	TheAI->pathfinder()->setIgnoreObstacleID( INVALID_ID );
+	TheAI->pathfinder()->setIgnoreUnderConstruction( FALSE );
 	if (theNewPath) {
 		// destroy previous path
 		destroyPath();

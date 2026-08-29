@@ -4206,6 +4206,7 @@ void Pathfinder::reset( void )
 	m_closedList = NULL;
 
 	m_ignoreObstacleID = INVALID_ID;
+	m_ignoreUnderConstruction = false;
 	m_isTunneling = false;
 
 	m_moveAlliesDepth = 0;
@@ -5196,10 +5197,52 @@ void Pathfinder::cleanOpenAndClosedLists(void) {
 }
 
 
+//-------------------------------------------------------------------------------------------------
+/** Is this obstacle cell one the builder now searching is allowed to walk over - a structure that
+	* is still going up?  It is the one unit that has to be able to leave a site it has just filled
+	* in: a row of structures laid across the only way out of a base used to shut the dozer in behind
+	* its own work, and it can hardly demolish its way back out.  Only builders get this,
+	* setIgnoreUnderConstruction is off for everyone else.
+	*
+	* Asked in two places that have to agree - whether the cell may be entered at all, and what
+	* entering it costs.  If only the first said yes the search would open the cell and then price it
+	* like a wall, and "allowed through" comes out as "walks all the way around it". */
+//-------------------------------------------------------------------------------------------------
+Bool Pathfinder::builderMayCross( const PathfindCell *cell ) const
+{
+	if (!m_ignoreUnderConstruction || cell == NULL || cell->getType() != PathfindCell::CELL_OBSTACLE)
+		return false;
+
+	Object *obstacle = TheGameLogic->findObjectByID( cell->getObstacleID() );
+	return obstacle != NULL && obstacle->testStatus( OBJECT_STATUS_UNDER_CONSTRUCTION );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** A footprint pinches the ring of clear cells around itself (MARK_BORDER_PINCHED in
+	* internal_classifyObjectFootprint), and a pinched cell is where Path::optimize stops
+	* straightening.  That ring is what a building leans on to keep straightened lines out of itself -
+	* the line test has no cell-type check of its own - so it has to be lifted, and only lifted, where
+	* the building is one this builder may walk over.  Left in place, the crossing came out of the
+	* search as the raw cell staircase, and a turn every cell is the stall the player sees. */
+//-------------------------------------------------------------------------------------------------
+Bool Pathfinder::builderMayCrossPinch( Int cellX, Int cellY, PathfindLayerEnum layer )
+{
+	if (!m_ignoreUnderConstruction)
+		return false;
+
+	// the orthogonal neighbours, which are the ones that set the border pinch
+	if (builderMayCross( getCell( layer, cellX - 1, cellY ) )) return true;
+	if (builderMayCross( getCell( layer, cellX + 1, cellY ) )) return true;
+	if (builderMayCross( getCell( layer, cellX, cellY - 1 ) )) return true;
+	if (builderMayCross( getCell( layer, cellX, cellY + 1 ) )) return true;
+
+	return false;
+}
+
 //
 // Return true if we can move onto this position
 //
-Bool Pathfinder::validMovementPosition( Bool isCrusher, LocomotorSurfaceTypeMask acceptableSurfaces, 
+Bool Pathfinder::validMovementPosition( Bool isCrusher, LocomotorSurfaceTypeMask acceptableSurfaces,
 																			 PathfindCell *toCell, PathfindCell *fromCell )
 {
 	if (toCell == NULL)
@@ -5208,6 +5251,10 @@ Bool Pathfinder::validMovementPosition( Bool isCrusher, LocomotorSurfaceTypeMask
 	// check if the destination cell is classified as an obstacle,
 	// and we happen to be ignoring it
 	if (toCell->isObstaclePresent( m_ignoreObstacleID ))
+		return true;
+
+	// a builder walks through anything that is still going up
+	if (builderMayCross( toCell ))
 		return true;
 
 	if (isCrusher && toCell->isObstacleFence()) {
@@ -6794,7 +6841,13 @@ Int Pathfinder::examineNeighboringCells(PathfindCell *parentCell, PathfindCell *
 			if (notZonePassable) {
 				newCostSoFar += 100*COST_ORTHOGONAL;
 			}
-			if (newCell->getType()==PathfindCell::CELL_OBSTACLE) {
+			//
+			// A hundred cells of detour per obstacle cell - it buys "go round unless there is no
+			// way round at all", which is right for a wall and wrong for a site the builder is
+			// entitled to cross: a footprint is many cells, so the builder was walking the length
+			// of the base to avoid its own half-built barracks.  It crosses at plain ground cost.
+			//
+			if (newCell->getType()==PathfindCell::CELL_OBSTACLE && !builderMayCross(newCell)) {
 				newCostSoFar += 100*COST_ORTHOGONAL;
 			}
 			// check if this neighbor cell is already on the open (waiting to be tried) 
@@ -7039,7 +7092,9 @@ Path *Pathfinder::internalFindPath( Object *obj, const LocomotorSet& locomotorSe
 		return NULL;
 	}
 
-	if (goalCell->isObstaclePresent(m_ignoreObstacleID) || m_isTunneling) {
+	// the same screen again, inside the search: a builder crossing its own site is the third way of
+	// "moving into or out of a building" that this test already knows about
+	if (goalCell->isObstaclePresent(m_ignoreObstacleID) || m_isTunneling || m_ignoreUnderConstruction) {
 		// Use terrain zones instead of building zones, since we are moving into or out of a building.
 		zone2 = m_zoneManager.getEffectiveTerrainZone(zone2);
 		zone2 =  m_zoneManager.getEffectiveZone(locomotorSet.getValidSurfaces(), isCrusher, zone2);
@@ -7309,7 +7364,15 @@ Int Pathfinder::clearCellForDiameter(Bool crusher, Int cellX, Int cellY, Pathfin
 							if (!crusher) {
 								clear = false;
 							}
-						} else {
+						} else if (!builderMayCross(cell)) {
+							//
+							// This width test is what Path::optimizeGroundPath asks before it straightens
+							// a leg (buildGroundPath -> isGroundPathPassable -> here), so a site the
+							// builder is allowed to walk over has to read as clear here too.  Left as an
+							// obstacle, no leg across it could ever be straightened and the builder was
+							// handed the raw cell-by-cell staircase the search came up with - a turn
+							// every cell, which is the stall at each crossing.
+							//
 							clear = false;
 						}
 					} else {
@@ -8644,8 +8707,16 @@ Bool Pathfinder::clientSafeQuickDoesPathExist( const LocomotorSet& locomotorSet,
 	if (goalCell->getType()==PathfindCell::CELL_CLIFF) {
 		return false; // No goals on cliffs.
 	}
-	Bool doingTerrainZone = false;
-	zone1 = m_zoneManager.getEffectiveZone(locomotorSet.getValidSurfaces(), false, parentCell->getZone()); 
+	//
+	// This zone screen is the front door of findPath and it runs before a single cell is looked at,
+	// so for a builder it has to be asked in terrain zones - the ones that merge straight across a
+	// structure.  Otherwise the row of half-built structures the builder is allowed to walk through
+	// still cuts the base into two zones here, and the search it would have won is refused before
+	// it starts.  Terrain zones ignore finished structures too, so this only makes the screen
+	// optimistic: the cell search still turns those away, one A* later.
+	//
+	Bool doingTerrainZone = m_ignoreUnderConstruction;
+	zone1 = m_zoneManager.getEffectiveZone(locomotorSet.getValidSurfaces(), false, parentCell->getZone());
 
 	if (parentCell->getType() == PathfindCell::CELL_OBSTACLE) {
 		doingTerrainZone = true;
@@ -10232,7 +10303,8 @@ struct LinePassableStruct
 		return 1;	// bail out
 	}
 
-	if (!d->allowPinched && to->getPinched()) {
+	if (!d->allowPinched && to->getPinched() &&
+			!pathfinder->builderMayCrossPinch( to_x, to_y, to->getLayer() )) {
 		return 1; // bail out.
 	}
 

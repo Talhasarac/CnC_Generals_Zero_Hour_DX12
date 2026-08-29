@@ -1237,6 +1237,23 @@ void PhysicsBehavior::onCollide( Object *other, const Coord3D *loc, const Coord3
 		return;
 	}
 
+	//
+	// A builder walks through anything that is still going up - the pathfinder routes it straight
+	// over half-built structures (Pathfinder::validMovementPosition), and without this the bounce
+	// off an immobile object below would shove it back out of the path it was given.  Both
+	// directions, because the collision is reported to each side separately.
+	//
+	if (ai != NULL && ai->getDozerAIInterface() != NULL &&
+			other->testStatus( OBJECT_STATUS_UNDER_CONSTRUCTION ))
+	{
+		return;
+	}
+	if (aiOther != NULL && aiOther->getDozerAIInterface() != NULL &&
+			obj->testStatus( OBJECT_STATUS_UNDER_CONSTRUCTION ))
+	{
+		return;
+	}
+
 	if (isIgnoringCollisionsWith(other->getID()))
 	{
 		return;

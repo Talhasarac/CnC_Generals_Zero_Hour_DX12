@@ -121,6 +121,8 @@ found and fixed — EA's own, not port damage.**
 - Your units walk straight over a plan — nothing solid is there until the builder starts work.
 - The plan turns solid the instant the first work goes in, so no building goes up inside its own ghost.
 - The builder starts work from where it reaches the site instead of shuffling into place first.
+- Dozers and workers walk through anything still going up, so they never shut themselves in behind
+  their own work.
 - The stop button prints its key on it, like the build buttons do.
 
 ## Bonuses that come and go when they should

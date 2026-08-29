@@ -767,6 +767,9 @@ public:
 	void adjustPathUsage( const PathNode *from, const PathNode *to, Int delta );	///< [from, to) raw nodes, +1/-1
 
 	void setIgnoreObstacleID( ObjectID objID );					///< if non-zero, the pathfinder will ignore the given obstacle
+	void setIgnoreUnderConstruction( Bool ignore );			///< if true, half-built structures are not obstacles to this search
+	Bool builderMayCross( const PathfindCell *cell ) const;	///< is this obstacle cell a structure the builder now searching may walk over?
+	Bool builderMayCrossPinch( Int cellX, Int cellY, PathfindLayerEnum layer );	///< is this cell pinched only by a site that builder may walk over?
 
 	Bool validMovementPosition( Bool isCrusher, LocomotorSurfaceTypeMask acceptableSurfaces, PathfindCell *toCell, PathfindCell *fromCell = NULL );		///< Return true if given position is a valid movement location
 	Bool validMovementPosition( Bool isCrusher, PathfindLayerEnum layer, const LocomotorSet& locomotorSet, Int x, Int y );					///< Return true if given position is a valid movement location
@@ -948,6 +951,7 @@ private:
 	Path *debugPath;															///< Used for visual debugging
 
 	ObjectID m_ignoreObstacleID;									///< Ignore the given obstacle
+	Bool m_ignoreUnderConstruction;								///< Ignore every structure that is still going up (builders only)
 
 	PathfindZoneManager m_zoneManager;						///< Handles the pathfind zones.
 
@@ -977,6 +981,11 @@ private:
 inline void Pathfinder::setIgnoreObstacleID( ObjectID objID )
 {
 	m_ignoreObstacleID = objID;
+}
+
+inline void Pathfinder::setIgnoreUnderConstruction( Bool ignore )
+{
+	m_ignoreUnderConstruction = ignore;
 }
 
 inline void Pathfinder::worldToGrid( const Coord3D *pos, ICoord2D *cellIndex ) 
