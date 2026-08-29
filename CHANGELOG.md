@@ -37,7 +37,9 @@ found and fixed — EA's own, not port damage.**
 - A unit turns onto whatever is actually shooting it, then resumes the advance.
 - Ctrl on the attack-move click no longer shells the ground instead.
 - Troop Crawlers wait for their squad to climb back in, up to ten seconds.
+- One man who cannot get back aboard no longer parks the Crawler for the rest of the attack move.
 - Their squad stays out until the area is clear, instead of piling back in after every kill.
+- "Clear" now means as far as the men can shoot, so they finish the enemies in front of them.
 - Every man aboard gets out to fight; nobody sits out the battle waiting to be patched up.
 - A Crawler that has lost its whole squad carries on with your order instead of idling.
 - Attack-move state is saved now, instead of coming back as random memory.

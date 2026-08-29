@@ -82,6 +82,16 @@ Bool AssaultTransport_waitingForBoarding( Bool membersOutside, UnsignedInt frame
 }
 
 //-------------------------------------------------------------------------------------------------
+/** Did the boarding wait just run out on somebody who is still outside?
+  * Asked before the countdown ticks, so 1 is the last frame of the wait. The wait used to be
+  * re-armed the moment it hit zero - a man who could not path back in kept the transport standing
+  * there for good, ignoring the attack move. */
+Bool AssaultTransport_boardingWaitJustExpired( Bool membersOutside, UnsignedInt framesRemaining )
+{
+	return membersOutside && framesRemaining == 1;
+}
+
+//-------------------------------------------------------------------------------------------------
 //-------------------------------------------------------------------------------------------------
 //-------------------------------------------------------------------------------------------------
 
@@ -379,6 +389,12 @@ UpdateSleepTime AssaultTransportAIUpdate::update( void )
 				{
 					aiIdle( CMD_FROM_AI );
 				}
+				if( AssaultTransport_boardingWaitJustExpired( membersOutside, m_framesRemaining ) )
+				{
+					//He is never getting back in. Hand him the order himself instead of arming the
+					//wait again next frame, which held the transport still for good.
+					releaseStragglers();
+				}
 				m_framesRemaining--;
 			}
 			else
@@ -450,6 +466,16 @@ UpdateSleepTime AssaultTransportAIUpdate::update( void )
 }
 
 //-------------------------------------------------------------------------------------------------
+/** How far around a unit do we look for someone still worth fighting?
+  * At least as far as that unit can shoot. The INI's ClearRangeRequiredToContinueAttackMove is
+  * shorter than an infantry rifle, so the men used to kill the one enemy they were deployed for
+  * and climb straight back in with the next one standing in plain sight and well in range. */
+Real AssaultTransport_clearScanRange( Real iniRange, Real weaponRange )
+{
+	return weaponRange > iniRange ? weaponRange : iniRange;
+}
+
+//-------------------------------------------------------------------------------------------------
 /** Anything alive and hostile to the transport within range of this object? */
 static Bool areaClearAround( const Object *around, const Object *transport, Real range )
 {
@@ -458,7 +484,7 @@ static Bool areaClearAround( const Object *around, const Object *transport, Real
 	PartitionFilterSameMapStatus	filterMapStatus( transport );
 	PartitionFilter *filters[] = { &filterRelationship, &filterAlive, &filterMapStatus, NULL };
 
-	return ThePartitionManager->getClosestObject( around, range, FROM_CENTER_2D, filters ) == NULL;
+	return ThePartitionManager->getClosestObject( around, AssaultTransport_clearScanRange( range, around->getLargestWeaponRange() ), FROM_CENTER_2D, filters ) == NULL;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -507,6 +533,23 @@ void AssaultTransportAIUpdate::retrieveMembers()
 					ai->aiEnter( getObject(), CMD_FROM_AI );
 				} 
 			}
+		}
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The boarding wait ran out with men still on the ground. Give them the transport's own order so
+  * they walk it themselves; a player-sourced order also drops them from the member list on the next
+  * update, which is what lets the transport get on with the attack move. */
+void AssaultTransportAIUpdate::releaseStragglers()
+{
+	for( int i = 0; i < m_currentMembers; i++ )
+	{
+		Object *member = TheGameLogic->findObjectByID( m_memberIDs[ i ] );
+		AIUpdateInterface *ai = member ? member->getAI() : NULL;
+		if( member && ai && !member->isContained() )
+		{
+			ai->aiAttackMoveToPosition( &m_attackMoveGoalPos, NO_MAX_SHOTS_LIMIT, CMD_FROM_PLAYER );
 		}
 	}
 }

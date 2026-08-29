@@ -105,6 +105,7 @@ public:
 	void reset();
 	Bool isAssaultAreaClear() const;	//Nothing hostile left near the transport?
 	void retrieveMembers();
+	void releaseStragglers();
 	void giveFinalOrders();
 
 protected:

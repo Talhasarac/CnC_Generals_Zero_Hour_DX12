@@ -831,6 +831,44 @@ TEST(troop_crawler_waits_for_boarding_but_not_forever)
 	CHECK( !AssaultTransport_waitingForBoarding( false, 300 ) );
 }
 
+/* AssaultTransportAIUpdate.cpp: the ten second wait was re-armed the frame it hit zero, so one man
+   who could not path back aboard parked the crawler on the spot and it never resumed the attack
+   move.  The last frame of the wait now cuts the stragglers loose instead. */
+extern Bool AssaultTransport_boardingWaitJustExpired( Bool membersOutside, UnsignedInt framesRemaining );
+
+TEST(troop_crawler_gives_up_on_a_man_who_cannot_board)
+{
+	/* last frame of the wait, somebody still on the ground: let him go and drive on. */
+	CHECK( AssaultTransport_boardingWaitJustExpired( true, 1 ) );
+
+	/* still time on the clock: keep waiting. */
+	CHECK( !AssaultTransport_boardingWaitJustExpired( true, 2 ) );
+	CHECK( !AssaultTransport_boardingWaitJustExpired( true, 300 ) );
+
+	/* no wait running - never let go of a squad we are not waiting on. */
+	CHECK( !AssaultTransport_boardingWaitJustExpired( true, 0 ) );
+
+	/* everybody is aboard: nobody to release. */
+	CHECK( !AssaultTransport_boardingWaitJustExpired( false, 1 ) );
+}
+
+/* AssaultTransportAIUpdate.cpp: the "is the fight over?" scan used the raw INI range (50), which is
+   shorter than the rifles the men are carrying - they killed the one enemy they were deployed for
+   and boarded again with the next one standing in range, unshot. */
+extern Real AssaultTransport_clearScanRange( Real iniRange, Real weaponRange );
+
+TEST(troop_crawler_scans_at_least_as_far_as_its_troops_shoot)
+{
+	/* a rifle outranges the INI knob: look as far as the man can shoot. */
+	CHECK_NEAR( AssaultTransport_clearScanRange( 50.0f, 150.0f ), 150.0f, 0.001f );
+
+	/* the knob is the wider of the two (a modded value): honour it. */
+	CHECK_NEAR( AssaultTransport_clearScanRange( 200.0f, 150.0f ), 200.0f, 0.001f );
+
+	/* no weapon at all - getLargestWeaponRange returns -1; never scan a negative radius. */
+	CHECK_NEAR( AssaultTransport_clearScanRange( 50.0f, -1.0f ), 50.0f, 0.001f );
+}
+
 /* AIStates.cpp: an attack move leashes a human player's ground unit so a target
    that backs away cannot walk it off the order.  Aircraft must be exempt: they
    acquire out to weapon range, which is far beyond the leash, so they broke it on
