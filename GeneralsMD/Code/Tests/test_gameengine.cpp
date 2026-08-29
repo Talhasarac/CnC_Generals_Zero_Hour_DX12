@@ -780,7 +780,9 @@ TEST(ctrl_is_force_fire_only_while_the_attack_move_cursor_is_down)
 }
 
 /* AssaultTransportAIUpdate.cpp: the troop crawler deploys its passengers at a target and used to
-   leave them walking behind it for the rest of the attack move once that target died. */
+   leave them walking behind it for the rest of the attack move once that target died - and on a
+   plain attack order it re-boarded them the instant the target died, once per dead enemy.  Both
+   orders now board on this one rule. */
 extern Bool AssaultTransport_shouldRetrieveMembers( Bool membersOutside, Bool membersFighting, Bool areaClear );
 extern Bool AssaultTransport_waitingForBoarding( Bool membersOutside, UnsignedInt framesRemaining );
 

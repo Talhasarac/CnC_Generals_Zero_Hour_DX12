@@ -342,34 +342,36 @@ UpdateSleepTime AssaultTransportAIUpdate::update( void )
 	}
 	else
 	{
-		if( m_isAttackMove )
+		//The target we deployed for is gone. Find out whether the troops we let out still have
+		//something to do - the same rule for both orders, so they no longer climb back in and
+		//straight back out once per dead enemy.
+		Bool membersOutside = FALSE;
+		Bool membersFighting = FALSE;
+		for( int i = 0; i < m_currentMembers; i++ )
 		{
-			//The target we deployed for is gone. Find out whether the troops we let out still have
-			//something to do.
-			Bool membersOutside = FALSE;
-			Bool membersFighting = FALSE;
-			for( int i = 0; i < m_currentMembers; i++ )
+			Object *member = TheGameLogic->findObjectByID( m_memberIDs[ i ] );
+			AIUpdateInterface *ai = member ? member->getAI() : NULL;
+			if( member && ai && !member->isContained() )
 			{
-				Object *member = TheGameLogic->findObjectByID( m_memberIDs[ i ] );
-				AIUpdateInterface *ai = member ? member->getAI() : NULL;
-				if( member && ai && !member->isContained() )
+				membersOutside = TRUE;
+				if( ai->getCurrentVictim() != NULL )
 				{
-					membersOutside = TRUE;
-					if( ai->getCurrentVictim() != NULL )
-					{
-						membersFighting = TRUE;
-					}
+					membersFighting = TRUE;
 				}
 			}
+		}
 
-			//Only worth a partition scan once the troops are out and nobody is engaged.
-			Bool areaClear = FALSE;
-			if( membersOutside && !membersFighting )
-			{
-				areaClear = isAssaultAreaClear();
-			}
+		//Only worth a partition scan once the troops are out and nobody is engaged.
+		Bool areaClear = FALSE;
+		if( membersOutside && !membersFighting )
+		{
+			areaClear = isAssaultAreaClear();
+		}
+		Bool retrieve = AssaultTransport_shouldRetrieveMembers( membersOutside, membersFighting, areaClear );
 
-			if( AssaultTransport_shouldRetrieveMembers( membersOutside, membersFighting, areaClear ) )
+		if( m_isAttackMove )
+		{
+			if( retrieve )
 			{
 				//Nobody left to shoot at, so pick the troops back up instead of walking them along
 				//behind the transport for the rest of the attack move.
@@ -400,8 +402,9 @@ UpdateSleepTime AssaultTransportAIUpdate::update( void )
 				}
 			}
 		}
-		else if( m_isAttackObject )
+		else if( m_isAttackObject && retrieve )
 		{
+			//Ordered onto one target: stay out and finish off whatever else is around us first.
 			retrieveMembers();
 		}
 	}

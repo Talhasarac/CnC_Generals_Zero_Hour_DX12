@@ -1,4 +1,4 @@
-# Zero Hour, rebuilt
+# Command and Conquer: Generals: Zero Hour: Reborn
 
 EA released the 2003 source for preservation. It did not compile, did not run, and nobody had touched
 the bugs inside it in twenty-two years. This build compiles, runs and plays.
@@ -37,6 +37,7 @@ found and fixed — EA's own, not port damage.**
 - A unit turns onto whatever is actually shooting it, then resumes the advance.
 - Ctrl on the attack-move click no longer shells the ground instead.
 - Troop Crawlers wait for their squad to climb back in, up to ten seconds.
+- Their squad stays out until the area is clear, instead of piling back in after every kill.
 - Attack-move state is saved now, instead of coming back as random memory.
 
 ## Your units stop shooting corpses
