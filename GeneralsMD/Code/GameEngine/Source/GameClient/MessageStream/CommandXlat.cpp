@@ -3957,6 +3957,48 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 
 
 
+		//--------------------------------------------------------------------------------------
+		/* Single-player test hook: hand the next player over to the keyboard.  Its AI is deleted
+			 outright, so nothing fights you for its units - press again to walk on to the player
+			 after it, and eventually back around to your own.
+			 ponytail: only the AIPlayer goes away - the map's own scripts can still order that
+			 player's teams about; kill the script lists too if that ever gets in the way. */
+		case GameMessage::MSG_META_SWITCH_CONTROL:
+		{
+			if (TheGameLogic->isInGame() && !TheGameLogic->isInMultiplayerGame() && !TheGameLogic->isInReplayGame())
+			{
+				Int count = ThePlayerList->getPlayerCount();
+				Int idx = 0;
+				for (Int i = 0; i < count; ++i)
+				{
+					if (ThePlayerList->getNthPlayer(i) == ThePlayerList->getLocalPlayer())
+					{
+						idx = i;
+						break;
+					}
+				}
+
+				for (Int i = 1; i < count; ++i)
+				{
+					Player *p = ThePlayerList->getNthPlayer((idx + i) % count);
+					if (p == NULL || p == ThePlayerList->getNeutralPlayer() || !p->isPlayerActive() || !p->isPlayableSide())
+						continue;
+
+					p->setPlayerType(PLAYER_HUMAN, FALSE);	// throws away its AIPlayer, if it had one
+					ThePlayerList->setLocalPlayer(p);
+					TheInGameUI->deselectAllDrawables();
+					ThePartitionManager->refreshShroudForLocalPlayer();
+					TheControlBar->initSpecialPowershortcutBar(p);
+					TheControlBar->setControlBarSchemeByPlayer(p);
+					TheGameClient->updateFakeDrawables();
+					TheInGameUI->message(UnicodeString(L"Now playing: %s"), p->getPlayerDisplayName().str());
+					break;
+				}
+			}
+			disp = DESTROY_MESSAGE;
+			break;
+		}
+
 #ifdef ALLOW_ALT_F4
 		case GameMessage::MSG_META_DEMO_INSTANT_QUIT:
     {

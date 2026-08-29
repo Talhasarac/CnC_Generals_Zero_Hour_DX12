@@ -310,6 +310,7 @@ public:
     MSG_META_TOGGLE_CAMERA_TRACKING_DRAWABLE,
 		MSG_META_TOGGLE_FAST_FORWARD_REPLAY,	      ///< Toggle the fast forward feature
 		MSG_META_DEMO_INSTANT_QUIT,									///< bail out of game immediately
+		MSG_META_SWITCH_CONTROL,										///< take over the next player in a single-player game, AI and all (fork)
 
     
 #if defined(_ALLOW_DEBUG_CHEATS_IN_RELEASE)//may be defined in GameCommon.h

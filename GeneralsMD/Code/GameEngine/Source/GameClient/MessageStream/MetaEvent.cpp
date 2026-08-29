@@ -222,6 +222,7 @@ static const LookupListRec GameMessageMetaTypeNames[] =
 	{ "TOGGLE_CAMERA_TRACKING_DRAWABLE",					GameMessage::MSG_META_TOGGLE_CAMERA_TRACKING_DRAWABLE },
 	{ "TOGGLE_FAST_FORWARD_REPLAY",              GameMessage::MSG_META_TOGGLE_FAST_FORWARD_REPLAY },
   	{ "DEMO_INSTANT_QUIT",												GameMessage::MSG_META_DEMO_INSTANT_QUIT },
+	{ "SWITCH_CONTROL",														GameMessage::MSG_META_SWITCH_CONTROL },
 
 #if defined(_ALLOW_DEBUG_CHEATS_IN_RELEASE)//may be defined in GameCommon.h
 	{ "CHEAT_RUNSCRIPT1",								        	GameMessage::MSG_CHEAT_RUNSCRIPT1 },																	

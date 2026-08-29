@@ -296,6 +296,7 @@ found and fixed — EA's own, not port damage.**
 - Ported leaf-first: every library compiled, tested and green before its dependents.
 - 14 automated suites; most bugs above were found by tests, not by reading code.
 - The game plays itself: eight computer opponents from one command line.
+- Shift-Ctrl-T hands you the opposing base itself: its brain is switched off and the whole army answers to you.
 - Headless, a 23-minute skirmish plays out in 38 seconds, identically every run.
 - It plays itself over a network too — two copies, one real connection.
 - That found every multiplayer replay falsely accusing itself of desync since 2003.
