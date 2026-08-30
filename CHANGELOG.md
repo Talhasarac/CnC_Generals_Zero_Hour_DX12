@@ -136,6 +136,8 @@ found and fixed â€” EA's own, not port damage.**
 - An aircraft carrier remembers the order it was given, and each runway its own ramp.
 - A barracks that has already put its mob on the street does not put a second one out after a load.
 - Effects tied together - a smoke column and its embers - stay tied together across a save.
+- A loaded save puts the world back in the order it was saved in, so the match plays on from where it was instead of resolving everything backwards.
+- And it shows you your own memory of the fog, not everyone else's: a loaded game used to draw what every player remembered on top of the world.
 - Saved units come back with the map's weapons, not the stock ones.
 - Restarting a skirmish restarts the same skirmish, with a replay that plays back.
 - Replays sound and look the way they did when you played them.

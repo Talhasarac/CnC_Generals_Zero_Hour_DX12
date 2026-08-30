@@ -195,6 +195,13 @@ public:
 
 	Object* getNextObject() { return m_next; }
 	const Object* getNextObject() const { return m_next; }
+	Object* getPrevObject() { return m_prev; }
+	const Object* getPrevObject() const { return m_prev; }
+
+	// only the save/load code relinks the global list by hand, to put a loaded list back in the
+	// order it was saved in
+	void friend_setNextObject( Object *obj ) { m_next = obj; }
+	void friend_setPrevObject( Object *obj ) { m_prev = obj; }
 
 	void updateObjValuesFromMapProperties(Dict* properties);			///< Brings in properties set in the editor.
 

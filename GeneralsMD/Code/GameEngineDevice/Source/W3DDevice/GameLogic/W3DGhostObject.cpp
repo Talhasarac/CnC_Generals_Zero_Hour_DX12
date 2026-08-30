@@ -748,23 +748,32 @@ void W3DGhostObject::xfer( Xfer *xfer )
 				// xfer data
 				xfer->xferSnapshot( objectSnapshot );
 
-				// add snapshot to the scene
-				objectSnapshot->addToScene();
-										
-			}  // end for, j	
+			}  // end for, j
 
 		}  // end else, load
 
 	}  // end for, i
 
 	//
-	// since there is a snapshot for this object, there cannot be a regular object/drawable
-	// in the world, we need to remove it
+	// Put the local player's remembered version of this object into the scene.  Every player's
+	// snapshots used to be added as they were read, so a loaded game drew what each of the other
+	// players remembers on top of the world - buildings and units in places only they had seen.
 	//
-	if( m_parentObject && 
-			m_parentSnapshots[ ThePlayerList->getLocalPlayer()->getPlayerIndex() ] != NULL &&
-			xfer->getXferMode() == XFER_LOAD )
-		removeParentObject();
+	if( xfer->getXferMode() == XFER_LOAD )
+	{
+		const Int localIndex = ThePlayerList->getLocalPlayer()->getPlayerIndex();
+		if( m_parentSnapshots[ localIndex ] != NULL )
+		{
+			addToScene( localIndex );
+
+			//
+			// since there is a snapshot for this object, there cannot be a regular object/drawable
+			// in the world, we need to remove it
+			//
+			if( m_parentObject )
+				removeParentObject();
+		}
+	}
 
 	// count of partition shroudedness info to follow
 	UnsignedByte shroudednessCount = 0;

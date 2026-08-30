@@ -5002,13 +5002,15 @@ void GameLogic::prepareLogicForObjectLoad( void )
 	* 5: Added xfering the BuildAssistant's sell list.
 	* 9: Added m_rankPointsToAddAtGameStart, or else on a load game, your RestartGame button will forget your exp
   * 10: xfer m_superweaponRestriction
+	* 11: objects are written back to front, so that loading - which prepends each one - rebuilds
+	*     the list in the order it was saved in.  Version 10 and earlier are reversed on load.
 	*/	
 // ------------------------------------------------------------------------------------------------
 void GameLogic::xfer( Xfer *xfer )
 {
   
 	// version
-	const XferVersion currentVersion = 10;
+	const XferVersion currentVersion = 11;
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
@@ -5042,7 +5044,15 @@ void GameLogic::xfer( Xfer *xfer )
 	if( xfer->getXferMode() == XFER_SAVE )
 	{
 
+		// Save the list backwards.  Loading creates each object in turn and every new object is
+		// prepended to the list, so a list saved front to back comes back reversed - and the order
+		// of that list is the order everything iterates objects in, which is the order the
+		// simulation resolves things in.  Written back to front, the prepending puts it right.
+		Object *lastObj = NULL;
 		for( obj = getFirstObject(); obj; obj = obj->getNextObject() )
+			lastObj = obj;
+
+		for( obj = lastObj; obj; obj = obj->getPrevObject() )
 		{
 
 			// get the object TOC entry for this template
@@ -5124,6 +5134,24 @@ void GameLogic::xfer( Xfer *xfer )
 				TheAI->pathfinder()->addWallPiece( obj );
 
 		}  // end for, i
+
+		// A save written before version 11 stored the list front to back, and the prepending above
+		// therefore built it backwards.  Turn it round, so an old save loads in the order it was
+		// played in rather than in the mirror of it.
+		if( version <= 10 )
+		{
+			Object *prev = NULL;
+			Object *current = m_objList;
+			while( current != NULL )
+			{
+				Object *next = current->getNextObject();
+				current->friend_setNextObject( prev );
+				current->friend_setPrevObject( next );
+				prev = current;
+				current = next;
+			}
+			m_objList = prev;
+		}
 
 	}  // end else
 
