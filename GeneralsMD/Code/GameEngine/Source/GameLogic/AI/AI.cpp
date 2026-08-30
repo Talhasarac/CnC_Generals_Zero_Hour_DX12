@@ -1021,11 +1021,13 @@ Real AI::getAdjustedVisionRangeForObject(const Object *object, Int factorsToCons
 	*    win in twenty over having none.
 	*
 	*  - useInfluenceMapForAttackLane is FALSE everywhere, deliberately.  It works - it aims at the
-	*    enemy's most valuable visible cell instead of the middle of his base - and over 20 matches
-	*    it cost two wins.  Aiming at the money means walking past the army; the roadmap's actual
-	*    proposal is to enter where the *defence density* is lowest, which is the threat map rather
-	*    than the cash map, and that is the next thing to try.  getMostValuableVisibleLocation and
-	*    influenceMapAttackGoal are kept for it.
+	*    enemy's most valuable visible cell instead of the middle of his base - and measured against
+	*    itself it does not pay: with one rung copied onto the other so the lane was the only
+	*    difference, and both seats played, it went 7-9 over 32 matches, and the side using it took
+	*    twice the losses for half the kills.  Aiming at the money means walking past the army.  The
+	*    roadmap's actual proposal is to come in where the *defence density* is lowest, which is the
+	*    threat map rather than the cash map; getMostValuableVisibleLocation and
+	*    influenceMapAttackGoal are kept for that attempt.
 	*
 	*                      scoutS maxSc react decis   cntr  mass  ttk   indiv team  infl  focus  save   harv  expand guard hoard */
 static const AIDifficultyProfile s_defaultSkillLadder[ AISKILL_COUNT ] =

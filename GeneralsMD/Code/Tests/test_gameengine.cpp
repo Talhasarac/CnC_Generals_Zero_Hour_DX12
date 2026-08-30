@@ -5817,8 +5817,9 @@ TEST(the_difficulty_ladder_climbs_in_every_direction_it_should)
 		CHECK( upper.m_retreatIndividualUnits >= lower.m_retreatIndividualUnits );
 		CHECK( upper.m_retreatTeams >= lower.m_retreatTeams );
 		CHECK( upper.m_useInfluenceMapForAttackLane >= lower.m_useInfluenceMapForAttackLane );
-		// ... and it is off at every rung today: it measured as two wins in twenty worse than
-		// aiming at the base. See the note on the table in AI.cpp before switching it back on.
+		// ... and it is off at every rung today: measured against itself with the lane as the only
+		// difference and both seats played, it went 7-9 over 32 matches. See the note on the table
+		// in AI.cpp before switching it back on.
 		CHECK( !upper.m_useInfluenceMapForAttackLane );
 		CHECK( upper.m_focusFire >= lower.m_focusFire );
 		CHECK( upper.m_savesSciencePoints >= lower.m_savesSciencePoints );

@@ -326,7 +326,11 @@ static void startAutoSkirmish( void )
 		}
 		else
 		{
-			slot.setState( (SlotState)TheGlobalData->m_autoSkirmishAIState );
+			// -aidiff2 gives the odd slots a different rung, so a batch can play one against another
+			Int state = TheGlobalData->m_autoSkirmishAIState;
+			if ((i & 1) && TheGlobalData->m_autoSkirmishAIStateOdd != 0)
+				state = TheGlobalData->m_autoSkirmishAIStateOdd;
+			slot.setState( (SlotState)state );
 			slot.setPlayerTemplate( PLAYERTEMPLATE_RANDOM );
 		}
 		slot.setColor( -1 );			// -1 is "random" to populateRandomSideAndColor

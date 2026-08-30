@@ -77,7 +77,8 @@ found and fixed â€” EA's own, not port damage.**
 
 - Easy, Steady, Medium, Hard, Brutal, Merciless. Medium to Brutal used to be a cliff; the steps in between are where a player actually needs them.
 - Every level plays by your rules. No level gets extra money, cheaper units, faster building, longer vision or tougher units - in either direction. What changes is what the computer is allowed to decide: how often it looks at the map, how long it takes to react, whether it counters what you field, whether it masses before attacking, whether it pulls damaged units out.
-- Each step up switches on exactly one new thing, so you can say in a sentence what you get for climbing. Easy is slow and brave. Steady saves its damaged units. Medium expands on its own. Hard counters your build. Brutal masses and commits. Merciless is the ceiling - everything on, no hesitation.
+- Each step up switches on exactly one new thing, so you can say in a sentence what you get for climbing.
+- Measured, not asserted: Merciless beats Easy 15-0 over 32 headless matches with the seats swapped both ways, on twice the army and twice the spending. Easy is slow and brave. Steady saves its damaged units. Medium expands on its own. Hard counters your build. Brutal masses and commits. Merciless is the ceiling - everything on, no hesitation.
 - Making Easy easier means giving it worse decisions, never less money. That is the whole promise.
 - The computer also picks a personality each match and keeps it: one plays for the attack, the other for the base. Same resources, spent differently.
 

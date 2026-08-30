@@ -1023,6 +1023,33 @@ Int parseAIDifficulty(char *args[], int num)
 	return 2;
 }
 
+/** -aidiff2 <name>: give the odd-numbered skirmish slots a different rung from -aidiff.
+	*
+	* Without this the batch runner can only play a rung against itself, which says nothing about
+	* whether the ladder is a ladder.  The whole no-cheat design (AI-ROADMAP.md D6) rests on higher
+	* rungs actually beating lower ones through better decisions, and that is not a claim to make
+	* without measuring it. */
+Int parseAIDifficulty2(char *args[], int num)
+{
+	if (TheWritableGlobalData && num > 1)
+	{
+		AsciiString difficulty = args[1];
+		if (difficulty.compareNoCase("easy") == 0)
+			TheWritableGlobalData->m_autoSkirmishAIStateOdd = SLOT_EASY_AI;
+		else if (difficulty.compareNoCase("steady") == 0)
+			TheWritableGlobalData->m_autoSkirmishAIStateOdd = SLOT_STEADY_AI;
+		else if (difficulty.compareNoCase("medium") == 0 || difficulty.compareNoCase("med") == 0)
+			TheWritableGlobalData->m_autoSkirmishAIStateOdd = SLOT_MED_AI;
+		else if (difficulty.compareNoCase("hard") == 0)
+			TheWritableGlobalData->m_autoSkirmishAIStateOdd = SLOT_HARD_AI;
+		else if (difficulty.compareNoCase("brutal") == 0)
+			TheWritableGlobalData->m_autoSkirmishAIStateOdd = SLOT_BRUTAL_AI;
+		else
+			TheWritableGlobalData->m_autoSkirmishAIStateOdd = SLOT_MERCILESS_AI;
+	}
+	return 2;
+}
+
 Int parseObserver(char *args[], int num)
 {
 	if (TheWritableGlobalData)
@@ -1470,6 +1497,7 @@ static CommandLineParam params[] =
 	{ "-fps", parseFPSLimit },
 	{ "-autoskirmish", parseAutoSkirmish },
 	{ "-aidiff", parseAIDifficulty },
+	{ "-aidiff2", parseAIDifficulty2 },
 	{ "-observer", parseObserver },
 	{ "-headless", parseHeadless },
 	{ "-maxframes", parseMaxGameFrames },
