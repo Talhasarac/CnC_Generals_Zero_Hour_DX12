@@ -181,6 +181,7 @@ found and fixed â€” EA's own, not port damage.**
 ## Sharper textures, for free
 
 - 481 base-game textures at four times the resolution now beat Zero Hour's downscaled copies.
+- A long thin texture loads at the size it was drawn at. Anything wider than eight to one used to be stretched onto a bigger, blurrier one, because that was the limit of a 2002 graphics card; the card is asked now, and modern ones have no such limit.
 
 ## Every replay, not just the last one
 

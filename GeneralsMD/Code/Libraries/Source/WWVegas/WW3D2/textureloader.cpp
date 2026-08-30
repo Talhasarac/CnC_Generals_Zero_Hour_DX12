@@ -408,18 +408,26 @@ void TextureLoader::Validate_Texture_Size
 		poweroftwodepth=dx8caps.MaxVolumeExtent;
 	}
 
-	if (poweroftwowidth>poweroftwoheight) 
+	// A texture wider than 8:1 used to be padded out until it was not, because that was what the
+	// cards of 2002 could hold.  Ask the device instead: it reports its own limit, and 0 means it
+	// has none - so a long thin texture loads at the size it was drawn at rather than being
+	// stretched onto a bigger, blurrier one.
+	const unsigned maxTextureAspectRatio = dx8caps.MaxTextureAspectRatio;
+	if (maxTextureAspectRatio != 0)
 	{
-		while (poweroftwowidth/poweroftwoheight>8) 
+		if (poweroftwowidth>poweroftwoheight)
 		{
-			poweroftwoheight*=2;
+			while ((unsigned)(poweroftwowidth/poweroftwoheight)>maxTextureAspectRatio)
+			{
+				poweroftwoheight*=2;
+			}
 		}
-	}
-	else 
-	{
-		while (poweroftwoheight/poweroftwowidth>8) 
+		else
 		{
-			poweroftwowidth*=2;
+			while ((unsigned)(poweroftwoheight/poweroftwowidth)>maxTextureAspectRatio)
+			{
+				poweroftwowidth*=2;
+			}
 		}
 	}
 
