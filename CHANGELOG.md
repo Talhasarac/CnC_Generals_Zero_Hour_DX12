@@ -397,6 +397,8 @@ found and fixed â€” EA's own, not port damage.**
 - A unit that has to deploy before firing does it standing still. It used to set up wherever it happened to be when the target came into range, then pack straight back up because it was still on its way somewhere.
 - An Aurora that went supersonic to attack comes back down again. The timer ran out and nothing put the normal engine back.
 - Calling in a gunship selects it for the player who called it, not for everyone watching the match.
+- A transport told to load into something it cannot enter - or into itself, which happens when it is part of the group you gave the order to - ignores the order instead of flying over and hovering beside it.
+- A pilot ejecting from a wreck no longer plays a promotion sound and animation somewhere out in the map.
 - Something going wrong now writes a readable crash report.
 
 ## Long orders stopped hitching

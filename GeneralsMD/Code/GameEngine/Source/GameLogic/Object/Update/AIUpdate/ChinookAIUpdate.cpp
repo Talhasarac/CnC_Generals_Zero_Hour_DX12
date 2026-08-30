@@ -1297,6 +1297,19 @@ void ChinookAIUpdate::aiDoCommand(const AICommandParms* parms)
 		}
 		break;
 
+		case AICMD_ENTER:
+		{
+			// A group order goes to every unit in the group, so a transport told to load into
+			// something can be handed itself, or something it cannot enter at all - it would then
+			// fly off and hover beside it forever.
+			if (parms->m_obj && parms->m_obj->getID() == getObject()->getID())
+				return;
+
+			if (!TheActionManager->canEnterObject(getObject(), parms->m_obj, parms->m_cmdSource, DONT_CHECK_CAPACITY))
+				return;
+		}
+		break;
+
 		case AICMD_MOVE_TO_POSITION_AND_EVACUATE:
 		case AICMD_MOVE_TO_POSITION_AND_EVACUATE_AND_EXIT:
 		{

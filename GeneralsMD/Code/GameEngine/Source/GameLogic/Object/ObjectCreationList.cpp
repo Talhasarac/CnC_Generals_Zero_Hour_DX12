@@ -1022,7 +1022,9 @@ protected:
 			DEBUG_LOG(("Object %s inherits veterancy level %d from %s\n",
 				obj->getTemplate()->getName().str(), sourceObj->getVeterancyLevel(), sourceObj->getTemplate()->getName().str()));
 			VeterancyLevel v = sourceObj->getVeterancyLevel();
-			obj->getExperienceTracker()->setVeterancyLevel(v);
+			// no fanfare: the object has only just been created and its transform is not set yet,
+			// so the level-up sound and animation would play somewhere it is not
+			obj->getExperienceTracker()->setVeterancyLevel(v, FALSE);
 
 			//In order to make things easier for the designers, we are going to transfer the unit name
 			//to the ejected thing... so the designer can control the pilot with the scripts.
