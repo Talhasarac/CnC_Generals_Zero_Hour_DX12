@@ -1086,7 +1086,9 @@ InGameUI::InGameUI()
 	{
 		m_productionStripCount[ stripRow ] = 0;
 		m_productionStripTotal[ stripRow ] = 0;
+		m_productionStripRowColor[ stripRow ] = 0;
 	}
+	m_productionStripWatching = FALSE;
 	m_productionStripCameoW = PRODUCTION_STRIP_CAMEO;
 	m_productionStripCameoH = PRODUCTION_STRIP_CAMEO;
 	m_productionStripOverflow = NULL;
@@ -6104,21 +6106,32 @@ void InGameUI::drawProductionStripRow( Int row, Int y )
 		// the cursor is really on, and an accidental cancel costs the whole item.
 		//
 		Bool cancelHover = FALSE;
-		if( TheKeyboard && TheKeyboard->isCtrl() && TheMouse )
+		if( !m_productionStripWatching && TheKeyboard && TheKeyboard->isCtrl() && TheMouse )
 		{
 			const MouseIO *io = TheMouse->getMouseStatus();
 			cancelHover = io && io->pos.x >= x && io->pos.x < x + cameoW &&
 										io->pos.y >= y && io->pos.y < y + cameoH;
 		}
 
-		// same border colours the command bar puts on its build and upgrade buttons
+		// same border colours the command bar puts on its build and upgrade buttons - except while
+		// watching, where the border is whose row it is, since that is what the row is there to say
 		Color border = GameMakeColor( 160, 160, 160, 160 );
 		if( cancelHover )
 			border = GameMakeColor( 255, 80, 80, 255 );
+		else if( m_productionStripRowColor[ row ] != 0 )
+		{
+			// the stored player colour's alpha is not ours to trust, the health bars found that out
+			UnsignedByte r, g, b, a;
+			GameGetColorComponents( m_productionStripRowColor[ row ], &r, &g, &b, &a );
+			border = GameMakeColor( r, g, b, 255 );
+		}
 		else if( TheControlBar )
 			border = slot->isUpgrade ? TheControlBar->getUpgradeBorderColor()
 															 : TheControlBar->getBuildBorderColor();
-		TheDisplay->drawOpenRect( x, y, cameoW, cameoH, 1.0f, border );
+
+		// a team border is the row's whole label, so it is drawn heavy enough to read as one
+		TheDisplay->drawOpenRect( x, y, cameoW, cameoH,
+															m_productionStripRowColor[ row ] != 0 ? 2.0f : 1.0f, border );
 
 		if( cancelHover )
 		{
@@ -6170,6 +6183,7 @@ void InGameUI::drawProductionStrip( void )
 	{
 		m_productionStripCount[ row ] = 0;
 		m_productionStripTotal[ row ] = 0;
+		m_productionStripRowColor[ row ] = 0;
 	}
 
 	if( TheGameLogic == NULL || !TheGameLogic->isInGame() || TheGameLogic->isInShellGame() )
@@ -6179,25 +6193,63 @@ void InGameUI::drawProductionStrip( void )
 	if( player == NULL )
 		return;
 
-	ProductionStripGather gather;
-	gather.slot = m_productionStrip[ 0 ];
-	gather.count = &m_productionStripCount[ 0 ];
-	gather.total = &m_productionStripTotal[ 0 ];
-	player->iterateObjects( gatherProductionStrip, &gather );
-
 	//
-	// a single selected producer gets its own row underneath, so the building you are looking at
-	// is readable without picking its items out of the whole base's queue
+	// Watching rather than playing (an observer, or a player who has been knocked out and stayed
+	// to watch): the strip becomes every player's queue at once, one row each, wearing that
+	// player's colour. "Who is building what" is the question a spectator is actually asking, and
+	// it was the one thing the game never showed - the observer's own queue is empty, so the strip
+	// used to be blank for the whole match.
 	//
-	if( getSelectCount() == 1 && !m_selectedDrawables.empty() )
+	m_productionStripWatching = !player->isPlayerActive();
+	if( m_productionStripWatching )
 	{
-		Object *sel = m_selectedDrawables.front()->getObject();
-		if( sel && sel->getControllingPlayer() == player )
-			appendProducerQueue( sel, m_productionStrip[ 1 ], &m_productionStripCount[ 1 ],
-													 PRODUCTION_STRIP_ROW_MAX, &m_productionStripTotal[ 1 ] );
+		Int row = 0;
+		for( Int i = 0; i < ThePlayerList->getPlayerCount() && row < PRODUCTION_STRIP_ROWS; i++ )
+		{
+			Player *p = ThePlayerList->getNthPlayer( i );
+			if( p == NULL || p == player || !p->isPlayerActive() || !p->isPlayableSide() )
+				continue;
+
+			ProductionStripGather watch;
+			watch.slot = m_productionStrip[ row ];
+			watch.count = &m_productionStripCount[ row ];
+			watch.total = &m_productionStripTotal[ row ];
+			p->iterateObjects( gatherProductionStrip, &watch );
+
+			if( m_productionStripCount[ row ] > 0 )
+			{
+				m_productionStripRowColor[ row ] = p->getPlayerColor();
+				row++;						// a player with nothing queued gets no row rather than an empty one
+			}
+		}
+	}
+	else
+	{
+		ProductionStripGather gather;
+		gather.slot = m_productionStrip[ 0 ];
+		gather.count = &m_productionStripCount[ 0 ];
+		gather.total = &m_productionStripTotal[ 0 ];
+		player->iterateObjects( gatherProductionStrip, &gather );
+
+		//
+		// a single selected producer gets its own row underneath, so the building you are looking at
+		// is readable without picking its items out of the whole base's queue
+		//
+		if( getSelectCount() == 1 && !m_selectedDrawables.empty() )
+		{
+			Object *sel = m_selectedDrawables.front()->getObject();
+			if( sel && sel->getControllingPlayer() == player )
+				appendProducerQueue( sel, m_productionStrip[ 1 ], &m_productionStripCount[ 1 ],
+														 PRODUCTION_STRIP_ROW_MAX, &m_productionStripTotal[ 1 ] );
+		}
 	}
 
-	if( m_productionStripCount[ 0 ] == 0 && m_productionStripCount[ 1 ] == 0 )
+	Int rowsUsed = 0;
+	for( Int row = 0; row < PRODUCTION_STRIP_ROWS; row++ )
+		if( m_productionStripCount[ row ] > 0 )
+			rowsUsed = row + 1;
+
+	if( rowsUsed == 0 )
 		return;
 
 	//
@@ -6237,22 +6289,21 @@ void InGameUI::drawProductionStrip( void )
 		}
 	}
 
-	// the selected building's row is the lower one, nearest the bar it belongs to
+	//
+	// rows stack upwards from just above the control bar, last row nearest the bar: playing, that
+	// puts the selected building's row under the base's; watching, it just keeps the pile off the
+	// bar. A row that would run off the top of the screen is dropped rather than drawn over the
+	// tactical view's edge.
+	//
 	const Int lowerY = barTop - m_productionStripCameoH - PRODUCTION_STRIP_LIFT;
-	const Int upperY = lowerY - m_productionStripCameoH - PRODUCTION_STRIP_GAP;
+	const Int rowStep = m_productionStripCameoH + PRODUCTION_STRIP_GAP;
 
-	if( m_productionStripCount[ 1 ] > 0 )
+	for( Int row = rowsUsed - 1; row >= 0; row-- )
 	{
-		if( upperY < 0 )
-			return;
-		drawProductionStripRow( 0, upperY );
-		drawProductionStripRow( 1, lowerY );
-	}
-	else
-	{
-		if( lowerY < 0 )
-			return;
-		drawProductionStripRow( 0, lowerY );
+		const Int y = lowerY - ( rowsUsed - 1 - row ) * rowStep;
+		if( y < 0 )
+			break;
+		drawProductionStripRow( row, y );
 	}
 }
 
@@ -6276,11 +6327,14 @@ Bool InGameUI::handleProductionStripClick( const ICoord2D *mouse, Bool cancel )
 			if( producer == NULL )
 				return TRUE;				// the building died under the cursor - the click is still ours
 
-			if( cancel )
+			if( cancel && producer->isLocallyControlled() )
 			{
 				//
 				// the producer travels with the message: the strip cancels on buildings that are not
 				// selected, so the logic cannot work out whose queue this is otherwise
+				//
+				// Only ever our own: while watching, the rows are other people's queues, and a
+				// spectator's ctrl-click is a camera jump, not a cancel.
 				//
 				GameMessage *msg = TheMessageStream->appendMessage( slot->isUpgrade
 																													 ? GameMessage::MSG_CANCEL_UPGRADE

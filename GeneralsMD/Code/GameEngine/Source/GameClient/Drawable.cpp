@@ -2819,6 +2819,23 @@ static Bool computeHealthRegion( const Drawable *draw, IRegion2D& region )
 
 }  // end computeHealthRegion
 
+//-------------------------------------------------------------------------------------------------
+/** Whether this object's private business - what it is building, what is charging up on it - is
+	* ours to see. Yours always is. An observer's is everybody's: watching a match is exactly the
+	* case where "who is building what" is the whole point, and a spectator commands nothing, so
+	* there is nothing to give away. Same test the control bar uses to switch to its observer
+	* scheme, so a defeated player watching the rest of the game out gets it too. */
+//-------------------------------------------------------------------------------------------------
+static Bool showsOwnerDetail( const Object *obj )
+{
+	if( obj->isLocallyControlled() )
+		return TRUE;
+
+	const Player *local = ThePlayerList ? ThePlayerList->getLocalPlayer() : NULL;
+	return local != NULL && !local->isPlayerActive();
+
+}  // end showsOwnerDetail
+
 
 // ------------------------------------------------------------------------------------------------
 
@@ -4189,7 +4206,7 @@ void Drawable::drawHealthBar(const IRegion2D* healthBarRegion)
 		Int stackY = healthBarRegion->lo.y - 3;
 
 		// own producers show a yellow production-progress bar above the (selection) line, with seconds left at its top-left
-		ProductionUpdateInterface *pu = obj->isLocallyControlled() ? obj->getProductionUpdateInterface() : NULL;
+		ProductionUpdateInterface *pu = showsOwnerDetail( obj ) ? obj->getProductionUpdateInterface() : NULL;
 		const ProductionEntry *pe = pu ? pu->firstProduction() : NULL;
 		if( pe )
 		{
@@ -4285,7 +4302,7 @@ void Drawable::drawHealthBar(const IRegion2D* healthBarRegion)
 		// not own is skipped, and so is one that has finished charging: a full bar that never
 		// empties is the same clutter in a different colour.
 		//
-		if( obj->isLocallyControlled() &&
+		if( showsOwnerDetail( obj ) &&
 				!obj->getStatusBits().test( OBJECT_STATUS_UNDER_CONSTRUCTION ) &&
 				!obj->getStatusBits().test( OBJECT_STATUS_SOLD ) )
 		{

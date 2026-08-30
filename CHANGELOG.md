@@ -249,6 +249,8 @@ found and fixed â€” EA's own, not port damage.**
 - Aircraft always show how many attack runs they have left.
 - The corner readout separates game time from real time, and sim rate from fps.
 - Pausing stops both clocks.
+- Watching a match, the strip becomes every player's queue at once: one row each, bordered in that player's colour.
+- Watching, the bars over the buildings are everyone's too - what each factory is turning out, and how long the superweapons have left. An observer used to see none of it.
 
 ## Placing buildings
 

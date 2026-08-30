@@ -585,7 +585,8 @@ public:  // ********************************************************************
 	// producer's queue it is, and where it was drawn this frame.
 	//
 	enum { PRODUCTION_STRIP_ROW_MAX = 16 };	///< cameos one row will draw; the rest become a "+N"
-	enum { PRODUCTION_STRIP_ROWS = 2 };			///< the global row, and the selected producer's row
+	enum { PRODUCTION_STRIP_ROWS = 8 };			///< playing: the global row and the selected producer's row.
+																					///  watching: one row per player, so eight of them
 	struct ProductionStripSlot
 	{
 		ObjectID			producer;						///< the building this item is queued on
@@ -939,6 +940,8 @@ protected:
 	ProductionStripSlot					m_productionStrip[ PRODUCTION_STRIP_ROWS ][ PRODUCTION_STRIP_ROW_MAX ];
 	Int													m_productionStripCount[ PRODUCTION_STRIP_ROWS ];	///< cameos drawn per row
 	Int													m_productionStripTotal[ PRODUCTION_STRIP_ROWS ];	///< items queued per row, drawn or not
+	Color												m_productionStripRowColor[ PRODUCTION_STRIP_ROWS ];	///< whose row it is, 0 for the local player's own
+	Bool												m_productionStripWatching;	///< the rows are every player's, not ours
 	Int													m_productionStripCameoW;		///< cameo size this frame, in the control bar's aspect
 	Int													m_productionStripCameoH;
 	DisplayString *							m_productionStripOverflow;	///< the "+N" that stands for the rest of a row
