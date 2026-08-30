@@ -551,24 +551,13 @@ StateReturnType HackInternetState::update()
 				//Grant the unit some experience for a successful hack.
 				xp->addExperiencePoints( ai->getXpPerCashUpdate() );
 
-				Bool displayMoney = TRUE;
-				if( owner->testStatus(OBJECT_STATUS_STEALTHED) )
-				{
-					// OY LOOK!  I AM USING LOCAL PLAYER.  Do not put anything other than TheInGameUI->addFloatingText in the block this controls!!!
-					if( !owner->isLocallyControlled() && !owner->testStatus(OBJECT_STATUS_DETECTED) )
-					{
-						displayMoney = FALSE;
-					}
-				}
-				if( owner->getContainedBy() && owner->getContainedBy()->testStatus(OBJECT_STATUS_STEALTHED) )
-				{
-					// OY LOOK!  I AM USING LOCAL PLAYER.  Do not put anything other than TheInGameUI->addFloatingText in the block this controls!!!
-					if( !owner->getContainedBy()->isLocallyControlled() && !owner->getContainedBy()->testStatus(OBJECT_STATUS_DETECTED) )
-					{
-						displayMoney = FALSE;
-					}
-				}
-				
+				// OY LOOK!  I AM USING LOCAL PLAYER.  Do not put anything other than TheInGameUI->addFloatingText in the block this controls!!!
+				// Whether the figure shows is whether this watcher can see the hacker.  Spelling the
+				// rule out as "mine, or not stealthed, or detected" reads the same for a player but
+				// hides it from an ally who shares the sight and from an observer who sees everything.
+				Drawable *ownerDraw = owner->getDrawable();
+				Bool displayMoney = ( ownerDraw != NULL && ownerDraw->isVisible() );
+
 				if( displayMoney )
 				{
 					// OY LOOK!  I AM USING LOCAL PLAYER.  Do not put anything other than TheInGameUI->addFloatingText in the block this controls!!!

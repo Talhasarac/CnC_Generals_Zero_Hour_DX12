@@ -93,6 +93,22 @@ public:
 	virtual void restorePartitionData(void);	///<restores ghost objects into the partition manager.
 	inline void lockGhostObjects(Bool enableLock) {m_lockGhostObjects=enableLock;}	///<temporary lock on creating new ghost objects. Only used by map border resizing!
 	inline void saveLockGhostObjects(Bool enableLock) {m_saveLockGhostObjects=enableLock;}
+
+	// Remembering what is under the fog costs a snapshot per player, so by default only the local
+	// player's memory is kept.  Anyone who can become a different player - an observer, or the
+	// take-over key - needs every player's, or the fog they are handed is still the first player's.
+	// This used to be the compile-time DEBUG_FOG_MEMORY, which meant it was never on in a build
+	// anyone plays.
+	inline void setTrackAllPlayers(Bool track) { m_trackAllPlayers = track; }
+	inline Bool trackAllPlayers(void) const
+	{
+#ifdef DEBUG_FOG_MEMORY
+		return TRUE;
+#else
+		return m_trackAllPlayers;
+#endif
+	}
+
 protected:
 	virtual void crc( Xfer *xfer );
 	virtual void xfer( Xfer *xfer );
@@ -100,6 +116,7 @@ protected:
 	Int m_localPlayer;
 	Bool m_lockGhostObjects;
 	Bool m_saveLockGhostObjects;	///< used to lock the ghost object system during a save/load
+	Bool m_trackAllPlayers;			///< keep every player's fog memory, not just the local player's
 };
 
 // the singleton

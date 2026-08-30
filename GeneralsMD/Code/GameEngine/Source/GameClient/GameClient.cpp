@@ -669,29 +669,35 @@ void GameClient::update( void )
 
 	if (!freezeTime)
 	{
+		Int numNonLocalPlayers=0;
+		Int nonLocalPlayerIndices[MAX_PLAYER_COUNT];
+
 #if defined(_DEBUG) || defined(_INTERNAL)
 		if (TheGlobalData->m_shroudOn)
 #else
 		if (true)
 #endif
 		{	
-			//localPlayerIndex=TheGhostObjectManager->getLocalPlayerIndex();	//always use the first local player set since normally can't change.  Doesn't work with debug "CTRL_SHIFT_SPACE"
-#ifdef DEBUG_FOG_MEMORY
-			//Find indices of all active players
-			Int numPlayers=ThePlayerList->getPlayerCount();
-			Int numNonLocalPlayers=0;
-			Int nonLocalPlayerIndices[MAX_PLAYER_COUNT];
-			for (Int i=0; i<numPlayers; i++)
-			{	Player *player=ThePlayerList->getNthPlayer(i);
-				//if (player->getPlayerType == PLAYER_HUMAN)
-				if (player->getPlayerIndex() != localPlayerIndex)
-					nonLocalPlayerIndices[numNonLocalPlayers++]=player->getPlayerIndex();
+			// Whether every player's fog memory is kept is a runtime question now: an observer, and
+			// anyone who can take a player over mid-match, needs all of them.  It used to be the
+			// compile-time DEBUG_FOG_MEMORY, so in a build anyone plays it was never on and
+			// switching player handed you the first player's fog.
+			if (TheGhostObjectManager->trackAllPlayers())
+			{
+				//Find indices of all active players
+				Int numPlayers=ThePlayerList->getPlayerCount();
+				for (Int i=0; i<numPlayers; i++)
+				{	Player *player=ThePlayerList->getNthPlayer(i);
+					if (player->getPlayerIndex() != localPlayerIndex)
+						nonLocalPlayerIndices[numNonLocalPlayers++]=player->getPlayerIndex();
+				}
+				//update ghostObjects which don't have drawables or objects.
+				TheGhostObjectManager->updateOrphanedObjects(nonLocalPlayerIndices,numNonLocalPlayers);
 			}
-			//update ghostObjects which don't have drawables or objects.
-			TheGhostObjectManager->updateOrphanedObjects(nonLocalPlayerIndices,numNonLocalPlayers);
-#else
-			TheGhostObjectManager->updateOrphanedObjects(NULL,0);
-#endif
+			else
+			{
+				TheGhostObjectManager->updateOrphanedObjects(NULL,0);
+			}
 		}
 
 
@@ -712,11 +718,14 @@ void GameClient::update( void )
 				Object *object=draw->getObject();
 				if (object)
 				{
-	#ifdef DEBUG_FOG_MEMORY
-					Int *playerIndex=nonLocalPlayerIndices;
-					for (i=0; i<numNonLocalPlayers; i++, playerIndex++)
-						object->getShroudedStatus(*playerIndex);
-	#endif
+					if (numNonLocalPlayers > 0)
+					{
+						// keep the other players' view of this object current too, so their fog
+						// memory is right the moment you become one of them
+						Int *playerIndex=nonLocalPlayerIndices;
+						for (Int p=0; p<numNonLocalPlayers; p++, playerIndex++)
+							object->getShroudedStatus(*playerIndex);
+					}
 					ObjectShroudStatus ss=object->getShroudedStatus(localPlayerIndex);
 					if (ss >= OBJECTSHROUD_FOGGED && draw->getShroudClearFrame()!=0) {
 						UnsignedInt limit = 2*LOGICFRAMES_PER_SECOND;

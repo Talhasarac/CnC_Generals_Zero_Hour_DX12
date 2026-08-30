@@ -141,6 +141,7 @@ GhostObjectManager::GhostObjectManager(void)
 	m_lockGhostObjects = FALSE;
 	m_saveLockGhostObjects = FALSE;
 	m_localPlayer = 0;
+	m_trackAllPlayers = FALSE;
 }
 
 // ------------------------------------------------------------------------------------------------

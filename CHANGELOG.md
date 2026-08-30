@@ -266,6 +266,8 @@ found and fixed â€” EA's own, not port damage.**
 - Pausing stops both clocks.
 - Watching a match, the strip becomes every player's queue at once: one row each, bordered in that player's colour, showing the five that land soonest and a count of the rest.
 - Watching, the bars over the buildings are everyone's too - what each factory is turning out, and how long the superweapons have left. An observer used to see none of it.
+- Watching, you see the fog the player you are watching sees. The game only ever remembered one player's fog, so switching seats handed you the first player's idea of the map.
+- An ally, and anyone watching, now sees a stealthed unit's muzzle flash, its promotion and the cash it earns - if they can see the unit at all. Those three asked 'is it mine' instead of 'can I see it', so allies and observers got nothing.
 
 ## Placing buildings
 

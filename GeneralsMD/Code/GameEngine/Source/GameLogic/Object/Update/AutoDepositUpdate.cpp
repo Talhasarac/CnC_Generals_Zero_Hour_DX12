@@ -66,6 +66,7 @@
 #include "GameClient/InGameUI.h"
 #include "GameClient/Color.h"
 #include "GameClient/GameText.h"
+#include "GameClient/Drawable.h"
 
 //-------------------------------------------------------------------------------------------------
 void parseUpgradePair( INI *ini, void *instance, void *store, const void *userData )
@@ -208,16 +209,11 @@ UpdateSleepTime AutoDepositUpdate::update( void )
 			getObject()->getControllingPlayer()->getScoreKeeper()->addMoneyEarned( moneyAmount );
 		}
 		
-		Bool displayMoney = moneyAmount > 0 ? TRUE : FALSE;
-		if( getObject()->testStatus(OBJECT_STATUS_STEALTHED) )
-		{
-			// OY LOOK!  I AM USING LOCAL PLAYER.  Do not put anything other than TheInGameUI->addFloatingText in the block this controls!!!
-			if( !getObject()->isLocallyControlled() && !getObject()->testStatus(OBJECT_STATUS_DETECTED) )
-			{
-				displayMoney = FALSE;
-			}
-
-		}
+		// OY LOOK!  I AM USING LOCAL PLAYER.  Do not put anything other than TheInGameUI->addFloatingText in the block this controls!!!
+		// The figure shows if this watcher can see the building - which covers an ally sharing the
+		// sight and an observer, both of whom the old spelled-out rule left out.
+		Drawable *depositDraw = getObject()->getDrawable();
+		Bool displayMoney = ( moneyAmount > 0 && depositDraw != NULL && depositDraw->isVisible() );
 		
 		if( displayMoney )
 		{

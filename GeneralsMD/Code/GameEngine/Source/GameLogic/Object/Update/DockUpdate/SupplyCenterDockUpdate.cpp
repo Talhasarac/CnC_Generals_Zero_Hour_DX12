@@ -36,6 +36,7 @@
 #include "GameClient/Color.h"
 #include "GameClient/InGameUI.h"
 #include "GameClient/GameText.h"
+#include "GameClient/Drawable.h"
 
 #ifdef _INTERNAL
 // for occasional debugging...
@@ -133,15 +134,11 @@ Bool SupplyCenterDockUpdate::action( Object* docker, Object *drone )
 		}
 	}
 	
-	Bool displayMoney = value > 0 ? TRUE : FALSE;
-	if( getObject()->testStatus(OBJECT_STATUS_STEALTHED) )
-	{
-		// OY LOOK!  I AM USING LOCAL PLAYER.  Do not put anything other than TheInGameUI->addFloatingText in the block this controls!!!
-		if( !getObject()->isLocallyControlled() && !getObject()->testStatus(OBJECT_STATUS_DETECTED) )
-		{
-			displayMoney = FALSE;
-		}
-	}
+	// OY LOOK!  I AM USING LOCAL PLAYER.  Do not put anything other than TheInGameUI->addFloatingText in the block this controls!!!
+	// The figure shows if this watcher can see the centre - an ally sharing the sight and an
+	// observer both got nothing from the old spelled-out rule.
+	Drawable *centerDraw = getObject()->getDrawable();
+	Bool displayMoney = ( value > 0 && centerDraw != NULL && centerDraw->isVisible() );
 		
 	if( displayMoney )
 	{

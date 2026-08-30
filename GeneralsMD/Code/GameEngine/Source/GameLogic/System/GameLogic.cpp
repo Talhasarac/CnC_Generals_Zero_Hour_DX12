@@ -1662,6 +1662,10 @@ void GameLogic::startNewGame( Bool loadingSaveGame )
 	ThePartitionManager->init();
 	ThePartitionManager->refreshShroudForLocalPlayer();// Can't do this until after init, and doesn't seem right to do in init
 
+	// An observer watches from behind whichever player's eyes it picks, so its fog memory has to be
+	// kept for every player from the first frame - there is no going back and remembering later.
+	// A player watches only their own, which is what the extra snapshots are worth avoiding.
+	TheGhostObjectManager->setTrackAllPlayers( ThePlayerList->getLocalPlayer()->isPlayerObserver() );
 	TheGhostObjectManager->setLocalPlayerIndex(ThePlayerList->getLocalPlayer()->getPlayerIndex());
 	TheGhostObjectManager->reset();
 	

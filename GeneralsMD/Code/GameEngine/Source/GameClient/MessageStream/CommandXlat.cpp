@@ -3535,9 +3535,8 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 					
 					ThePlayerList->setLocalPlayer(ThePlayerList->getNthPlayer(idx));
 					TheInGameUI->deselectAllDrawables();
-	#ifdef DEBUG_FOG_MEMORY
+					// the fog you are handed has to be the fog of the player you just became
 					TheGhostObjectManager->setLocalPlayerIndex(idx);
-	#endif
 					ThePartitionManager->refreshShroudForLocalPlayer();
 					TheControlBar->initSpecialPowershortcutBar(ThePlayerList->getLocalPlayer());
 					TheControlBar->setControlBarSchemeByPlayer(ThePlayerList->getLocalPlayer());
@@ -4081,9 +4080,8 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 				
 				ThePlayerList->setLocalPlayer(ThePlayerList->getNthPlayer(idx));
 				TheInGameUI->deselectAllDrawables();
-#ifdef DEBUG_FOG_MEMORY
+				// the fog you are handed has to be the fog of the player you just became
 				TheGhostObjectManager->setLocalPlayerIndex(idx);
-#endif
 				ThePartitionManager->refreshShroudForLocalPlayer();
 				TheControlBar->initSpecialPowershortcutBar(ThePlayerList->getLocalPlayer());
 				TheControlBar->setControlBarSchemeByPlayer(ThePlayerList->getLocalPlayer());

@@ -266,7 +266,9 @@ W3DShroudLevel W3DShroud::getShroudLevel(Int x, Int y)
 {
 	DEBUG_ASSERTCRASH( m_pSrcTexture != NULL, ("Reading empty shroud"));
 
-	if (x < m_numCellsX && y < m_numCellsY)
+	// the upper bound was checked and the lower was not, so a negative cell - which is what a
+	// position just off the edge of the map gives - read backwards out of the shroud texture
+	if (x >= 0 && y >= 0 && x < m_numCellsX && y < m_numCellsY)
 	{
 		UnsignedShort pixel=*(UnsignedShort *)((Byte *)m_srcTextureData + x*2 + y*m_srcTexturePitch);
 		

@@ -3185,14 +3185,13 @@ void Object::onVeterancyLevelChanged( VeterancyLevel oldLevel, VeterancyLevel ne
 	if (body)
 		body->onVeterancyLevelChanged( oldLevel, newLevel, provideFeedback );
 	
-	Bool hideAnimationForStealth = FALSE;
-	if( !isLocallyControlled() && 
-			testStatus( OBJECT_STATUS_STEALTHED ) && 
-			!testStatus( OBJECT_STATUS_DETECTED ) && 
-			!testStatus( OBJECT_STATUS_DISGUISED ) )
-	{
-		hideAnimationForStealth = TRUE;
-	}
+	// Whether the promotion shows is simply whether this watcher can see the unit.  The rule used
+	// to be spelled out here as "mine, or not stealthed, or detected, or disguised", which reads
+	// the same for a player but is wrong for everyone else at the table: an ally who shares your
+	// sight, and an observer who sees everything, both got nothing.  The drawable already answers
+	// the question for whoever is watching.
+	const Drawable *draw = getDrawable();
+	Bool hideAnimationForStealth = ( draw == NULL || !((Drawable *)draw)->isVisible() );
 
 	Bool doAnimation = ( ! hideAnimationForStealth 
 											&& (newLevel > oldLevel) 

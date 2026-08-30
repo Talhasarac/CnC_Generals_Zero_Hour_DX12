@@ -933,10 +933,12 @@ UnsignedInt WeaponTemplate::fireWeaponTemplate
 
 		Bool handled;
 		
-		if(!sourceObj->isLocallyControlled()									// if user watching is not controller and
-			&&  sourceObj->testStatus(OBJECT_STATUS_STEALTHED)	// if unit is stealthed (like a Pathfinder)
-			&& !sourceObj->testStatus(OBJECT_STATUS_DETECTED)		// but not detected...
-			&& !sourceObj->testStatus(OBJECT_STATUS_DISGUISED)  // and not disguised...
+		// Whether the muzzle flash shows is simply whether this watcher can see the firer.  The rule
+		// used to be spelled out as "not mine, and stealthed, and not detected, and not disguised",
+		// which reads the same for a player but hid the shot from an ally who shares your sight and
+		// from an observer who sees everything.
+		Drawable *sourceDraw = sourceObj->getDrawable();
+		if((sourceDraw == NULL || !sourceDraw->isVisible())	// if the watcher cannot see us
 			&& !sourceObj->isKindOf(KINDOF_MINE)								// and not a mine (which always do the FX, even if hidden)...
 			&& !isPlayFXWhenStealthed()													// and not a weapon marked to playwhenstealthed
 			)
