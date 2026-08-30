@@ -69,6 +69,8 @@ public:
 
 	virtual void refreshTerrain( TerrainLogic *terrain );
 
+	virtual void notifyViewChanged( void );				///< the camera view changed
+
 protected:
 
 	void drawSingleBeaconEvent( Int pixelX, Int pixelY, Int width, Int height, Int index );
@@ -116,8 +118,6 @@ protected:
 	// translate real world coords to integer radar spots
 	//
 	Bool m_reconstructViewBox;										///< true when we need to reconstruct the box
-	Real m_viewAngle;															///< camera angle used for the view box we have
-	Real m_viewZoom;															///< camera zoom used for the view box we have	
 	ICoord2D m_viewBox[ 4 ];											///< radar cell points for the 4 corners of view box
 
 	std::list<const Coord3D *> m_cachedHeroPosList;					//< cache of hero positions for drawing icons in radar overlay

@@ -217,14 +217,6 @@ void W3DRadar::reconstructViewBox( void )
 
 	}  // end for i
 
-	//
-	// save the camera settings for this view box, we will need to make it again only
-	// if some of these change
-	//
-	m_viewAngle = TheTacticalView->getAngle();
-	Coord3D pos;
-	TheTacticalView->getPosition( &pos );
-	m_viewZoom = TheTacticalView->getZoom();
 	m_reconstructViewBox = FALSE;
 
 }  // end reconstructViewBox
@@ -846,8 +838,6 @@ W3DRadar::W3DRadar( void )
 	m_textureHeight = RADAR_CELL_HEIGHT;
 
 	m_reconstructViewBox = TRUE;
-	m_viewAngle = 0.0f;
-	m_viewZoom = 0.0f;
 	for( Int i = 0; i < 4; i++ )
 	{
 
@@ -1447,13 +1437,10 @@ void W3DRadar::draw( Int pixelX, Int pixelY, Int width, Int height )
 	// draw any radar events
 	drawEvents( ul.x, ul.y, scaledWidth, scaledHeight );
 
-	// see if we need to reconstruct the view box
-	if( TheTacticalView->getZoom() != m_viewZoom )
-		m_reconstructViewBox = TRUE;
-	if( TheTacticalView->getAngle() != m_viewAngle )
-		m_reconstructViewBox = TRUE;
-
-	if( m_reconstructViewBox == TRUE )
+	// The box used to be rebuilt only when the zoom or the angle had changed, so panning the
+	// camera left it where it was until you happened to zoom or turn.  The view tells us now,
+	// whatever it was that moved.
+	if( m_reconstructViewBox )
 		reconstructViewBox();
 
 	// draw the view region on top of the radar reconstructing if necessary
@@ -1624,3 +1611,10 @@ void W3DRadar::refreshTerrain( TerrainLogic *terrain )
 
  *
  */
+
+// ------------------------------------------------------------------------------------------------
+// ------------------------------------------------------------------------------------------------
+void W3DRadar::notifyViewChanged( void )
+{
+	m_reconstructViewBox = TRUE;
+}

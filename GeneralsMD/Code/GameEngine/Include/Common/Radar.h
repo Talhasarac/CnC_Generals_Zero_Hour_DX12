@@ -214,6 +214,9 @@ public:
 
 	virtual void draw( Int pixelX, Int pixelY, Int width, Int height ) = 0;	///< draw the radar
 
+	/// the camera moved, turned or zoomed - whatever the radar draws from it is stale now
+	virtual void notifyViewChanged( void ) {}
+
 	/// empty the entire shroud
 	virtual void clearShroud() = 0;
 

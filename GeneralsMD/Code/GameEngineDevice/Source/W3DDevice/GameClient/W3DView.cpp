@@ -39,6 +39,7 @@
 // USER INCLUDES //////////////////////////////////////////////////////////////////////////////////
 #include "Common/BuildAssistant.h"
 #include "Common/GlobalData.h"
+#include "Common/Radar.h"
 #include "Common/Module.h"
 #include "Common/RandomValue.h"
 #include "Common/ThingTemplate.h"
@@ -413,6 +414,22 @@ void W3DView::buildCameraTransform( Matrix3D *transform )
 		}
 	}
 
+	// Keep the eye above the ground.  Zoomed right in on a slope, or pitched up, the camera ends up
+	// inside the hill it is looking over and the near plane cuts the world open.  Lift both the eye
+	// and what it is looking at by the same amount, so the shot is the same shot, just above the
+	// dirt.  The height is sampled around the point rather than at it, so a bumpy slope does not
+	// make the camera jitter.
+	if( TheTerrainLogic )		// the view is built once before the terrain exists
+	{
+		const Real minAcceptableCameraHeight = getHeightAroundPos( sourcePos.X, sourcePos.Y ) + MAP_XY_FACTOR;
+		if( sourcePos.Z < minAcceptableCameraHeight )
+		{
+			const Real repositionZ = minAcceptableCameraHeight - sourcePos.Z;
+			sourcePos.Z += repositionZ;
+			targetPos.Z += repositionZ;
+		}
+	}
+
 	//m_3DCamera->Set_View_Plane(DEG_TO_RADF(50.0f));
 	//DEBUG_LOG(("zoom %f, SourceZ %f, posZ %f, groundLevel %f CamOffZ %f\n",
 	//			zoom, sourcePos.Z, pos.z, groundLevel,m_cameraOffset.z));
@@ -589,8 +606,17 @@ void W3DView::setCameraTransform( void )
 	Real nearZ, farZ;
 	// m_3DCamera->Get_Clip_Planes(nearZ, farZ);
 	// Set the near to MAP_XY_FACTOR.  Improves zbuffer resolution.
-	nearZ = MAP_XY_FACTOR; 
-	farZ = 1200.0f;
+	nearZ = MAP_XY_FACTOR;
+
+	// 1200 was a number, not a distance: at the stock ceiling and pitch the far plane already cuts
+	// the terrain the game means to draw, and this fork zooms further out than the stock game did.
+	// Take the distance the terrain is actually drawn over instead, and open it with the height -
+	// at twice the height you see twice as far.
+	static const Real VIEW_DEFAULT_MAX_HEIGHT_ABOVE_TERRAIN = 310.0f;
+	farZ = (WorldHeightMap::NORMAL_DRAW_WIDTH * 1.08f) * MAP_XY_FACTOR;
+	const Real heightMultiplier = m_heightAboveGround / VIEW_DEFAULT_MAX_HEIGHT_ABOVE_TERRAIN;
+	if (heightMultiplier > 1.0f)
+		farZ *= heightMultiplier;
 
 	if (m_useRealZoomCam)	//WST 10.19.2002
 	{
@@ -601,9 +627,9 @@ void W3DView::setCameraTransform( void )
 	}
 	else
 	{
-		if ((TheGlobalData && TheGlobalData->m_drawEntireTerrain) || (m_FXPitch<0.95f || m_zoom>1.05))
+		if ((TheGlobalData && TheGlobalData->m_drawEntireTerrain) || m_FXPitch<0.95f)
 		{	//need to extend far clip plane so entire terrain can be visible
-			farZ *= MAP_XY_FACTOR;
+			farZ *= 10.0f;
 		}
 	}
 
@@ -639,16 +665,21 @@ void W3DView::setCameraTransform( void )
 	buildCameraTransform( &cameraTransform );
 	m_3DCamera->Set_Transform( cameraTransform );
 
-	if (TheTerrainRenderObject) 
+	if (TheTerrainRenderObject)
 	{
 		RefRenderObjListIterator *it = W3DDisplay::m_3DScene->createLightsIterator();
 		TheTerrainRenderObject->updateCenter(m_3DCamera, it);
-		if (it) 
+		if (it)
 		{
 		 W3DDisplay::m_3DScene->destroyLightsIterator(it);
 		 it = NULL;
 		}
 	}
+
+	// tell the radar its view box is stale, whatever it was that moved - it used to work that out
+	// itself by comparing the zoom and the angle, so panning left the box behind
+	if (TheRadar)
+		TheRadar->notifyViewChanged();
 }
 
 //-------------------------------------------------------------------------------------------------

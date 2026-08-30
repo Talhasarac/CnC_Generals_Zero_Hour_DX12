@@ -325,6 +325,9 @@ found and fixed â€” EA's own, not port damage.**
 - The zoom-out ceiling is the same for everyone; no setting buys you a wider view.
 - The wheel covers that whole range in about six notches instead of thirty-eight.
 - Zoom toward the cursor works; the spot under your pointer stays there.
+- The camera stays above the ground. Zoomed in on a slope it used to end up inside the hill it was looking over, and the world opened up along the near plane.
+- The far edge of the view opens with the height, instead of stopping at a distance fixed for the stock zoom - which is what put black beyond the terrain when you zoom out past it.
+- The box on the radar follows the camera when you pan. It only ever redrew itself when the zoom or the angle changed, so scrolling left it behind.
 - The camera turns in whole 45-degree steps, instantly, while you hold the key.
 - Edge scrolling works windowed, and scroll speed no longer follows your frame rate.
 - Taking over another base no longer squeezes the picture into the top four fifths of the screen.
