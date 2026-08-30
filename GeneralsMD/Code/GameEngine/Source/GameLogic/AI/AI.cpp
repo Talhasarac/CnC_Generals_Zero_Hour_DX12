@@ -1122,6 +1122,12 @@ Real aiStartOccupiedOdds( Int unlocatedEnemies, Int uncheckedPositions )
 }
 
 //-------------------------------------------------------------------------------------------------
+Bool aiIsIncomeNotATarget( Bool isTechBuilding, Bool isCapturable, Bool isTechBaseDefense )
+{
+	return isTechBuilding && isCapturable && !isTechBaseDefense;
+}
+
+//-------------------------------------------------------------------------------------------------
 Real aiRoleMassFraction( AIRole role )
 {
 	switch( role )

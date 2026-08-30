@@ -6025,6 +6025,29 @@ TEST(elimination_narrows_the_start_positions_until_it_knows)
 }
 
 
+/** An oil derrick pays whoever owns it and costs one infantryman to take, so the computer razing the
+	 enemy's was the one thing it could do with a derrick that earned nobody anything.  It captures them
+	 now, and stops picking them up as targets on its own initiative - but only the ones that are
+	 actually worth owning and cannot shoot back. */
+TEST(a_capturable_tech_building_is_income_not_a_target)
+{
+	// the oil derrick: a tech building, capturable, unarmed
+	CHECK( aiIsIncomeNotATarget( TRUE, TRUE, FALSE ) );
+
+	//
+	// The two that stay targets.  A tech building that acts as a base defence when captured shoots at
+	// us, and something that is never shot back at is something the AI walks past for ever.
+	//
+	CHECK( !aiIsIncomeNotATarget( TRUE, TRUE, TRUE ) );
+	// ... and one nobody can capture is only ever a building in the way
+	CHECK( !aiIsIncomeNotATarget( TRUE, FALSE, FALSE ) );
+
+	// everything else is untouched: this rule is about tech buildings and nothing else
+	CHECK( !aiIsIncomeNotATarget( FALSE, TRUE, FALSE ) );
+	CHECK( !aiIsIncomeNotATarget( FALSE, FALSE, FALSE ) );
+}
+
+
 /** C2: whether a finished wave waits at the rally point or goes now.  EA sent every team the moment
 	 it was ready, and a string of small waves is free veterancy for whoever is on the other end.
 	 Three things override the arithmetic, and each of them is a way of getting the AI stuck if it is

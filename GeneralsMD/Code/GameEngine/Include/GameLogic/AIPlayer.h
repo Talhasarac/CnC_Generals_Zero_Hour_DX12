@@ -268,6 +268,14 @@ protected:
 	void countStartIntel(Int *enemies, Int *occupied, Int *unchecked) const;	///< the three numbers the odds are made of
 	Bool enemyStartGuess(Int playerNdx, Coord3D *pos);	///< where this enemy is, or the best address we have for him
 
+	/** B?: an oil derrick is income standing in the open.  The AI used to walk past the neutral ones
+		* and shoot the enemy's, which is the one thing you can do with a derrick that earns nothing. */
+	virtual void doCapture(void);
+	Object *findCapturer(void);					///< a unit of ours that can walk into a building and own it
+	Object *nearestTechBuilding(const Coord3D *from, Bool wantOurs);	///< the closest one worth taking, or worth sitting on
+	void queueCapturer(void);						///< ... or build the cheapest thing that can take one
+	void queueSupportUnit(const ThingTemplate *tmpl, const char *what);	///< one cheap unit, outside the team system
+
 	virtual void doBaseBuilding(void);
 	virtual void checkReadyTeams(void);
 	virtual void checkQueuedTeams(void);
@@ -350,6 +358,8 @@ protected:
 	Bool			m_startOccupied[ MAX_PLAYER_COUNT ];	///< ... and which of those turned out to hold an enemy
 	Int				m_playerStartNdx[ MAX_PLAYER_COUNT ];	///< the start position each player is known to be at; -1 == not found yet
 	UnsignedInt m_startIntelFrame;			///< frame the above was last brought up to date
+	ObjectID	m_capturerID;						///< the unit currently out taking tech buildings for us
+	Int				m_captureTimer;					///< frames until the next look for something to capture
 	Int				m_retreatTimer;					///< frames until the next look at how the fights are going
 	Int				m_expandTimer;					///< frames until the next look for somewhere to expand to
 

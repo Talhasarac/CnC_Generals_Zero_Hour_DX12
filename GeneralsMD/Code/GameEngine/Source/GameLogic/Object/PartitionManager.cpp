@@ -1,4 +1,4 @@
-/*
+﻿/*
 **	Command & Conquer Generals Zero Hour(tm)
 **	Copyright 2025 Electronic Arts Inc.
 **
@@ -73,6 +73,7 @@
 #include "GameLogic/Module/ContainModule.h"
 #include "GameLogic/Module/StealthUpdate.h"
 #include "GameLogic/PartitionManager.h"
+#include "GameLogic/AI.h"					// aiIsIncomeNotATarget - a derrick is money, not a target
 #include "GameLogic/PolygonTrigger.h"
 #include "GameLogic/Squad.h"
 #include "GameLogic/GhostObject.h"
@@ -5480,6 +5481,19 @@ Bool PartitionFilterPossibleToAttack::allow(Object *objOther)
 	// moving, idle scanning - so an explicit attack order is never touched by it.
 	//
 	if (IncomingDamageTracker::isAlreadyDoomed(objOther))
+		return FALSE;
+
+	//
+	// A capturable tech building is income, not a target.  The computer razed the enemy's oil derricks
+	// on sight - the one thing you can do with a derrick that earns nobody anything - when it could
+	// have walked an infantryman in and owned it.  As above, this filter only ever runs when a unit is
+	// picking its own target, so an explicit order to level one still goes through, and a tech
+	// building that shoots back is still shot back at.
+	//
+	if (m_obj->getControllingPlayer() && m_obj->getControllingPlayer()->getPlayerType() == PLAYER_COMPUTER &&
+			aiIsIncomeNotATarget(objOther->isKindOf(KINDOF_TECH_BUILDING),
+													 objOther->isKindOf(KINDOF_CAPTURABLE),
+													 objOther->isKindOf(KINDOF_TECH_BASE_DEFENSE)))
 		return FALSE;
 
 	CanAttackResult result = m_obj->getAbleToAttackSpecificObject( m_attackType, objOther, m_commandSource );

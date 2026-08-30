@@ -62,6 +62,8 @@
 #include "GameLogic/Module/SupplyTruckAIUpdate.h"
 #include "GameLogic/Module/SupplyWarehouseDockUpdate.h"
 #include "GameLogic/PartitionManager.h"
+#include "Common/ActionManager.h"				// canCaptureBuilding, for the tech buildings
+#include "GameLogic/Module/SpecialPowerModule.h"	// ... and the module that does it
 
 #ifdef _INTERNAL
 // for occasional debugging...
@@ -195,6 +197,8 @@ m_role(AIROLE_AGGRESSIVE)
 		m_playerStartNdx[startNdx] = -1;	// nobody located yet, not even us - updateStartIntel seeds it
 	}
 	m_startIntelFrame = 0;
+	m_capturerID = INVALID_ID;
+	m_captureTimer = 1;
 
 	m_frameLastBuildingBuilt = TheGameLogic->getFrame();
 	p->setCanBuildUnits(false); // turn off ai production by default.
@@ -3583,6 +3587,8 @@ void AIPlayer::update( void )
 
 	doExpansion(); // Go and take the money that is lying around.
 
+	doCapture(); // ... and the money that is standing around.
+
 }
 
 //----------------------------------------------------------------------------------------------------------
@@ -4060,11 +4066,19 @@ Bool AIPlayer::scoutInQueue( void )
  */
 void AIPlayer::queueScout( void )
 {
-	if( scoutInQueue() )
-		return;
+	queueSupportUnit( cheapestScoutTemplate( m_player ), "SCOUT" );
+}
 
-	const ThingTemplate *tTemplate = cheapestScoutTemplate( m_player );
-	if( tTemplate == NULL )
+//----------------------------------------------------------------------------------------------------------
+/**
+ * Put one cheap unit on order for a job outside the team system - the scout, the capturer.  Same
+ * shape as queueDozer: a one-order priority team on the player's default team, so it never disturbs
+ * the team the AI is massing, and it waits for spare change so it can never be what stops a base
+ * going up.  One at a time, whichever job asked first.
+ */
+void AIPlayer::queueSupportUnit( const ThingTemplate *tTemplate, const char *what )
+{
+	if( tTemplate == NULL || scoutInQueue() )
 		return;
 
 	// scouting must never be what stops a base going up, so it waits for spare change
@@ -4093,7 +4107,8 @@ void AIPlayer::queueScout( void )
 		team->m_frameStarted = TheGameLogic->getFrame();
 		team->m_team = m_player->getDefaultTeam();
 
-		AsciiString msg = "SCOUT - building one at the ";
+		AsciiString msg = what;
+		msg.concat( " - building one at the " );
 		msg.concat( factory->getTemplate()->getName() );
 		TheScriptEngine->AppendDebugMessage( msg, false );
 
@@ -4425,6 +4440,230 @@ Bool AIPlayer::nextScoutTarget( Int slot, const Coord3D *from, Coord3D *pos )
 }
 
 //----------------------------------------------------------------------------------------------------------
+/** How often the AI looks for something to capture.  It only ever gets an order when it is idle, so
+	* this is a check, not a re-path. */
+static const Int CAPTURE_CHECK_RATE = 5 * LOGICFRAMES_PER_SECOND;
+
+/** The cheapest infantry this player can build that can walk into a building and own it.  Read off
+	* the command set rather than a per-faction table, so it lands on the Ranger, the Rebel and the
+	* Red Guard - and on whatever a mod gave the ability to. */
+static const ThingTemplate *cheapestCapturerTemplate( Player *player )
+{
+	if( TheControlBar == NULL )
+		return NULL;
+
+	const ThingTemplate *best = NULL;
+	Int bestCost = 0;
+
+	for( const ThingTemplate *t = TheThingFactory->firstTemplate(); t; t = t->friend_getNextTemplate() )
+	{
+		if( !t->isKindOf( KINDOF_INFANTRY ) || t->isKindOf( KINDOF_DOZER ) )
+			continue;
+		if( !player->canBuild( t ) )
+			continue;
+
+		const Int cost = t->calcCostToBuild( player );
+		if( cost <= 0 || (best != NULL && cost >= bestCost) )
+			continue;
+
+		const CommandSet *set = TheControlBar->findCommandSet( t->friend_getCommandSetString() );
+		if( set == NULL )
+			continue;
+
+		Bool canCapture = FALSE;
+		for( Int i = 0; i < MAX_COMMANDS_PER_SET; ++i )
+		{
+			const CommandButton *button = set->getCommandButton( i );
+			if( button == NULL || button->getCommandType() != GUI_COMMAND_SPECIAL_POWER )
+				continue;
+			const SpecialPowerTemplate *power = button->getSpecialPowerTemplate();
+			if( power && power->getSpecialPowerType() == SPECIAL_INFANTRY_CAPTURE_BUILDING )
+				canCapture = TRUE;
+		}
+		if( !canCapture )
+			continue;
+
+		best = t;
+		bestCost = cost;
+	}
+	return best;
+}
+
+//----------------------------------------------------------------------------------------------------------
+/**
+ * A unit of ours that can take a building.  Same rule as findScout: the default team only, so
+ * nothing is pulled off a team that has a mission.
+ */
+Object *AIPlayer::findCapturer( void )
+{
+	Team *team = m_player->getDefaultTeam();
+	if( team == NULL )
+		return NULL;
+
+	for( DLINK_ITERATOR<Object> iter = team->iterate_TeamMemberList(); !iter.done(); iter.advance() )
+	{
+		Object *obj = iter.cur();
+		if( obj == NULL || obj->isEffectivelyDead() || obj->getAI() == NULL )
+			continue;
+		if( obj->findSpecialPowerModuleInterface( SPECIAL_INFANTRY_CAPTURE_BUILDING ) == NULL )
+			continue;
+
+		Bool busy = FALSE;
+		for( Int slot = 0; slot < MAX_AI_SCOUTS; ++slot )
+			if( m_scoutID[ slot ] == obj->getID() )
+				busy = TRUE;			// the map still has to be looked at
+		if( busy )
+			continue;
+
+		return obj;
+	}
+	return NULL;
+}
+
+//----------------------------------------------------------------------------------------------------------
+/**
+ * The closest tech building worth walking to: one to take (wantOurs FALSE) or one of ours to stand
+ * on (wantOurs TRUE).
+ *
+ * Fog-aware like everything else here - a derrick nobody has seen yet is not a plan.  Uncaptured
+ * ones belong to the neutral player, captured ones to whoever took them, so both are found by
+ * walking the player list, which is the same shape getPlayerStructureBounds uses.
+ */
+Object *AIPlayer::nearestTechBuilding( const Coord3D *from, Bool wantOurs )
+{
+	if( ThePlayerList == NULL || from == NULL )
+		return NULL;
+
+	const Int myNdx = m_player->getPlayerIndex();
+	Object *best = NULL;
+	Real bestDistSqr = 0.0f;
+
+	const Int playerCount = ThePlayerList->getPlayerCount();
+	for( Int i = 0; i < playerCount; ++i )
+	{
+		Player *p = ThePlayerList->getNthPlayer( i );
+		if( p == NULL )
+			continue;
+		if( wantOurs != (p == m_player) )
+			continue;
+		if( !wantOurs && p != m_player && m_player->getRelationship( p->getDefaultTeam() ) == ALLIES )
+			continue;			// it is not polite to capture an ally's buildings
+
+		for( Player::PlayerTeamList::const_iterator it = p->getPlayerTeams()->begin();
+				 it != p->getPlayerTeams()->end(); ++it )
+		{
+			for( DLINK_ITERATOR<Team> teamIter = (*it)->iterate_TeamInstanceList(); !teamIter.done(); teamIter.advance() )
+			{
+				Team *team = teamIter.cur();
+				if( team == NULL )
+					continue;
+
+				for( DLINK_ITERATOR<Object> objIter = team->iterate_TeamMemberList(); !objIter.done(); objIter.advance() )
+				{
+					Object *obj = objIter.cur();
+					if( obj == NULL || obj->isEffectivelyDead() )
+						continue;
+					if( !obj->isKindOf( KINDOF_TECH_BUILDING ) )
+						continue;
+					if( !wantOurs && obj->isKindOf( KINDOF_IMMUNE_TO_CAPTURE ) )
+						continue;
+					if( !observerKnowsAbout( obj, myNdx ) )
+						continue;			// not found yet, so not a plan
+
+					const Coord3D *at = obj->getPosition();
+					const Real dx = at->x - from->x;
+					const Real dy = at->y - from->y;
+					const Real distSqr = dx*dx + dy*dy;
+					if( best == NULL || distSqr < bestDistSqr )
+					{
+						best = obj;
+						bestDistSqr = distSqr;
+					}
+				}
+			}
+		}
+	}
+	return best;
+}
+
+//----------------------------------------------------------------------------------------------------------
+/**
+ * Go and take the buildings that pay.
+ *
+ * An oil derrick is a supply pile that never runs out and costs one infantryman to own, and the AI
+ * had no concept of one: it walked past the neutral ones and shot the enemy's.  One cheap unit now
+ * does the rounds, and when there is nothing left to take it stands on what we own - an uncaptured
+ * derrick is free money for whoever walks up to it next, and a captured one is free money for
+ * whoever walks up to it after that.
+ */
+void AIPlayer::doCapture( void )
+{
+	if( --m_captureTimer > 0 )
+		return;
+	m_captureTimer = CAPTURE_CHECK_RATE;
+
+	Object *capturer = TheGameLogic->findObjectByID( m_capturerID );
+	if( capturer && (capturer->isEffectivelyDead() || capturer->getControllingPlayer() != m_player) )
+		capturer = NULL;
+	if( capturer == NULL )
+	{
+		m_capturerID = INVALID_ID;
+		capturer = findCapturer();
+		if( capturer )
+			m_capturerID = capturer->getID();
+	}
+
+	Coord3D from = m_baseCenter;
+	if( capturer )
+		from = *capturer->getPosition();
+
+	Object *target = nearestTechBuilding( &from, FALSE );
+
+	if( capturer == NULL )
+	{
+		// only pay for one when there is something to spend it on
+		if( target )
+			queueCapturer();
+		return;
+	}
+
+	AIUpdateInterface *ai = capturer->getAI();
+	if( ai == NULL || !ai->isIdle() )
+		return;			// still on its way
+
+	if( target == NULL )
+	{
+		// nothing left to take: sit on what we own rather than wander home and let it be taken back
+		Object *ours = nearestTechBuilding( &from, TRUE );
+		if( ours )
+			ai->aiGuardObject( ours, GUARDMODE_NORMAL, CMD_FROM_AI );
+		return;
+	}
+
+	//
+	// canCaptureBuilding refuses through the shroud and the capture itself has a range, so a target
+	// we know about but cannot reach from here is walked to first and asked again next check.
+	//
+	SpecialPowerModuleInterface *mod = capturer->findSpecialPowerModuleInterface( SPECIAL_INFANTRY_CAPTURE_BUILDING );
+	if( mod && TheActionManager->canCaptureBuilding( capturer, target, CMD_FROM_AI ) )
+	{
+		mod->doSpecialPowerAtObject( target, 0 );
+		DEBUG_LOG(("AI player %d capturing a '%s'\n", m_player->getPlayerIndex(),
+							 target->getTemplate()->getName().str()));
+	}
+	else
+	{
+		ai->aiMoveToObject( target, CMD_FROM_AI );
+	}
+}
+
+//----------------------------------------------------------------------------------------------------------
+void AIPlayer::queueCapturer( void )
+{
+	queueSupportUnit( cheapestCapturerTemplate( m_player ), "CAPTURE" );
+}
+
+//----------------------------------------------------------------------------------------------------------
 /**
  * Keep one unit looking at the map.  Cheap by construction: one unit, ordered only when it has
  * arrived somewhere, replaced out of spare change when it dies.  Every difficulty scouts - an AI
@@ -4682,7 +4921,7 @@ void AIPlayer::xfer( Xfer *xfer )
 {
 
 	// version
-	XferVersion currentVersion = 4;		// 2: the scout   3: skill rung and role   4: the scouting stamps
+	XferVersion currentVersion = 5;		// 2: scout  3: rung and role  4: scouting stamps  5: the capturer
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
@@ -4862,6 +5101,12 @@ void AIPlayer::xfer( Xfer *xfer )
 	{
 		xfer->xferInt( &m_retreatTimer );
 		xfer->xferInt( &m_expandTimer );
+	}
+	// the capturer, so a loaded game does not build a second one
+	if( version >= 5 )
+	{
+		xfer->xferObjectID( &m_capturerID );
+		xfer->xferInt( &m_captureTimer );
 	}
 
 	// the ladder rung and the role, which are rolled once and must come back the same way

@@ -289,6 +289,15 @@ Real aiScoutScore( UnsignedInt now, UnsignedInt lastSeenFrame, Real distance, Un
 	* scout is even built. */
 Real aiStartOccupiedOdds( Int unlocatedEnemies, Int uncheckedPositions );
 
+/** Is this building income rather than a target?  An oil derrick pays whoever owns it and costs one
+	* infantryman to take, so a computer player razing the enemy's is the one thing it can do with a
+	* derrick that earns nobody anything.
+	*
+	* Two things are deliberately still targets.  One that shoots back has to be shootable back at, or
+	* the AI walks past a bunker forever.  And one that cannot be captured at all is only ever a
+	* building in the way. */
+Bool aiIsIncomeNotATarget( Bool isTechBuilding, Bool isCapturable, Bool isTechBaseDefense );
+
 /** How attractive an enemy player is to go after, as a cost - lower is better, and it is a squared
 	* distance with the other terms folded into it so the units stay comparable.
 	*
