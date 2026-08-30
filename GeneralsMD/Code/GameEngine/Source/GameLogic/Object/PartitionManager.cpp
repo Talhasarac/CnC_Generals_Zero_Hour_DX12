@@ -4832,6 +4832,65 @@ void PartitionManager::getMostValuableLocation( Int playerIndex, UnsignedInt whi
 }
 
 //-------------------------------------------------------------------------------------------------
+Bool PartitionManager::getMostValuableVisibleLocation( Int playerIndex, UnsignedInt whichPlayerTypes,
+																											 ValueOrThreat valType, Coord3D *outLocation )
+{
+	if (!outLocation)
+		return FALSE;
+
+	PlayerMaskType playerMask = ThePlayerList->getPlayersWithRelationship(playerIndex, whichPlayerTypes);
+	if (playerMask == 0)
+		return FALSE;
+
+	PlayerMaskType allPlayerMasks[MAX_PLAYER_COUNT] = { 0 };
+	Int totalPlayerCount = ThePlayerList->getPlayerCount();
+	Int i;
+	for (i = 0; i < totalPlayerCount; ++i) {
+		Player *player = ThePlayerList->getNthPlayer(i);
+		if (player)
+			allPlayerMasks[i] = player->getPlayerMask();
+	}
+
+	const Int cellCount = m_cellCountX * m_cellCountY;
+	Int greatestValueCell = -1;
+	Int maxCellValue = 0;			// zero, not -1: a cell worth nothing is not an answer
+
+	for (i = 0; i < cellCount; ++i) {
+		Int cellValue = 0;
+		for (Int player = 0; player < MAX_PLAYER_COUNT; ++player) {
+			if (BitTest(allPlayerMasks[player], playerMask)) {
+				if (valType == VOT_CashValue) {
+					cellValue += m_cells[i].getCashValue(player);
+				} else {
+					cellValue += m_cells[i].getThreatValue(player);
+				}
+			}
+		}
+
+		if (cellValue <= maxCellValue)
+			continue;
+
+		// ... and only if this player has seen the ground it is standing on
+		Coord3D where;
+		where.set(m_cells[i].getCellX() * TheGlobalData->m_partitionCellSize,
+							m_cells[i].getCellY() * TheGlobalData->m_partitionCellSize, 0);
+		if (getPropShroudStatusForPlayer(playerIndex, &where) == OBJECTSHROUD_SHROUDED)
+			continue;
+
+		maxCellValue = cellValue;
+		greatestValueCell = i;
+	}
+
+	if (greatestValueCell == -1)
+		return FALSE;
+
+	outLocation->set(m_cells[greatestValueCell].getCellX() * TheGlobalData->m_partitionCellSize,
+									 m_cells[greatestValueCell].getCellY() * TheGlobalData->m_partitionCellSize,
+									 0);
+	return TRUE;
+}
+
+//-------------------------------------------------------------------------------------------------
 void PartitionManager::getNearestGroupWithValue( Int playerIndex, UnsignedInt whichPlayerTypes, ValueOrThreat valType,
 															 const Coord3D *sourceLocation, Int valueRequired, Bool greaterThan, Coord3D *outLocation )
 {

@@ -75,6 +75,11 @@ public:	// AIPlayer interface methods.
 
 	virtual Player *getAiEnemy(void);	///< Solo AI attacks based on scripting.  Only skirmish auto-acquires an enemy at this point.  jba.
 
+	/** B4: where to send an attack, off the engine's own influence map instead of at the geometric
+		* centre of the enemy's buildings - which is the middle of his base and so the middle of his
+		* guns.  FALSE when this AI has not seen anything worth attacking yet. */
+	Bool influenceMapAttackGoal(Coord3D *goal);
+
 protected:
 
 	// snapshot methods

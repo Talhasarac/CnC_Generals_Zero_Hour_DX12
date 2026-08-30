@@ -1535,6 +1535,15 @@ public:
 	Real getGroundOrStructureHeight(Real posx, Real posy);
 
 	void getMostValuableLocation( Int playerIndex, UnsignedInt whichPlayerTypes, ValueOrThreat valType, Coord3D *outLocation );
+
+	/** The same question, asked only of ground this player has actually seen.
+		*
+		* The influence map is kept per player and does no fog checking of its own, so the plain
+		* getMostValuableLocation above answers out of the whole map - which is fine for a script action
+		* the map author wrote deliberately, and is omniscience for an AI that is supposed to have to
+		* scout (AI-ROADMAP.md A2, B4).  Returns FALSE when nothing it can see has any value, which is
+		* the honest answer for an AI that has not looked yet. */
+	Bool getMostValuableVisibleLocation( Int playerIndex, UnsignedInt whichPlayerTypes, ValueOrThreat valType, Coord3D *outLocation );
 	void getNearestGroupWithValue( Int playerIndex, UnsignedInt whichPlayerTypes, ValueOrThreat valType, const Coord3D *sourceLocation,
 																 Int valueRequired, Bool greaterThan, Coord3D *outLocation );
 

@@ -476,6 +476,39 @@ Int AISkirmishPlayer::getMyEnemyPlayerIndex(void) {
 /** 
 	Get the AI's enemy.  Recalc if it has been a while (5 seconds.)  
 */
+//----------------------------------------------------------------------------------------------------------
+/** Where to send an attack, off the engine's own influence map.
+	*
+	* This is B4: the map is already there, per player, with cash and threat per cell, with a query
+	* API and even an in-game debug view - and until now its only users were two script actions.  The
+	* C++ AI never touched it, and aimed every attack at the geometric centre of the enemy's
+	* buildings, which is the middle of his base and therefore the middle of his defences.
+	*
+	* The enemy's most valuable cell is where his economy is, which is usually not where his guns
+	* are.  Fog-masked, so it is somewhere this AI has actually seen; FALSE means it has not looked
+	* yet and the caller keeps the old aim point.
+	*
+	* Off below the top rung: this is what Merciless adds.
+	*/
+//----------------------------------------------------------------------------------------------------------
+Bool AISkirmishPlayer::influenceMapAttackGoal( Coord3D *goal )
+{
+	if( !getSkillProfile()->m_useInfluenceMapForAttackLane )
+		return FALSE;
+	if( ThePartitionManager == NULL || goal == NULL )
+		return FALSE;
+
+	Coord3D found;
+	if( !ThePartitionManager->getMostValuableVisibleLocation( m_player->getPlayerIndex(), ALLOW_ENEMIES,
+																													 VOT_CashValue, &found ) )
+		return FALSE;
+
+	goal->x = found.x;
+	goal->y = found.y;
+	goal->z = TheTerrainLogic->getGroundHeight( goal->x, goal->y );
+	return TRUE;
+}
+
 void AISkirmishPlayer::acquireEnemy(void)
 {
 	Player *bestEnemy = NULL;
@@ -632,10 +665,12 @@ void AISkirmishPlayer::buildAIBaseDefenseStructure(const AsciiString &thingName,
 			goalPos = *way->getLocation();
 		} else {
 			if (flank) return;
-			Region2D bounds;
-			getPlayerStructureBounds(&bounds, getMyEnemyPlayerIndex(), FALSE, m_player->getPlayerIndex());
-			goalPos.x = bounds.lo.x + bounds.width()/2;
-			goalPos.y = bounds.lo.y + bounds.height()/2;
+			if (!influenceMapAttackGoal(&goalPos)) {
+				Region2D bounds;
+				getPlayerStructureBounds(&bounds, getMyEnemyPlayerIndex(), FALSE, m_player->getPlayerIndex());
+				goalPos.x = bounds.lo.x + bounds.width()/2;
+				goalPos.y = bounds.lo.y + bounds.height()/2;
+			}
 		}
 		Coord2D offset;
 		offset.x = goalPos.x-m_baseCenter.x;
@@ -1184,10 +1219,12 @@ Bool AISkirmishPlayer::computeSuperweaponTarget(const SpecialPowerTemplate *powe
 		if (way) {
 			goalPos = *way->getLocation();
 		} else {
-			Region2D bounds;
-			getPlayerStructureBounds(&bounds, getMyEnemyPlayerIndex(), FALSE, m_player->getPlayerIndex());
-			goalPos.x = bounds.lo.x + bounds.width()/2;
-			goalPos.y = bounds.lo.y + bounds.height()/2;
+			if (!influenceMapAttackGoal(&goalPos)) {
+				Region2D bounds;
+				getPlayerStructureBounds(&bounds, getMyEnemyPlayerIndex(), FALSE, m_player->getPlayerIndex());
+				goalPos.x = bounds.lo.x + bounds.width()/2;
+				goalPos.y = bounds.lo.y + bounds.height()/2;
+			}
 		}
 		Coord2D offset;
 		offset.x = goalPos.x-m_baseCenter.x;
