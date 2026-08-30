@@ -739,8 +739,10 @@ void DumbProjectileBehavior::crc( Xfer *xfer )
 void DumbProjectileBehavior::xfer( Xfer *xfer )
 {
 
-	// version
-	XferVersion currentVersion = 1;
+	// version 2 saves how far along its arc the shell is, and rebuilds the arc on load.  Version 1
+	// saved neither: a shell in flight came back at step zero of a path it no longer had, so it
+	// went off in the launcher's face instead of finishing its flight.
+	XferVersion currentVersion = 2;
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
@@ -790,6 +792,14 @@ void DumbProjectileBehavior::xfer( Xfer *xfer )
 
 	// lifespan frame
 	xfer->xferUnsignedInt( &m_lifespanFrame );
+
+	if( version >= 2 )
+		xfer->xferInt( &m_currentFlightPathStep );
+
+	// the path itself is a vector of points that is not saved; rebuild it from the start, end and
+	// segment count that are, so the step we just read means something
+	if( xfer->getXferMode() == XFER_LOAD && m_flightPathSegments > 0 )
+		calcFlightPath( false );
 
 }  // end xfer
 

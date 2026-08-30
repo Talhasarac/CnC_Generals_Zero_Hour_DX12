@@ -1083,8 +1083,10 @@ void SpawnBehavior::xfer( Xfer *xfer )
 {
 	AsciiString name;
 
-	// version
-	XferVersion currentVersion = 2;
+	// version 3 saves how much of the opening burst is still owed.  Without it a loaded save reset
+	// that counter to the template's full count, so a barracks that had already put its mob on the
+	// street put a whole new one out - fallen members came back at the building.
+	XferVersion currentVersion = 3;
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
@@ -1094,6 +1096,10 @@ void SpawnBehavior::xfer( Xfer *xfer )
 	
 	if (version >= 2) {
 		xfer->xferBool(&m_initialBurstTimesInited);
+	}
+
+	if (version >= 3) {
+		xfer->xferUnsignedInt(&m_initialBurstCountdown);
 	}
 
 	// spawn template

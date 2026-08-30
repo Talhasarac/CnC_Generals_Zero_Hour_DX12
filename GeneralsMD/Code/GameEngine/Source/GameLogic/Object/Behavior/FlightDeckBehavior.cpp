@@ -1693,7 +1693,9 @@ void FlightDeckBehavior::xfer( Xfer *xfer )
 	xfer->xferUnsignedInt( &m_startedProductionFrame );
 	xfer->xferUnsignedInt( &m_nextAllowedProductionFrame );
 	xfer->xferObjectID( &m_designatedTarget );
-	Int commandType;
+	// on save this is what gets written, and it was written uninitialised - the carrier came back
+	// from a save having forgotten the order it was given, or holding whatever was on the stack
+	Int commandType = (Int)m_designatedCommand;
 	xfer->xferInt( &commandType );
 	m_designatedCommand = (AICommandType)commandType;
 	xfer->xferCoord3D( &m_designatedPosition );
@@ -1710,7 +1712,9 @@ void FlightDeckBehavior::xfer( Xfer *xfer )
 			xfer->xferUnsignedInt( &m_rampUpFrame[ i ] );					
 			xfer->xferUnsignedInt( &m_catapultSystemFrame[ i ] ); 
 			xfer->xferUnsignedInt( &m_lowerRampFrame[ i ] );			
-			xfer->xferBool( &m_rampUp[ MAX_RUNWAYS ] );
+			// this said [MAX_RUNWAYS], which is one past the end of the array: every runway's ramp
+			// state was read and written through the same out-of-bounds byte
+			xfer->xferBool( &m_rampUp[ i ] );
 		}
 		else
 		{

@@ -131,6 +131,11 @@ found and fixed â€” EA's own, not port damage.**
 
 - A unit with nowhere to stand appears where asked, not at a random point.
 - Loading a save remembers what your guards were guarding.
+- A turret loaded from a save is still tracking what it was tracking, and a worker loaded mid-job carries on with it, instead of both snapping back to their default state.
+- A shell already in the air finishes its flight after a load instead of going off in the launcher's face.
+- An aircraft carrier remembers the order it was given, and each runway its own ramp.
+- A barracks that has already put its mob on the street does not put a second one out after a load.
+- Effects tied together - a smoke column and its embers - stay tied together across a save.
 - Saved units come back with the map's weapons, not the stock ones.
 - Restarting a skirmish restarts the same skirmish, with a replay that plays back.
 - Replays sound and look the way they did when you played them.

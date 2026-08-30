@@ -155,9 +155,15 @@ void TurretStateMachine::crc( Xfer *xfer )
 // ------------------------------------------------------------------------------------------------
 void TurretStateMachine::xfer( Xfer *xfer )
 {
-	XferVersion cv = 1;	
+	// version 2 saves the state machine underneath.  Version 1 saved a version number and nothing
+	// else, so every turret came back from a save in its default state - pointed forward, with
+	// whatever it was tracking forgotten.
+	XferVersion cv = 2;	
 	XferVersion v = cv; 
 	xfer->xferVersion( &v, cv );
+
+	if( v >= 2 )
+		StateMachine::xfer( xfer );
 
 }  // end xfer
 
@@ -166,6 +172,7 @@ void TurretStateMachine::xfer( Xfer *xfer )
 // ------------------------------------------------------------------------------------------------
 void TurretStateMachine::loadPostProcess( void )
 {
+	StateMachine::loadPostProcess();
 }  // end loadPostProcess
 
 //----------------------------------------------------------------------------------------------------------

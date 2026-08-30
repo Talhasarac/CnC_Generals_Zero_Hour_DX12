@@ -1317,7 +1317,11 @@ ParticleSystem::ParticleSystem( const ParticleSystemTemplate *sysTemplate,
 	m_controlParticle = NULL;
 	m_groundShadow = NULL;
 
-	TheParticleSystemManager->friend_addParticleSystem(this);
+	// A system built without an id yet - the load path does that, so it can restore the saved id
+	// first - registers itself once it has one, rather than here where the manager would file it
+	// under nothing and every later lookup by id would miss it.
+	if (m_systemID != INVALID_PARTICLE_SYSTEM_ID)
+		TheParticleSystemManager->friend_addParticleSystem(this);
 
 	//DEBUG_ASSERTLOG(!(m_totalParticleSystemCount % 10 == 0), ( "TotalParticleSystemCount = %d\n", m_totalParticleSystemCount ));
 }
@@ -1364,8 +1368,9 @@ ParticleSystem::~ParticleSystem()
 		m_controlParticle->detachControlledParticleSystem();
 
 	m_controlParticle = NULL;
-	
-	TheParticleSystemManager->friend_removeParticleSystem(this);
+
+	if (m_systemID != INVALID_PARTICLE_SYSTEM_ID)
+		TheParticleSystemManager->friend_removeParticleSystem(this);
 	//DEBUG_ASSERTLOG(!(m_totalParticleSystemCount % 10 == 0), ( "TotalParticleSystemCount = %d\n", m_totalParticleSystemCount ));
 }
 
@@ -3588,8 +3593,12 @@ void ParticleSystemManager::xfer( Xfer *xfer )
 
 			}  // end if
 
-			// create system
-			system = createParticleSystem( systemTemplate, FALSE );
+			// Create the system without an id and let the saved one come back first.  It used to be
+			// created through createParticleSystem, which hands out the next id in sequence and
+			// files the system under it - and then the xfer below overwrote the id with the saved
+			// one, leaving the manager's index pointing at the wrong system.  Every lookup by id
+			// after a load missed: a master could not find its slaves.
+			system = newInstance(ParticleSystem)( systemTemplate, INVALID_PARTICLE_SYSTEM_ID, FALSE );
 
 			if( system == NULL )
 			{
@@ -3600,8 +3609,20 @@ void ParticleSystemManager::xfer( Xfer *xfer )
 
 			}  // end if
 
-			// read system data
+			// read system data - this is what restores the id
 			xfer->xferSnapshot( system );
+
+			if( system->getSystemID() == INVALID_PARTICLE_SYSTEM_ID )
+			{
+
+				DEBUG_CRASH(( "ParticleSystemManager::xfer - No system id restored for particle system '%s'\n",
+											systemName.str() ));
+				system->deleteInstance();
+				throw SC_INVALID_DATA;
+
+			}  // end if
+
+			friend_addParticleSystem( system );
 
 		}  // end for, i
 

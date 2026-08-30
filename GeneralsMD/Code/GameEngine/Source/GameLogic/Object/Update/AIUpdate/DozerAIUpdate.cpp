@@ -861,12 +861,17 @@ void DozerActionStateMachine::crc( Xfer *xfer )
 // ------------------------------------------------------------------------------------------------
 void DozerActionStateMachine::xfer( Xfer *xfer )
 {
-  // version
-  XferVersion currentVersion = 1;
+  // version 2 saves the state machine underneath.  Version 1 saved the task and nothing else, so a
+  // dozer came back from a save still holding the job but standing in the default state for it -
+  // which is how a builder loaded mid-job stopped building.
+  XferVersion currentVersion = 2;
   XferVersion version = currentVersion;
   xfer->xferVersion( &version, currentVersion );
 
 	xfer->xferUser(&m_task, sizeof(m_task));
+
+	if( version >= 2 )
+		StateMachine::xfer( xfer );
 }  // end xfer
 
 // ------------------------------------------------------------------------------------------------
@@ -874,6 +879,7 @@ void DozerActionStateMachine::xfer( Xfer *xfer )
 // ------------------------------------------------------------------------------------------------
 void DozerActionStateMachine::loadPostProcess( void )
 {
+	StateMachine::loadPostProcess();
 }  // end loadPostProcess
 
 

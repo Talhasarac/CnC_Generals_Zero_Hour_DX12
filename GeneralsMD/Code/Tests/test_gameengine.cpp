@@ -3314,6 +3314,46 @@ TEST(particlesys_find_answers_by_id_and_forgets_a_dead_system)
 	TheGameClient = savedClient;
 }
 
+/* Loading a save has to put each system back under the id it was saved with.  It used to build the
+	 system through createParticleSystem, which hands out the next id in sequence and files the system
+	 under it, and only then read the saved id over the top - so the manager's index pointed at the
+	 wrong system and every lookup by id missed, which is how a master lost its slaves across a save.
+	 A system built with no id now stays out of the index until it has one. */
+TEST(particlesys_built_without_an_id_stays_out_of_the_index_until_it_has_one)
+{
+	GameClient *savedClient = TheGameClient;
+	TheGameClient = getTestGameClient();
+	ParticleSystemManager *savedManager = TheParticleSystemManager;
+
+	{
+		TestParticleSystemManager mgr;
+		TheParticleSystemManager = &mgr;
+
+		ParticleSystemTemplate *tmpl = mgr.newTemplate( AsciiString( "TestParticleSystem" ) );
+		CHECK( tmpl != NULL );
+
+		ParticleSystem *normal = mgr.createParticleSystem( tmpl, FALSE );
+		CHECK_EQ( mgr.getParticleSystemCount(), 1 );
+
+		// the shape the load path uses: no id yet, so nothing to file it under
+		ParticleSystem *loading = newInstance(ParticleSystem)( tmpl, INVALID_PARTICLE_SYSTEM_ID, FALSE );
+		CHECK( loading != NULL );
+		CHECK_EQ( mgr.getParticleSystemCount(), 1 );				// still just the first one
+		CHECK( mgr.findParticleSystem( INVALID_PARTICLE_SYSTEM_ID ) == NULL );
+
+		// and taking it away again does not disturb what is filed
+		loading->deleteInstance();
+		CHECK_EQ( mgr.getParticleSystemCount(), 1 );
+		CHECK( mgr.findParticleSystem( normal->getSystemID() ) == normal );
+
+		normal->deleteInstance();
+		CHECK_EQ( mgr.getParticleSystemCount(), 0 );
+	}
+
+	TheParticleSystemManager = savedManager;
+	TheGameClient = savedClient;
+}
+
 TEST(particlesys_reset_lets_the_ids_start_over_without_ghosts)
 {
 	GameClient *savedClient = TheGameClient;
