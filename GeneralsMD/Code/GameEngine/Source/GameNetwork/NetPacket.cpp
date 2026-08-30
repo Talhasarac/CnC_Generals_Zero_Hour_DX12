@@ -39,6 +39,20 @@
 //#pragma MESSAGE("************************************** WARNING, optimization disabled for debugging purposes")
 #endif
 
+// A chat message's length travels as a single byte, and all eight places that pack or measure one
+// simply assigned getLength() to that byte.  So a 256 character message became a length of zero and
+// a 300 character one became 44 - and the size estimate, the room check and the copy each wrapped
+// on their own, which is how a long line of chat turned into a packet whose declared length and
+// contents disagree.  Clamp instead: the byte is always honest, and a message too long to fit is
+// refused by the room check rather than sent mangled.
+static const Int MAX_CHAT_TEXT_LENGTH = 255;
+
+static UnsignedByte usableChatTextLength(const UnicodeString &text)
+{
+	const Int len = text.getLength();
+	return (UnsignedByte)((len > MAX_CHAT_TEXT_LENGTH) ? MAX_CHAT_TEXT_LENGTH : len);
+}
+
 // This function assumes that all of the fields are either of default value or are
 // present in the raw data.
 NetCommandRef * NetPacket::ConstructNetCommandMsgFromRawData(UnsignedByte *data, UnsignedShort dataLength) {
@@ -540,7 +554,7 @@ UnsignedInt NetPacket::GetDisconnectChatCommandSize(NetCommandMsg *msg) {
 
 	++msglen; // the 'D'
 	msglen += sizeof(UnsignedByte); // string msglength
-	UnsignedByte textmsglen = cmdMsg->getText().getLength();
+	UnsignedByte textmsglen = usableChatTextLength(cmdMsg->getText());
 	msglen += textmsglen * sizeof(UnsignedShort);
 
 	return msglen;
@@ -577,7 +591,7 @@ UnsignedInt NetPacket::GetChatCommandSize(NetCommandMsg *msg) {
 
 	++msglen; // the 'D'
 	msglen += sizeof(UnsignedByte); // string msglength
-	UnsignedByte textmsglen = cmdMsg->getText().getLength();
+	UnsignedByte textmsglen = usableChatTextLength(cmdMsg->getText());
 	msglen += textmsglen * sizeof(UnsignedShort);
 	msglen += sizeof(Int); // playerMask
 
@@ -1434,7 +1448,7 @@ void NetPacket::FillBufferWithDisconnectChatCommand(UnsignedByte *buffer, NetCom
 	buffer[offset] = 'D';
 	++offset;
 	UnicodeString unitext = cmdMsg->getText();
-	UnsignedByte length = unitext.getLength();
+	UnsignedByte length = usableChatTextLength(unitext);
 	memcpy(buffer + offset, &length, sizeof(UnsignedByte));
 	offset += sizeof(UnsignedByte);
 
@@ -1535,7 +1549,7 @@ void NetPacket::FillBufferWithChatCommand(UnsignedByte *buffer, NetCommandRef *m
 	buffer[offset] = 'D';
 	++offset;
 	UnicodeString unitext = cmdMsg->getText();
-	UnsignedByte length = unitext.getLength();
+	UnsignedByte length = usableChatTextLength(unitext);
 	Int playerMask = cmdMsg->getPlayerMask();
 	memcpy(buffer + offset, &length, sizeof(UnsignedByte));
 	offset += sizeof(UnsignedByte);
@@ -1969,11 +1983,13 @@ void NetPacket::setAddress(Int addr, Int port) {
 Bool NetPacket::addCommand(NetCommandRef *msg) {
 	// This is where the fun begins...
 
-	NetCommandMsg *cmdMsg = msg->getCommand();
-
+	// The null test was written below this, after the reference had already been followed, so the
+	// one call it exists to survive was the one call that crashed.
 	if (msg == NULL) {
 		return TRUE; // There was nothing to add, so it was successful.
 	}
+
+	NetCommandMsg *cmdMsg = msg->getCommand();
 
 	switch(cmdMsg->getNetCommandType())
 	{
@@ -3265,7 +3281,7 @@ Bool NetPacket::addDisconnectChatCommand(NetCommandRef *msg) {
 		m_packet[m_packetLen] = 'D';
 		++m_packetLen;
 		UnicodeString unitext = cmdMsg->getText();
-		UnsignedByte length = unitext.getLength();
+		UnsignedByte length = usableChatTextLength(unitext);
 		memcpy(m_packet + m_packetLen, &length, sizeof(UnsignedByte));
 		m_packetLen += sizeof(UnsignedByte);
 
@@ -3303,7 +3319,7 @@ Bool NetPacket::isRoomForDisconnectChatMessage(NetCommandRef *msg) {
 
 	++len; // the 'D'
 	len += sizeof(UnsignedByte); // string length
-	UnsignedByte textLen = cmdMsg->getText().getLength();
+	UnsignedByte textLen = usableChatTextLength(cmdMsg->getText());
 	len += textLen * sizeof(UnsignedShort);
 	if ((len + m_packetLen) > MAX_PACKET_SIZE) {
 		return FALSE;
@@ -3378,7 +3394,7 @@ Bool NetPacket::addChatCommand(NetCommandRef *msg) {
 		m_packet[m_packetLen] = 'D';
 		++m_packetLen;
 		UnicodeString unitext = cmdMsg->getText();
-		UnsignedByte length = unitext.getLength();
+		UnsignedByte length = usableChatTextLength(unitext);
 		Int playerMask = cmdMsg->getPlayerMask();
 		memcpy(m_packet + m_packetLen, &length, sizeof(UnsignedByte));
 		m_packetLen += sizeof(UnsignedByte);
@@ -3428,7 +3444,7 @@ Bool NetPacket::isRoomForChatMessage(NetCommandRef *msg) {
 
 	++len; // the 'D'
 	len += sizeof(UnsignedByte); // string length
-	UnsignedByte textLen = cmdMsg->getText().getLength();
+	UnsignedByte textLen = usableChatTextLength(cmdMsg->getText());
 	len += textLen * sizeof(UnsignedShort);
 	len += sizeof(Int); // playerMask
 	if ((len + m_packetLen) > MAX_PACKET_SIZE) {

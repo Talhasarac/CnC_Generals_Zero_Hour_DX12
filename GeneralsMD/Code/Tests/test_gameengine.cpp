@@ -4300,6 +4300,70 @@ TEST(an_overlong_announced_filename_is_truncated_instead_of_overflowing)
 	msg->detach();
 }
 
+/* A chat message's length goes on the wire in one byte, and every site that packed or measured one
+	 assigned the character count straight to it.  256 characters became a length of zero; 300 became
+	 44 - and the size estimate, the room check and the copy each wrapped separately, so what went
+	 out declared one length and carried another. */
+TEST(an_overlong_chat_line_is_refused_rather_than_wrapped_to_a_short_one)
+{
+	NetChatCommandMsg *chat = newInstance( NetChatCommandMsg );
+	UnicodeString text;
+	Int k;
+	for( k = 0; k < 300; ++k )
+		text.concat( (WideChar)(L'a' + (k % 26)) );
+	chat->setText( text );
+	chat->setPlayerMask( 0xFF );
+	chat->setPlayerID( 1 );
+	chat->setID( 1 );
+	chat->setExecutionFrame( 0 );
+	chat->setNetCommandType( NETCOMMANDTYPE_CHAT );
+
+	NetCommandRef *ref = newInstance( NetCommandRef )( chat );
+	ref->setRelay( 0 );
+
+	NetPacket *packet = newInstance( NetPacket );
+	packet->init();
+
+	/* 300 characters cannot fit a 476 byte packet, so the only right answer is to refuse it.  With
+		 the wrapped byte the packet believed it needed 88 bytes and took the message, then wrote a
+		 length of 44 in front of it. */
+	CHECK( !packet->addCommand( ref ) );
+	CHECK_EQ( packet->getNumCommands(), 0 );
+
+	/* and a chat line that does fit is still taken */
+	NetChatCommandMsg *shortChat = newInstance( NetChatCommandMsg );
+	shortChat->setText( UnicodeString( L"gg" ) );
+	shortChat->setPlayerMask( 0xFF );
+	shortChat->setPlayerID( 1 );
+	shortChat->setID( 1 );
+	shortChat->setExecutionFrame( 0 );
+	shortChat->setNetCommandType( NETCOMMANDTYPE_CHAT );
+	NetCommandRef *shortRef = newInstance( NetCommandRef )( shortChat );
+	shortRef->setRelay( 0 );
+
+	CHECK( packet->addCommand( shortRef ) );
+	CHECK_EQ( packet->getNumCommands(), 1 );
+
+	packet->deleteInstance();
+	shortRef->deleteInstance();
+	ref->deleteInstance();
+	shortChat->detach();
+	chat->detach();
+}
+
+/* addCommand's own guard against a null reference sat below the line that followed it, so the one
+	 call it exists to survive was the one call that crashed. */
+TEST(adding_a_null_command_to_a_packet_is_refused_not_followed)
+{
+	NetPacket *packet = newInstance( NetPacket );
+	packet->init();
+
+	CHECK( packet->addCommand( NULL ) );			// nothing to add, and nothing to dereference
+	CHECK_EQ( packet->getNumCommands(), 0 );
+
+	packet->deleteInstance();
+}
+
 /* A command too big for one packet is sent as numbered chunks and reassembled into one heap block
 	 sized from the first chunk's claim.  Each later chunk then said where it went and how long it
 	 was, and neither number was checked before the memcpy - so a peer could place its bytes anywhere
