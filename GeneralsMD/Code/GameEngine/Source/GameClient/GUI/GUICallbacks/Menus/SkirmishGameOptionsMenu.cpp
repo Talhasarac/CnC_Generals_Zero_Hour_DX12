@@ -1147,14 +1147,27 @@ void InitSkirmishGameGadgets( void )
 			// A seat with no AI behind it, for testing: Shift-Ctrl-T in game hands it to you.
 			GadgetComboBoxAddEntry(comboBoxPlayer[i],TheGameText->fetch("GUI:HumanSlot"),white);
       GadgetComboBoxSetItemData(comboBoxPlayer[i], 2, (void *)SLOT_TAKEOVER);
+			//
+			// The six-rung ladder (AI-ROADMAP.md D6).  Every rung plays by the player's rules - the
+			// steps are decisions the AI is or is not allowed to make, never money, build speed,
+			// vision or unit stats.  Three of the six have no shipped string, so they read as plain
+			// English rather than as MISSING:; the three that do keep it, and EA's "HardAI" string
+			// now labels the rung that is actually called Hard.
+			//
 			GadgetComboBoxAddEntry(comboBoxPlayer[i],TheGameText->fetch("GUI:EasyAI"),white);
       GadgetComboBoxSetItemData(comboBoxPlayer[i], 3, (void *)SLOT_EASY_AI);
+			GadgetComboBoxAddEntry(comboBoxPlayer[i],UnicodeString(L"Steady AI"),white);
+      GadgetComboBoxSetItemData(comboBoxPlayer[i], 4, (void *)SLOT_STEADY_AI);
 			GadgetComboBoxAddEntry(comboBoxPlayer[i],TheGameText->fetch("GUI:MediumAI"),white);
-      GadgetComboBoxSetItemData(comboBoxPlayer[i], 4, (void *)SLOT_MED_AI);
+      GadgetComboBoxSetItemData(comboBoxPlayer[i], 5, (void *)SLOT_MED_AI);
 			GadgetComboBoxAddEntry(comboBoxPlayer[i],TheGameText->fetch("GUI:HardAI"),white);
-      GadgetComboBoxSetItemData(comboBoxPlayer[i], 5, (void *)SLOT_BRUTAL_AI);
-			// six entries now, one more than the layout's list box was sized for
-			GadgetComboBoxSetMaxDisplay(comboBoxPlayer[i], 6);
+      GadgetComboBoxSetItemData(comboBoxPlayer[i], 6, (void *)SLOT_HARD_AI);
+			GadgetComboBoxAddEntry(comboBoxPlayer[i],UnicodeString(L"Brutal AI"),white);
+      GadgetComboBoxSetItemData(comboBoxPlayer[i], 7, (void *)SLOT_BRUTAL_AI);
+			GadgetComboBoxAddEntry(comboBoxPlayer[i],UnicodeString(L"Merciless AI"),white);
+      GadgetComboBoxSetItemData(comboBoxPlayer[i], 8, (void *)SLOT_MERCILESS_AI);
+			// nine entries now; the layout's list box was sized for five
+			GadgetComboBoxSetMaxDisplay(comboBoxPlayer[i], 9);
 			GadgetComboBoxSetSelectedPos(comboBoxPlayer[i],0);
 
 		}

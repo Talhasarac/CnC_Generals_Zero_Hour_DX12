@@ -182,6 +182,8 @@ static const FieldParse TheAIFieldParseTable[] =
 
 	{ "SideInfo",			AI::parseSideInfo,			NULL, NULL },
 
+	{ "SkillLevel",		AI::parseSkillLevel,		NULL, NULL },
+
 
 	{ "SkirmishBuildList",			AI::parseSkirmishBuildList,			NULL, NULL },
 
@@ -1002,6 +1004,78 @@ Real AI::getAdjustedVisionRangeForObject(const Object *object, Int factorsToCons
 }
 
 //-------------------------------------------------------------------------------------------------
+//-------------------------------------------------------------------------------------------------
+/** The ladder, from AI-ROADMAP.md D6.  Each rung switches on exactly one new capability and takes
+	* one step off the reaction delay, so every rung's identity is a sentence and a rung that plays
+	* wrong has exactly one new thing in it.
+	*
+	* Read the columns down, not across: nothing here is money, build speed, vision or unit stats.
+	*
+	*                      scoutS maxSc react decis   cntr  mass  ttk   indiv infl  focus   harv  expand guard hoard */
+static const AIDifficultyProfile s_defaultSkillLadder[ AISKILL_COUNT ] =
+{
+	/* Easy      */ { 90.0f, 1, 15.0f, 10.0f,  0.00f, FALSE, 0.00f, FALSE, FALSE, FALSE,  FALSE, FALSE, FALSE,     0 },
+	/* Steady    */ { 75.0f, 1, 10.0f,  8.0f,  0.00f, FALSE, 0.50f, TRUE,  FALSE, FALSE,  TRUE,  FALSE, FALSE,     0 },
+	/* Medium    */ { 60.0f, 1,  6.0f,  5.0f,  0.25f, FALSE, 0.60f, TRUE,  FALSE, TRUE,   TRUE,  TRUE,  FALSE, 10000 },
+	/* Hard      */ { 45.0f, 2,  3.0f,  4.0f,  0.60f, FALSE, 0.70f, TRUE,  FALSE, TRUE,   TRUE,  TRUE,  FALSE,  8000 },
+	/* Brutal    */ { 30.0f, 2,  1.0f,  2.0f,  0.85f, TRUE,  0.80f, TRUE,  FALSE, TRUE,   TRUE,  TRUE,  TRUE,   5000 },
+	/* Merciless */ { 25.0f, 2,  0.0f,  1.5f,  1.00f, TRUE,  0.85f, TRUE,  TRUE,  TRUE,   TRUE,  TRUE,  TRUE,   4000 }
+};
+
+//-------------------------------------------------------------------------------------------------
+const AIDifficultyProfile *AI::getDifficultyProfile( AISkillLevel level ) const
+{
+	if( m_aiData == NULL )
+		return &s_defaultSkillLadder[ AISKILL_MERCILESS ];
+	if( level < 0 || level >= AISKILL_COUNT )
+		level = AISKILL_MERCILESS;			// the baseline; a bad index must not read as a handicap
+	return &m_aiData->m_skill[ level ];
+}
+
+//-------------------------------------------------------------------------------------------------
+/** SkillLevel = Brutal ... End, in AI.ini: tuning the ladder without a recompile, which is what
+	* the headless batch runner wants.  Anything the block does not mention keeps its default. */
+//-------------------------------------------------------------------------------------------------
+void AI::parseSkillLevel(INI *ini, void *instance, void* /*store*/, const void* /*userData*/)
+{
+	static const FieldParse myFieldParse[] =
+	{
+		{ "ScoutIntervalSeconds",			INI::parseReal, NULL, offsetof( AIDifficultyProfile, m_scoutIntervalSeconds ) },
+		{ "MaxScouts",								INI::parseInt,  NULL, offsetof( AIDifficultyProfile, m_maxScouts ) },
+		{ "ReactionDelaySeconds",			INI::parseReal, NULL, offsetof( AIDifficultyProfile, m_reactionDelaySeconds ) },
+		{ "DecisionIntervalSeconds",	INI::parseReal, NULL, offsetof( AIDifficultyProfile, m_decisionIntervalSeconds ) },
+		{ "CounterCompositionWeight",	INI::parseReal, NULL, offsetof( AIDifficultyProfile, m_counterCompositionWeight ) },
+		{ "MassBeforeAttacking",			INI::parseBool, NULL, offsetof( AIDifficultyProfile, m_massBeforeAttacking ) },
+		{ "RetreatTtkRatio",					INI::parseReal, NULL, offsetof( AIDifficultyProfile, m_retreatTtkRatio ) },
+		{ "RetreatIndividualUnits",		INI::parseBool, NULL, offsetof( AIDifficultyProfile, m_retreatIndividualUnits ) },
+		{ "UseInfluenceMapForAttackLane", INI::parseBool, NULL, offsetof( AIDifficultyProfile, m_useInfluenceMapForAttackLane ) },
+		{ "FocusFire",								INI::parseBool, NULL, offsetof( AIDifficultyProfile, m_focusFire ) },
+		{ "AdaptiveHarvesters",				INI::parseBool, NULL, offsetof( AIDifficultyProfile, m_adaptiveHarvesters ) },
+		{ "SelfTriggeredExpansion",		INI::parseBool, NULL, offsetof( AIDifficultyProfile, m_selfTriggeredExpansion ) },
+		{ "DefendExpansions",					INI::parseBool, NULL, offsetof( AIDifficultyProfile, m_defendExpansions ) },
+		{ "CashHoardThreshold",				INI::parseInt,  NULL, offsetof( AIDifficultyProfile, m_cashHoardThreshold ) },
+		{ NULL, NULL, NULL, 0 }
+	};
+
+	static const char *names[ AISKILL_COUNT ] =
+		{ "Easy", "Steady", "Medium", "Hard", "Brutal", "Merciless" };
+
+	AsciiString name( ini->getNextToken() );
+	Int which = -1;
+	for( Int i = 0; i < AISKILL_COUNT; ++i )
+		if( name.compareNoCase( names[ i ] ) == 0 )
+			which = i;
+
+	if( which < 0 )
+	{
+		DEBUG_LOG(("AI.ini SkillLevel '%s' is not one of Easy/Steady/Medium/Hard/Brutal/Merciless\n",
+							 name.str()));
+		which = AISKILL_MERCILESS;		// parse it somewhere rather than throw the block on the floor
+	}
+
+	ini->initFromINI( &((TAiData*)instance)->m_skill[ which ], myFieldParse );
+}
+
 TAiData::TAiData() : 
 m_next(NULL), 
 m_sideInfo(NULL), 
@@ -1053,6 +1127,9 @@ m_maxRetaliateDistance(210.0f),
 m_retaliateFriendsRadius(120.0f)
 //
 {
+	// the ladder starts at its shipped defaults; an AI.ini SkillLevel block overrides one rung
+	for (Int i = 0; i < AISKILL_COUNT; ++i)
+		m_skill[i] = s_defaultSkillLadder[i];
 }
 
 //-------------------------------------------------------------------------------------------------

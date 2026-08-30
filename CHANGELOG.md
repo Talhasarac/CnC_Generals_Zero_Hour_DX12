@@ -29,6 +29,14 @@ found and fixed — EA's own, not port damage.**
 - It scouts. There was no such thing as scouting in the computer opponent - it never needed to look, because it could already see everything. One cheap unit now tours the enemy start positions and keeps going round for the rest of the match, replaced out of spare change when it dies. Every difficulty scouts; an opponent that never looks reads as broken, not as easy.
 - Nor does it read your base off the map. Where your base is, what it is worth, which supply dock to expand to and where to aim a superweapon all came off a walk of your object list, in the shroud, from the first second of the match. The computer now only counts what it can see, plus the buildings it has already found - buildings do not walk away. Before it has scouted you, all it knows is where you started, which is on the map preview anyway.
 
+## Six difficulty levels, and none of them cheat
+
+- Easy, Steady, Medium, Hard, Brutal, Merciless. Medium to Brutal used to be a cliff; the steps in between are where a player actually needs them.
+- Every level plays by your rules. No level gets extra money, cheaper units, faster building, longer vision or tougher units - in either direction. What changes is what the computer is allowed to decide: how often it looks at the map, how long it takes to react, whether it counters what you field, whether it masses before attacking, whether it pulls damaged units out.
+- Each step up switches on exactly one new thing, so you can say in a sentence what you get for climbing. Easy is slow and brave. Steady saves its damaged units. Medium expands on its own. Hard counters your build. Brutal masses and commits. Merciless is the ceiling - everything on, no hesitation.
+- Making Easy easier means giving it worse decisions, never less money. That is the whole promise.
+- The computer also picks a personality each match and keeps it: one plays for the attack, the other for the base. Same resources, spent differently.
+
 ## Attack-move actually attacks
 
 - Ctrl on the click advances the group at the slowest unit's pace.

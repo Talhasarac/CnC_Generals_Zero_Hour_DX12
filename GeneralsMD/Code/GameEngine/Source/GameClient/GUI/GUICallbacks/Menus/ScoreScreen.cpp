@@ -1217,11 +1217,14 @@ static void updateSkirmishBattleHonors(SkirmishBattleHonors& stats)
 		const GameSlot *slot = TheGameInfo->getConstSlot(i);
 		if (slot->isAI() && !isSlotLocalAlly(TheGameInfo, slot))
 		{
-			if (TheGameInfo->getConstSlot(i)->getState() == SLOT_EASY_AI)
+			// the three new rungs count towards the medal of the tier they sit in, so the challenge
+			// medals keep meaning what they meant before the ladder was widened
+			SlotState st = TheGameInfo->getConstSlot(i)->getState();
+			if (st == SLOT_EASY_AI || st == SLOT_STEADY_AI)
 				++numEasy;
-			if (TheGameInfo->getConstSlot(i)->getState() == SLOT_MED_AI)
+			if (st == SLOT_MED_AI || st == SLOT_HARD_AI)
 				++numMedium;
-			if (TheGameInfo->getConstSlot(i)->getState() == SLOT_BRUTAL_AI)
+			if (st == SLOT_BRUTAL_AI || st == SLOT_MERCILESS_AI)
 				++numBrutal;
 		}
 		else if (slot->isAI())

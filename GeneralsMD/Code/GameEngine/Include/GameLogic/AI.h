@@ -133,6 +133,69 @@ public:
 
 
 
+//-------------------------------------------------------------------------------------------------
+/** Six rungs of how well the AI plays.  Deliberately NOT GameDifficulty, which stays at three
+	* values: that enum answers "which scripts run" and is baked into every shipped map and .scb,
+	* into the campaign's stat bonus tables and into network messages.  This one answers "how well
+	* does it play", and every rung of it plays by the player's rules - no income, build-rate, vision
+	* or stat handicap at any level, in either direction.  See AI-ROADMAP.md sections D6, D7 and D10.
+	*/
+//-------------------------------------------------------------------------------------------------
+enum AISkillLevel
+{
+	AISKILL_EASY = 0,			///< slow and brave: looks around, but reacts far too late
+	AISKILL_STEADY,				///< + unit-level retreat, adaptive harvesters
+	AISKILL_MEDIUM,				///< + closest-target focus, expands on its own
+	AISKILL_HARD,					///< + counters what you field, groups fire together
+	AISKILL_BRUTAL,				///< + masses before attacking, team retreat, defended expansions
+	AISKILL_MERCILESS,		///< + influence-map attack lanes, no reaction delay
+
+	AISKILL_COUNT
+};
+
+//-------------------------------------------------------------------------------------------------
+/** What the AI is trying to do, as opposed to how well it does it.  A preference, never a bonus:
+	* the roles have to be about equally strong or the axis silently becomes a difficulty setting. */
+//-------------------------------------------------------------------------------------------------
+enum AIRole
+{
+	AIROLE_AGGRESSIVE = 0,
+	AIROLE_DEFENSIVE,
+
+	AIROLE_COUNT
+};
+
+//-------------------------------------------------------------------------------------------------
+/** One rung of the ladder.  Every new AI behaviour adds a field here rather than a
+	* switch(difficulty) somewhere, so the whole ladder can be read, tuned and measured in one place.
+	*
+	* Nothing in here may exceed the AI's honest baseline - the top rung IS the baseline and the
+	* lower rungs are handicaps on its *decisions*.  If a field ever appears that multiplies income,
+	* build rate, vision or unit stats, the design has drifted. */
+//-------------------------------------------------------------------------------------------------
+struct AIDifficultyProfile
+{
+	// Perception. Never fog: only how diligently it looks and how fast it acts on what it saw.
+	Real	m_scoutIntervalSeconds;					///< how often the scout is re-tasked; every rung scouts
+	Int		m_maxScouts;
+	Real	m_reactionDelaySeconds;					///< lag between "something happened" and answering it
+	Real	m_decisionIntervalSeconds;			///< how often it re-evaluates - the AI's APM
+
+	// Decision quality
+	Real	m_counterCompositionWeight;			///< 0 = ignore what the enemy fields (EA's behaviour)
+	Bool	m_massBeforeAttacking;
+	Real	m_retreatTtkRatio;							///< allied time-to-kill / enemy TTK below which it pulls back
+	Bool	m_retreatIndividualUnits;
+	Bool	m_useInfluenceMapForAttackLane;
+	Bool	m_focusFire;
+
+	// Economy: decisions only, never multipliers
+	Bool	m_adaptiveHarvesters;
+	Bool	m_selfTriggeredExpansion;
+	Bool	m_defendExpansions;
+	Int		m_cashHoardThreshold;						///< above this, spend faster; 0 = never hurry
+};
+
 class TAiData : public Snapshot
 {
 public:
@@ -166,6 +229,8 @@ public:
 	UnsignedInt m_guardEnemyReturnScanRate;		// rate to scan for enemies while guarding but returning
 
 	Real m_wallHeight;				// Height of special wall units can walk on top of.
+
+	AIDifficultyProfile m_skill[AISKILL_COUNT];	///< the ladder; defaults in TAiData(), overridable from INI
 	
 	Real m_alertRangeModifier;			// When a unit is alert, its range will be modified by this value
 	Real m_aggressiveRangeModifier;	// When a unit is aggressive, its range will be modified by this value
@@ -292,6 +357,11 @@ public:
 	static Real s_lastPathfindMS;						///< see getLastPathfindMS
 	static Real s_lastPlayerUpdateMS;				///< see getLastPlayerUpdateMS
 	const TAiData *getAiData() {return m_aiData;}
+
+	/// The rung's knobs. Bounds-checked, so a bad index reads as the baseline rather than as memory.
+	const AIDifficultyProfile *getDifficultyProfile( AISkillLevel level ) const;
+
+	static void parseSkillLevel(INI *ini, void *instance, void *store, const void *userData);
 
 	// Note: Does not work for things that do not have AI. (This is in AI.h, after all)
 	static Real getAdjustedVisionRangeForObject(const Object *object, Int factorsToConsider);

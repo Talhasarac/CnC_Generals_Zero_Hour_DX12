@@ -66,6 +66,7 @@
 #include "GameClient/ParticleSys.h"
 #include "GameClient/FXList.h"
 #include "GameClient/ControlBar.h"
+#include "GameLogic/AI.h"
 #include "GameLogic/Module/ProductionUpdate.h"
 #include "GameLogic/Module/SupplyTruckAIUpdate.h"
 #include "GameClient/InGameUI.h"
@@ -5782,4 +5783,54 @@ TEST(ceil_and_floor_are_exact_on_whole_numbers)
 	CHECK_EQ( -4, REAL_TO_INT_FLOOR( -3.1f ) );
 	CHECK_EQ( 0, REAL_TO_INT_FLOOR( 0.9f ) );
 	CHECK_EQ( -1, REAL_TO_INT_FLOOR( -0.1f ) );
+}
+
+
+/** The difficulty ladder is a table, not thirty scattered switch statements, so the one thing worth
+	 asserting about it is that it is actually a ladder: every rung looks harder than the one below,
+	 and no rung is a cheat.  A fat-fingered row in the table is otherwise invisible until somebody
+	 plays a hundred matches.
+
+	 TheAI does not exist in this binary, so this reads the shipped defaults the way TAiData's
+	 constructor does. */
+TEST(the_difficulty_ladder_climbs_in_every_direction_it_should)
+{
+	TAiData data;
+
+	for( Int i = 1; i < AISKILL_COUNT; ++i )
+	{
+		const AIDifficultyProfile &lower = data.m_skill[ i - 1 ];
+		const AIDifficultyProfile &upper = data.m_skill[ i ];
+
+		// perception: looks more often, acts sooner, thinks more often - never sees more
+		CHECK( upper.m_scoutIntervalSeconds <= lower.m_scoutIntervalSeconds );
+		CHECK( upper.m_reactionDelaySeconds <= lower.m_reactionDelaySeconds );
+		CHECK( upper.m_decisionIntervalSeconds <= lower.m_decisionIntervalSeconds );
+		CHECK( upper.m_maxScouts >= lower.m_maxScouts );
+
+		// decisions: counters harder, holds on to its units longer
+		CHECK( upper.m_counterCompositionWeight >= lower.m_counterCompositionWeight );
+		CHECK( upper.m_retreatTtkRatio >= lower.m_retreatTtkRatio );
+
+		// capabilities only ever switch on as you climb, never off again
+		CHECK( upper.m_massBeforeAttacking >= lower.m_massBeforeAttacking );
+		CHECK( upper.m_retreatIndividualUnits >= lower.m_retreatIndividualUnits );
+		CHECK( upper.m_useInfluenceMapForAttackLane >= lower.m_useInfluenceMapForAttackLane );
+		CHECK( upper.m_focusFire >= lower.m_focusFire );
+		CHECK( upper.m_adaptiveHarvesters >= lower.m_adaptiveHarvesters );
+		CHECK( upper.m_selfTriggeredExpansion >= lower.m_selfTriggeredExpansion );
+		CHECK( upper.m_defendExpansions >= lower.m_defendExpansions );
+	}
+
+	// the ends of the ladder are what they say they are
+	CHECK_EQ( 0.0f, data.m_skill[ AISKILL_EASY ].m_counterCompositionWeight );
+	CHECK_EQ( 1.0f, data.m_skill[ AISKILL_MERCILESS ].m_counterCompositionWeight );
+	CHECK_EQ( 0.0f, data.m_skill[ AISKILL_MERCILESS ].m_reactionDelaySeconds );
+
+	// every rung scouts. An AI that never looks reads as broken, not as easy.
+	for( Int i = 0; i < AISKILL_COUNT; ++i )
+	{
+		CHECK( data.m_skill[ i ].m_scoutIntervalSeconds > 0.0f );
+		CHECK( data.m_skill[ i ].m_maxScouts >= 1 );
+	}
 }

@@ -916,9 +916,20 @@ void Player::initFromDict(const Dict* d)
 		{
 			difficulty = (GameDifficulty) diffInt;
 		}
+		Bool skillExists = false;
+		Int skillInt = d->getInt(TheKey_skirmishAISkill, &skillExists);
 		if (m_ai) 
 		{
 			m_ai->setAIDifficulty(difficulty);
+			//
+			// The rung, if the seat named one. A save or replay from before the ladder existed does
+			// not, so fall back on the three-value difficulty: that is what those matches were
+			// actually played at.
+			//
+			if (skillExists)
+				m_ai->setAISkillLevel((AISkillLevel)skillInt);
+			else
+				m_ai->setAISkillLevel(AIPlayer::skillLevelForDifficulty(difficulty));
 		}
 
 		if (!found) 

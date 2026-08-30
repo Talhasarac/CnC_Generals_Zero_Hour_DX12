@@ -881,6 +881,15 @@ DEFINE_KEY(skirmishDifficulty)
 
 /**
 	Which: Player Properties
+	Type: Int
+	Usage: (optional) which rung of the six-step AI ladder this player plays at (AISkillLevel).
+	       skirmishDifficulty stays a GameDifficulty and answers "which scripts run"; this answers
+	       "how well does it play". See AI-ROADMAP.md D7.
+*/
+DEFINE_KEY(skirmishAISkill)
+
+/**
+	Which: Player Properties
 	Type: Bool
 	Usage: (optional) if present, signifies if the player is the local player
 */

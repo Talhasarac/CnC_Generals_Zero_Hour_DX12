@@ -981,10 +981,21 @@ AsciiString LANAPI::createSlotString( void )
 		}
 		else if (slot->isAI())
 		{
+			//
+			// The missing "else" on the second test meant an easy AI was set to "CE," and then
+			// immediately overwritten with "CB," - every AI seat but a medium one advertised itself
+			// to the lobby as brutal.
+			//
 			if (slot->getState() == SLOT_EASY_AI)
 				str = "CE,";
-			if (slot->getState() == SLOT_MED_AI)
+			else if (slot->getState() == SLOT_STEADY_AI)
+				str = "CS,";
+			else if (slot->getState() == SLOT_MED_AI)
 				str = "CM,";
+			else if (slot->getState() == SLOT_HARD_AI)
+				str = "CH,";
+			else if (slot->getState() == SLOT_MERCILESS_AI)
+				str = "CX,";
 			else
 				str = "CB,";
 		}

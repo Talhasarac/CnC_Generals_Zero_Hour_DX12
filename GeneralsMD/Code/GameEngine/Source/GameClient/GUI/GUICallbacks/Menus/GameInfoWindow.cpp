@@ -171,9 +171,25 @@ void RefreshGameInfoWindow(GameInfo *gameInfo, UnicodeString gameName)
 					addedRow = GadgetListBoxAddEntryText(listBoxPlayers,TheGameText->fetch("GUI:MediumAI"),playerColor,-1, 1);
 					break;
 				}
-				case SLOT_BRUTAL_AI:
+				case SLOT_HARD_AI:
 				{
 					addedRow = GadgetListBoxAddEntryText(listBoxPlayers,TheGameText->fetch("GUI:HardAI"),playerColor,-1, 1);
+					break;
+				}
+				// the rungs the ladder added have no shipped string; plain English rather than MISSING:
+				case SLOT_STEADY_AI:
+				{
+					addedRow = GadgetListBoxAddEntryText(listBoxPlayers,UnicodeString(L"Steady AI"),playerColor,-1, 1);
+					break;
+				}
+				case SLOT_BRUTAL_AI:
+				{
+					addedRow = GadgetListBoxAddEntryText(listBoxPlayers,UnicodeString(L"Brutal AI"),playerColor,-1, 1);
+					break;
+				}
+				case SLOT_MERCILESS_AI:
+				{
+					addedRow = GadgetListBoxAddEntryText(listBoxPlayers,UnicodeString(L"Merciless AI"),playerColor,-1, 1);
 					break;
 				}
 				default:

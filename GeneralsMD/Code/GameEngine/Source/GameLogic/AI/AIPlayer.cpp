@@ -133,7 +133,9 @@ m_teamSeconds(10),
 m_curWarehouseID(INVALID_ID),
 m_scoutID(INVALID_ID),
 m_scoutTimer(1),
-m_scoutTarget(0)
+m_scoutTarget(0),
+m_skillLevel(AISKILL_MERCILESS),
+m_role(AIROLE_AGGRESSIVE)
 {
 	m_frameLastBuildingBuilt = TheGameLogic->getFrame();
 	p->setCanBuildUnits(false); // turn off ai production by default.
@@ -146,6 +148,16 @@ m_scoutTarget(0)
 	m_baseCenter.zero();
 	m_baseCenterSet = false;
 	m_difficulty = TheScriptEngine->getGlobalDifficulty(); 
+	m_skillLevel = skillLevelForDifficulty( m_difficulty );
+
+	//
+	// Role is rolled once and kept for the whole match.  Sins is explicit that its AI does not flip
+	// personality mid-game, and that consistency is what makes an opponent readable and therefore
+	// counterable - an AI that turtles for ten minutes and then rushes is not deep, it is noise.
+	// GameLogicRandomValue, so a replay rolls the same one.
+	//
+	m_role = (GameLogicRandomValue( 0, AIROLE_COUNT - 1 ) == 0) ? AIROLE_AGGRESSIVE : AIROLE_DEFENSIVE;
+
 	m_teamSeconds = TheAI->getAiData()->m_teamSeconds;
 
 	//
@@ -3493,7 +3505,20 @@ void AIPlayer::doScouting( void )
 
 	Coord3D goal;
 	if( nextScoutTarget( &goal ) )
+	{
 		ai->aiMoveToPosition( &goal, CMD_FROM_AI );
+
+		//
+		// ... and then leave it alone for this rung's scouting interval before the next leg.  This
+		// is the ladder's honest perception knob: every rung scouts, they differ in how diligently.
+		// Ninety seconds between legs on Easy is a scout that wanders; twenty-five on Merciless is
+		// one that keeps the map current.
+		//
+		const AIDifficultyProfile *profile = getSkillProfile();
+		Int interval = REAL_TO_INT_CEIL( profile->m_scoutIntervalSeconds * LOGICFRAMES_PER_SECOND );
+		if( interval > m_scoutTimer )
+			m_scoutTimer = interval;
+	}
 }
 
 //----------------------------------------------------------------------------------------------------------
@@ -3552,6 +3577,26 @@ void AIPlayer::queueDozer( void )
 enum GameDifficulty AIPlayer::getAIDifficulty(void) const
 {
 	return m_difficulty;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The rung a seat that predates the ladder plays at - an old save, a replay, a scripted campaign
+	* player.  The three that existed map to the three the lobby used to offer. */
+//-------------------------------------------------------------------------------------------------
+AISkillLevel AIPlayer::skillLevelForDifficulty( GameDifficulty difficulty )
+{
+	switch( difficulty )
+	{
+		case DIFFICULTY_EASY:		return AISKILL_EASY;
+		case DIFFICULTY_NORMAL:	return AISKILL_MEDIUM;
+		default:								return AISKILL_BRUTAL;
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
+const AIDifficultyProfile *AIPlayer::getSkillProfile( void ) const
+{
+	return TheAI->getDifficultyProfile( m_skillLevel );
 }
 
 
@@ -3654,7 +3699,7 @@ void AIPlayer::xfer( Xfer *xfer )
 {
 
 	// version
-	XferVersion currentVersion = 2;		// 2: the scout
+	XferVersion currentVersion = 3;		// 2: the scout   3: skill rung and role
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
@@ -3814,6 +3859,13 @@ void AIPlayer::xfer( Xfer *xfer )
 		xfer->xferObjectID( &m_scoutID );
 		xfer->xferInt( &m_scoutTimer );
 		xfer->xferInt( &m_scoutTarget );
+	}
+
+	// the ladder rung and the role, which are rolled once and must come back the same way
+	if( version >= 3 )
+	{
+		xfer->xferUser( &m_skillLevel, sizeof( AISkillLevel ) );
+		xfer->xferUser( &m_role, sizeof( AIRole ) );
 	}
 
 	xfer->xferUser( m_structuresToRepair, sizeof( ObjectID ) * MAX_STRUCTURES_TO_REPAIR );

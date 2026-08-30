@@ -33,6 +33,7 @@
 
 #include "Common/GameMemory.h"
 #include "Common/Snapshot.h"
+#include "GameLogic/AI.h"			// AISkillLevel, AIRole and the difficulty profile the ladder reads
 
 enum { INVALID_SKILLSET_SELECTION = -1 };
 
@@ -199,6 +200,18 @@ public:
 	/// Difficulty level for this player.
 	GameDifficulty getAIDifficulty(void) const;
 	void setAIDifficulty(GameDifficulty difficulty) {m_difficulty = difficulty;}
+
+	/** Which rung of the six-step ladder this AI plays at, and what it is trying to do.  Two
+		* independent axes: the rung says how well, the role says what.  See AI-ROADMAP.md D6/D8. */
+	AISkillLevel getAISkillLevel(void) const {return m_skillLevel;}
+	void setAISkillLevel(AISkillLevel level) {m_skillLevel = level;}
+	AIRole getAIRole(void) const {return m_role;}
+
+	/// This rung's knobs, for any behaviour that has a difficulty-dependent decision to make.
+	const AIDifficultyProfile *getSkillProfile(void) const;
+
+	/// What a seat that predates the ladder (an old save, a replay, a script) plays at.
+	static AISkillLevel skillLevelForDifficulty(GameDifficulty difficulty);
 	void buildBySupplies(Int minimumCash, const AsciiString &thingName ); ///< Builds a building by supplies.
 	void buildSpecificBuildingNearestTeam( const AsciiString &thingName, const Team *team );
 	void buildUpgrade(const AsciiString &upgrade ); ///< Builds an upgrade.
@@ -303,6 +316,9 @@ protected:
 protected:	 
 
 	Player *m_player;									///< the Player we represent
+
+	AISkillLevel m_skillLevel;				///< rung of the ladder: how well this AI plays
+	AIRole		m_role;									///< what it is trying to do; rolled once, kept for the match
 
 	ObjectID	m_scoutID;							///< the unit currently touring the map for us
 	Int				m_scoutTimer;						///< frames until the next scouting check

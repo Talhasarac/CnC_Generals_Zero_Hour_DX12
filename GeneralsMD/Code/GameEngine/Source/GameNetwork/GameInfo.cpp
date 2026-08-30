@@ -271,7 +271,9 @@ Bool GameSlot::isAI( void ) const
 	// SLOT_TAKEOVER counts here on purpose: to the lobby it is an ordinary opponent seat that the
 	// host owns and that no network peer is expected to check in from.  It differs in one place
 	// only - the player it creates is human (GameLogic::startNewGame), so no AI is ever attached.
-	return m_state == SLOT_EASY_AI || m_state == SLOT_MED_AI || m_state == SLOT_BRUTAL_AI || m_state == SLOT_TAKEOVER;
+	return m_state == SLOT_EASY_AI || m_state == SLOT_MED_AI || m_state == SLOT_BRUTAL_AI ||
+				 m_state == SLOT_STEADY_AI || m_state == SLOT_HARD_AI || m_state == SLOT_MERCILESS_AI ||
+				 m_state == SLOT_TAKEOVER;
 }
 
 Bool GameSlot::isPlayer( AsciiString userName ) const
