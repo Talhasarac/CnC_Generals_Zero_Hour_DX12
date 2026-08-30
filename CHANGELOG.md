@@ -348,6 +348,7 @@ found and fixed â€” EA's own, not port damage.**
 - Quitting faulted twice every time; it now takes about half a second.
 - A long chat message or an unusual map name could kill the process.
 - Nor can a map handed to you over the network, however long a name the other machine gives it.
+- An order too big for one packet arrives in pieces, and a piece that claims to belong outside the order is dropped instead of landing there.
 - The window no longer goes *Not Responding* during the menu's camera moves.
 - Poison clouds, mine clearing, garrison kills and crew-killing weapons: all traced and fixed.
 - Blowing up a full transport is survivable now, in every remaining variant.

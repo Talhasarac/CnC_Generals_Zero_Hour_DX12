@@ -57,6 +57,7 @@
 #include "GameClient/Gadget.h"
 #include "GameNetwork/NetworkUtil.h"
 #include "GameNetwork/NetCommandList.h"
+#include "GameNetwork/NetCommandWrapperList.h"
 #include "GameNetwork/NetPacket.h"
 #include "GameNetwork/GameInfo.h"
 #include <float.h>
@@ -4297,6 +4298,70 @@ TEST(an_overlong_announced_filename_is_truncated_instead_of_overflowing)
 	CHECK_EQ( (Int)announce->getPlayerMask(), 0x5A );
 
 	msg->detach();
+}
+
+/* A command too big for one packet is sent as numbered chunks and reassembled into one heap block
+	 sized from the first chunk's claim.  Each later chunk then said where it went and how long it
+	 was, and neither number was checked before the memcpy - so a peer could place its bytes anywhere
+	 it liked relative to that block.  The offset, the length and their sum are all checked now, and
+	 a refused chunk no longer counts towards the command being complete. */
+static NetWrapperCommandMsg *makeWrapperChunk( UnsignedInt chunkNumber, UnsignedInt numChunks,
+	UnsignedInt totalDataLength, UnsignedInt offset, UnsignedByte *data, UnsignedInt dataLength )
+{
+	NetWrapperCommandMsg *msg = newInstance( NetWrapperCommandMsg );
+	msg->setWrappedCommandID( 42 );
+	msg->setNumChunks( numChunks );
+	msg->setTotalDataLength( totalDataLength );
+	msg->setChunkNumber( chunkNumber );
+	msg->setDataOffset( offset );
+	msg->setData( data, dataLength );
+	return msg;
+}
+
+TEST(a_wrapped_command_chunk_cannot_write_outside_its_own_buffer)
+{
+	UnsignedByte first[4]  = { 0x11, 0x22, 0x33, 0x44 };
+	UnsignedByte second[4] = { 0x55, 0x66, 0x77, 0x88 };
+
+	NetWrapperCommandMsg *chunk0 = makeWrapperChunk( 0, 2, 8, 0, first, 4 );
+	NetCommandWrapperListNode *node = newInstance( NetCommandWrapperListNode )( chunk0 );
+
+	CHECK_EQ( (Int)node->getRawDataLength(), 8 );
+
+	node->copyChunkData( chunk0 );					// the honest first half
+	CHECK( !node->isComplete() );
+	CHECK_EQ( node->getPercentComplete(), 50 );
+
+	// an offset past the end of the block
+	NetWrapperCommandMsg *farOffset = makeWrapperChunk( 1, 2, 8, 4096, second, 4 );
+	node->copyChunkData( farOffset );
+	CHECK( !node->isComplete() );
+	CHECK_EQ( node->getPercentComplete(), 50 );		// refused, and not counted as received
+	farOffset->detach();
+
+	// a length no packet could have carried
+	NetWrapperCommandMsg *hugeLength = makeWrapperChunk( 1, 2, 8, 4, second, MAX_PACKET_SIZE + 1 );
+	node->copyChunkData( hugeLength );
+	CHECK( !node->isComplete() );
+	hugeLength->detach();
+
+	// in range on its own, but the tail runs off the end
+	NetWrapperCommandMsg *overhang = makeWrapperChunk( 1, 2, 8, 6, second, 4 );
+	node->copyChunkData( overhang );
+	CHECK( !node->isComplete() );
+	overhang->detach();
+
+	// and the honest second half still completes the command
+	NetWrapperCommandMsg *chunk1 = makeWrapperChunk( 1, 2, 8, 4, second, 4 );
+	node->copyChunkData( chunk1 );
+	CHECK( node->isComplete() );
+	CHECK_EQ( node->getPercentComplete(), 100 );
+	CHECK_MEM( first, node->getRawData(), 4 );
+	CHECK_MEM( second, node->getRawData() + 4, 4 );
+	chunk1->detach();
+
+	node->deleteInstance();
+	chunk0->detach();
 }
 
 //////////////////////////////////////////////////////////////////////////////

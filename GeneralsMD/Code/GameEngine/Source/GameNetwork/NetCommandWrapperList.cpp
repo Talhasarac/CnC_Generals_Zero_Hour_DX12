@@ -93,22 +93,49 @@ void NetCommandWrapperListNode::copyChunkData(NetWrapperCommandMsg *msg) {
 		return;
 	}
 
-	DEBUG_ASSERTCRASH(msg->getChunkNumber() < m_numChunks, ("MunkeeChunk %d of %d\n",
-		msg->getChunkNumber(), m_numChunks));
-	if (msg->getChunkNumber() >= m_numChunks)
+	UnsignedInt chunkNumber = msg->getChunkNumber();
+
+	if (chunkNumber >= m_numChunks) {
+		DEBUG_CRASH(("Data chunk %d exceeds the expected maximum of %d chunks\n",
+			chunkNumber, m_numChunks));
 		return;
+	}
 
-	DEBUG_LOG(("NetCommandWrapperListNode::copyChunkData() - copying chunk %d\n",
-		msg->getChunkNumber()));
-
-	if (m_chunksPresent[msg->getChunkNumber()] == TRUE) {
+	if (m_chunksPresent[chunkNumber] == TRUE) {
 		// we already received this chunk, no need to recopy it.
 		return;
 	}
 
-	m_chunksPresent[msg->getChunkNumber()] = TRUE;
-	UnsignedInt offset = msg->getDataOffset();
-	memcpy(m_data + offset, msg->getData(), msg->getDataLength());
+	// The offset and the length both come off the wire and neither was checked.  A wrapped command
+	// whose chunk claims an offset or a size beyond the buffer this node allocated for the whole
+	// command wrote straight past the end of that heap block - and the sender is a peer, not us.
+	UnsignedInt chunkDataOffset = msg->getDataOffset();
+	UnsignedInt chunkDataLength = msg->getDataLength();
+
+	if (chunkDataOffset >= m_dataLength) {
+		DEBUG_CRASH(("Data chunk offset %d exceeds the total data length %d\n",
+			chunkDataOffset, m_dataLength));
+		return;
+	}
+
+	if (chunkDataLength > MAX_PACKET_SIZE) {
+		DEBUG_CRASH(("Data chunk size %d is greater than the maximum packet size %d\n",
+			chunkDataLength, MAX_PACKET_SIZE));
+		return;
+	}
+
+	if (chunkDataOffset + chunkDataLength > m_dataLength) {
+		DEBUG_CRASH(("Data chunk at %d for %d bytes runs past the data array\n",
+			chunkDataOffset, chunkDataLength));
+		return;
+	}
+
+	DEBUG_LOG(("NetCommandWrapperListNode::copyChunkData() - copying chunk %d\n", chunkNumber));
+
+	memcpy(m_data + chunkDataOffset, msg->getData(), chunkDataLength);
+
+	// only a chunk that was really copied counts as present, or the command completes with a hole
+	m_chunksPresent[chunkNumber] = TRUE;
 	++m_numChunksPresent;
 }
 
