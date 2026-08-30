@@ -5834,3 +5834,57 @@ TEST(the_difficulty_ladder_climbs_in_every_direction_it_should)
 		CHECK( data.m_skill[ i ].m_maxScouts >= 1 );
 	}
 }
+
+
+/** B1's arithmetic, the half of "build what counters what he is fielding" that has no engine in it.
+	 The bug it replaces was not a bad score, it was no score at all: EA picked at random among the
+	 teams sharing the highest static priority, so an AI facing nothing but aircraft went on building
+	 tanks. */
+TEST(counter_score_answers_what_the_enemy_actually_fields)
+{
+	AIEnemyComposition allAir;
+	allAir.m_air = 1.0f;
+
+	AITeamCapability aa;      aa.m_hitsAir = TRUE;
+	AITeamCapability tanks;   tanks.m_hitsGround = TRUE; tanks.m_prefersVehicles = TRUE;
+
+	// against an all-air enemy the AA team is the answer and the tank team is not
+	CHECK_NEAR( 1.0f, aiCounterScore( allAir, aa ), 0.0001f );
+	CHECK_NEAR( 0.0f, aiCounterScore( allAir, tanks ), 0.0001f );
+
+	// against an all-armour enemy it is the other way round: anti-tank scores its share plus the
+	// quarter share every ground-capable team gets
+	AIEnemyComposition allArmour;
+	allArmour.m_armour = 1.0f;
+	CHECK_NEAR( 1.0f, aiCounterScore( allArmour, tanks ), 0.0001f );
+	CHECK_NEAR( 0.0f, aiCounterScore( allArmour, aa ), 0.0001f );
+
+	// a team that can only shoot the ground is worth something against a ground army, but far less
+	// than one built for it
+	AITeamCapability generic;  generic.m_hitsGround = TRUE;
+	CHECK_NEAR( 0.25f, aiCounterScore( allArmour, generic ), 0.0001f );
+	CHECK( aiCounterScore( allArmour, generic ) < aiCounterScore( allArmour, tanks ) );
+
+	// stealth is the case A1 created: the AI stopped shooting through fog, so a detector earns its
+	// place the moment the enemy fields anything that can hide
+	AIEnemyComposition halfStealth;
+	halfStealth.m_armour = 1.0f;
+	halfStealth.m_stealth = 0.5f;
+	AITeamCapability detector;  detector.m_hitsGround = TRUE; detector.m_detectsStealth = TRUE;
+	CHECK( aiCounterScore( halfStealth, detector ) > aiCounterScore( halfStealth, generic ) );
+
+	// seen nothing yet -> no opinion, whatever the team is. The static priority then decides,
+	// which is EA's behaviour and the right fallback.
+	AIEnemyComposition unknown;
+	CHECK_NEAR( 0.0f, aiCounterScore( unknown, aa ), 0.0001f );
+	CHECK_NEAR( 0.0f, aiCounterScore( unknown, tanks ), 0.0001f );
+
+	// the score is a share, so it never leaves 0..1 however many terms a team answers
+	AIEnemyComposition mixed;
+	mixed.m_air = 0.4f; mixed.m_armour = 0.4f; mixed.m_infantry = 0.2f; mixed.m_stealth = 0.3f;
+	AITeamCapability everything;
+	everything.m_hitsAir = everything.m_hitsGround = everything.m_detectsStealth = TRUE;
+	everything.m_prefersVehicles = everything.m_prefersInfantry = TRUE;
+	CHECK( aiCounterScore( mixed, everything ) <= 1.0f );
+	CHECK( aiCounterScore( mixed, everything ) > aiCounterScore( mixed, generic ) );
+}

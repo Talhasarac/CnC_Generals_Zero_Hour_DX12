@@ -196,6 +196,40 @@ struct AIDifficultyProfile
 	Int		m_cashHoardThreshold;						///< above this, spend faster; 0 = never hurry
 };
 
+//-------------------------------------------------------------------------------------------------
+/** What an enemy is fielding, as shares of the threat value the observer can actually see.  The
+	* four shares overlap (a stealth tank is both armour and stealth) and each is 0..1. */
+//-------------------------------------------------------------------------------------------------
+struct AIEnemyComposition
+{
+	Real m_air;					///< share of the enemy's visible threat value that flies
+	Real m_armour;			///< ... that is a vehicle
+	Real m_infantry;
+	Real m_stealth;			///< ... that can go invisible
+
+	AIEnemyComposition() : m_air(0.0f), m_armour(0.0f), m_infantry(0.0f), m_stealth(0.0f) {}
+};
+
+//-------------------------------------------------------------------------------------------------
+/** What a team can answer, read off the unit templates it is built from. */
+//-------------------------------------------------------------------------------------------------
+struct AITeamCapability
+{
+	Bool m_hitsAir;
+	Bool m_hitsGround;
+	Bool m_detectsStealth;
+	Bool m_prefersVehicles;			///< carries a weapon declared PreferredAgainst a vehicle: anti-tank
+	Bool m_prefersInfantry;			///< ... or against infantry: splash, flame, machine gun
+
+	AITeamCapability() : m_hitsAir(FALSE), m_hitsGround(FALSE), m_detectsStealth(FALSE),
+											 m_prefersVehicles(FALSE), m_prefersInfantry(FALSE) {}
+};
+
+/** How well this team answers what the enemy is fielding, 0 (answers none of it) to 1 (answers all
+	* of it).  Pure arithmetic on purpose - the whole point of B1 is a score you can test and tune
+	* rather than a coin flip, and this is the half of it that has no engine in it. */
+Real aiCounterScore( const AIEnemyComposition &enemy, const AITeamCapability &team );
+
 class TAiData : public Snapshot
 {
 public:

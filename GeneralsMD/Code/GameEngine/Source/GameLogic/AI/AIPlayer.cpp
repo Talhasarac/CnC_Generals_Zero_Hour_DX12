@@ -51,6 +51,7 @@
 #include "GameLogic/SidesList.h"
 #include "GameLogic/AI.h"
 #include "GameLogic/AIPathfind.h"
+#include "GameLogic/Weapon.h"				// the anti-masks B1 reads off a team's weapons
 #include "GameLogic/TerrainLogic.h"
 #include "GameLogic/Module/AIUpdate.h"
 #include "GameLogic/Module/DozerAIUpdate.h"
@@ -1736,6 +1737,129 @@ Bool AIPlayer::selectTeamToReinforce( Int minPriority )
 // ------------------------------------------------------------------------------------------------
 /** Determine the next team to build.  Return true if one was selected. */
 // ------------------------------------------------------------------------------------------------
+//-------------------------------------------------------------------------------------------------
+/** What one unit template can answer.  Read off its weapons: what they are allowed to shoot at,
+	* and what the data says they are the preferred answer to. */
+//-------------------------------------------------------------------------------------------------
+static void addTemplateCapability( const ThingTemplate *tmpl, AITeamCapability *cap )
+{
+	if( tmpl == NULL )
+		return;
+
+	//
+	// "Can it see stealth" is not a KindOf - it is a module the data hangs on the unit, so ask the
+	// template's module list by name.  That is the same question the game itself answers when it
+	// builds the object, one INI edit away from being right for a mod's own detector.
+	//
+	const ModuleInfo &modules = tmpl->getBehaviorModuleInfo();
+	for( Int m = 0; m < modules.getCount(); ++m )
+	{
+		if( modules.getNthName( m ).compareNoCase( "StealthDetectorUpdate" ) == 0 )
+		{
+			cap->m_detectsStealth = TRUE;
+			break;
+		}
+	}
+
+	const WeaponTemplateSetVector &sets = tmpl->getWeaponTemplateSets();
+	for( WeaponTemplateSetVector::const_iterator it = sets.begin(); it != sets.end(); ++it )
+	{
+		for( Int slot = 0; slot < WEAPONSLOT_COUNT; ++slot )
+		{
+			const WeaponTemplate *w = it->getNth( (WeaponSlotType)slot );
+			if( w == NULL )
+				continue;
+
+			const Int anti = w->getAntiMask();
+			if( anti & (WEAPON_ANTI_AIRBORNE_VEHICLE | WEAPON_ANTI_AIRBORNE_INFANTRY) )
+				cap->m_hitsAir = TRUE;
+			if( anti & WEAPON_ANTI_GROUND )
+				cap->m_hitsGround = TRUE;
+
+			const KindOfMaskType &preferred = it->getNthPreferredAgainstMask( (WeaponSlotType)slot );
+			if( preferred.test( KINDOF_VEHICLE ) )
+				cap->m_prefersVehicles = TRUE;
+			if( preferred.test( KINDOF_INFANTRY ) )
+				cap->m_prefersInfantry = TRUE;
+		}
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
+/** What a team prototype can answer, over every unit it is built from. */
+//-------------------------------------------------------------------------------------------------
+static AITeamCapability teamCapability( const TeamPrototype *proto )
+{
+	AITeamCapability cap;
+	const TeamTemplateInfo *info = proto ? proto->getTemplateInfo() : NULL;
+	if( info == NULL )
+		return cap;
+
+	for( Int i = 0; i < info->m_numUnitsInfo; ++i )
+		addTemplateCapability( TheThingFactory->findTemplate( info->m_unitsInfo[ i ].unitThingName, FALSE ), &cap );
+
+	return cap;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** What this AI can see of what its enemies are fielding, weighted by threat value so a tank
+	* counts for more than a rifleman.  Fog-aware by construction - it asks observerKnowsAbout of
+	* every object, which is what makes B1 A2's first customer. */
+//-------------------------------------------------------------------------------------------------
+void AIPlayer::computeEnemyComposition( AIEnemyComposition *out )
+{
+	Real air = 0.0f, armour = 0.0f, infantry = 0.0f, stealth = 0.0f, total = 0.0f;
+	const Int me = m_player->getPlayerIndex();
+
+	for( Int i = 0; i < ThePlayerList->getPlayerCount(); ++i )
+	{
+		Player *p = ThePlayerList->getNthPlayer( i );
+		if( p == NULL || p == m_player )
+			continue;
+		if( m_player->getRelationship( p->getDefaultTeam() ) != ENEMIES )
+			continue;
+
+		for( Player::PlayerTeamList::const_iterator t = p->getPlayerTeams()->begin();
+				 t != p->getPlayerTeams()->end(); ++t )
+		{
+			for( DLINK_ITERATOR<Team> iter = (*t)->iterate_TeamInstanceList(); !iter.done(); iter.advance() )
+			{
+				Team *team = iter.cur();
+				if( team == NULL )
+					continue;
+				for( DLINK_ITERATOR<Object> objIter = team->iterate_TeamMemberList(); !objIter.done(); objIter.advance() )
+				{
+					Object *obj = objIter.cur();
+					if( obj == NULL || obj->isEffectivelyDead() )
+						continue;
+					if( obj->isKindOf( KINDOF_STRUCTURE ) || obj->isKindOf( KINDOF_PROJECTILE ) )
+						continue;			// this is about the army, not the base
+					if( !observerKnowsAbout( obj, me ) )
+						continue;
+
+					const Real threat = INT_TO_REAL( obj->getTemplate()->getThreatValue() );
+					if( threat <= 0.0f )
+						continue;
+
+					total += threat;
+					if( obj->isKindOf( KINDOF_AIRCRAFT ) )				air += threat;
+					if( obj->isKindOf( KINDOF_VEHICLE ) )					armour += threat;
+					if( obj->isKindOf( KINDOF_INFANTRY ) )				infantry += threat;
+					if( obj->getStatusBits().test( OBJECT_STATUS_CAN_STEALTH ) )	stealth += threat;
+				}
+			}
+		}
+	}
+
+	if( total <= 0.0f )
+		return;			// nothing seen: the caller's zeroed composition means "no opinion"
+
+	out->m_air = air / total;
+	out->m_armour = armour / total;
+	out->m_infantry = infantry / total;
+	out->m_stealth = stealth / total;
+}
+
 Bool AIPlayer::selectTeamToBuild( void )
 {
 
@@ -1771,12 +1895,55 @@ Bool AIPlayer::selectTeamToBuild( void )
 		TheScriptEngine->AppendDebugMessage("**AI** Selecting team to build", false);
 	}
 
-	// collect all teams that are possible to build, and are at the highest priority
+	//
+	// EA's version stopped here: take the highest static productionPriority and flip a coin among
+	// the ties.  Not one line of it looked at what the enemy was fielding, which is why an AI facing
+	// nothing but aircraft would go on building tanks.
+	//
+	// So the static priority is the base of a score rather than the whole of it, and two situational
+	// terms ride on top:
+	//
+	//   - how well the team answers what this AI can *see* the enemy fielding (B1), scaled by the
+	//     rung's counterCompositionWeight - zero on the bottom two rungs, which is EA's behaviour
+	//     exactly, up to one at the top;
+	//   - what this AI is trying to do (D8): an aggressive one leans towards attack teams, a
+	//     defensive one towards the teams the data flags as base or perimeter defence.  A
+	//     preference, not a bonus - both spend the same money.
+	//
+	// The coin flip stays, for the ties that remain. Determinism: GameLogicRandomValue, as before.
+	//
+	const AIDifficultyProfile *profile = getSkillProfile();
+	AIEnemyComposition enemy;
+	if (profile->m_counterCompositionWeight > 0.0f)
+		computeEnemyComposition( &enemy );
+
+	// what a perfect counter, and the role preference, are worth in units of production priority
+	const Real COUNTER_SPAN = 20.0f;
+	const Real ROLE_SPAN = 10.0f;
+
 	Player::PlayerTeamList candidateList;
 	Int count = 0;
+	Real bestScore = 0.0f;
+	Bool haveBest = FALSE;
 	for (t = candidateList1.begin(); t != candidateList1.end(); ++t)
 	{
-		if ((*t)->getTemplateInfo()->m_productionPriority == hiPri)
+		const TeamTemplateInfo *info = (*t)->getTemplateInfo();
+		const Bool isDefenceTeam = info->m_isBaseDefense || info->m_isPerimeterDefense;
+
+		Real score = INT_TO_REAL( info->m_productionPriority );
+		score += profile->m_counterCompositionWeight * COUNTER_SPAN *
+						 aiCounterScore( enemy, teamCapability( *t ) );
+		if( (m_role == AIROLE_DEFENSIVE) == (isDefenceTeam != FALSE) )
+			score += ROLE_SPAN;
+
+		if( !haveBest || score > bestScore )
+		{
+			bestScore = score;
+			haveBest = TRUE;
+			candidateList.clear();
+			count = 0;
+		}
+		if( score >= bestScore )
 		{
 			candidateList.push_back( (*t) );
 			count++;

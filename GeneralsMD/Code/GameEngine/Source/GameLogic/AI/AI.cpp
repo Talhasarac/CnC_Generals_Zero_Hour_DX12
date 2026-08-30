@@ -1023,6 +1023,38 @@ static const AIDifficultyProfile s_defaultSkillLadder[ AISKILL_COUNT ] =
 };
 
 //-------------------------------------------------------------------------------------------------
+/** How well a team answers what the enemy is fielding.
+	*
+	* Anti-air and stealth detection carry their enemy's whole share, because a team that cannot
+	* touch what it is walking into is worth nothing against it - AA is the AI's classic hole and
+	* stealth became a real threat to it the moment its units stopped shooting through fog.  A
+	* weapon declared PreferredAgainst something is the data's own statement that it is the answer to
+	* it, so that is what "anti-tank" and "anti-infantry" mean here rather than a hand-kept list.
+	*
+	* Merely being able to shoot at the ground is worth a quarter share: almost every team can, so
+	* it barely discriminates, but a team that cannot is genuinely useless against a ground army. */
+//-------------------------------------------------------------------------------------------------
+Real aiCounterScore( const AIEnemyComposition &enemy, const AITeamCapability &team )
+{
+	Real score = 0.0f;
+
+	if( team.m_hitsAir )
+		score += enemy.m_air;
+	if( team.m_detectsStealth )
+		score += enemy.m_stealth;
+	if( team.m_prefersVehicles )
+		score += enemy.m_armour;
+	if( team.m_prefersInfantry )
+		score += enemy.m_infantry;
+	if( team.m_hitsGround )
+		score += 0.25f * (enemy.m_armour + enemy.m_infantry);
+
+	if( score < 0.0f ) score = 0.0f;
+	if( score > 1.0f ) score = 1.0f;
+	return score;
+}
+
+//-------------------------------------------------------------------------------------------------
 const AIDifficultyProfile *AI::getDifficultyProfile( AISkillLevel level ) const
 {
 	if( m_aiData == NULL )

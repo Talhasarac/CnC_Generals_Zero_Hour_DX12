@@ -256,6 +256,7 @@ protected:
 	virtual void doUpgradesAndSkills(void);
 	virtual Object *findDozer(const Coord3D *pos);
 	virtual void queueDozer(void);
+	void computeEnemyComposition( AIEnemyComposition *out );	///< what this AI can see the enemy fielding
 	virtual Bool selectTeamToBuild( void );			///< determine the next team to build
 	virtual Bool selectTeamToReinforce( Int minPriority );			///< determine the next team to reinforce
 	virtual Bool startTraining( WorkOrder *order, Bool busyOK, AsciiString teamName);	///< find a production building that can handle the order, and start building
