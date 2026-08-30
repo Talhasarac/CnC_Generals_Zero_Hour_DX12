@@ -58,6 +58,7 @@
 #include "GameNetwork/NetworkUtil.h"
 #include "GameNetwork/NetCommandList.h"
 #include "GameNetwork/NetCommandWrapperList.h"
+#include "GameNetwork/LANAPI.h"
 #include "GameNetwork/NetPacket.h"
 #include "GameNetwork/GameInfo.h"
 #include <float.h>
@@ -4309,17 +4310,36 @@ TEST(an_overlong_announced_filename_is_truncated_instead_of_overflowing)
 	msg->detach();
 }
 
+/* The 2003 datagram was 512 bytes all in, 476 of it payload - a quarter of what any link carries
+	 today, and the reason a busy frame needs four or five datagrams where one would do.  The payload
+	 is sized from a safe UDP ceiling now, and the three numbers have to stay in step: what goes on
+	 the wire is the header plus the payload, and the payload is exactly what a packet may hold. */
+TEST(a_datagram_is_one_udp_payload_and_the_payload_is_what_a_packet_holds)
+{
+	TransportMessage msg;
+
+	CHECK_EQ( (Int)sizeof(msg.header) + MAX_PACKET_SIZE, MAX_NETWORK_MESSAGE_LEN );
+	CHECK_EQ( (Int)sizeof(msg.data), MAX_PACKET_SIZE );
+	CHECK( MAX_NETWORK_MESSAGE_LEN <= MAX_UDP_PAYLOAD_SIZE );
+	CHECK( MAX_PACKET_SIZE > 476 );					// bigger than the 2003 datagram
+
+	// everything that has to live inside one payload still does
+	CHECK( (Int)sizeof(CommandPacket) <= MAX_PACKET_SIZE );
+	CHECK( (Int)sizeof(LANMessage) <= MAX_LANAPI_PACKET_SIZE );
+	CHECK( MAX_LANAPI_PACKET_SIZE <= MAX_PACKET_SIZE );
+}
+
 /* A chat message's length goes on the wire in one byte, and every site that packed or measured one
 	 assigned the character count straight to it.  256 characters became a length of zero; 300 became
 	 44 - and the size estimate, the room check and the copy each wrapped separately, so what went
 	 out declared one length and carried another. */
-TEST(an_overlong_chat_line_is_refused_rather_than_wrapped_to_a_short_one)
+static NetCommandRef *makeChat( const WideChar *body, Int length )
 {
 	NetChatCommandMsg *chat = newInstance( NetChatCommandMsg );
 	UnicodeString text;
 	Int k;
-	for( k = 0; k < 300; ++k )
-		text.concat( (WideChar)(L'a' + (k % 26)) );
+	for( k = 0; k < length; ++k )
+		text.concat( body ? body[k] : (WideChar)(L'a' + (k % 26)) );
 	chat->setText( text );
 	chat->setPlayerMask( 0xFF );
 	chat->setPlayerID( 1 );
@@ -4329,35 +4349,26 @@ TEST(an_overlong_chat_line_is_refused_rather_than_wrapped_to_a_short_one)
 
 	NetCommandRef *ref = newInstance( NetCommandRef )( chat );
 	ref->setRelay( 0 );
+	chat->detach();									// the ref holds it now
+	return ref;
+}
+
+TEST(an_overlong_chat_line_keeps_its_length_instead_of_wrapping_to_a_short_one)
+{
+	NetCommandRef *ref = makeChat( NULL, 300 );
 
 	NetPacket *packet = newInstance( NetPacket );
 	packet->init();
 
-	/* 300 characters cannot fit a 476 byte packet, so the only right answer is to refuse it.  With
-		 the wrapped byte the packet believed it needed 88 bytes and took the message, then wrote a
-		 length of 44 in front of it. */
-	CHECK( !packet->addCommand( ref ) );
-	CHECK_EQ( packet->getNumCommands(), 0 );
-
-	/* and a chat line that does fit is still taken */
-	NetChatCommandMsg *shortChat = newInstance( NetChatCommandMsg );
-	shortChat->setText( UnicodeString( L"gg" ) );
-	shortChat->setPlayerMask( 0xFF );
-	shortChat->setPlayerID( 1 );
-	shortChat->setID( 1 );
-	shortChat->setExecutionFrame( 0 );
-	shortChat->setNetCommandType( NETCOMMANDTYPE_CHAT );
-	NetCommandRef *shortRef = newInstance( NetCommandRef )( shortChat );
-	shortRef->setRelay( 0 );
-
-	CHECK( packet->addCommand( shortRef ) );
+	CHECK( packet->addCommand( ref ) );
 	CHECK_EQ( packet->getNumCommands(), 1 );
 
+	/* 300 characters clamp to 255, which is 510 bytes of text.  With the wrapped byte the length
+		 came out as 44 and the packet carried 88 bytes - so the size alone tells the two apart. */
+	CHECK( packet->getLength() >= 510 );
+
 	packet->deleteInstance();
-	shortRef->deleteInstance();
 	ref->deleteInstance();
-	shortChat->detach();
-	chat->detach();
 }
 
 /* addCommand's own guard against a null reference sat below the line that followed it, so the one

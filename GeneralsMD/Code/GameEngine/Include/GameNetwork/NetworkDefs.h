@@ -53,16 +53,42 @@ enum ConnectionNumbers
 
 static const Int MAX_SLOTS = MAX_PLAYER+1;
 
-// UDP (8 bytes) + IP header (28 bytes) = 36 bytes total.  We want a total packet size of 512, so 512 - 36 = 476
-static const Int MAX_PACKET_SIZE = 476;
+#pragma pack(push, 1)
+struct TransportMessageHeader
+{
+	UnsignedInt crc;											///< packet-level CRC (must be first in packet)
+	UnsignedShort magic;									///< Magic number identifying Generals packets
+//	Int id;
+//	NetMessageFlags flags;
+};
+#pragma pack(pop)
+
+// 2003's answer was a 512 byte datagram: UDP (8 bytes) + IP header (28 bytes) = 36, so 476 of
+// payload.  That is a quarter of what any link today carries, and it is the reason a busy frame
+// needs four or five datagrams where it could need one - every extra datagram is another chance to
+// arrive late and another entry in the resend machinery.
+//
+// 1100 is the ceiling we take instead.  It is not the ethernet MTU: a mobile link can hand back an
+// MTU of 1340, and PPPoE, IPv6 and tunnelling each eat their own header on top of that, so a
+// payload chosen from 1500 fragments on exactly the links that can least afford it.  Nothing here
+// discovers the path MTU, so the number has to be safe unasked.
+static const Int MAX_UDP_PAYLOAD_SIZE = 1100;
+
+// What goes on the wire is the header plus the payload, and the payload is what a packet may hold.
+static const Int MAX_NETWORK_MESSAGE_LEN = MAX_UDP_PAYLOAD_SIZE;
+static const Int MAX_PACKET_SIZE = MAX_UDP_PAYLOAD_SIZE - sizeof(TransportMessageHeader);
+
+// The LAN lobby's own broadcast is a fixed struct read at fixed offsets, and it stays where it was.
+static const Int MAX_LANAPI_PACKET_SIZE = 476;
 
 /**
  * Command packet - contains frame #, total # of commands, and each command.  This is what gets sent
  * to each player every frame
  */
-#define MAX_MESSAGE_LEN 1024
-#define MAX_MESSAGES 128
-static const Int numCommandsPerCommandPacket = (MAX_MESSAGE_LEN - sizeof(UnsignedInt) - sizeof(UnsignedShort))/sizeof(GameMessage);
+// twice as many in flight: the send and receive rings both used to fill under load, and a full ring
+// is a dropped message that the other end waits for
+#define MAX_MESSAGES 256
+static const Int numCommandsPerCommandPacket = (MAX_PACKET_SIZE - sizeof(UnsignedInt) - sizeof(UnsignedShort))/sizeof(GameMessage);
 #pragma pack(push, 1)
 struct CommandPacket
 {
@@ -74,16 +100,6 @@ struct CommandPacket
 
 #define MAX_TRANSPORT_STATISTICS_SECONDS 30
 
-#pragma pack(push, 1)
-struct TransportMessageHeader
-{
-	UnsignedInt crc;											///< packet-level CRC (must be first in packet)
-	UnsignedShort magic;									///< Magic number identifying Generals packets
-//	Int id;
-//	NetMessageFlags flags;
-};
-#pragma pack(pop)
-
 /**
  * Transport message - encapsulating info kept by the transport layer about each
  * packet.  These structs make up the in/out buffers at the transport layer.
@@ -92,7 +108,7 @@ struct TransportMessageHeader
 struct TransportMessage
 {
 	TransportMessageHeader header;
-	UnsignedByte data[MAX_MESSAGE_LEN];
+	UnsignedByte data[MAX_PACKET_SIZE];
 	Int length;
 	UnsignedInt addr;
 	UnsignedShort port;

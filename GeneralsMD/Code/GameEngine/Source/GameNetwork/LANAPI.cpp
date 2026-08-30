@@ -72,8 +72,8 @@ LANGame::LANGame( void )
 
 LANAPI::LANAPI( void ) : m_transport(NULL)
 {
-	DEBUG_LOG(("LANAPI::LANAPI() - max game option size is %d, sizeof(LANMessage)=%d, MAX_PACKET_SIZE=%d\n",
-		m_lanMaxOptionsLength, sizeof(LANMessage), MAX_PACKET_SIZE));
+	DEBUG_LOG(("LANAPI::LANAPI() - max game option size is %d, sizeof(LANMessage)=%d, MAX_LANAPI_PACKET_SIZE=%d\n",
+		m_lanMaxOptionsLength, sizeof(LANMessage), MAX_LANAPI_PACKET_SIZE));
 
 	m_lastResendTime = 0;
 	//

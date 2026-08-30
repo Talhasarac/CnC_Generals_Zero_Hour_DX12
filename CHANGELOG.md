@@ -143,6 +143,7 @@ found and fixed â€” EA's own, not port damage.**
 - The mismatch check now covers whole units and all sixty-eight special powers.
 - Order numbering no longer scrambles your commands after about fifteen hundred orders.
 - A network game runs at the speed it says it does.
+- A frame of orders now travels in one datagram instead of four or five: the packet was still the 476 bytes a 2003 modem could carry, and every extra datagram was another chance to arrive late.
 - Input delay is measured from simulation speed now, not your graphics card.
 - One lost packet costs a round trip instead of a flat two seconds.
 - A desynced match stops at once instead of playing on as two games.

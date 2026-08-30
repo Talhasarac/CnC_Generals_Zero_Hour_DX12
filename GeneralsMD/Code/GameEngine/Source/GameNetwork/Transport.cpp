@@ -296,9 +296,9 @@ Bool Transport::doRecv()
 
 	TransportMessage incomingMessage;
 	unsigned char *buf = (unsigned char *)&incomingMessage;
-	int len = MAX_MESSAGE_LEN;
+	int len = MAX_NETWORK_MESSAGE_LEN;
 //	DEBUG_LOG(("Transport::doRecv - checking\n"));
-	while ( (len=m_udpsock->Read(buf, MAX_MESSAGE_LEN, &from)) > 0 )
+	while ( (len=m_udpsock->Read(buf, MAX_NETWORK_MESSAGE_LEN, &from)) > 0 )
 	{
 		// Packet loss simulation
 		if (m_usePacketLoss)
@@ -420,7 +420,7 @@ Bool Transport::isGeneralsPacket( TransportMessage *msg )
 	if (!msg)
 		return false;
 
-	if (msg->length < 0 || msg->length > MAX_MESSAGE_LEN)
+	if (msg->length < 0 || msg->length > MAX_PACKET_SIZE)
 		return false;
 
 	CRC crc;

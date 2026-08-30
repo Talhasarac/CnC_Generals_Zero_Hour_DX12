@@ -176,7 +176,7 @@ Bool AddCommandToPacket(const GameMessage *msg)
 	int messageSize = sizeofMessageHeader + sizeofMessageArg * msg->getArgumentCount();
 
 	// If we have too much, send what we have
-	if (bytesUsed && (bytesUsed + sizeof(CommandPacketHeader) + messageSize >= MAX_MESSAGE_LEN))
+	if (bytesUsed && (bytesUsed + sizeof(CommandPacketHeader) + messageSize >= MAX_PACKET_SIZE))
 	{
 		commandBuf[0] = MSGTYPE_PARTIALCOMMAND;
 		if (!TheNetwork->queueSend(BROADCAST_CON, commandBuf, bytesUsed + sizeof(CommandPacketHeader) + 1, MSG_NEEDACK | MSG_SEQUENCED))
@@ -190,7 +190,7 @@ Bool AddCommandToPacket(const GameMessage *msg)
 		bytesUsed = 0;
 	}
 
-	if (bytesUsed + sizeof(CommandPacketHeader) + messageSize >= MAX_MESSAGE_LEN)
+	if (bytesUsed + sizeof(CommandPacketHeader) + messageSize >= MAX_PACKET_SIZE)
 	{
 		//DEBUG_ASSERTCRASH(false, ("Too many commands in one frame!  Some will be dropped."));
 		DEBUG_LOG(("Too many commands in one frame!  Some will be dropped."));
@@ -208,7 +208,7 @@ Bool AddCommandToPacket(const GameMessage *msg)
 		bytesUsed += sizeofMessageArg;
 	}
 
-	//DEBUG_ASSERTCRASH(bytesUsed + sizeof(CommandPacketHeader) < MAX_MESSAGE_LEN, ("Memory overwrite constructing command packet!"));
+	//DEBUG_ASSERTCRASH(bytesUsed + sizeof(CommandPacketHeader) < MAX_PACKET_SIZE, ("Memory overwrite constructing command packet!"));
 	//DEBUG_LOG(("Memory overwrite constructing command packet!"));
 	return true;
 }
