@@ -26,6 +26,7 @@
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
 
 #include "GameNetwork/NetworkUtil.h"
+#include "TARGA.H"
 
 Int MAX_FRAMES_AHEAD = 128;
 
@@ -297,4 +298,137 @@ AsciiString GetAsciiNetCommandType(NetCommandType type) {
 		s.set("UNKNOWN");
 	}
 	return s;
+}
+
+//----------------------------------------------------------------------------------------------
+// What another machine is allowed to put on this disk.
+//
+// A map transfer arrives as a filename and a block of bytes, and both come from the other end.
+// Nothing checked either one: whatever it named was written wherever the name resolved to, with
+// whatever was in it.  A host could hand a joining player any file it liked.
+//
+// Three gates, cheapest first: the name may not climb out of the directory it belongs in, the
+// extension has to be one of the six a map transfer ever carries, and the bytes have to look like
+// what the extension claims - with a size ceiling per kind, so a "map" cannot be a gigabyte.
+//----------------------------------------------------------------------------------------------
+
+enum TransferFileType
+{
+	TransferFileType_Invalid = -1,
+	TransferFileType_Map,
+	TransferFileType_Ini,
+	TransferFileType_Str,
+	TransferFileType_Txt,
+	TransferFileType_Tga,
+	TransferFileType_Wak,
+	TransferFileType_Count
+};
+
+struct TransferFileRule
+{
+	const char *ext;
+	UnsignedInt maxSize;
+};
+
+static const TransferFileRule transferFileRules[TransferFileType_Count] =
+{
+	{ ".map", 5 * 1024 * 1024 },
+	{ ".ini", 2 * 1024 * 1024 },
+	{ ".str",      512 * 1024 },
+	{ ".txt", 1 * 1024 * 1024 },
+	{ ".tga", 2 * 1024 * 1024 },
+	{ ".wak",      128 * 1024 },
+};
+
+static TransferFileType getTransferFileType(const char *extension)
+{
+	for (Int i = 0; i < TransferFileType_Count; ++i)
+	{
+		if (stricmp(extension, transferFileRules[i].ext) == 0)
+			return (TransferFileType)i;
+	}
+	return TransferFileType_Invalid;
+}
+
+// The portable path keeps its last two components, so a ".." among them walks out of the map
+// directory.  Nothing legitimate needs one.
+Bool IsSafeTransferPath(const AsciiString &filePath)
+{
+	const char *p = filePath.str();
+	if (strstr(p, "..") != NULL)
+	{
+		DEBUG_LOG(("Transfer path '%s' tries to climb out of its directory\n", p));
+		return FALSE;
+	}
+	return TRUE;
+}
+
+Bool IsValidTransferFileContent(const AsciiString &filePath, const UnsignedByte *data, UnsignedInt dataSize)
+{
+	const char *fileExt = strrchr(filePath.str(), '.');
+	if (fileExt == NULL)
+	{
+		DEBUG_LOG(("File '%s' has no extension\n", filePath.str()));
+		return FALSE;
+	}
+
+	const TransferFileType fileType = getTransferFileType(fileExt);
+	if (fileType == TransferFileType_Invalid)
+	{
+		DEBUG_LOG(("File '%s' has an extension a transfer never carries\n", filePath.str()));
+		return FALSE;
+	}
+
+	const TransferFileRule &rule = transferFileRules[fileType];
+	if (dataSize > rule.maxSize)
+	{
+		DEBUG_LOG(("File '%s' is %d bytes, over the %d byte limit for its kind\n",
+			filePath.str(), dataSize, rule.maxSize));
+		return FALSE;
+	}
+
+	switch (fileType)
+	{
+		case TransferFileType_Ini:
+		{
+			// an INI is text; a null byte in one means it is something else wearing the name
+			for (UnsignedInt i = 0; i < dataSize; ++i)
+			{
+				if (data[i] == 0)
+				{
+					DEBUG_LOG(("INI file '%s' holds null bytes, so it is not an INI\n", filePath.str()));
+					return FALSE;
+				}
+			}
+			break;
+		}
+
+		case TransferFileType_Tga:
+		{
+			// the Targa 2 footer is the last 26 bytes, and its signature the 18 before the end.
+			// Read it by offset rather than as a struct: the struct carries a constructor and the
+			// padding that comes with it.
+			static const Int TGA2_FOOTER_SIZE = 26;
+			static const Int TGA2_SIGNATURE_LEN = 16;
+			if (dataSize < (UnsignedInt)(sizeof(TGAHeader) + TGA2_FOOTER_SIZE))
+			{
+				DEBUG_LOG(("TGA file '%s' is too small to be one\n", filePath.str()));
+				return FALSE;
+			}
+			const UnsignedByte *sig = data + dataSize - (TGA2_SIGNATURE_LEN + 2);
+			if (memcmp(sig, TGA2_SIGNATURE, TGA2_SIGNATURE_LEN) != 0
+				|| sig[TGA2_SIGNATURE_LEN] != '.'
+				|| sig[TGA2_SIGNATURE_LEN + 1] != '\0')
+			{
+				DEBUG_LOG(("TGA file '%s' has no TRUEVISION-XFILE footer\n", filePath.str()));
+				return FALSE;
+			}
+			break;
+		}
+
+		default:
+			break;
+	}
+
+	return TRUE;
 }

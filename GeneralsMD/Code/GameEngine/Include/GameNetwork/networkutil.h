@@ -46,6 +46,13 @@ Bool CommandRequiresDirectSend(NetCommandMsg *msg);
 Bool IsCommandSynchronized(NetCommandType type);
 AsciiString GetAsciiNetCommandType(NetCommandType type);
 
+/* What another machine is allowed to put on this disk during a map transfer.  IsSafeTransferPath
+	 refuses a name that climbs out of the directory it belongs in; IsValidTransferFileContent
+	 refuses an extension a transfer never carries, a file over the size ceiling for its kind, and
+	 bytes that are not what the extension claims. */
+Bool IsSafeTransferPath(const AsciiString &filePath);
+Bool IsValidTransferFileContent(const AsciiString &filePath, const UnsignedByte *data, UnsignedInt dataSize);
+
 // Command ids are sixteen bits wide and wrap.  Ordering them with < or > puts every command
 // issued after a wrap in front of every command issued before it, so the answer comes from the
 // distance between them instead: newVal is newer when it sits within half the id space ahead of

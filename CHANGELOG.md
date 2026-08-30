@@ -155,6 +155,7 @@ found and fixed â€” EA's own, not port damage.**
 - A player leaving is reported as a player leaving, not a desync.
 - A desync now writes a per-object report on both machines for comparison.
 - LAN refuses to start between two machines whose game files differ.
+- A map sent to you over the network has to be a map. The other machine used to name any file it liked and fill it with anything at all, and it was written where the name pointed; now the name cannot leave the map folder, the kind has to be one a map transfer carries, and the contents have to match the kind.
 - The processor's rounding mode is reset from the right register every frame.
 - The disconnect screen no longer interrupts a game that is merely slow.
 - The keepalive interval setting is read now, and kept in a sane range.

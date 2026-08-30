@@ -723,7 +723,15 @@ void ConnectionManager::processFile(NetFileCommandMsg *msg)
 	DEBUG_LOG(("%ls\n", log.str()));
 #endif
 
-	if (TheFileSystem->doesFileExist(msg->getRealFilename().str()))
+	AsciiString realFileName = msg->getRealFilename();
+
+	if (!IsSafeTransferPath(msg->getPortableFilename()) || !IsSafeTransferPath(realFileName))
+	{
+		DEBUG_LOG(("ConnectionManager::processFile - refused '%s'\n", realFileName.str()));
+		return;
+	}
+
+	if (TheFileSystem->doesFileExist(realFileName.str()))
 	{
 		DEBUG_LOG(("File exists already!\n"));
 		//return;
@@ -755,13 +763,28 @@ void ConnectionManager::processFile(NetFileCommandMsg *msg)
 	}
 #endif // COMPRESS_TARGAS
 
-	File *fp = TheFileSystem->openFile(msg->getRealFilename().str(), File::CREATE | File::BINARY | File::WRITE);
+	// the bytes are still in memory here, so check them before any of them reach the disk
+	if (!IsValidTransferFileContent(realFileName, buf, (UnsignedInt)len))
+	{
+		DEBUG_LOG(("ConnectionManager::processFile - '%s' is not what it says it is, dropped\n",
+			realFileName.str()));
+#ifdef COMPRESS_TARGAS
+		if (deleteBuf)
+		{
+			delete[] buf;
+			buf = NULL;
+		}
+#endif // COMPRESS_TARGAS
+		return;
+	}
+
+	File *fp = TheFileSystem->openFile(realFileName.str(), File::CREATE | File::BINARY | File::WRITE);
 	if (fp)
 	{
 		fp->write(buf, len);
 		fp->close();
 		fp = NULL;
-		DEBUG_LOG(("Wrote %d bytes to file %s!\n",len,msg->getRealFilename().str()));
+		DEBUG_LOG(("Wrote %d bytes to file %s!\n",len,realFileName.str()));
 
 	}
 	else

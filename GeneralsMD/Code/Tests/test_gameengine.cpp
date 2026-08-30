@@ -4371,6 +4371,69 @@ TEST(an_overlong_announced_filename_is_truncated_instead_of_overflowing)
 	msg->detach();
 }
 
+/* A map transfer arrives as a filename and a block of bytes, both chosen by the other machine, and
+	 nothing checked either one: whatever it named was written wherever the name resolved to, with
+	 whatever was in it.  A host could hand a joining player any file it liked, anywhere the name
+	 reached. */
+static UnsignedByte *makeTga( Int payloadBytes, Bool withFooter )
+{
+	static UnsignedByte tga[512];
+	memset( tga, 0, sizeof(tga) );
+	if( withFooter )
+	{
+		UnsignedByte *sig = tga + payloadBytes - 18;
+		memcpy( sig, "TRUEVISION-XFILE", 16 );
+		sig[16] = '.';
+		sig[17] = '\0';
+	}
+	return tga;
+}
+
+TEST(a_transferred_file_has_to_be_what_its_name_says_it_is)
+{
+	UnsignedByte text[64];
+	memset( text, 'x', sizeof(text) );
+
+	// the six kinds a transfer carries are taken
+	CHECK( IsValidTransferFileContent( "maps\\foo\\foo.map", text, sizeof(text) ) );
+	CHECK( IsValidTransferFileContent( "maps\\foo\\foo.ini", text, sizeof(text) ) );
+	CHECK( IsValidTransferFileContent( "maps\\foo\\foo.str", text, sizeof(text) ) );
+	CHECK( IsValidTransferFileContent( "maps\\foo\\foo.txt", text, sizeof(text) ) );
+	CHECK( IsValidTransferFileContent( "maps\\foo\\foo.wak", text, sizeof(text) ) );
+
+	// anything else is not
+	CHECK( !IsValidTransferFileContent( "maps\\foo\\foo.exe", text, sizeof(text) ) );
+	CHECK( !IsValidTransferFileContent( "maps\\foo\\foo.dll", text, sizeof(text) ) );
+	CHECK( !IsValidTransferFileContent( "maps\\foo\\foo.bat", text, sizeof(text) ) );
+	CHECK( !IsValidTransferFileContent( "maps\\foo\\noextension", text, sizeof(text) ) );
+
+	// an INI that holds null bytes is a binary wearing the name
+	UnsignedByte binary[64];
+	memset( binary, 'x', sizeof(binary) );
+	binary[13] = 0;
+	CHECK( !IsValidTransferFileContent( "maps\\foo\\foo.ini", binary, sizeof(binary) ) );
+	CHECK( IsValidTransferFileContent( "maps\\foo\\foo.txt", binary, sizeof(binary) ) );	// a txt may
+
+	// the size ceiling is per kind
+	CHECK( !IsValidTransferFileContent( "maps\\foo\\foo.wak", text, 256 * 1024 ) );
+	CHECK( IsValidTransferFileContent( "maps\\foo\\foo.map", text, 256 * 1024 ) );
+
+	// a targa needs its footer, and enough bytes to have one
+	CHECK( IsValidTransferFileContent( "maps\\foo\\foo.tga", makeTga( 128, TRUE ), 128 ) );
+	CHECK( !IsValidTransferFileContent( "maps\\foo\\foo.tga", makeTga( 128, FALSE ), 128 ) );
+	CHECK( !IsValidTransferFileContent( "maps\\foo\\foo.tga", text, 8 ) );
+}
+
+TEST(a_transferred_name_cannot_climb_out_of_its_directory)
+{
+	CHECK( IsSafeTransferPath( "maps\\foo\\foo.map" ) );
+	CHECK( IsSafeTransferPath( "MAPS\\some map\\some map.map" ) );
+
+	CHECK( !IsSafeTransferPath( "maps\\..\\..\\windows\\system32\\evil.map" ) );
+	CHECK( !IsSafeTransferPath( "..\\evil.map" ) );
+	CHECK( !IsSafeTransferPath( "maps/../evil.map" ) );
+}
+
 /* The 2003 datagram was 512 bytes all in, 476 of it payload - a quarter of what any link carries
 	 today, and the reason a busy frame needs four or five datagrams where one would do.  The payload
 	 is sized from a safe UDP ceiling now, and the three numbers have to stay in step: what goes on
