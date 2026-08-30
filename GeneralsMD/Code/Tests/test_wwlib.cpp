@@ -27,6 +27,7 @@
 #include "random.h"
 #include "fixed.h"
 #include "wwstring.h"
+#include "stringex.h"
 #include "widestring.h"
 #include "trim.h"
 #include "nstrdup.h"
@@ -1375,4 +1376,96 @@ TEST(threadclass_stop_returns_promptly_when_called_unlocked)
 	unsigned elapsed = GetTickCount() - start;
 
 	CHECK(elapsed < 250);
+}
+
+/* ---------------------------------------------------------------------------------------------
+ * stringex - bounded string copies.
+ *
+ * strncpy is the trap these replace: given a source at least as long as the destination it copies
+ * dstsize characters and writes no terminator, so every later read runs off the end of the buffer.
+ * strlcpy always terminates and reports the length it wanted, which is the only way a caller can
+ * tell that truncation happened.
+ * --------------------------------------------------------------------------------------------- */
+TEST(strlcpy_terminates_and_reports_the_length_it_wanted)
+{
+	char dst[8];
+
+	/* fits: full copy, terminated, return is the source length */
+	memset(dst, 'X', sizeof(dst));
+	CHECK_EQ(6u, (unsigned)strlcpy(dst, "abcdef", sizeof(dst)));
+	CHECK_STR("abcdef", dst);
+
+	/* exactly fills: still terminated inside the buffer */
+	memset(dst, 'X', sizeof(dst));
+	CHECK_EQ(7u, (unsigned)strlcpy(dst, "abcdefg", sizeof(dst)));
+	CHECK_STR("abcdefg", dst);
+	CHECK_EQ(0, (int)dst[7]);
+
+	/* too long: truncated, still terminated, and the return says so */
+	memset(dst, 'X', sizeof(dst));
+	CHECK_EQ(11u, (unsigned)strlcpy(dst, "abcdefghijk", sizeof(dst)));
+	CHECK_STR("abcdefg", dst);
+	CHECK(11u >= sizeof(dst));					/* return >= dstsize is the truncation signal */
+
+	/* a zero-sized destination is not written at all */
+	char guard[2] = { 'A', 'B' };
+	CHECK_EQ(3u, (unsigned)strlcpy(guard, "abc", 0));
+	CHECK_EQ('A', guard[0]);
+	CHECK_EQ('B', guard[1]);
+
+	/* empty source */
+	CHECK_EQ(0u, (unsigned)strlcpy(dst, "", sizeof(dst)));
+	CHECK_STR("", dst);
+}
+
+TEST(strlcpy_does_not_write_past_the_destination)
+{
+	/* The overflow this exists to stop: a long source into a short buffer must leave the byte
+	   after the buffer untouched. */
+	struct { char buf[4]; char canary; } s;
+	s.canary = (char)0x7E;
+	CHECK_EQ(9u, (unsigned)strlcpy(s.buf, "123456789", sizeof(s.buf)));
+	CHECK_STR("123", s.buf);
+	CHECK_EQ((char)0x7E, s.canary);
+}
+
+TEST(strlcat_appends_within_the_buffer_and_terminates)
+{
+	char dst[8];
+
+	strcpy(dst, "abc");
+	CHECK_EQ(6u, (unsigned)strlcat(dst, "def", sizeof(dst)));
+	CHECK_STR("abcdef", dst);
+
+	/* appending past the end truncates and reports what it wanted */
+	strcpy(dst, "abcde");
+	CHECK_EQ(10u, (unsigned)strlcat(dst, "fghij", sizeof(dst)));
+	CHECK_STR("abcdefg", dst);
+
+	/* a full destination is left alone */
+	strcpy(dst, "abcdefg");
+	CHECK_EQ(10u, (unsigned)strlcat(dst, "hij", sizeof(dst)));
+	CHECK_STR("abcdefg", dst);
+
+	/* appending nothing changes nothing */
+	strcpy(dst, "abc");
+	CHECK_EQ(3u, (unsigned)strlcat(dst, "", sizeof(dst)));
+	CHECK_STR("abc", dst);
+}
+
+TEST(wcslcpy_and_wcslcat_count_characters_not_bytes)
+{
+	/* The template is instantiated per character type, so the wide forms have to bound by
+	   character count - bounding by bytes would halve the usable buffer. */
+	wchar_t dst[8];
+
+	CHECK_EQ(6u, (unsigned)wcslcpy(dst, L"abcdef", 8));
+	CHECK(wcscmp(dst, L"abcdef") == 0);
+
+	CHECK_EQ(11u, (unsigned)wcslcpy(dst, L"abcdefghijk", 8));
+	CHECK(wcscmp(dst, L"abcdefg") == 0);
+
+	wcscpy(dst, L"abc");
+	CHECK_EQ(6u, (unsigned)wcslcat(dst, L"def", 8));
+	CHECK(wcscmp(dst, L"abcdef") == 0);
 }
