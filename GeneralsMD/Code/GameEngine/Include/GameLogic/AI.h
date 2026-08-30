@@ -185,7 +185,8 @@ struct AIDifficultyProfile
 	Real	m_counterCompositionWeight;			///< 0 = ignore what the enemy fields (EA's behaviour)
 	Bool	m_massBeforeAttacking;
 	Real	m_retreatTtkRatio;							///< allied time-to-kill / enemy TTK below which it pulls back
-	Bool	m_retreatIndividualUnits;
+	Bool	m_retreatIndividualUnits;				///< pull a losing unit out of a fight the team is winning
+	Bool	m_retreatTeams;									///< ... and break off the whole team when the fight is lost
 	Bool	m_useInfluenceMapForAttackLane;
 	Bool	m_focusFire;
 
@@ -229,6 +230,15 @@ struct AITeamCapability
 	* of it).  Pure arithmetic on purpose - the whole point of B1 is a score you can test and tune
 	* rather than a coin flip, and this is the half of it that has no engine in it. */
 Real aiCounterScore( const AIEnemyComposition &enemy, const AITeamCapability &team );
+
+/** How the exchange is going, as the ratio of how long this force lasts to how long it needs to
+	* kill what is shooting at it.  Below 1 it is losing; below the rung's retreatTtkRatio it should
+	* break off.  This is Sins of a Solar Empire's aiRetreatThreshold, and it is the right metric
+	* rather than a health percentage: a unit at 20% health that still out-damages what is shooting
+	* it should stay, and a full-health one being melted should not.
+	*
+	* 'power' is a stand-in for damage per second - the threat value the data already carries. */
+Real aiRetreatRatio( Real myHealth, Real myPower, Real enemyHealth, Real enemyPower );
 
 class TAiData : public Snapshot
 {

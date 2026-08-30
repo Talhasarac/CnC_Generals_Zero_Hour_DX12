@@ -1011,15 +1011,15 @@ Real AI::getAdjustedVisionRangeForObject(const Object *object, Int factorsToCons
 	*
 	* Read the columns down, not across: nothing here is money, build speed, vision or unit stats.
 	*
-	*                      scoutS maxSc react decis   cntr  mass  ttk   indiv infl  focus   harv  expand guard hoard */
+	*                      scoutS maxSc react decis   cntr  mass  ttk   indiv team  infl  focus   harv  expand guard hoard */
 static const AIDifficultyProfile s_defaultSkillLadder[ AISKILL_COUNT ] =
 {
-	/* Easy      */ { 90.0f, 1, 15.0f, 10.0f,  0.00f, FALSE, 0.00f, FALSE, FALSE, FALSE,  FALSE, FALSE, FALSE,     0 },
-	/* Steady    */ { 75.0f, 1, 10.0f,  8.0f,  0.00f, FALSE, 0.50f, TRUE,  FALSE, FALSE,  TRUE,  FALSE, FALSE,     0 },
-	/* Medium    */ { 60.0f, 1,  6.0f,  5.0f,  0.25f, FALSE, 0.60f, TRUE,  FALSE, TRUE,   TRUE,  TRUE,  FALSE, 10000 },
-	/* Hard      */ { 45.0f, 2,  3.0f,  4.0f,  0.60f, FALSE, 0.70f, TRUE,  FALSE, TRUE,   TRUE,  TRUE,  FALSE,  8000 },
-	/* Brutal    */ { 30.0f, 2,  1.0f,  2.0f,  0.85f, TRUE,  0.80f, TRUE,  FALSE, TRUE,   TRUE,  TRUE,  TRUE,   5000 },
-	/* Merciless */ { 25.0f, 2,  0.0f,  1.5f,  1.00f, TRUE,  0.85f, TRUE,  TRUE,  TRUE,   TRUE,  TRUE,  TRUE,   4000 }
+	/* Easy      */ { 90.0f, 1, 15.0f, 10.0f,  0.00f, FALSE, 0.00f, FALSE, FALSE, FALSE, FALSE,  FALSE, FALSE, FALSE,     0 },
+	/* Steady    */ { 75.0f, 1, 10.0f,  8.0f,  0.00f, FALSE, 0.50f, TRUE,  FALSE, FALSE, FALSE,  TRUE,  FALSE, FALSE,     0 },
+	/* Medium    */ { 60.0f, 1,  6.0f,  5.0f,  0.25f, FALSE, 0.60f, TRUE,  FALSE, FALSE, TRUE,   TRUE,  TRUE,  FALSE, 10000 },
+	/* Hard      */ { 45.0f, 2,  3.0f,  4.0f,  0.60f, FALSE, 0.70f, TRUE,  FALSE, FALSE, TRUE,   TRUE,  TRUE,  FALSE,  8000 },
+	/* Brutal    */ { 30.0f, 2,  1.0f,  2.0f,  0.85f, TRUE,  0.80f, TRUE,  TRUE,  FALSE, TRUE,   TRUE,  TRUE,  TRUE,   5000 },
+	/* Merciless */ { 25.0f, 2,  0.0f,  1.5f,  1.00f, TRUE,  0.85f, TRUE,  TRUE,  TRUE,  TRUE,   TRUE,  TRUE,  TRUE,   4000 }
 };
 
 //-------------------------------------------------------------------------------------------------
@@ -1034,6 +1034,32 @@ static const AIDifficultyProfile s_defaultSkillLadder[ AISKILL_COUNT ] =
 	* Merely being able to shoot at the ground is worth a quarter share: almost every team can, so
 	* it barely discriminates, but a team that cannot is genuinely useless against a ground army. */
 //-------------------------------------------------------------------------------------------------
+//-------------------------------------------------------------------------------------------------
+/** How the exchange is going: how long this force lasts, over how long it needs to finish what is
+	* shooting at it.  Above 1 it is winning.
+	*
+	* The two degenerate cases are the ones that matter in practice.  Nothing is shooting at me: no
+	* fight, never retreat, so a large number.  I cannot hurt what is shooting me: no exchange to
+	* win at any health, so zero. */
+//-------------------------------------------------------------------------------------------------
+Real aiRetreatRatio( Real myHealth, Real myPower, Real enemyHealth, Real enemyPower )
+{
+	const Real NOT_A_FIGHT = 1000.0f;
+
+	if( enemyPower <= 0.0f || enemyHealth <= 0.0f )
+		return NOT_A_FIGHT;				// nothing that can hurt me
+	if( myPower <= 0.0f || myHealth <= 0.0f )
+		return 0.0f;							// nothing I can do about it
+
+	const Real howLongILast = myHealth / enemyPower;
+	const Real howLongTheyLast = enemyHealth / myPower;
+	if( howLongTheyLast <= 0.0f )
+		return NOT_A_FIGHT;
+
+	Real ratio = howLongILast / howLongTheyLast;
+	return (ratio > NOT_A_FIGHT) ? NOT_A_FIGHT : ratio;
+}
+
 Real aiCounterScore( const AIEnemyComposition &enemy, const AITeamCapability &team )
 {
 	Real score = 0.0f;
@@ -1080,6 +1106,7 @@ void AI::parseSkillLevel(INI *ini, void *instance, void* /*store*/, const void* 
 		{ "MassBeforeAttacking",			INI::parseBool, NULL, offsetof( AIDifficultyProfile, m_massBeforeAttacking ) },
 		{ "RetreatTtkRatio",					INI::parseReal, NULL, offsetof( AIDifficultyProfile, m_retreatTtkRatio ) },
 		{ "RetreatIndividualUnits",		INI::parseBool, NULL, offsetof( AIDifficultyProfile, m_retreatIndividualUnits ) },
+		{ "RetreatTeams",							INI::parseBool, NULL, offsetof( AIDifficultyProfile, m_retreatTeams ) },
 		{ "UseInfluenceMapForAttackLane", INI::parseBool, NULL, offsetof( AIDifficultyProfile, m_useInfluenceMapForAttackLane ) },
 		{ "FocusFire",								INI::parseBool, NULL, offsetof( AIDifficultyProfile, m_focusFire ) },
 		{ "AdaptiveHarvesters",				INI::parseBool, NULL, offsetof( AIDifficultyProfile, m_adaptiveHarvesters ) },

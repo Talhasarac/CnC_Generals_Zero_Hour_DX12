@@ -135,6 +135,7 @@ m_curWarehouseID(INVALID_ID),
 m_scoutID(INVALID_ID),
 m_scoutTimer(1),
 m_scoutTarget(0),
+m_retreatTimer(1),
 m_skillLevel(AISKILL_MERCILESS),
 m_role(AIROLE_AGGRESSIVE)
 {
@@ -3345,6 +3346,8 @@ void AIPlayer::update( void )
 
 	doScouting(); // Keep one unit looking at the map.
 
+	doRetreats(); // Break off the fights we are losing.
+
 }
 
 //----------------------------------------------------------------------------------------------------------
@@ -3464,6 +3467,147 @@ Bool AIPlayer::dozerInQueue( void )
 		}
 	}
 	return false;
+}
+
+//----------------------------------------------------------------------------------------------------------
+/** How far around a fight to look for what is in it.  Wide enough to catch the base defences and
+	* the second rank shooting into it, not so wide that a skirmish at the front counts the garrison
+	* at the back as part of the same exchange. */
+static const Real RETREAT_ENGAGEMENT_RADIUS = 300.0f;
+
+/** A unit's contribution to an exchange: what it can still take, and what it can still deal.  The
+	* threat value the data already carries stands in for damage per second - it is what
+	* AI_threatScore uses for the same purpose. */
+static void addToForce( const Object *obj, Real *health, Real *power )
+{
+	if( obj == NULL || obj->isEffectivelyDead() )
+		return;
+
+	const BodyModuleInterface *body = obj->getBodyModule();
+	if( body )
+		*health += body->getHealth();
+	*power += INT_TO_REAL( obj->getTemplate()->getThreatValue() );
+}
+
+//----------------------------------------------------------------------------------------------------------
+/** Look at every fight this AI is in and break off the ones it is losing.
+	*
+	* Deliberately at the player level and on the rung's decision interval rather than inside the
+	* unit update: it is one partition query per engaged team every few seconds, not a judgement
+	* every unit makes every frame, and it keeps the whole of "when do we quit" in one readable
+	* place.
+	*/
+//----------------------------------------------------------------------------------------------------------
+void AIPlayer::doRetreats( void )
+{
+	const AIDifficultyProfile *profile = getSkillProfile();
+	if( profile->m_retreatTtkRatio <= 0.0f )
+		return;			// the bottom rung does not know how to quit, on purpose
+
+	if( --m_retreatTimer > 0 )
+		return;
+	m_retreatTimer = REAL_TO_INT_CEIL( profile->m_decisionIntervalSeconds * LOGICFRAMES_PER_SECOND );
+	if( m_retreatTimer < 1 )
+		m_retreatTimer = 1;
+
+	if( !m_baseCenterSet )
+		return;			// nowhere to fall back to
+
+	for( Player::PlayerTeamList::const_iterator t = m_player->getPlayerTeams()->begin();
+			 t != m_player->getPlayerTeams()->end(); ++t )
+	{
+		const TeamTemplateInfo *info = (*t)->getTemplateInfo();
+		if( info && (info->m_isBaseDefense || info->m_isPerimeterDefense) )
+			continue;			// a base defence team that falls back has abandoned the thing it defends
+
+		for( DLINK_ITERATOR<Team> iter = (*t)->iterate_TeamInstanceList(); !iter.done(); iter.advance() )
+		{
+			Team *team = iter.cur();
+			if( team == NULL )
+				continue;
+
+			// what this team still has, and where it is
+			Real myHealth = 0.0f, myPower = 0.0f, count = 0.0f;
+			Coord3D centre;
+			centre.zero();
+			for( DLINK_ITERATOR<Object> objIter = team->iterate_TeamMemberList(); !objIter.done(); objIter.advance() )
+			{
+				Object *obj = objIter.cur();
+				if( obj == NULL || obj->isEffectivelyDead() )
+					continue;
+				if( obj->isKindOf( KINDOF_STRUCTURE ) || obj->isKindOf( KINDOF_IMMOBILE ) ||
+						obj->isKindOf( KINDOF_PROJECTILE ) || obj->getAI() == NULL )
+					continue;
+				addToForce( obj, &myHealth, &myPower );
+				centre.x += obj->getPosition()->x;
+				centre.y += obj->getPosition()->y;
+				count += 1.0f;
+			}
+			if( count < 1.0f )
+				continue;
+			centre.x /= count;
+			centre.y /= count;
+			centre.z = TheTerrainLogic->getGroundHeight( centre.x, centre.y );
+
+			// ... and what is shooting at it
+			Real enemyHealth = 0.0f, enemyPower = 0.0f;
+			{
+				PartitionFilterPlayerAffiliation filterEnemies( m_player, ALLOW_ENEMIES, true );
+				PartitionFilterAlive filterAlive;
+				PartitionFilterOnMap filterOnMap;
+				PartitionFilter *filters[] = { &filterEnemies, &filterAlive, &filterOnMap, 0 };
+
+				MemoryPoolObjectHolder hold;
+				SimpleObjectIterator *nearby = ThePartitionManager->iterateObjectsInRange(
+						&centre, RETREAT_ENGAGEMENT_RADIUS, FROM_CENTER_2D, filters );
+				hold.hold( nearby );
+				for( Object *e = nearby->first(); e; e = nearby->next() )
+				{
+					if( e->isKindOf( KINDOF_PROJECTILE ) )
+						continue;
+					// only what it can see: an AI that pulls back from something it has not found
+					// is reading the object list again (A2)
+					if( !observerKnowsAbout( e, m_player->getPlayerIndex() ) )
+						continue;
+					addToForce( e, &enemyHealth, &enemyPower );
+				}
+			}
+
+			if( enemyPower <= 0.0f )
+				continue;			// not in a fight
+
+			const Real ratio = aiRetreatRatio( myHealth, myPower, enemyHealth, enemyPower );
+			if( ratio >= profile->m_retreatTtkRatio )
+				continue;			// holding, or winning
+
+			//
+			// Losing.  The whole team goes home if this rung knows how; otherwise the members that
+			// are personally finished go, which saves the units that would otherwise die inside a
+			// fight the team as a whole is still winning.
+			//
+			for( DLINK_ITERATOR<Object> objIter = team->iterate_TeamMemberList(); !objIter.done(); objIter.advance() )
+			{
+				Object *obj = objIter.cur();
+				if( obj == NULL || obj->isEffectivelyDead() || obj->getAI() == NULL )
+					continue;
+				if( obj->isKindOf( KINDOF_STRUCTURE ) || obj->isKindOf( KINDOF_IMMOBILE ) )
+					continue;
+
+				if( !profile->m_retreatTeams )
+				{
+					if( !profile->m_retreatIndividualUnits )
+						continue;
+					// this one's own exchange, against the same enemy force
+					Real oneHealth = 0.0f, onePower = 0.0f;
+					addToForce( obj, &oneHealth, &onePower );
+					if( aiRetreatRatio( oneHealth, onePower, enemyHealth, enemyPower ) >= profile->m_retreatTtkRatio )
+						continue;
+				}
+
+				obj->getAI()->aiMoveToPosition( &m_baseCenter, CMD_FROM_AI );
+			}
+		}
+	}
 }
 
 //----------------------------------------------------------------------------------------------------------
@@ -4027,6 +4171,8 @@ void AIPlayer::xfer( Xfer *xfer )
 		xfer->xferInt( &m_scoutTimer );
 		xfer->xferInt( &m_scoutTarget );
 	}
+	if( version >= 3 )
+		xfer->xferInt( &m_retreatTimer );
 
 	// the ladder rung and the role, which are rolled once and must come back the same way
 	if( version >= 3 )

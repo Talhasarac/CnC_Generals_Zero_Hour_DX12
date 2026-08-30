@@ -243,6 +243,12 @@ protected:
 		* while every strategic decision read the enemy's object list straight out of the game (see
 		* the observer index on getPlayerStructureBounds).  One cheap unit, replaced when it dies,
 		* touring the enemy start positions: that is what turns fog back into information. */
+	/** Break off a fight that is being lost.  The word "retreat" did not appear anywhere in the AI:
+		* teams fought to the last man, which is the single most visible thing that made it look
+		* stupid.  Two levels, because pulling out only whole teams still loses the units that were
+		* individually finished - Sins does exactly that, and keeps losing capital ships for it. */
+	virtual void doRetreats(void);
+
 	virtual void doScouting(void);
 	Object *findScout(void);						///< a spare unit of ours that can do the touring
 	void queueScout(void);							///< ... or build the cheapest one that can
@@ -324,6 +330,7 @@ protected:
 	ObjectID	m_scoutID;							///< the unit currently touring the map for us
 	Int				m_scoutTimer;						///< frames until the next scouting check
 	Int				m_scoutTarget;					///< which player's start position the scout is walking to
+	Int				m_retreatTimer;					///< frames until the next look at how the fights are going
 
 	Bool		m_readyToBuildTeam;				///< True if the team select timer has expired.
 	Bool		m_readyToBuildStructure;	///< True if the buildDelay timer has expired.

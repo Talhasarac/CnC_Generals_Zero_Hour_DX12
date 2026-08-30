@@ -5815,6 +5815,7 @@ TEST(the_difficulty_ladder_climbs_in_every_direction_it_should)
 		// capabilities only ever switch on as you climb, never off again
 		CHECK( upper.m_massBeforeAttacking >= lower.m_massBeforeAttacking );
 		CHECK( upper.m_retreatIndividualUnits >= lower.m_retreatIndividualUnits );
+		CHECK( upper.m_retreatTeams >= lower.m_retreatTeams );
 		CHECK( upper.m_useInfluenceMapForAttackLane >= lower.m_useInfluenceMapForAttackLane );
 		CHECK( upper.m_focusFire >= lower.m_focusFire );
 		CHECK( upper.m_adaptiveHarvesters >= lower.m_adaptiveHarvesters );
@@ -5887,4 +5888,45 @@ TEST(counter_score_answers_what_the_enemy_actually_fields)
 	everything.m_prefersVehicles = everything.m_prefersInfantry = TRUE;
 	CHECK( aiCounterScore( mixed, everything ) <= 1.0f );
 	CHECK( aiCounterScore( mixed, everything ) > aiCounterScore( mixed, generic ) );
+}
+
+
+/** C1's arithmetic: the ratio of how long a force lasts to how long it needs to finish what is
+	 shooting at it.  The word "retreat" did not appear anywhere in the AI before this - teams fought
+	 to the last man - and the metric is deliberately not a health percentage: Sins of a Solar
+	 Empire's aiRetreatThreshold is a time-to-kill ratio for the reason the third case below shows. */
+TEST(retreat_ratio_measures_the_exchange_not_the_health_bar)
+{
+	// even fight: both sides need the same time to finish the other
+	CHECK_NEAR( 1.0f, aiRetreatRatio( 100.0f, 10.0f, 100.0f, 10.0f ), 0.0001f );
+
+	// twice their damage for the same health: they die in half the time I do
+	CHECK( aiRetreatRatio( 100.0f, 20.0f, 100.0f, 10.0f ) > 1.0f );
+	CHECK( aiRetreatRatio( 100.0f, 5.0f, 100.0f, 10.0f ) < 1.0f );
+
+	// the case a health percentage gets wrong, and the reason for the metric: a unit at a fifth of
+	// its health that still out-damages what is shooting it is winning and should stay
+	CHECK( aiRetreatRatio( 20.0f, 100.0f, 500.0f, 1.0f ) > 1.0f );
+	// ... and a full-health one being melted is losing and should not
+	CHECK( aiRetreatRatio( 1000.0f, 1.0f, 10.0f, 500.0f ) < 1.0f );
+
+	// nothing shooting at me is not a fight, at any health
+	CHECK( aiRetreatRatio( 1.0f, 1.0f, 0.0f, 0.0f ) > 100.0f );
+	CHECK( aiRetreatRatio( 1.0f, 1.0f, 100.0f, 0.0f ) > 100.0f );
+
+	// nothing I can do about it: leave, whatever my health
+	CHECK_NEAR( 0.0f, aiRetreatRatio( 10000.0f, 0.0f, 10.0f, 10.0f ), 0.0001f );
+
+	// already dead is not a fight to stay in either
+	CHECK_NEAR( 0.0f, aiRetreatRatio( 0.0f, 10.0f, 10.0f, 10.0f ), 0.0001f );
+
+	// and the ladder's thresholds mean what they say: at Brutal's 0.8 a force that lasts three
+	// quarters as long as the one it is fighting breaks off, and one that lasts as long does not
+	TAiData data;
+	const Real brutal = data.m_skill[ AISKILL_BRUTAL ].m_retreatTtkRatio;
+	CHECK( aiRetreatRatio( 75.0f, 10.0f, 100.0f, 10.0f ) < brutal );
+	CHECK( aiRetreatRatio( 100.0f, 10.0f, 100.0f, 10.0f ) >= brutal );
+
+	// the bottom rung has no threshold at all: it never quits, which is what makes it Easy
+	CHECK_EQ( 0.0f, data.m_skill[ AISKILL_EASY ].m_retreatTtkRatio );
 }

@@ -29,6 +29,13 @@ found and fixed — EA's own, not port damage.**
 - It scouts. There was no such thing as scouting in the computer opponent - it never needed to look, because it could already see everything. One cheap unit now tours the enemy start positions and keeps going round for the rest of the match, replaced out of spare change when it dies. Every difficulty scouts; an opponent that never looks reads as broken, not as easy.
 - Nor does it read your base off the map. Where your base is, what it is worth, which supply dock to expand to and where to aim a superweapon all came off a walk of your object list, in the shroud, from the first second of the match. The computer now only counts what it can see, plus the buildings it has already found - buildings do not walk away. Before it has scouted you, all it knows is where you started, which is on the map preview anyway.
 
+## The computer knows when to quit
+
+- Its teams fought to the last man. The word "retreat" appeared nowhere in the opponent's code - the single most visible thing that made it look stupid.
+- It now measures the fight, not the health bar: how long its force lasts against how long it needs to finish yours. A unit at a fifth of its health that still out-damages what is shooting it stays; a full-health one being melted leaves. A health percentage gets both of those backwards.
+- Two levels. From Steady up, a unit that is personally finished pulls out of a fight its team is still winning. From Brutal up, the whole team breaks off when the exchange is lost. Easy never quits - that is part of what makes it easy.
+- It only counts what it can see. An opponent that flinches from something it has not found is reading your unit list again.
+
 ## The computer builds against what you field
 
 - Which unit it trained next was a coin flip. It gathered the teams sharing the highest priority number in its data and picked one at random - not one line looked at what it was fighting. An opponent facing nothing but aircraft went on building tanks.
