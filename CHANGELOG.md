@@ -66,6 +66,7 @@ found and fixed â€” EA's own, not port damage.**
 - Two levels. From Steady up, a unit that is personally finished pulls out of a fight its team is still winning. From Brutal up, the whole team breaks off when the exchange is lost. Easy never quits - that is part of what makes it easy.
 - It only counts what it can see. An opponent that flinches from something it has not found is reading your unit list again.
 - It weighs a fight by what is in it, not by who is nearby: only things that can shoot count, and buildings do not. Its own base is not a reason to feel safe and yours is not a reason to run.
+- Its aircraft are left out of it. A retreat order was what took a parked jet off the runway, so while a fight raged near the airfield the whole wing took off, flew at the base, landed, and did it again every few seconds instead of ever reaching you. Aircraft already fly home on their own when the load is spent.
 - Matches finish. Two of these opponents used to fail to settle 65% of their games inside sixteen minutes; it is half that now, and they end in under seven minutes on average instead of ten.
 
 ## The computer builds against what you field

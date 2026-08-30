@@ -3819,6 +3819,35 @@ static void addToForce( const Object *obj, Real *health, Real *power )
 }
 
 //----------------------------------------------------------------------------------------------------------
+/** Who a "fall back to the base" order can be handed to.
+	*
+	* Not aircraft.  A jet or a helicopter flies its own round trip - take off, spend the load, land
+	* to reload and heal - and a move order is what starts that cycle.  Handing a parked aircraft one
+	* every decision interval had it take off, fly at the base centre, go idle, land, and take off
+	* again on the next tick, for as long as a fight near the base kept reading as lost: the
+	* airfield emptied and filled every few seconds and nothing ever reached the enemy.  Everything
+	* that sends an aircraft home is already in JetAIUpdate - out of ammo, out of special ammo, idle
+	* for ReturnToBaseIdleTime - so the retreat has nothing to add and no business interrupting it.
+	*
+	* Split out with plain flags so the rule is testable without a running game.
+	*/
+Bool AIRetreat_canBeOrderedHome( Bool hasAI, Bool isStructureOrImmobile, Bool ownsItsOwnLanding )
+{
+	return hasAI && !isStructureOrImmobile && !ownsItsOwnLanding;
+}
+
+/** The same rule, asked of a real object. */
+static Bool retreatCanOrderHome( const Object *obj )
+{
+	if( obj == NULL )
+		return FALSE;
+	const AIUpdateInterface *ai = obj->getAI();
+	return AIRetreat_canBeOrderedHome( ai != NULL,
+			obj->isKindOf( KINDOF_STRUCTURE ) || obj->isKindOf( KINDOF_IMMOBILE ),
+			ai != NULL && ai->getJetAIUpdate() != NULL );
+}
+
+//----------------------------------------------------------------------------------------------------------
 /** Look at every fight this AI is in and break off the ones it is losing.
 	*
 	* Deliberately at the player level and on the rung's decision interval rather than inside the
@@ -3864,9 +3893,8 @@ void AIPlayer::doRetreats( void )
 				Object *obj = objIter.cur();
 				if( obj == NULL || obj->isEffectivelyDead() )
 					continue;
-				if( obj->isKindOf( KINDOF_STRUCTURE ) || obj->isKindOf( KINDOF_IMMOBILE ) ||
-						obj->isKindOf( KINDOF_PROJECTILE ) || obj->getAI() == NULL )
-					continue;
+				if( obj->isKindOf( KINDOF_PROJECTILE ) || !retreatCanOrderHome( obj ) )
+					continue;			// only the units that could actually be pulled out place the fight
 				centre.x += obj->getPosition()->x;
 				centre.y += obj->getPosition()->y;
 				count += 1.0f;
@@ -3940,9 +3968,7 @@ void AIPlayer::doRetreats( void )
 			for( DLINK_ITERATOR<Object> objIter = team->iterate_TeamMemberList(); !objIter.done(); objIter.advance() )
 			{
 				Object *obj = objIter.cur();
-				if( obj == NULL || obj->isEffectivelyDead() || obj->getAI() == NULL )
-					continue;
-				if( obj->isKindOf( KINDOF_STRUCTURE ) || obj->isKindOf( KINDOF_IMMOBILE ) )
+				if( obj == NULL || obj->isEffectivelyDead() || !retreatCanOrderHome( obj ) )
 					continue;
 
 				if( !profile->m_retreatTeams )

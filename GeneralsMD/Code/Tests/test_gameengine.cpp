@@ -5945,6 +5945,28 @@ TEST(retreat_ratio_measures_the_exchange_not_the_health_bar)
 }
 
 
+/** AIPlayer.cpp: who the retreat is allowed to order home.  Aircraft are not: a move order is what
+	 starts a jet's or a helicopter's own round trip, so one handed to a parked aircraft every
+	 decision interval took it off the deck, flew it at the base centre, idled it and landed it
+	 again, over and over, for as long as a fight near the base read as lost.  JetAIUpdate already
+	 owns every reason an aircraft goes home. */
+extern Bool AIRetreat_canBeOrderedHome( Bool hasAI, Bool isStructureOrImmobile, Bool ownsItsOwnLanding );
+
+TEST(the_retreat_never_orders_an_aircraft_home)
+{
+	// a tank in a fight it is losing: this is what the retreat is for
+	CHECK( AIRetreat_canBeOrderedHome( true, false, false ) );
+
+	// a jet or a comanche - anything running JetAIUpdate - is left alone, in the air or parked
+	CHECK( !AIRetreat_canBeOrderedHome( true, false, true ) );
+
+	// a building cannot fall back, and neither can anything without an AI to give the order to
+	CHECK( !AIRetreat_canBeOrderedHome( true, true, false ) );
+	CHECK( !AIRetreat_canBeOrderedHome( false, false, false ) );
+	CHECK( !AIRetreat_canBeOrderedHome( false, true, true ) );
+}
+
+
 /** The second half of scouting: once every enemy has been placed there is nothing left to search for,
 	 and the job becomes keeping the picture of their bases current.  That is the stalest one per step
 	 walked, recomputed at every arrival - which is what stopped the scout walking a blind lap of the
