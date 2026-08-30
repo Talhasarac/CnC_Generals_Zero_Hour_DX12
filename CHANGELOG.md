@@ -220,6 +220,8 @@ found and fixed â€” EA's own, not port damage.**
 - Something flagged unselectable is unselectable. The flag existed and nothing read it.
 - Double-clicking to grab everything of a kind grabs what a box would, not things you can only click one at a time.
 - A bounty pays what the percentage says. Rounding up a fraction that was already a whole number paid a dollar extra on every kill.
+- A supply upgrade pays for what arrives. The bonus was a flat sum handed over on arrival, so a truck turning up with one box collected the same as a full load - and a driver dropping off little and often earned several times what the upgrade is worth.
+- Taking over a defeated ally's base no longer starts his research again from scratch. A player upgrade is bought once for the whole player, and the buildings you inherit were left paying for a second copy of what you already had.
 
 ## One crate, one collector
 

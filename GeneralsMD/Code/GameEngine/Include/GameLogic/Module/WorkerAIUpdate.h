@@ -214,6 +214,7 @@ public:
 	virtual void finishBuildingSound();
 	
 	virtual Int getUpgradedSupplyBoost() const;
+	virtual Int getMaxBoxes() const { return getWorkerAIUpdateModuleData()->m_maxBoxesData; }
 
 	virtual void noteDockActionWindow( UnsignedInt frames );
 	virtual Real getDockActionProgress() const;

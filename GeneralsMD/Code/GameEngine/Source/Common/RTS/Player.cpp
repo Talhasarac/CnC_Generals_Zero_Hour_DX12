@@ -2150,6 +2150,19 @@ void Player::setObjectsEnabled(AsciiString templateTypeToAffect, Bool enable)
 }
 
 //=============================================================================
+//=============================================================================
+// Cancel an upgrade a building of the losing player still has in its queue, because the player
+// taking the assets over has it already.
+//=============================================================================
+static void cancelUpgradeInProduction(Object *obj, void *userData)
+{
+	const UpgradeTemplate *upgradeTemplate = (const UpgradeTemplate *)userData;
+	ProductionUpdateInterface *pui = ProductionUpdate::getProductionUpdateInterfaceFromObject(obj);
+
+	if (pui && pui->isUpgradeInQueue(upgradeTemplate))
+		pui->cancelUpgrade(upgradeTemplate);
+}
+
 void Player::transferAssetsFromThat(Player *that)
 {
 	Team *defaultTeam = getDefaultTeam();
@@ -2189,6 +2202,31 @@ void Player::transferAssetsFromThat(Player *that)
 	for (std::list<Object *>::iterator itObjs = objsToTransfer.begin(); itObjs != objsToTransfer.end(); ++itObjs) {
 		(*itObjs)->setTeam(defaultTeam);
 	}
+
+	// Take over what he had in the research queues.  A player upgrade is bought once for the whole
+	// player, so an ally who already has one - or is already paying for it - would otherwise end up
+	// with a second copy being researched in the buildings he just inherited, paid for and useless.
+	std::vector<const UpgradeTemplate *> upgradesToCancel;
+	for (Upgrade *upgrade = that->m_upgradeList; upgrade; upgrade = upgrade->friend_getNext())
+	{
+		const UpgradeTemplate *upgradeTemplate = upgrade->getTemplate();
+
+		if (upgrade->getStatus() == UPGRADE_STATUS_IN_PRODUCTION
+			&& upgradeTemplate->getUpgradeType() == UPGRADE_TYPE_PLAYER
+			&& (hasUpgradeComplete(upgradeTemplate) || hasUpgradeInProduction(upgradeTemplate)))
+		{
+			upgradesToCancel.push_back(upgradeTemplate);
+		}
+	}
+
+	for (std::vector<const UpgradeTemplate *>::iterator cancelIt = upgradesToCancel.begin();
+			 cancelIt != upgradesToCancel.end(); ++cancelIt)
+	{
+		that->iterateObjects(cancelUpgradeInProduction, (void *)(*cancelIt));
+	}
+
+	// and what he was part way through that we were not: otherwise it can be started a second time
+	m_upgradesInProgress.set(that->m_upgradesInProgress);
 
 	// transfer all his money
 	UnsignedInt allMoney = that->getMoney()->countMoney();

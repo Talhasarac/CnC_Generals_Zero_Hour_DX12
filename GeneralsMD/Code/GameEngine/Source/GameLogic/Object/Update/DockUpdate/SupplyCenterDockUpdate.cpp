@@ -100,12 +100,22 @@ Bool SupplyCenterDockUpdate::action( Object* docker, Object *drone )
 		return FALSE;
 
 	UnsignedInt value = 0;
+
+	// The upgrade bonus is a flat sum paid on arrival, so a truck that turned up with one box in it
+	// collected the whole bonus, and a driver who dropped off little and often earned several times
+	// what a full load pays.  Scale it by how much of a load actually arrived.  This has to be read
+	// before the boxes are unloaded below.
+	{
+		const Int maxBoxes = supplyTruckAI->getMaxBoxes();
+		if( maxBoxes > 0 )
+			value += (UnsignedInt)((supplyTruckAI->getUpgradedSupplyBoost() * supplyTruckAI->getNumberBoxes()) / maxBoxes);
+	}
+
 	Player *ownerPlayer = getObject()->getControllingPlayer();
 	while( supplyTruckAI->loseOneBox() )
 		value += ownerPlayer->getSupplyBoxValue();
 	
-	// Add money boost from upgrades that give extra money
-	value += supplyTruckAI->getUpgradedSupplyBoost();
+	// (the upgrade bonus was added above, scaled by how full the truck was)
 
 	if( value > 0)
 	{

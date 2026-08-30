@@ -194,6 +194,7 @@ public:
 	virtual ObjectID getPreferredDockID() const = 0;
 	virtual UnsignedInt getActionDelayForDock( Object *dock ) = 0;
 	virtual Int getUpgradedSupplyBoost() const = 0;
+	virtual Int getMaxBoxes() const = 0;			///< how many boxes a full load is
 
 	/** The dock state announces how long the box it is working on takes; that window is what the
 		* progress bar over the worker's head fills across.  (See AIDockProcessDockState.) */
@@ -237,6 +238,7 @@ public:
 	virtual ObjectID getPreferredDockID() const { return m_preferredDock; }
 	virtual UnsignedInt getActionDelayForDock( Object *dock );
 	virtual Int getUpgradedSupplyBoost() const { return 0; }
+	virtual Int getMaxBoxes() const { return getSupplyTruckAIUpdateModuleData()->m_maxBoxesData; }
 
 	virtual void noteDockActionWindow( UnsignedInt frames );
 	virtual Real getDockActionProgress() const;
