@@ -4631,6 +4631,17 @@ void AIPlayer::doCapture( void )
 	if( ai == NULL || !ai->isIdle() )
 		return;			// still on its way
 
+	//
+	// A capture in progress reads as idle - the ability parks the unit's AI while it works - so
+	// this check used to come round every five seconds and order the same capture again on the
+	// same building, restarting it before it could finish.  On anything whose capture takes longer
+	// than the check rate that is a loop with no way out: the derrick flashed and ticked forever
+	// with a rifleman standing on it, and each restart left another copy of the ability's loop
+	// sound playing.
+	//
+	if( capturer->testStatus( OBJECT_STATUS_IS_USING_ABILITY ) )
+		return;			// already taking one
+
 	if( target == NULL )
 	{
 		// nothing left to take: sit on what we own rather than wander home and let it be taken back

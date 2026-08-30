@@ -69,6 +69,7 @@
 #include "GameLogic/AI.h"
 #include "GameLogic/Module/ProductionUpdate.h"
 #include "GameLogic/Module/SupplyTruckAIUpdate.h"
+#include "GameLogic/Module/SpecialAbilityUpdate.h"
 #include "GameClient/InGameUI.h"
 #include "GameClient/View.h"
 #include "GameLogic/IncomingDamage.h"
@@ -6199,4 +6200,29 @@ TEST(every_role_commits_at_its_own_moment_and_none_of_them_is_a_bonus)
 	// and it only flips the term it is about: an untargeted enemy is scored the same either way
 	CHECK_NEAR( aiEnemyCost( dist, FALSE, FALSE, FALSE, 0.5f, FALSE ),
 							aiEnemyCost( dist, FALSE, FALSE, FALSE, 0.5f, TRUE ), 0.001f );
+}
+
+
+/** A capture in progress is broken by the capturing unit walking away - that is the whole of the
+	 rule, and the only movement exempt from it is the turn towards the target that the ability
+	 itself orders.  The exemption used to be "the facing has started", a flag that is never cleared
+	 once set, so after the first turn nothing the unit did could break the capture: an AI ordering
+	 its riflemen to run from a fight left the derrick they were on flashing and sounding its
+	 capture tick with nobody there, and it changed hands anyway. */
+TEST(walking_away_breaks_a_capture_but_turning_towards_it_does_not)
+{
+	// standing on the building, working: nothing to break
+	CHECK( !abilityBrokenByMovement( FALSE, TRUE, TRUE, TRUE ) );
+
+	// the ability's own turn towards the target: moving, but not leaving
+	CHECK( !abilityBrokenByMovement( TRUE, TRUE, TRUE, FALSE ) );
+
+	// the turn is over and the unit is moving again: it has left, whoever ordered it
+	CHECK( abilityBrokenByMovement( TRUE, TRUE, TRUE, TRUE ) );
+
+	// an ability that never faces its target (NeedToFaceTarget = No) is broken by movement too
+	CHECK( abilityBrokenByMovement( TRUE, TRUE, FALSE, FALSE ) );
+
+	// and nothing is broken when no power is up: walking is just walking
+	CHECK( !abilityBrokenByMovement( TRUE, FALSE, TRUE, TRUE ) );
 }

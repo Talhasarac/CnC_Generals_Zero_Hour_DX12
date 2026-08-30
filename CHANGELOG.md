@@ -283,6 +283,7 @@ found and fixed â€” EA's own, not port damage.**
 
 ## Twenty-two-year-old bugs, found by testing
 
+- A rifleman pulled off an oil derrick mid-capture left it flashing and chiming for the rest of the match, and the derrick changed hands anyway with nobody standing on it. Walking away now stops the capture, whether you or the computer gave the order.
 - Every countdown on screen was a second too long. Rounding up a whole number of seconds gave a whole number plus one, so a ten second build said eleven - production queues, buildings going up, superweapons, all of it.
 - A Chinese silo researching an upgrade while its missile charged drew both bars and both countdowns in the same row of pixels. They stack now.
 - Units moving diagonally ran up to 40% faster than their own stat sheet.
@@ -379,6 +380,7 @@ found and fixed â€” EA's own, not port damage.**
 - The videos play: the intro, the sizzle reel, the mission briefings, the general portraits.
 - About 5,600 graphics calls are translated to a modern path, none of them touched.
 - No disc, no registry keys, no retail installer â€” a normal install works.
+- The startup screen is this build's own, so you can see which one you launched before the menu loads.
 - The 1.04 patch content is reachable again.
 
 ---

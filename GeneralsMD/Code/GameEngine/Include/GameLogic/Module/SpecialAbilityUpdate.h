@@ -47,6 +47,24 @@ enum SpecialPowerType;
 #define SPECIAL_ABILITY_HUGE_DISTANCE 10000000.0f
 
 //-------------------------------------------------------------------------------------------------
+/** Walking away from a special ability in progress breaks it off - a rifleman ordered off a
+	* building he is halfway through capturing has stopped capturing it. The one movement that does
+	* not count is the turn towards the target the ability itself asks for: that is the ability
+	* working, not the unit leaving.
+	*
+	* Only the turn, though. Reading "the facing has been initiated" as the exemption meant the
+	* exemption never ended - the flag is set once when the turn starts and cleared only when the
+	* whole ability restarts - so from that frame on, nothing this unit did could break the capture.
+	* Human orders still stopped it through the command-source check, but an AI's orders look
+	* exactly like the ability's own, so a bot pulling its infantry off a derrick under fire left
+	* the building flashing and ticking with nobody on it. */
+//-------------------------------------------------------------------------------------------------
+inline Bool abilityBrokenByMovement( Bool isMoving, Bool powerInUse, Bool facingInitiated, Bool facingComplete )
+{
+	return isMoving && powerInUse && !( facingInitiated && !facingComplete );
+}
+
+//-------------------------------------------------------------------------------------------------
 class SpecialAbilityUpdateModuleData : public UpdateModuleData
 {
 public:

@@ -230,10 +230,11 @@ UpdateSleepTime SpecialAbilityUpdate::update( void )
     onExit( false );
     return calcSleepTime();
   }
-	if( ai->isMoving() && isPowerCurrentlyInUse() && !m_facingInitiated )
+	if( abilityBrokenByMovement( ai->isMoving(), isPowerCurrentlyInUse(), m_facingInitiated, m_facingComplete ) )
   {
 		// Capture is broken by movement just as if we had been given a direct command (above check).
 		// However, the time of Facing the target is considered isPowerCurrentlyInUse, but isMoving.  So let that slide.
+		// (Only the turn itself - see abilityBrokenByMovement for what that used to let through.)
 		switch(data->m_specialPowerTemplate->getSpecialPowerType() )
 		{
       case SPECIAL_INFANTRY_CAPTURE_BUILDING: 
@@ -501,6 +502,7 @@ Bool SpecialAbilityUpdate::initiateIntentToDoSpecialPower( const SpecialPowerTem
   m_facingInitiated = false;
   m_facingComplete = false;
   m_withinStartAbilityRange = false;
+  m_captureFlashPhase = 0.0f;   // a restarted capture starts its flash over, not part way up the ramp
 
 //  getObject()->getControllingPlayer()->getAcademyStats()->recordSpecialPowerUsed( specialPowerTemplate );
 
@@ -1094,6 +1096,10 @@ void SpecialAbilityUpdate::startPreparation()
     getObject()->getAI()->aiIdle( CMD_FROM_AI ); // just in case.  jba.
   }
   getObject()->setStatus( MAKE_OBJECT_STATUS_MASK( OBJECT_STATUS_IS_USING_ABILITY ) );
+
+  // the handle is the only way to stop a looping sound, so drop the last one before it is
+  // overwritten - a preparation that starts twice used to leave the first loop playing forever
+  TheAudio->removeAudioEvent( m_prepSoundLoop.getPlayingHandle() );
 
   m_prepSoundLoop = data->m_prepSoundLoop;
   m_prepSoundLoop.setObjectID( getObject()->getID() );
