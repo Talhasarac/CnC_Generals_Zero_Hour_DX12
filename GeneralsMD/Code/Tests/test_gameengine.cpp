@@ -4242,7 +4242,68 @@ struct NetPacketFileReader : public NetPacket
 	using NetPacket::readFileMessage;
 	using NetPacket::readFileAnnounceMessage;
 	using NetPacket::GetBufferSizeNeededForCommand;
+	using NetPacket::FillBufferWithCommand;
 };
+
+/* Sending a command out of band asks how many bytes it needs, allocates that, and then lets the
+	 writer fill it.  Three of those size functions disagreed with their own writer: the run-ahead
+	 metrics one counted the average frame rate as a byte where the writer sends a short, and the
+	 load-complete and timeout-start ones did not count the command id at all, though the writer
+	 always emits it.  Each of those is a write past the end of a freshly sized heap block.
+
+	 So measure it: fill a canary buffer, find how far the writer really went, and hold the
+	 advertised size against it. */
+static Int bytesActuallyWritten( NetCommandRef *ref, Int *advertised )
+{
+	static const Int CANARY_LEN = 512;
+	static const UnsignedByte CANARY = 0xCD;
+	UnsignedByte buffer[CANARY_LEN];
+	memset( buffer, CANARY, sizeof(buffer) );
+
+	*advertised = (Int)NetPacketFileReader::GetBufferSizeNeededForCommand( ref->getCommand() );
+	NetPacketFileReader::FillBufferWithCommand( buffer, ref );
+
+	Int last = -1;
+	Int i;
+	for( i = 0; i < CANARY_LEN; ++i )
+		if( buffer[i] != CANARY )
+			last = i;
+	return last + 1;
+}
+
+static NetCommandRef *wrapForSend( NetCommandMsg *msg, NetCommandType type )
+{
+	msg->setNetCommandType( type );
+	msg->setPlayerID( 3 );
+	msg->setID( 0x1234 );
+	msg->setExecutionFrame( 99 );
+	NetCommandRef *ref = newInstance( NetCommandRef )( msg );
+	ref->setRelay( 0 );
+	msg->detach();
+	return ref;
+}
+
+TEST(a_commands_advertised_size_covers_what_its_writer_puts_in_the_buffer)
+{
+	Int advertised;
+
+	NetRunAheadMetricsCommandMsg *metrics = newInstance( NetRunAheadMetricsCommandMsg );
+	metrics->setAverageLatency( 0.125f );
+	metrics->setAverageFps( 300 );					// wider than a byte, which is the point
+	NetCommandRef *metricsRef = wrapForSend( metrics, NETCOMMANDTYPE_RUNAHEADMETRICS );
+	CHECK( bytesActuallyWritten( metricsRef, &advertised ) <= advertised );
+	metricsRef->deleteInstance();
+
+	NetCommandMsg *loadDone = newInstance( NetCommandMsg );
+	NetCommandRef *loadRef = wrapForSend( loadDone, NETCOMMANDTYPE_LOADCOMPLETE );
+	CHECK( bytesActuallyWritten( loadRef, &advertised ) <= advertised );
+	loadRef->deleteInstance();
+
+	NetCommandMsg *timeout = newInstance( NetCommandMsg );
+	NetCommandRef *timeoutRef = wrapForSend( timeout, NETCOMMANDTYPE_TIMEOUTSTART );
+	CHECK( bytesActuallyWritten( timeoutRef, &advertised ) <= advertised );
+	timeoutRef->deleteInstance();
+}
 
 /* The size of nothing is nothing.  This one hands back a byte count, but its guard against a null
 	 command returned TRUE - so a caller sizing a buffer reserved one byte for a command that is not

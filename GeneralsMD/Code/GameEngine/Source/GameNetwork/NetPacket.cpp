@@ -429,9 +429,11 @@ UnsignedInt NetPacket::GetRunAheadMetricsCommandSize(NetCommandMsg *msg) {
 	msglen += sizeof(UnsignedByte);
 	msglen += sizeof(UnsignedShort) + sizeof(UnsignedByte);
 
-	++msglen;
-	msglen += sizeof(UnsignedByte);
-	msglen += sizeof(Real);
+	++msglen;										// the 'D'
+	msglen += sizeof(Real);							// average latency
+	msglen += sizeof(UnsignedShort);				// average fps - the writer sends a short, and
+													// this counted a byte, so the buffer was a
+													// byte short of what got written into it
 
 	return msglen;
 }
@@ -623,6 +625,9 @@ UnsignedInt NetPacket::GetLoadCompleteMessageSize(NetCommandMsg *msg) {
 	msglen += sizeof(UnsignedByte) + sizeof(UnsignedByte);
 	++msglen;
 	msglen += sizeof(UnsignedByte);
+	msglen += sizeof(UnsignedShort) + sizeof(UnsignedByte);	// the 'C' and the command id, which
+															// the writer always emits and this
+															// never counted
 
 	++msglen; // For the 'D'
 
@@ -637,6 +642,7 @@ UnsignedInt NetPacket::GetTimeOutGameStartMessageSize(NetCommandMsg *msg) {
 	msglen += sizeof(UnsignedByte) + sizeof(UnsignedByte);
 	++msglen;
 	msglen += sizeof(UnsignedByte);
+	msglen += sizeof(UnsignedShort) + sizeof(UnsignedByte);	// the 'C' and the command id, as above
 
 	++msglen; // For the 'D'
 
