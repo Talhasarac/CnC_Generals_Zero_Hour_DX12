@@ -286,6 +286,21 @@ void StickyBombUpdate::detonate()
 }
 
 // ------------------------------------------------------------------------------------------------
+/** The trap is going away without going off - shot off the building, or the building sold.  The
+	* status it set on its victim is cleared when it detonates and nowhere else, so the building
+	* stayed marked as trapped for the rest of the match and no second trap could be laid on it. */
+// ------------------------------------------------------------------------------------------------
+void StickyBombUpdate::onDelete()
+{
+	if( getObject()->isKindOf( KINDOF_BOOBY_TRAP ) )
+	{
+		Object *boobyTrappedObject = getTargetObject();
+		if( boobyTrappedObject )
+			boobyTrappedObject->clearStatus( MAKE_OBJECT_STATUS_MASK(OBJECT_STATUS_BOOBY_TRAPPED) );
+	}
+}
+
+// ------------------------------------------------------------------------------------------------
 /** CRC */
 // ------------------------------------------------------------------------------------------------
 void StickyBombUpdate::crc( Xfer *xfer )

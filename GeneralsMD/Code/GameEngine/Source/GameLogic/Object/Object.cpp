@@ -3050,9 +3050,13 @@ Bool Object::isSelectable() const
     return TRUE;
 
 	if ( m_isSelectable )
-    if ( !testStatus(OBJECT_STATUS_UNSELECTABLE) ) 
+    if ( !testStatus(OBJECT_STATUS_UNSELECTABLE) )
 		  if ( !isEffectivelyDead() )
-				//if ( !getTemplate()->isKindOf(KINDOF_DRONE) )//Most drones are unselectable from being slaved, but the SpyDrone needs help
+				// KINDOF_NO_SELECT says a thing may not be selected, and nothing read it here - so
+				// the flag did nothing and the only way to make something unselectable was to be a
+				// drone.  (That is the test this replaces; it was commented out because it caught
+				// the spy drone, which is meant to be selectable.)
+				if ( !getTemplate()->isKindOf(KINDOF_NO_SELECT) )
 					return TRUE;
 
   return FALSE;

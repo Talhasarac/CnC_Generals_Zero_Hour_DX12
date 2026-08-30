@@ -2162,10 +2162,9 @@ void AIGroup::groupAttackObjectPrivate( Bool forced, Object *victim, Int maxShot
 	for( i = m_memberList.begin(); i != m_memberList.end(); ++i )	{
 		Real dx, dy;
 		Coord3D unitPos = *((*i)->getPosition());
-		if ((*i)->isDisabledByType( DISABLED_HELD ) ) 
-		{
-			continue; // don't bother telling the occupants to move.
-		}
+		// Held units were skipped here on the grounds that there is no point telling a passenger to
+		// walk somewhere - but this is the attack order, not a move, and a unit that is held can
+		// still shoot.  A bunkered Battle Bus ignored every attack you gave it.
 		dx = unitPos.x - victimPos.x;
 		dy = unitPos.y - victimPos.y;
 		iter->insert((*i), dx*dx+dy*dy);

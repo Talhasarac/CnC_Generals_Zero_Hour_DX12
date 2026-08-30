@@ -170,6 +170,12 @@ UpdateSleepTime BunkerBusterBehavior::update( void )
 // ------------------------------------------------------------------------------------------------
 void BunkerBusterBehavior::onDie( const DamageInfo *damageInfo )
 {
+  // Only bust the bunker if the missile got there.  This fires on any death, so a bunker buster
+  // shot down on the way in - by a Point Defence Laser, say - still cleared out the building it
+  // was aimed at, from wherever it happened to be destroyed.
+  if( !getObject()->testStatus( OBJECT_STATUS_MISSILE_KILLING_SELF ) )
+    return;
+
   // do what we came here to do!
   bustTheBunker();
 }

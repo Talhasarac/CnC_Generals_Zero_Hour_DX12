@@ -211,6 +211,16 @@ found and fixed â€” EA's own, not port damage.**
 - Fanaticism works without nationalism being bought first.
 - Two battle plans stack properly, and plans move with a captured strategy center.
 
+## Weapons and units that were quietly wrong
+
+- A bunker buster shot down on the way in no longer clears out the building it was aimed at. It emptied the bunker from wherever it happened to be destroyed - a Point Defence Laser did not save you, it just moved the explosion.
+- A Battle Bus in its wrecked form takes attack orders again. Every order you gave it was dropped on the way, because the crew inside are 'held' and held units were skipped.
+- A sniper cannot pick at an empty Stinger Site. The rule that stops snipers hurting empty buildings only counted passengers, and a Stinger Site's men are spawned, not carried.
+- A booby trap shot off a building, or sold with it, releases the building. The mark was only ever cleared when the trap went off, so the building stayed marked for the rest of the match and no second trap could be laid.
+- Something flagged unselectable is unselectable. The flag existed and nothing read it.
+- Double-clicking to grab everything of a kind grabs what a box would, not things you can only click one at a time.
+- A bounty pays what the percentage says. Rounding up a fraction that was already a whole number paid a dollar extra on every kill.
+
 ## One crate, one collector
 
 - A crate pays once per frame, not once per soldier who touched it.

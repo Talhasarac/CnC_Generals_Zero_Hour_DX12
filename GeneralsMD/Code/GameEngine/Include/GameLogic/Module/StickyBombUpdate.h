@@ -82,6 +82,7 @@ public:
 	// virtual destructor prototype provided by memory pool declaration
 
 	virtual void onObjectCreated();
+	virtual void onDelete();											///< this module is going away
 
 	virtual UpdateSleepTime update();							///< called once per frame
 

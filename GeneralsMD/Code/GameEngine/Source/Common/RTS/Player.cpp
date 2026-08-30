@@ -2460,7 +2460,10 @@ void Player::doBountyForKill(const Object* killer, const Object* victim)
 		return;
 
 	Int costToBuild = victim->getTemplate()->calcCostToBuild(victim->getControllingPlayer());
-	Int bounty = REAL_TO_INT_CEIL(costToBuild * m_cashBountyPercent);
+	// Rounding up a product of two floats hands you an extra dollar whenever the multiplication
+	// lands a hair above a whole number - a 10% bounty on a 1000 cost unit paid 101. Take an
+	// epsilon off first, so only a genuine fraction rounds up.
+	Int bounty = REAL_TO_INT_CEIL((costToBuild * m_cashBountyPercent) - WWMATH_EPSILON);
 	
 	if( bounty )
 	{

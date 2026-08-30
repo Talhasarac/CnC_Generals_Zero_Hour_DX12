@@ -128,6 +128,7 @@ public:
 	virtual Bool areAllSlavesStealthed() const = 0;
 	virtual void revealSlaves() = 0;
 	virtual Bool doSlavesHaveFreedom() const = 0;
+	virtual Int getSlaveCount() const = 0;
 };
 
 // ------------------------------------------------------------------------------------------------
@@ -183,6 +184,7 @@ public:
 	virtual Bool areAllSlavesStealthed() const;
 	virtual void revealSlaves();
 	virtual Bool doSlavesHaveFreedom() const { return getSpawnBehaviorModuleData()->m_slavesHaveFreeWill; }
+	virtual Int getSlaveCount() const { return m_spawnCount; }
 
 	// **********************************************************************************************
 	// our own methods

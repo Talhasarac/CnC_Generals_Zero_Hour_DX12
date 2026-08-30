@@ -62,6 +62,7 @@
 #include "GameLogic/Module/BehaviorModule.h"
 #include "GameLogic/Module/BodyModule.h"
 #include "GameLogic/Module/ContainModule.h"
+#include "GameLogic/Module/SpawnBehavior.h"
 #include "GameLogic/Module/LaserUpdate.h"
 #include "GameLogic/Module/UpdateModule.h"
 #include "GameLogic/Module/SpecialPowerCompletionDie.h"
@@ -599,13 +600,16 @@ Real WeaponTemplate::estimateWeaponTemplateDamage(
 
   
   // hmm.. must be shooting a firebase or such, if there is noone home to take the bullet, return 0!
+  // The test only looked at passengers, and a Stinger Site's men are not passengers - they are
+  // spawned slaves - so a Stinger Site with nobody left in it still took sniper fire, which is the
+  // one building a sniper has no business hurting.
   if ( victimObj->isKindOf( KINDOF_STRUCTURE) && damageType == DAMAGE_SNIPER )
   {
-    if ( victimObj->getContain() )
-    {
-      if ( victimObj->getContain()->getContainCount() == 0 )
-        return 0.0f;
-    }
+    const Bool hasOccupants = victimObj->getContain() && victimObj->getContain()->getContainCount() > 0;
+    const Bool hasSlaves = victimObj->getSpawnBehaviorInterface() && victimObj->getSpawnBehaviorInterface()->getSlaveCount() > 0;
+
+    if ( !hasOccupants && !hasSlaves )
+      return 0.0f;
   }
 
 

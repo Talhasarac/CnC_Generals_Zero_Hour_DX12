@@ -533,8 +533,10 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 					selectMore->appendBooleanArgument(FALSE);
 					for (DrawableListIt it = listOfSelectedDrawables.begin(); it != listOfSelectedDrawables.end(); ++it) {
 						Drawable *draw = *it;
-						// buildings and units stay in separate selections
-						if (draw && draw->isSelectable() && draw->isKindOf( KINDOF_STRUCTURE ) == picked->isKindOf( KINDOF_STRUCTURE )) {
+						// buildings and units stay in separate selections, and a double click that
+						// gathers everything of a kind may only gather what a box would - things
+						// you can click one at a time but never sweep up used to come along
+						if (draw && draw->isMassSelectable() && draw->isKindOf( KINDOF_STRUCTURE ) == picked->isKindOf( KINDOF_STRUCTURE )) {
 							TheInGameUI->selectDrawable(draw);
 							selectMore->appendObjectIDArgument(draw->getObject()->getID());
 						}
