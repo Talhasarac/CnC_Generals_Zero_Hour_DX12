@@ -206,12 +206,18 @@ found and fixed â€” EA's own, not port damage.**
 - Dozers and workers walk through anything still going up, so they never shut themselves in behind
   their own work.
 - The stop button prints its key on it, like the build buttons do.
+- A captured worker stops working for its old owner. Being captured cleared its orders but not its
+  job, so it carried on building and repairing for the player who just lost it.
 
 ## Bonuses that come and go when they should
 
 - Horde, nationalism and fanaticism bonuses now leave with the horde.
 - Fanaticism works without nationalism being bought first.
 - Two battle plans stack properly, and plans move with a captured strategy center.
+- The Bombardment Cannon cannot be fired in the middle of a battle plan change. The turret was only
+  switched off once it had finished swinging back, so the whole swing was still a firing window.
+- Passengers do not step out of a transport that is itself inside something. They would have
+  appeared inside whatever was carrying it.
 
 ## Weapons and units that were quietly wrong
 

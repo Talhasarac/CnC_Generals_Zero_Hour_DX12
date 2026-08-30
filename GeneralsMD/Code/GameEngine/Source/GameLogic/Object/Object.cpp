@@ -4637,7 +4637,19 @@ void Object::onCapture( Player *oldOwner, Player *newOwner )
 {
 	// Everybody dhills when they captured so they don't keep doing something the new player might not want him to be doing
 	if( getAIUpdateInterface()  &&  (oldOwner != newOwner) )
+	{
 		getAIUpdateInterface()->aiIdle(CMD_FROM_AI);
+
+		// Going idle stops what a unit is doing, but a builder's job is not held in its AI state -
+		// it is held in the dozer task list, so a captured worker carried on building or repairing
+		// for its old owner.  Drop the tasks with the orders.
+		DozerAIInterface *dozerAI = getAIUpdateInterface()->getDozerAIInterface();
+		if( dozerAI )
+		{
+			for( UnsignedInt task = DOZER_TASK_FIRST; task < DOZER_NUM_TASKS; ++task )
+				dozerAI->cancelTask( (DozerTask)task );
+		}
+	}
 
 	// this gets the new owner some points
 	newOwner->getScoreKeeper()->addObjectCaptured(this);

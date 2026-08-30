@@ -573,6 +573,11 @@ Bool TransportContain::isSpecificRiderFreeToExit(Object* specificObject)
 	if (ai && ai->getAiFreeToExit(specificObject) != FREE_TO_EXIT)
 		return FALSE;
 
+	// If this transport is itself inside something, its passengers have nowhere to step out to -
+	// they would appear inside whatever is carrying us.
+	if (me->isContained())
+		return FALSE;
+
   // I can always kick people out if I am in the air, I know what I'm doing
   if (me->isUsingAirborneLocomotor())
    	return TRUE;

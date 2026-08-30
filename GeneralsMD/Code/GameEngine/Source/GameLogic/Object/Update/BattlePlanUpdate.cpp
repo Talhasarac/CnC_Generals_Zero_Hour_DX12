@@ -396,6 +396,11 @@ UpdateSleepTime BattlePlanUpdate::update()
 							{
 								//It's not centered, and not trying to center, so order it to center.
 								ai->aiIdle( CMD_FROM_AI );
+								// The turret is only switched off once it has finished centring, so
+								// through the whole swing back it could still be fired - which is
+								// how the Bombardment Cannon went off in the middle of a battle
+								// plan change.
+								enableTurret( false );
 								recenterTurret();
 								m_centeringTurret = true;
 							}
