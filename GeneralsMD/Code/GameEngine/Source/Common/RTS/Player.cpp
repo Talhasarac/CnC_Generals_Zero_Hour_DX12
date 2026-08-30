@@ -2654,6 +2654,16 @@ Bool Player::grantScience(ScienceType science)
 }
 
 //=============================================================================
+AISkillLevel Player::getAISkillLevel(void) const
+{
+	return m_ai ? m_ai->getAISkillLevel() : AISKILL_MERCILESS;
+}
+
+AIRole Player::getAIRole(void) const
+{
+	return m_ai ? m_ai->getAIRole() : AIROLE_AGGRESSIVE;
+}
+
 Bool Player::isCapableOfPurchasingScience(ScienceType science) const
 {
 	if (science == SCIENCE_INVALID)

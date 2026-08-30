@@ -567,7 +567,8 @@ void AISkirmishPlayer::acquireEnemy(void)
 			}
 
 			const Real share = (estateTotal > 0.0f && i < MAX_PLAYER_COUNT) ? (estate[i] / estateTotal) : 0.0f;
-			curDistSqr = aiEnemyCost( curDistSqr, inBadShape, alreadyTargeted, attackingMe, share );
+			curDistSqr = aiEnemyCost( curDistSqr, inBadShape, alreadyTargeted, attackingMe, share,
+														getAIRole() == AIROLE_SUPPORTIVE );
 
 			// Ai enemy - will take if we don't get a better offer.
 			if (curDistSqr<bestDistanceSqr) {

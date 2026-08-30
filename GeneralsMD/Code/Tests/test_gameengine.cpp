@@ -6048,3 +6048,40 @@ TEST(a_cash_hoard_shortens_the_wait_but_only_so_far)
 	CHECK( data.m_skill[ AISKILL_MERCILESS ].m_cashHoardThreshold <
 				 data.m_skill[ AISKILL_MEDIUM ].m_cashHoardThreshold );
 }
+
+
+/** D8: role is the second axis - difficulty says how well the AI plays, role says what it is
+	 trying to do.  The property that has to hold is that a role is a *preference*, not a bonus: they
+	 all spend the same money, they spend it at different moments and on different things.  If one
+	 role were simply stronger the axis would have quietly become a second difficulty setting. */
+TEST(every_role_commits_at_its_own_moment_and_none_of_them_is_a_bonus)
+{
+	// every role has a threshold, and every threshold is a real fraction of an enemy army
+	for( Int r = 0; r < AIROLE_COUNT; ++r )
+	{
+		CHECK( aiRoleMassFraction( (AIRole)r ) > 0.0f );
+		CHECK( aiRoleMassFraction( (AIRole)r ) < 5.0f );
+	}
+
+	// the spread is the whole point: the aggressive one goes in with the least in hand and the
+	// steamroller with the most
+	CHECK( aiRoleMassFraction( AIROLE_AGGRESSIVE ) < aiRoleMassFraction( AIROLE_DEFENSIVE ) );
+	CHECK( aiRoleMassFraction( AIROLE_DEFENSIVE ) < aiRoleMassFraction( AIROLE_ECONOMIST ) );
+	CHECK( aiRoleMassFraction( AIROLE_ECONOMIST ) < aiRoleMassFraction( AIROLE_STEAMROLLER ) );
+
+	// at parity with the enemy, the aggressive one has already gone and the steamroller has not
+	CHECK( !aiShouldMass( 1000.0f, 1000.0f, aiRoleMassFraction( AIROLE_AGGRESSIVE ), FALSE, FALSE ) );
+	CHECK( aiShouldMass( 1000.0f, 1000.0f, aiRoleMassFraction( AIROLE_STEAMROLLER ), FALSE, FALSE ) );
+
+	// the supportive role converges on an ally's target instead of paying EA's gang-up penalty -
+	// which is the single sign flip that makes allied play work
+	const Real dist = 200.0f * 200.0f;
+	CHECK( aiEnemyCost( dist, FALSE, TRUE, FALSE, 0.0f, FALSE ) >
+				 aiEnemyCost( dist, FALSE, FALSE, FALSE, 0.0f, FALSE ) );
+	CHECK( aiEnemyCost( dist, FALSE, TRUE, FALSE, 0.0f, TRUE ) <
+				 aiEnemyCost( dist, FALSE, FALSE, FALSE, 0.0f, TRUE ) );
+
+	// and it only flips the term it is about: an untargeted enemy is scored the same either way
+	CHECK_NEAR( aiEnemyCost( dist, FALSE, FALSE, FALSE, 0.5f, FALSE ),
+							aiEnemyCost( dist, FALSE, FALSE, FALSE, 0.5f, TRUE ), 0.001f );
+}

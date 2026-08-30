@@ -259,10 +259,10 @@ protected:
 	Bool shouldHoldForMassing( TeamInQueue *team );
 
 	virtual void doScouting(void);
-	Object *findScout(void);						///< a spare unit of ours that can do the touring
+	Object *findScout(void);						///< a spare unit of ours that can do the touring, not already scouting
 	void queueScout(void);							///< ... or build the cheapest one that can
 	Bool scoutInQueue(void);						///< one is already on order
-	Bool nextScoutTarget(Coord3D *pos);	///< the next enemy start position to go and look at
+	Bool nextScoutTarget(Int slot, Coord3D *pos);	///< the next enemy start position for this scout
 
 	virtual void doBaseBuilding(void);
 	virtual void checkReadyTeams(void);
@@ -337,9 +337,10 @@ protected:
 	AISkillLevel m_skillLevel;				///< rung of the ladder: how well this AI plays
 	AIRole		m_role;									///< what it is trying to do; rolled once, kept for the match
 
-	ObjectID	m_scoutID;							///< the unit currently touring the map for us
+	enum { MAX_AI_SCOUTS = 2 };				///< the ladder's maxScouts never asks for more than this
+	ObjectID	m_scoutID[ MAX_AI_SCOUTS ];	///< the units currently touring the map for us
+	Int				m_scoutTargetFor[ MAX_AI_SCOUTS ];	///< which start position each one is walking to
 	Int				m_scoutTimer;						///< frames until the next scouting check
-	Int				m_scoutTarget;					///< which player's start position the scout is walking to
 	Int				m_retreatTimer;					///< frames until the next look at how the fights are going
 	Int				m_expandTimer;					///< frames until the next look for somewhere to expand to
 

@@ -709,7 +709,20 @@ void ActiveBody::attemptDamage( DamageInfo *damageInfo )
 	//Also only retaliate if we're controlled by a human player and the thing that attacked me
 	//is an enemy.
 	Player *controllingPlayer = obj->getControllingPlayer();
-	if( controllingPlayer && controllingPlayer->isLogicalRetaliationModeEnabled() && controllingPlayer->getPlayerType() == PLAYER_HUMAN ) 
+	//
+	// "Friends come to your aid" already sweeps a radius and pulls in an *allied player's* units,
+	// not only your own - and EA switched the whole mechanism off for computer players with a
+	// player-type test, twice (here, and again in shouldRetaliateAgainstAggressor). That is the
+	// same shape as the fog exemption in A1.
+	//
+	// It is unlocked for the supportive role and no other: turning up when your partner is hit is
+	// the whole of what that role is for, and switching it on for every AI would be a flat combat
+	// buff rather than a difference in what an opponent is trying to do (D8, D10).
+	//
+	const Bool retaliates = obj->getControllingPlayer() &&
+													(obj->getControllingPlayer()->getPlayerType() == PLAYER_HUMAN ||
+													 obj->getControllingPlayer()->getAIRole() == AIROLE_SUPPORTIVE);
+	if( controllingPlayer && controllingPlayer->isLogicalRetaliationModeEnabled() && retaliates )
 	{
 		if( shouldRetaliateAgainstAggressor(obj, damager))
 		{
@@ -765,8 +778,9 @@ Bool ActiveBody::shouldRetaliateAgainstAggressor(Object *obj, Object *damager)
 	if (distSqr > sqr(TheAI->getAiData()->m_maxRetaliateDistance)) {
 		return false;
 	}
-	// Only human players retaliate. [8/25/2003]
-	if (obj->getControllingPlayer()->getPlayerType() != PLAYER_HUMAN) {
+	// Only human players retaliate. [8/25/2003] ... and supportive AIs; see doDamage above.
+	if (obj->getControllingPlayer()->getPlayerType() != PLAYER_HUMAN &&
+			obj->getControllingPlayer()->getAIRole() != AIROLE_SUPPORTIVE) {
 		return false;
 	}
 	// Drones never retaliate. [8/25/2003]

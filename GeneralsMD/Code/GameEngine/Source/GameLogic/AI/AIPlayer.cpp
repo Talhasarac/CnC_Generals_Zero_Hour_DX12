@@ -1,4 +1,4 @@
-/*
+﻿/*
 **	Command & Conquer Generals Zero Hour(tm)
 **	Copyright 2025 Electronic Arts Inc.
 **
@@ -168,14 +168,18 @@ m_supplySourceAttackCheckFrame(0),
 m_attackedSupplyCenter(INVALID_ID),
 m_teamSeconds(10),
 m_curWarehouseID(INVALID_ID),
-m_scoutID(INVALID_ID),
 m_scoutTimer(1),
-m_scoutTarget(0),
 m_retreatTimer(1),
 m_expandTimer(1),
 m_skillLevel(AISKILL_MERCILESS),
 m_role(AIROLE_AGGRESSIVE)
 {
+	for (Int scoutSlot = 0; scoutSlot < MAX_AI_SCOUTS; ++scoutSlot) {
+		m_scoutID[scoutSlot] = INVALID_ID;
+		// a different start position each, so two scouts do not walk the same lap together
+		m_scoutTargetFor[scoutSlot] = scoutSlot;
+	}
+
 	m_frameLastBuildingBuilt = TheGameLogic->getFrame();
 	p->setCanBuildUnits(false); // turn off ai production by default.
 
@@ -2566,11 +2570,18 @@ Object *AIPlayer::findSupplyCenter(Int minimumCash)
 				Real radius = SUPPLY_CENTER_CLOSE_DIST + obj->getGeometryInfo().getBoundingCircleRadius();
 
 				PartitionFilterAcceptByKindOf f1(MAKE_KINDOF_MASK(KINDOF_CASH_GENERATOR), KINDOFMASK_NONE);
+				//
+				// "Do I already have a centre here" - and, for a supportive AI, "does my ally".  Two
+				// allied AIs racing each other to the same warehouse is one of the most visibly
+				// stupid things AI teammates do, and this filter is the whole of the fix.
+				//
 				PartitionFilterPlayer f2(m_player, true);	// Only find your own units.
+				PartitionFilterPlayerAffiliation f2Ally(m_player, ALLOW_SAME_PLAYER | ALLOW_ALLIES, true);
 				PartitionFilterOnMap filterMapStatus;
 
-
-				PartitionFilter *filters[] = { &f1, &f2, &filterMapStatus, 0 };
+				PartitionFilter *mine[] = { &f1, &f2, &filterMapStatus, 0 };
+				PartitionFilter *ours[] = { &f1, &f2Ally, &filterMapStatus, 0 };
+				PartitionFilter **filters = (m_role == AIROLE_SUPPORTIVE) ? ours : mine;
 
 				Object *supplyCenter = ThePartitionManager->getClosestObject(&center, radius, FROM_BOUNDINGSPHERE_2D, filters);
 				if (supplyCenter) {
@@ -3998,6 +4009,14 @@ Object *AIPlayer::findScout( void )
 			continue;
 		if( obj->getAI() == NULL )
 			continue;
+
+		Bool alreadyScouting = FALSE;
+		for( Int slot = 0; slot < MAX_AI_SCOUTS; ++slot )
+			if( m_scoutID[ slot ] == obj->getID() )
+				alreadyScouting = TRUE;
+		if( alreadyScouting )
+			continue;
+
 		return obj;
 	}
 	return NULL;
@@ -4075,19 +4094,22 @@ void AIPlayer::queueScout( void )
  * what is on them is what has to be found out.  The list is walked round and round, so the same one
  * unit that opens the map keeps it up to date for the rest of the match.
  */
-Bool AIPlayer::nextScoutTarget( Coord3D *pos )
+Bool AIPlayer::nextScoutTarget( Int slot, Coord3D *pos )
 {
+	if( slot < 0 || slot >= MAX_AI_SCOUTS )
+		return FALSE;
+
 	const Int count = ThePlayerList->getPlayerCount();
 	for( Int tries = 0; tries < count; ++tries )
 	{
-		m_scoutTarget = (m_scoutTarget + 1) % count;
+		m_scoutTargetFor[ slot ] = (m_scoutTargetFor[ slot ] + 1) % count;
 
-		Player *p = ThePlayerList->getNthPlayer( m_scoutTarget );
+		Player *p = ThePlayerList->getNthPlayer( m_scoutTargetFor[ slot ] );
 		if( p == NULL || p == m_player )
 			continue;
 		if( m_player->getRelationship( p->getDefaultTeam() ) != ENEMIES )
 			continue;
-		if( playerStartPosition( m_scoutTarget, pos ) )
+		if( playerStartPosition( m_scoutTargetFor[ slot ], pos ) )
 			return TRUE;
 	}
 	return FALSE;
@@ -4106,45 +4128,63 @@ void AIPlayer::doScouting( void )
 		return;
 	m_scoutTimer = SCOUT_CHECK_RATE;
 
-	Object *scout = TheGameLogic->findObjectByID( m_scoutID );
-	if( scout && (scout->isEffectivelyDead() || scout->getControllingPlayer() != m_player) )
-		scout = NULL;
+	const AIDifficultyProfile *profile = getSkillProfile();
+	Int wanted = profile->m_maxScouts;
+	if( wanted < 1 ) wanted = 1;
+	if( wanted > MAX_AI_SCOUTS ) wanted = MAX_AI_SCOUTS;
 
-	if( scout == NULL )
+	Bool ordered = FALSE;
+	Bool short_ = FALSE;
+
+	for( Int slot = 0; slot < wanted; ++slot )
 	{
-		m_scoutID = INVALID_ID;
-		scout = findScout();
-		if( scout )
+		Object *scout = TheGameLogic->findObjectByID( m_scoutID[ slot ] );
+		if( scout && (scout->isEffectivelyDead() || scout->getControllingPlayer() != m_player) )
+			scout = NULL;
+
+		if( scout == NULL )
 		{
-			m_scoutID = scout->getID();
-			// once per scout, so the log says whether this is working at all without saying it twice
-			DEBUG_LOG(("AI player %d scouting with a '%s'\n", m_player->getPlayerIndex(),
-								 scout->getTemplate()->getName().str()));
+			m_scoutID[ slot ] = INVALID_ID;
+			scout = findScout();
+			if( scout )
+			{
+				m_scoutID[ slot ] = scout->getID();
+				// once per scout, so the log says whether this works at all without saying it twice
+				DEBUG_LOG(("AI player %d scouting with a '%s'\n", m_player->getPlayerIndex(),
+									 scout->getTemplate()->getName().str()));
+			}
+		}
+
+		if( scout == NULL )
+		{
+			short_ = TRUE;
+			continue;
+		}
+
+		AIUpdateInterface *ai = scout->getAI();
+		if( ai == NULL || !ai->isIdle() )
+			continue;			// still on its way
+
+		Coord3D goal;
+		if( nextScoutTarget( slot, &goal ) )
+		{
+			ai->aiMoveToPosition( &goal, CMD_FROM_AI );
+			ordered = TRUE;
 		}
 	}
 
-	if( scout == NULL )
-	{
+	// one short of what this rung wants: put one on order, out of spare change
+	if( short_ )
 		queueScout();
-		return;
-	}
 
-	AIUpdateInterface *ai = scout->getAI();
-	if( ai == NULL || !ai->isIdle() )
-		return;			// still on its way
-
-	Coord3D goal;
-	if( nextScoutTarget( &goal ) )
+	//
+	// A scout that has just been sent somewhere is left alone for this rung's scouting interval.
+	// This is the ladder's honest perception knob: every rung scouts, they differ in how diligently.
+	// Ninety seconds between legs on Easy is a scout that wanders; twenty-five on Merciless is one
+	// that keeps the map current.
+	//
+	if( ordered )
 	{
-		ai->aiMoveToPosition( &goal, CMD_FROM_AI );
-
-		//
-		// ... and then leave it alone for this rung's scouting interval before the next leg.  This
-		// is the ladder's honest perception knob: every rung scouts, they differ in how diligently.
-		// Ninety seconds between legs on Easy is a scout that wanders; twenty-five on Merciless is
-		// one that keeps the map current.
-		//
-		const AIDifficultyProfile *profile = getSkillProfile();
 		Int interval = REAL_TO_INT_CEIL( profile->m_scoutIntervalSeconds * LOGICFRAMES_PER_SECOND );
 		if( interval > m_scoutTimer )
 			m_scoutTimer = interval;
@@ -4486,9 +4526,12 @@ void AIPlayer::xfer( Xfer *xfer )
 	// the scout, so a loaded game does not go blind or start a second one
 	if( version >= 2 )
 	{
-		xfer->xferObjectID( &m_scoutID );
 		xfer->xferInt( &m_scoutTimer );
-		xfer->xferInt( &m_scoutTarget );
+		for( Int scoutSlot = 0; scoutSlot < MAX_AI_SCOUTS; ++scoutSlot )
+		{
+			xfer->xferObjectID( &m_scoutID[ scoutSlot ] );
+			xfer->xferInt( &m_scoutTargetFor[ scoutSlot ] );
+		}
 	}
 	if( version >= 3 )
 	{

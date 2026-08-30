@@ -43,6 +43,7 @@
 
 #include "GameLogic/SidesList.h"
 #include "GameLogic/Object.h"
+#include "GameLogic/AI.h"			// the rung decides whether a team fires together
 #include "GameLogic/Module/BodyModule.h"
 #include "GameLogic/Module/ContainModule.h"
 #include "GameLogic/PolygonTrigger.h"
@@ -1507,8 +1508,14 @@ void Team::setTeamTargetObject(const Object *target)
 	}
 	// Only ai players do common attack.
 	if (getControllingPlayer()->getPlayerType() == PLAYER_COMPUTER) {
-		if (getControllingPlayer()->getPlayerDifficulty() == DIFFICULTY_EASY) {
-			return; // we don't do this for easy.  jba.
+		//
+		// Whether a team fires together is a rung of the ladder now, not one of the three script
+		// tiers: the ladder has six steps and this is one of the capabilities that separates them
+		// (AI-ROADMAP.md D6). The bottom two rungs still do not do it, which is what the old
+		// DIFFICULTY_EASY test said.
+		//
+		if (!TheAI->getDifficultyProfile(getControllingPlayer()->getAISkillLevel())->m_focusFire) {
+			return;
 		}
 		m_commonAttackTarget = target->getID();
 	}

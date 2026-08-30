@@ -159,11 +159,18 @@ enum AISkillLevel
 //-------------------------------------------------------------------------------------------------
 enum AIRole
 {
-	AIROLE_AGGRESSIVE = 0,
-	AIROLE_DEFENSIVE,
+	AIROLE_AGGRESSIVE = 0,	///< cheap early units, few defences, commits with less
+	AIROLE_DEFENSIVE,				///< base defences first, waits for more, counter-attacks
+	AIROLE_SUPPORTIVE,			///< converges on an ally's target, answers calls for help, shares the map
+	AIROLE_ECONOMIST,				///< expands early and often, fights only with an advantage
+	AIROLE_STEAMROLLER,			///< heavy units, one large well-timed push
 
 	AIROLE_COUNT
 };
+
+/** How much of the enemy army a role wants in hand before it commits.  The role's knob, not the
+	* rung's: both spend the same money, they spend it at different moments. */
+Real aiRoleMassFraction( AIRole role );
 
 //-------------------------------------------------------------------------------------------------
 /** One rung of the ladder.  Every new AI behaviour adds a field here rather than a
@@ -267,7 +274,7 @@ Bool aiShouldMass( Real waitingThreat, Real enemyVisibleThreat, Real massFractio
 	* ill-defended planet 25 map units away".  Two independently written RTS AIs converging on the
 	* same mistake is decent evidence that distance-dominated target selection is the wrong default. */
 Real aiEnemyCost( Real distSqr, Bool crippled, Bool alreadyTargetedByAnotherAI,
-									Bool isAttackingMe, Real economyShare );
+									Bool isAttackingMe, Real economyShare, Bool joinAllysTarget = FALSE );
 
 /** Shorten a build delay when the money is piling up.  The classic AI disease is sitting on twenty
 	* thousand cash while trickling one unit out at a time; the delays already move with wealth

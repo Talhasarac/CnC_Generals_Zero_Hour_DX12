@@ -1077,8 +1077,22 @@ Bool aiShouldMass( Real waitingThreat, Real enemyVisibleThreat, Real massFractio
 }
 
 //-------------------------------------------------------------------------------------------------
+Real aiRoleMassFraction( AIRole role )
+{
+	switch( role )
+	{
+		case AIROLE_AGGRESSIVE:		return 0.8f;		// presses, with less
+		case AIROLE_DEFENSIVE:		return 1.3f;		// would rather absorb a hit and counter-attack
+		case AIROLE_SUPPORTIVE:		return 1.0f;		// goes when the ally goes
+		case AIROLE_ECONOMIST:		return 1.5f;		// fights only with a clear advantage
+		case AIROLE_STEAMROLLER:	return 1.8f;		// one push, and it had better land
+		default:									return 1.0f;
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
 Real aiEnemyCost( Real distSqr, Bool crippled, Bool alreadyTargetedByAnotherAI,
-									Bool isAttackingMe, Real economyShare )
+									Bool isAttackingMe, Real economyShare, Bool joinAllysTarget )
 {
 	Real cost = distSqr;
 
@@ -1092,9 +1106,14 @@ Real aiEnemyCost( Real distSqr, Bool crippled, Bool alreadyTargetedByAnotherAI,
 	if( economyShare > 1.0f ) economyShare = 1.0f;
 	cost *= (1.0f - 0.3f * economyShare);
 
+	//
 	// EA's two flat terms, kept: do not gang up, and gently prefer whoever is already on me.
+	//
+	// The first one is exactly backwards for a supportive AI - converging on the ally's chosen
+	// enemy is the entire point of allied play - so that role flips its sign rather than paying it.
+	//
 	if( alreadyTargetedByAnotherAI )
-		cost += 500.0f * 500.0f;
+		cost += joinAllysTarget ? -(250.0f * 250.0f) : (500.0f * 500.0f);
 	if( isAttackingMe )
 		cost -= 25.0f * 25.0f;
 

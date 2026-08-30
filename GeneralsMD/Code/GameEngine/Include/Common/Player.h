@@ -56,6 +56,7 @@
 #include "Common/MissionStats.h"
 #include "Common/Money.h"
 #include "Common/Science.h"
+#include "GameLogic/AI.h"			// AISkillLevel and AIRole, asked of a player from outside the AI
 #include "Common/UnicodeString.h"
 #include "Common/NameKeyGenerator.h"
 #include "Common/Thing.h"
@@ -744,6 +745,11 @@ public:
 
 	/** return true attemptToPurchaseScience() would succeed for this science. */
 	Bool isCapableOfPurchasingScience(ScienceType science) const;
+
+	/** What kind of AI is behind this player, for the handful of places outside GameLogic/AI/ that
+		* have to ask.  Both answer their neutral value for a human seat. */
+	AISkillLevel getAISkillLevel(void) const;
+	AIRole getAIRole(void) const;
 
 protected:
 
