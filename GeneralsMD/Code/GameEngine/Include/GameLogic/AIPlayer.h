@@ -247,6 +247,11 @@ protected:
 		* teams fought to the last man, which is the single most visible thing that made it look
 		* stupid.  Two levels, because pulling out only whole teams still loses the units that were
 		* individually finished - Sins does exactly that, and keeps losing capital ships for it. */
+	/** B3: decide to expand, instead of waiting for a script to say so.  buildBySupplies is a
+		* working expansion mechanism that only ever ran when the "Build supply center" script action
+		* fired - the AI never worked out for itself that it was running out of money. */
+	virtual void doExpansion(void);
+
 	virtual void doRetreats(void);
 
 	/** C2: hold a finished team at the rally point until there is a force worth sending.  A string of
@@ -336,6 +341,7 @@ protected:
 	Int				m_scoutTimer;						///< frames until the next scouting check
 	Int				m_scoutTarget;					///< which player's start position the scout is walking to
 	Int				m_retreatTimer;					///< frames until the next look at how the fights are going
+	Int				m_expandTimer;					///< frames until the next look for somewhere to expand to
 
 	Bool		m_readyToBuildTeam;				///< True if the team select timer has expired.
 	Bool		m_readyToBuildStructure;	///< True if the buildDelay timer has expired.

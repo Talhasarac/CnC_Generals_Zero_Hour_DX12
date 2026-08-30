@@ -172,6 +172,7 @@ m_scoutID(INVALID_ID),
 m_scoutTimer(1),
 m_scoutTarget(0),
 m_retreatTimer(1),
+m_expandTimer(1),
 m_skillLevel(AISKILL_MERCILESS),
 m_role(AIROLE_AGGRESSIVE)
 {
@@ -3523,6 +3524,8 @@ void AIPlayer::update( void )
 
 	doRetreats(); // Break off the fights we are losing.
 
+	doExpansion(); // Go and take the money that is lying around.
+
 }
 
 //----------------------------------------------------------------------------------------------------------
@@ -3642,6 +3645,90 @@ Bool AIPlayer::dozerInQueue( void )
 		}
 	}
 	return false;
+}
+
+//----------------------------------------------------------------------------------------------------------
+/** How often the AI looks for somewhere to expand to.  Long, because an expansion is a building
+	* order and the base builder has its own rhythm to keep. */
+static const Int EXPANSION_CHECK_SECONDS = 60;
+
+//----------------------------------------------------------------------------------------------------------
+/** Notice that there is money to be had, and go and take it.
+	*
+	* Every piece of this already existed and only ever ran from a script: buildBySupplies places a
+	* structure beside a warehouse, findSupplyCenter picks a warehouse that is worth taking and is
+	* not already served, and guardSupplyCenter sends a team to sit on one.  What was missing was
+	* any decision to call them - so an AI ran its starting piles dry and then simply stopped
+	* earning.
+	*
+	* The defence goes down in the same job: an undefended expansion is a gift, and the same
+	* buildBySupplies call places a base defence structure beside the warehouse facing the enemy
+	* (that branch of it is written for exactly this and had no caller either).
+	*/
+//----------------------------------------------------------------------------------------------------------
+void AIPlayer::doExpansion( void )
+{
+	const AIDifficultyProfile *profile = getSkillProfile();
+	if( !profile->m_selfTriggeredExpansion )
+		return;
+
+	if( --m_expandTimer > 0 )
+		return;
+	m_expandTimer = EXPANSION_CHECK_SECONDS * LOGICFRAMES_PER_SECOND;
+
+	if( !m_player->getCanBuildBase() || !m_baseCenterSet )
+		return;
+
+	//
+	// What this faction calls a supply centre: whatever is already flagged as one on the build
+	// list.  Faction-correct and mod-correct without a table, and if the AI has never had one it
+	// has nothing to expand with anyway.
+	//
+	AsciiString supplyCenterName;
+	for( BuildListInfo *info = m_player->getBuildList(); info; info = info->getNext() )
+	{
+		if( info->isSupplyBuilding() && info->getTemplateName().isNotEmpty() )
+		{
+			supplyCenterName = info->getTemplateName();
+			break;
+		}
+	}
+	if( supplyCenterName.isEmpty() )
+		return;
+
+	const ThingTemplate *tmpl = TheThingFactory->findTemplate( supplyCenterName, FALSE );
+	if( tmpl == NULL )
+		return;
+
+	// pay for it out of what is spare, not out of the army's money
+	const Int cost = tmpl->calcCostToBuild( m_player );
+	if( m_player->getMoney()->countMoney() < 2 * cost )
+		return;
+
+	//
+	// Somewhere worth going. findSupplyCenter already refuses a warehouse that is picked clean, one
+	// this AI already has a centre beside, and one that is closer to the enemy than to us.
+	//
+	const Int WORTH_TAKING = 1000;
+	if( findSupplyCenter( WORTH_TAKING ) == NULL )
+		return;
+
+	buildBySupplies( WORTH_TAKING, supplyCenterName );
+
+	if( profile->m_defendExpansions )
+	{
+		const AISideInfo *resInfo = TheAI->getAiData()->m_sideInfo;
+		while( resInfo )
+		{
+			if( resInfo->m_side == m_player->getSide() )
+			{
+				if( resInfo->m_baseDefenseStructure1.isNotEmpty() )
+					buildBySupplies( WORTH_TAKING, resInfo->m_baseDefenseStructure1 );
+				break;
+			}
+			resInfo = resInfo->m_next;
+		}
+	}
 }
 
 //----------------------------------------------------------------------------------------------------------
@@ -4374,7 +4461,10 @@ void AIPlayer::xfer( Xfer *xfer )
 		xfer->xferInt( &m_scoutTarget );
 	}
 	if( version >= 3 )
+	{
 		xfer->xferInt( &m_retreatTimer );
+		xfer->xferInt( &m_expandTimer );
+	}
 
 	// the ladder rung and the role, which are rolled once and must come back the same way
 	if( version >= 3 )
