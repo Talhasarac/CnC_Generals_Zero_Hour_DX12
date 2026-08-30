@@ -71,6 +71,7 @@
 #include "GameLogic/Module/SupplyTruckAIUpdate.h"
 #include "GameLogic/Module/SpecialAbilityUpdate.h"
 #include "GameClient/InGameUI.h"
+#include "GameClient/GlobalLanguage.h"
 #include "GameClient/View.h"
 #include "GameLogic/IncomingDamage.h"
 #include "GameLogic/AIPlayer.h"
@@ -6290,3 +6291,39 @@ TEST(every_ai_seat_survives_the_options_string_the_host_sends_round)
 	CHECK( !IsAISlotState( SLOT_PLAYER ) );
 	CHECK( !OptionsCharToSlotState( 'Q', NULL ) );
 }
+
+/* Every .wnd layout is drawn at 800x600 and stretched to the screen by the resolution ratio, but
+	 the point size written beside it was handed to the font library untouched, and what adjustment
+	 there was stopped dead at twice the original.  So from about 1950 pixels wide up the text
+	 stopped growing while the panel around it kept going: on a 2560 wide screen the command bar was
+	 three times its designed size wearing the same 8pt letters, which is where the build hotkeys,
+	 the prices and the build times went. */
+TEST(text_keeps_growing_with_the_screen_instead_of_stopping_at_twice)
+{
+	const Real damping = 0.7f;		// the shipped ResolutionFontAdjustment, and the class default
+
+	// 800x600 is the resolution every layout was drawn at, so nothing may move there - and nothing
+	// shrinks below it either
+	CHECK_EQ( 8, GlobalLanguage::adjustFontSizeForWidth( 8, 800, damping ) );
+	CHECK_EQ( 8, GlobalLanguage::adjustFontSizeForWidth( 8, 640, damping ) );
+
+	// a command button's "Arial 8" used to stop at 16 for ever, 1950 pixels wide and up
+	CHECK( GlobalLanguage::adjustFontSizeForWidth( 8, 2560, damping ) > 16 );
+	CHECK( GlobalLanguage::adjustFontSizeForWidth( 8, 3840, damping ) >
+				 GlobalLanguage::adjustFontSizeForWidth( 8, 2560, damping ) );
+
+	Int previous = 0;
+	for( Int width = 800; width <= 3840; width += 32 )
+	{
+		const Int size = GlobalLanguage::adjustFontSizeForWidth( 100, width, damping );
+
+		// it never outruns the stretch applied to the window it sits in, or the text spills out of
+		// its own panel - which is what the old ceiling was there to prevent
+		CHECK( size <= 100 * width / 800 );
+
+		// and it never goes backwards as the screen grows
+		CHECK( size >= previous );
+		previous = size;
+	}
+}
+

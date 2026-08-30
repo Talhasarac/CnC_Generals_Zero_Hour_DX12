@@ -71,6 +71,7 @@
 #include "GameClient/GadgetSlider.h"
 #include "GameClient/GameText.h"
 #include "GameClient/HeaderTemplate.h"
+#include "GameClient/GlobalLanguage.h"
 
 #ifdef _INTERNAL
 // for occasional debugging...
@@ -621,6 +622,18 @@ static Bool parseFont( char *token, WinInstanceData *instData,
 	c = strtok( NULL, seps );  // label
 	c = strtok( NULL, seps );  // value
 	scanInt( c, fontBold );
+
+	//
+	// every point size in a .wnd is the one the layout was drawn at, at its CREATIONRESOLUTION,
+	// and parseScreenRect stretches the window itself by the resolution ratio.  The font has to
+	// follow or the text shrinks inside its own panel as the screen grows: a command button's
+	// "Arial 8" is unreadable on a 2560 wide screen, which is where the build hotkey letters and
+	// the price and time badges went.  Windows that name a HEADERTEMPLATE have always been
+	// adjusted this way (HeaderTemplateManager::populateGameFonts); the ones that name only a
+	// FONT never were.
+	//
+	if( TheGlobalLanguageData )
+		fontSize = TheGlobalLanguageData->adjustFontSize( fontSize );
 
 	if( TheFontLibrary )
 	{

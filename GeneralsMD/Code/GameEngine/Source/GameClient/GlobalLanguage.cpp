@@ -1,4 +1,4 @@
-/*
+﻿/*
 **	Command & Conquer Generals Zero Hour(tm)
 **	Copyright 2025 Electronic Arts Inc.
 **
@@ -191,10 +191,23 @@ void GlobalLanguage::parseFontFileName( INI *ini, void * instance, void *store, 
 
 Int GlobalLanguage::adjustFontSize(Int theFontSize) 
 {
-	Real adjustFactor = TheGlobalData->m_xResolution/800.0f;
-	adjustFactor = 1.0f + (adjustFactor-1.0f) * m_resolutionFontSizeAdjustment;
+	return adjustFontSizeForWidth( theFontSize, TheGlobalData->m_xResolution,
+																 m_resolutionFontSizeAdjustment );
+}
+
+Int GlobalLanguage::adjustFontSizeForWidth(Int theFontSize, Int screenWidth, Real damping) 
+{
+	Real adjustFactor = screenWidth/800.0f;
+	adjustFactor = 1.0f + (adjustFactor-1.0f) * damping;
 	if (adjustFactor<1.0f) adjustFactor = 1.0f;
-	if (adjustFactor>2.0f) adjustFactor = 2.0f;
+	//
+	// the window layouts themselves are stretched by the full resolution ratio, so a font ceiling
+	// of 2x meant that from about 1950 pixels wide up the text stopped growing while the panel it
+	// sits in kept going - at 2560 a command bar three times the size of its 800x600 original wore
+	// 8pt letters.  The damping factor already keeps the text below the layout's own scale
+	// (0.7 < 1), so the ceiling only has to be high enough not to bite before 4K.
+	//
+	if (adjustFactor>4.0f) adjustFactor = 4.0f;
 	Int pointSize = REAL_TO_INT_FLOOR(theFontSize*adjustFactor);
 	return pointSize;
 }

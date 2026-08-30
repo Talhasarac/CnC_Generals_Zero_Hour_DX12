@@ -220,6 +220,21 @@ protected:
 // the singleton
 extern Display *TheDisplay;
 
+//-------------------------------------------------------------------------------------------------
+/** How much bigger this screen is than the 800x600 every window layout and every hand-placed HUD
+	* pixel in the game was drawn for.  The .wnd rectangles are stretched by exactly this
+	* (parseScreenRect), so anything drawn beside them in raw pixels - a production strip cameo, a
+	* health bar - has to be multiplied by it too, or it keeps its 2003 size while the screen around
+	* it triples.  Never below 1: nothing shrinks under 800 wide. */
+//-------------------------------------------------------------------------------------------------
+inline Real TheUIScale( void )
+{
+	if( TheDisplay == NULL )
+		return 1.0f;
+	Real scale = TheDisplay->getWidth() / 800.0f;
+	return scale < 1.0f ? 1.0f : scale;
+}
+
 extern void StatDebugDisplay( DebugDisplayInterface *dd, void *, FILE *fp = NULL );
 
 //Added By Saad

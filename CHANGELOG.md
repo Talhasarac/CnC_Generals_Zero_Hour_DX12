@@ -280,6 +280,7 @@ found and fixed â€” EA's own, not port damage.**
 
 ## Health bars
 
+- A health bar keeps its size against the unit at any resolution. It was a fixed number of pixels wide and three tall, so the bigger the screen the thinner the thread over a tank.
 - Health bars are in the owner's colour instead of green to red.
 - A building's bar sits above its roof rather than inside its art.
 - Every garrisonable building shows how full it is, whoever holds it.
@@ -303,6 +304,8 @@ found and fixed â€” EA's own, not port damage.**
 
 ## It fits your monitor
 
+- The writing on screen grows with your monitor now. Every panel is stretched to your resolution and always was, but the text inside it stayed the size it was drawn at in 2003, and what growth there was stopped dead at twice - so on a 2560 wide screen a command bar three times its original size still wore eight point lettering. The keys on the build buttons, the prices and the build times were the worst of it: at 2K they were drawn, and unreadable.
+- The strip of everything your base is building follows the screen too, instead of staying a row of postage stamps under a command bar three times its size.
 - Widescreen resolutions are back in the options menu.
 - Zoom further out, with the whole map drawn instead of black corners.
 - The zoom-out ceiling is the same for everyone; no setting buys you a wider view.

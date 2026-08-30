@@ -2805,9 +2805,18 @@ static Bool computeHealthRegion( const Drawable *draw, IRegion2D& region )
 	healthBoxWidth *= widthScale;
 	healthBoxHeight *= heightScale;
 
+	//
+	// the width above is world units treated as pixels, and the height below is a flat three of
+	// them, so both stayed the size they were in 2003 while the unit they sit over grew with the
+	// screen: on a 2560 wide screen a tank was three times its 800x600 size wearing the same
+	// hairline bar.  Both follow the screen now.
+	//
+	const Real uiScale = TheUIScale();
+	healthBoxWidth *= uiScale;
+
 	// do this so health bar doesn't get too skinny or fat after scaling
 	//healthBoxHeight = max(3.0f, healthBoxHeight);
-	healthBoxHeight = 3.0f;
+	healthBoxHeight = 3.0f * uiScale;
 
 	// figure out the final region for the health box
 	region.lo.x = screenCenter.x - healthBoxWidth * 0.45f;

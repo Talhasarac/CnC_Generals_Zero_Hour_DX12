@@ -118,6 +118,17 @@ enum
 };
 
 //-------------------------------------------------------------------------------------------------
+/** Every number above is an 800x600 one, the resolution the command bar right below the strip was
+	* drawn at - and that bar is stretched to the screen while these are not, so on a 2560 wide
+	* screen the strip came out a third of the size of the row of buttons it belongs to.  Every one
+	* of them goes through here. */
+//-------------------------------------------------------------------------------------------------
+static Int stripPixels( Int nominal )
+{
+	return REAL_TO_INT_CEIL( nominal * TheUIScale() );
+}
+
+//-------------------------------------------------------------------------------------------------
 /** Pointer to show while a structure rides the cursor.  Mouse::BUILD_PLACEMENT and
 	* INVALID_BUILD_PLACEMENT are two names in CursorININames[] that no shipped Mouse.ini ever
 	* defines, so asking for them left m_cursorInfo empty and drew nothing at all - the pointer
@@ -6064,17 +6075,21 @@ void InGameUI::drawProductionStripRow( Int row, Int y )
 
 	const Int cameoW = m_productionStripCameoW;
 	const Int cameoH = m_productionStripCameoH;
+	const Int gap = stripPixels( PRODUCTION_STRIP_GAP );
+	const Int left = stripPixels( PRODUCTION_STRIP_LEFT );
+	const Int more = stripPixels( PRODUCTION_STRIP_MORE );
+	const Int plate = stripPixels( 3 );
 
 	const Int hidden = m_productionStripTotal[ row ] - count;
-	Int rowWidth = count * cameoW + ( count - 1 ) * PRODUCTION_STRIP_GAP;
+	Int rowWidth = count * cameoW + ( count - 1 ) * gap;
 	if( hidden > 0 )
-		rowWidth += PRODUCTION_STRIP_GAP + PRODUCTION_STRIP_MORE;
+		rowWidth += gap + more;
 
 	// one plate behind the row, so the cameos read over any terrain
-	TheDisplay->drawFillRect( PRODUCTION_STRIP_LEFT - 3, y - 3, rowWidth + 6, cameoH + 6,
+	TheDisplay->drawFillRect( left - plate, y - plate, rowWidth + 2 * plate, cameoH + 2 * plate,
 														GameMakeColor( 0, 0, 0, 130 ) );
 
-	Int x = PRODUCTION_STRIP_LEFT;
+	Int x = left;
 	for( Int i = 0; i < count; i++ )
 	{
 		ProductionStripSlot *slot = &m_productionStrip[ row ][ i ];
@@ -6149,7 +6164,7 @@ void InGameUI::drawProductionStripRow( Int row, Int y )
 		if( cancelHover )
 		{
 			const Int barInset = cameoW / 4;
-			const Int barHeight = 4;
+			const Int barHeight = stripPixels( 4 );
 
 			TheDisplay->drawFillRect( x, y, cameoW, cameoH,
 																GameMakeColor( 190, 0, 0, 120 ) );
@@ -6158,7 +6173,7 @@ void InGameUI::drawProductionStripRow( Int row, Int y )
 																GameMakeColor( 255, 255, 255, 255 ) );
 		}
 
-		x += cameoW + PRODUCTION_STRIP_GAP;
+		x += cameoW + gap;
 	}
 
 	//
@@ -6182,7 +6197,7 @@ void InGameUI::drawProductionStripRow( Int row, Int y )
 		Int textWidth = 0, textHeight = 0;
 		m_productionStripOverflow->getSize( &textWidth, &textHeight );
 
-		m_productionStripOverflow->draw( x + ( PRODUCTION_STRIP_MORE - textWidth ) / 2,
+		m_productionStripOverflow->draw( x + ( more - textWidth ) / 2,
 																		 y + ( cameoH - textHeight ) / 2,
 																		 GameMakeColor( 235, 235, 235, 255 ),
 																		 GameMakeColor( 0, 0, 0, 255 ) );
@@ -6288,8 +6303,8 @@ void InGameUI::drawProductionStrip( void )
 	// Take the aspect from a real command button and keep the box's area at the nominal size, so
 	// the row stays as long as it was: a wider cameo is a correspondingly shorter one.
 	//
-	m_productionStripCameoW = PRODUCTION_STRIP_CAMEO;
-	m_productionStripCameoH = PRODUCTION_STRIP_CAMEO;
+	m_productionStripCameoW = stripPixels( PRODUCTION_STRIP_CAMEO );
+	m_productionStripCameoH = stripPixels( PRODUCTION_STRIP_CAMEO );
 	static NameKeyType commandButtonKey = TheNameKeyGenerator->nameToKey( "ControlBar.wnd:ButtonCommand01" );
 	GameWindow *commandButton = TheWindowManager->winGetWindowFromId( NULL, commandButtonKey );
 	if( commandButton )
@@ -6299,7 +6314,7 @@ void InGameUI::drawProductionStrip( void )
 		if( buttonSize.x > 0 && buttonSize.y > 0 )
 		{
 			const Real aspect = INT_TO_REAL( buttonSize.x ) / INT_TO_REAL( buttonSize.y );
-			const Real area = INT_TO_REAL( PRODUCTION_STRIP_CAMEO * PRODUCTION_STRIP_CAMEO );
+			const Real area = INT_TO_REAL( m_productionStripCameoW * m_productionStripCameoH );
 			m_productionStripCameoH = REAL_TO_INT_CEIL( (Real)sqrt( area / aspect ) );
 			m_productionStripCameoW = REAL_TO_INT_CEIL( m_productionStripCameoH * aspect );
 		}
@@ -6311,8 +6326,8 @@ void InGameUI::drawProductionStrip( void )
 	// bar. A row that would run off the top of the screen is dropped rather than drawn over the
 	// tactical view's edge.
 	//
-	const Int lowerY = barTop - m_productionStripCameoH - PRODUCTION_STRIP_LIFT;
-	const Int rowStep = m_productionStripCameoH + PRODUCTION_STRIP_GAP;
+	const Int lowerY = barTop - m_productionStripCameoH - stripPixels( PRODUCTION_STRIP_LIFT );
+	const Int rowStep = m_productionStripCameoH + stripPixels( PRODUCTION_STRIP_GAP );
 
 	for( Int row = rowsUsed - 1; row >= 0; row-- )
 	{
