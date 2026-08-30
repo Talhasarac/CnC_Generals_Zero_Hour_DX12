@@ -79,7 +79,10 @@ Bool W3DFontLibrary::loadFontData( GameFont *font )
 	if( font == NULL )
 		return FALSE;
 
-	if ((UnsignedInt)font->pointSize > 100)	//sanity check the size - anything over 100 is probably wrong. -MW
+	// 100 points was "probably wrong" on a 1024x768 screen.  On a 4K display the interface scales
+	// past it and the font simply fails to load, which is a missing string on screen.  A size of
+	// zero is still refused - that one really is wrong.
+	if (font->pointSize < 1)
 		fontChar = NULL;
 	else
 	{	// get the font data from the asset manager

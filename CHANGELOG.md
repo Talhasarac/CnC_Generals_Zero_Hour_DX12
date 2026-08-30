@@ -336,6 +336,9 @@ found and fixed â€” EA's own, not port damage.**
 - The writing on screen grows with your monitor now. Every panel is stretched to your resolution and always was, but the text inside it stayed the size it was drawn at in 2003, and what growth there was stopped dead at twice - so on a 2560 wide screen a command bar three times its original size still wore eight point lettering. The keys on the build buttons, the prices and the build times were the worst of it: at 2K they were drawn, and unreadable.
 - The strip of everything your base is building follows the screen too, instead of staying a row of postage stamps under a command bar three times its size.
 - Widescreen resolutions are back in the options menu.
+- Picking High detail gives you high resolution textures. The setting was ignored: the resolution came from a machine benchmark that answers 'low' on anything modern, so there was no way to ask for better.
+- The Default button in the options menu no longer throws away your resolution. It reset the display along with everything else, dropping you to 800x600 with no undo.
+- Text does not vanish at large sizes. Any font over 100 points simply failed to load, which on a 4K screen is a missing line of interface.
 - Zoom further out, with the whole map drawn instead of black corners.
 - The zoom-out ceiling is the same for everyone; no setting buys you a wider view.
 - The wheel covers that whole range in about six notches instead of thirty-eight.

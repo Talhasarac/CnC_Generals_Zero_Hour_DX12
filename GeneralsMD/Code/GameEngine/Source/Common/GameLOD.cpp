@@ -555,8 +555,14 @@ void GameLODManager::applyStaticLODLevel(StaticGameLODLevel level)
 	}
 	else
 	if (level >= STATIC_GAME_LOD_LOW)
-	{	//normal non-custom level gets texture reduction based on recommendation
-		requestedTextureReduction = getRecommendedTextureReduction();
+	{
+		// The level the player picked decides the texture resolution.  It used to come from the
+		// machine benchmark instead, and that benchmark answers "low" on any modern machine - so
+		// choosing High still gave low resolution textures and nothing in the menu could raise
+		// them.  Under 256 MB is still forced down, which is what the memory test is for.
+		requestedTextureReduction = m_memPassed
+			? getLevelTextureReduction(level)
+			: getLevelTextureReduction(STATIC_GAME_LOD_LOW);
 	}
 
 	if (TheGlobalData)

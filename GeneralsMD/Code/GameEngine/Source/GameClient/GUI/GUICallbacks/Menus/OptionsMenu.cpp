@@ -949,9 +949,15 @@ static void setDefaults( void )
 	// send Delay
 	GadgetCheckBoxSetChecked(checkSendDelay, FALSE);
 	
+	// Default puts the *game* options back to their defaults.  It used to reach into the display
+	// settings too - re-running the machine benchmark and dropping the resolution to 800x600 - so
+	// one click on a menu full of audio and control settings threw away a monitor's worth of
+	// picture and there was no undo.
+	const Bool modifyDisplaySettings = FALSE;
+
 	//-------------------------------------------------------------------------------------------------
 	// LOD
-	if ((TheGameLogic->isInGame() == FALSE) || (TheGameLogic->isInShellGame() == TRUE)) {
+	if (modifyDisplaySettings && ((TheGameLogic->isInGame() == FALSE) || (TheGameLogic->isInShellGame() == TRUE))) {
 		StaticGameLODLevel level=TheGameLODManager->findStaticLODLevel();
 		switch (level)
 		{
@@ -975,7 +981,7 @@ static void setDefaults( void )
 	//-------------------------------------------------------------------------------------------------
 	// Resolution
 	//Find index of 800x600 mode.
-	if ((TheGameLogic->isInGame() == FALSE) || (TheGameLogic->isInShellGame() == TRUE)  && !TheGameSpyInfo) {
+	if (modifyDisplaySettings && ((TheGameLogic->isInGame() == FALSE) || (TheGameLogic->isInShellGame() == TRUE)  && !TheGameSpyInfo)) {
 		Int numResolutions = TheDisplay->getDisplayModeCount();
 		Int defaultResIndex=0;
 		for( Int i = 0; i < numResolutions; ++i )
