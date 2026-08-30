@@ -1899,6 +1899,41 @@ void AIPlayer::computeEnemyComposition( AIEnemyComposition *out )
 	out->m_stealth = stealth / total;
 }
 
+//-------------------------------------------------------------------------------------------------
+/** What this AI can see another player is worth, priced in build cost - his army and his base.
+	* Fog-aware, so an enemy nobody has scouted is worth nothing to attack rather than everything. */
+//-------------------------------------------------------------------------------------------------
+Real AIPlayer::visibleEstateValue( Int playerNdx )
+{
+	Player *p = ThePlayerList->getNthPlayer( playerNdx );
+	if( p == NULL )
+		return 0.0f;
+
+	const Int me = m_player->getPlayerIndex();
+	Real value = 0.0f;
+
+	for( Player::PlayerTeamList::const_iterator t = p->getPlayerTeams()->begin();
+			 t != p->getPlayerTeams()->end(); ++t )
+	{
+		for( DLINK_ITERATOR<Team> iter = (*t)->iterate_TeamInstanceList(); !iter.done(); iter.advance() )
+		{
+			Team *team = iter.cur();
+			if( team == NULL )
+				continue;
+			for( DLINK_ITERATOR<Object> objIter = team->iterate_TeamMemberList(); !objIter.done(); objIter.advance() )
+			{
+				Object *obj = objIter.cur();
+				if( obj == NULL || obj->isEffectivelyDead() || obj->isKindOf( KINDOF_PROJECTILE ) )
+					continue;
+				if( !observerKnowsAbout( obj, me ) )
+					continue;
+				value += INT_TO_REAL( obj->getTemplate()->calcCostToBuild( p ) );
+			}
+		}
+	}
+	return value;
+}
+
 Bool AIPlayer::selectTeamToBuild( void )
 {
 

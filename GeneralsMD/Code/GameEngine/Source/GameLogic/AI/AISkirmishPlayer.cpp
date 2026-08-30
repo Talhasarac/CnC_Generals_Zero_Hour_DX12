@@ -486,7 +486,20 @@ void AISkirmishPlayer::acquireEnemy(void)
 		if (!inBadShape) return;
 	}
 
-	// look for the closest enemy.
+	//
+	// How much of what this AI can see belongs to each candidate, so a fat enemy outweighs a thin
+	// one at the same distance. Gathered first because each player's share is of the total.
+	//
+	Real estate[ MAX_PLAYER_COUNT ];
+	Real estateTotal = 0.0f;
+	{
+		for (Int e = 0; e < ThePlayerList->getPlayerCount() && e < MAX_PLAYER_COUNT; e++) {
+			estate[e] = visibleEstateValue(e);
+			estateTotal += estate[e];
+		}
+	}
+
+	// look for the best enemy to go after.
 	Int i;
 	for (i=0; i<ThePlayerList->getPlayerCount(); i++) {
 		Player *curPlayer = ThePlayerList->getNthPlayer(i);
@@ -503,26 +516,25 @@ void AISkirmishPlayer::acquireEnemy(void)
 			enemyPos.y = bounds.lo.y + bounds.height()/2;
 			Real curDistSqr = sqr(enemyPos.x-m_baseCenter.x) + sqr(enemyPos.y-m_baseCenter.y);
 
-			//Fudge for in bad shape.	 If an enemy is crippled, concentrate on the other ones.
-			if (inBadShape) {
-				curDistSqr = HUGE_DIST*HUGE_DIST*0.5f;
-			}
-			// See if other ai's are attacking this target.  
-			// We don't want the ai's to gang up on one enemy.
+			//
+			// The two flags EA folded straight into the distance, gathered rather than applied:
+			// aiEnemyCost decides what each is worth, and its test says what that is.  The "in bad
+			// shape" rule went with them, with its sign corrected - EA set a crippled enemy's
+			// distance to half the map, which reads as "ignore the one you are about to beat".
+			//
+			Bool alreadyTargeted = FALSE;
+			Bool attackingMe = FALSE;
 			Int k;
 			for (k=0; k<ThePlayerList->getPlayerCount(); k++) {
 				if (k==i) continue;  // don't count self.
 				Player *somePlayer = ThePlayerList->getNthPlayer(k);
-				if (somePlayer->isSkirmishAIPlayer() && (somePlayer->getCurrentEnemy()==curPlayer)) {
-					// Some ai is already targeting this guy.  Add a distance penalty.
-					curDistSqr += (500*500);
-				}	
-				if (somePlayer->isSkirmishAIPlayer() && (somePlayer->getCurrentEnemy()==m_player)) {
-					// he is attacking me.  So I will (gently) prefer to attack him.
-					curDistSqr -= (25*25);
-					if (curDistSqr<0) curDistSqr = 0;
-				}
+				if (!somePlayer->isSkirmishAIPlayer()) continue;
+				if (somePlayer->getCurrentEnemy()==curPlayer) alreadyTargeted = TRUE;
+				if (somePlayer->getCurrentEnemy()==m_player) attackingMe = TRUE;
 			}
+
+			const Real share = (estateTotal > 0.0f && i < MAX_PLAYER_COUNT) ? (estate[i] / estateTotal) : 0.0f;
+			curDistSqr = aiEnemyCost( curDistSqr, inBadShape, alreadyTargeted, attackingMe, share );
 
 			// Ai enemy - will take if we don't get a better offer.
 			if (curDistSqr<bestDistanceSqr) {

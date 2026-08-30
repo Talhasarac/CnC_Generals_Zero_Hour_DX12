@@ -1076,6 +1076,31 @@ Bool aiShouldMass( Real waitingThreat, Real enemyVisibleThreat, Real massFractio
 	return waitingThreat < massFraction * enemyVisibleThreat;
 }
 
+//-------------------------------------------------------------------------------------------------
+Real aiEnemyCost( Real distSqr, Bool crippled, Bool alreadyTargetedByAnotherAI,
+									Bool isAttackingMe, Real economyShare )
+{
+	Real cost = distSqr;
+
+	// A crippled enemy is an opportunity, not a distraction. EA multiplied his distance up; this
+	// pulls it down. Only a genuinely finished one is skipped, and that is the caller's test.
+	if( crippled )
+		cost *= 0.4f;
+
+	// The bigger his economy, the more of the match is decided by hitting him.
+	if( economyShare < 0.0f ) economyShare = 0.0f;
+	if( economyShare > 1.0f ) economyShare = 1.0f;
+	cost *= (1.0f - 0.3f * economyShare);
+
+	// EA's two flat terms, kept: do not gang up, and gently prefer whoever is already on me.
+	if( alreadyTargetedByAnotherAI )
+		cost += 500.0f * 500.0f;
+	if( isAttackingMe )
+		cost -= 25.0f * 25.0f;
+
+	return (cost < 0.0f) ? 0.0f : cost;
+}
+
 Real aiCounterScore( const AIEnemyComposition &enemy, const AITeamCapability &team )
 {
 	Real score = 0.0f;

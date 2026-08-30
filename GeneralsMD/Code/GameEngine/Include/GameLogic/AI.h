@@ -253,6 +253,21 @@ Real aiRetreatRatio( Real myHealth, Real myPower, Real enemyHealth, Real enemyPo
 Bool aiShouldMass( Real waitingThreat, Real enemyVisibleThreat, Real massFraction,
 									 Bool timeExpired, Bool baseUnderAttack );
 
+/** How attractive an enemy player is to go after, as a cost - lower is better, and it is a squared
+	* distance with the other terms folded into it so the units stay comparable.
+	*
+	* EA's version was distance and nothing else, plus one rule that had the sign wrong: an enemy
+	* who had lost his units or his production had his distance set to half the map, which reads as
+	* "ignore the crippled one".  Finishing off the weak one is usually the right move, and refusing
+	* to is what drags matches out.
+	*
+	* Sins of a Solar Empire has the identical bug, in its own community's words: its AI "is much
+	* more likely to send its fleet to a well-defended planet roughly 5 map units away than an
+	* ill-defended planet 25 map units away".  Two independently written RTS AIs converging on the
+	* same mistake is decent evidence that distance-dominated target selection is the wrong default. */
+Real aiEnemyCost( Real distSqr, Bool crippled, Bool alreadyTargetedByAnotherAI,
+									Bool isAttackingMe, Real economyShare );
+
 class TAiData : public Snapshot
 {
 public:

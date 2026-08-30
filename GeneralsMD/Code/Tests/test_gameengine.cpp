@@ -1,4 +1,4 @@
-/*
+﻿/*
  * GameEngine boot coverage: the Phase 3 checkpoint.
  *
  * Linking gameengine.lib proves nothing on its own, so this brings up the
@@ -5967,4 +5967,48 @@ TEST(massing_waits_for_a_force_but_never_waits_for_ever)
 	CHECK( !data.m_skill[ AISKILL_HARD ].m_massBeforeAttacking );
 	CHECK( data.m_skill[ AISKILL_BRUTAL ].m_massBeforeAttacking );
 	CHECK( data.m_skill[ AISKILL_MERCILESS ].m_massBeforeAttacking );
+}
+
+
+/** B2: which enemy to go after.  EA's answer was the nearest one, plus a rule with the sign the
+	 wrong way round - an enemy who had lost his units or his production had his distance set to half
+	 the map, which is "ignore the one you are about to beat" and is what drags matches out. */
+TEST(enemy_choice_prefers_the_weak_the_rich_and_the_near)
+{
+	const Real CLOSE_BY = 100.0f * 100.0f;
+	const Real FAR_OFF = 300.0f * 300.0f;
+
+	// all else equal, the near one
+	CHECK( aiEnemyCost( CLOSE_BY, FALSE, FALSE, FALSE, 0.0f ) <
+				 aiEnemyCost( FAR_OFF,  FALSE, FALSE, FALSE, 0.0f ) );
+
+	// a crippled enemy is an opportunity, not a distraction: this is the sign EA had backwards
+	CHECK( aiEnemyCost( CLOSE_BY, TRUE,  FALSE, FALSE, 0.0f ) <
+				 aiEnemyCost( CLOSE_BY, FALSE, FALSE, FALSE, 0.0f ) );
+
+	// and it is worth walking past a healthy neighbour to finish him
+	CHECK( aiEnemyCost( FAR_OFF, TRUE, FALSE, FALSE, 0.0f ) <
+				 aiEnemyCost( FAR_OFF, FALSE, FALSE, FALSE, 0.0f ) );
+
+	// the fatter of two enemies at the same distance is the one that decides the match
+	CHECK( aiEnemyCost( CLOSE_BY, FALSE, FALSE, FALSE, 1.0f ) <
+				 aiEnemyCost( CLOSE_BY, FALSE, FALSE, FALSE, 0.0f ) );
+
+	// EA's two flat terms are kept: do not gang up, and gently prefer whoever is already on you
+	CHECK( aiEnemyCost( CLOSE_BY, FALSE, TRUE,  FALSE, 0.0f ) >
+				 aiEnemyCost( CLOSE_BY, FALSE, FALSE, FALSE, 0.0f ) );
+	CHECK( aiEnemyCost( CLOSE_BY, FALSE, FALSE, TRUE,  0.0f ) <
+				 aiEnemyCost( CLOSE_BY, FALSE, FALSE, FALSE, 0.0f ) );
+
+	// the gang-up penalty is the big one: it should outweigh being shot at
+	CHECK( aiEnemyCost( CLOSE_BY, FALSE, TRUE, TRUE, 0.0f ) >
+				 aiEnemyCost( CLOSE_BY, FALSE, FALSE, FALSE, 0.0f ) );
+
+	// never negative, whatever the bonuses add up to
+	CHECK( aiEnemyCost( 0.0f, TRUE, FALSE, TRUE, 1.0f ) >= 0.0f );
+
+	// an economy share outside 0..1 cannot flip the cost the wrong way
+	CHECK( aiEnemyCost( CLOSE_BY, FALSE, FALSE, FALSE, 5.0f ) > 0.0f );
+	CHECK( aiEnemyCost( CLOSE_BY, FALSE, FALSE, FALSE, -5.0f ) <=
+				 aiEnemyCost( CLOSE_BY, FALSE, FALSE, FALSE, 0.0f ) );
 }

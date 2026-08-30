@@ -1,10 +1,10 @@
-# Command and Conquer: Generals: Zero Hour: Reborn
+﻿# Command and Conquer: Generals: Zero Hour: Reborn
 
 EA released the 2003 source for preservation. It did not compile, did not run, and nobody had touched
 the bugs inside it in twenty-two years. This build compiles, runs and plays.
 
 **119 changes. ~580 engine source files ported. 14 automated test suites. Around 60 original bugs
-found and fixed — EA's own, not port damage.**
+found and fixed â€” EA's own, not port damage.**
 
 ---
 
@@ -29,6 +29,10 @@ found and fixed — EA's own, not port damage.**
 - It scouts. There was no such thing as scouting in the computer opponent - it never needed to look, because it could already see everything. One cheap unit now tours the enemy start positions and keeps going round for the rest of the match, replaced out of spare change when it dies. Every difficulty scouts; an opponent that never looks reads as broken, not as easy.
 - Nor does it read your base off the map. Where your base is, what it is worth, which supply dock to expand to and where to aim a superweapon all came off a walk of your object list, in the shroud, from the first second of the match. The computer now only counts what it can see, plus the buildings it has already found - buildings do not walk away. Before it has scouted you, all it knows is where you started, which is on the map preview anyway.
 
+## The computer picks its fights
+- Which enemy it goes after was the nearest one and nothing else, plus a rule with its sign the wrong way round: an opponent who had lost his units or his production had his distance treated as half the map, so the computer ignored the one it was about to beat. That is what dragged matches out.
+- It now weighs distance, whether the target is crippled - an opportunity, not a distraction - and how much of what it can see that player is worth. Only a genuinely finished enemy is skipped.
+- It still refuses to gang up with another computer opponent on one victim, and still gently prefers whoever is already shooting at it.
 ## The computer knows when to quit
 
 - Its teams fought to the last man. The word "retreat" appeared nowhere in the opponent's code - the single most visible thing that made it look stupid.
@@ -148,10 +152,10 @@ found and fixed — EA's own, not port damage.**
 - The building on your cursor shows where its units will come out.
 - An ordered building stands as a see-through plan until a worker starts it.
 - Click a plan, or press Stop, to cancel it and take the money back.
-- Cancelling a plan is silent — nothing was built, so nothing explodes.
+- Cancelling a plan is silent â€” nothing was built, so nothing explodes.
 - Ground your units have walked stays buildable after they leave it.
 - A plan opens no fog of its own, and your opponent never sees it.
-- Your units walk straight over a plan — nothing solid is there until the builder starts work.
+- Your units walk straight over a plan â€” nothing solid is there until the builder starts work.
 - The plan turns solid the instant the first work goes in, so no building goes up inside its own ghost.
 - The builder starts work from where it reaches the site instead of shuffling into place first.
 - Dozers and workers walk through anything still going up, so they never shut themselves in behind
@@ -346,7 +350,7 @@ found and fixed — EA's own, not port damage.**
 - Audio is real, through the audio library the retail game ships with.
 - The videos play: the intro, the sizzle reel, the mission briefings, the general portraits.
 - About 5,600 graphics calls are translated to a modern path, none of them touched.
-- No disc, no registry keys, no retail installer — a normal install works.
+- No disc, no registry keys, no retail installer â€” a normal install works.
 - The 1.04 patch content is reachable again.
 
 ---
@@ -360,7 +364,7 @@ found and fixed — EA's own, not port damage.**
 - Its sight is yours from the first frame, and clicking any of it hands you the base itself.
 - Shift-Ctrl-T does the same to any opponent, a computer one included, and walks around the table.
 - Headless, a 23-minute skirmish plays out in 38 seconds, identically every run.
-- It plays itself over a network too — two copies, one real connection.
+- It plays itself over a network too â€” two copies, one real connection.
 - That found every multiplayer replay falsely accusing itself of desync since 2003.
 - Every fix was proved by putting the bug back and watching the test fail.
 - No debugger here: a crash symboliser, a sampling profiler, probes in live matches.
@@ -378,7 +382,7 @@ found and fixed — EA's own, not port damage.**
 
 ## Not there yet
 
-- Random maps generate and can be played — a number picks the map and the match starts on it —
+- Random maps generate and can be played â€” a number picks the map and the match starts on it â€”
   but there is still no menu entry and no reroll button.
 - Online and LAN play are untested.
 - You need to own the game; no game data ships here.
