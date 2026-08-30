@@ -30,5 +30,25 @@
 
 AudioRequest::~AudioRequest() 
 {
-	
+	// A play request carries an event it allocated.  Pausing the game throws every pending play
+	// request away, and killing a sound before it starts throws one away, and neither freed the
+	// event - so every pause leaked one allocation per queued sound.
+	if (m_usePendingEvent)
+	{
+		delete m_pendingEvent;
+		m_pendingEvent = NULL;
+		m_usePendingEvent = FALSE;
+	}
+}
+
+AudioEventRTS *AudioRequest::releasePendingEvent()
+{
+	if (m_usePendingEvent)
+	{
+		AudioEventRTS *event = m_pendingEvent;
+		m_pendingEvent = NULL;
+		m_usePendingEvent = FALSE;
+		return event;
+	}
+	return NULL;
 }

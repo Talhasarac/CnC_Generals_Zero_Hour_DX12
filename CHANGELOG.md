@@ -145,6 +145,8 @@ found and fixed â€” EA's own, not port damage.**
 - Somebody quitting no longer reports a desync to everyone still playing.
 - A power sabotage no longer follows a player into the next match.
 - Muting sound effects or speech no longer desyncs the game.
+- Pausing no longer leaks a little memory for every sound that was about to start.
+- A sound cancelled before it started really is cancelled. The check compared a pointer against a handle - two different things sharing one slot - so it never matched and the sound played anyway.
 - Angles come from the game's own table, identical on every machine.
 - Defeat, second maps and the sync fingerprint each had a drift bug; fixed.
 - The mismatch check now covers whole units and all sixty-eight special powers.

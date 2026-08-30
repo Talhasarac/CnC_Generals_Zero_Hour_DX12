@@ -56,6 +56,10 @@ public:
 	};
 	Bool m_usePendingEvent;
 	Bool m_requiresCheckForSample;
+
+	/** A play request owns the event it is carrying until something takes it - the destructor frees
+		* whatever is left, so a request dropped without being processed no longer leaks it. */
+	AudioEventRTS *releasePendingEvent();
 };
 
 #endif // _AUDIOREQUEST_H_

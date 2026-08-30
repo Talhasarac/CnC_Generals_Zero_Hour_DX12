@@ -663,8 +663,13 @@ void MilesAudioManager::playAudioEvent( AudioEventRTS *event )
 #ifdef INTENSIVE_AUDIO_DEBUG
 	DEBUG_LOG(("MILES (%d) - Processing play request: %d (%s)", TheGameLogic->getFrame(), event->getPlayingHandle(), event->getEventName().str()));
 #endif
+	if (!event) {
+		return;
+	}
+
 	const AudioEventInfo *info = event->getAudioEventInfo();
 	if (!info) {
+		delete event;			// nothing downstream will take it now
 		return;
 	}
 
@@ -981,7 +986,11 @@ void MilesAudioManager::killAudioEventImmediately( AudioHandle audioEvent )
 	for( ait = m_audioRequests.begin(); ait != m_audioRequests.end(); ait++ ) 
 	{
 		AudioRequest *req = (*ait);
-		if( req && req->m_request == AR_Play && req->m_handleToInteractOn == audioEvent ) 
+		// m_handleToInteractOn and m_pendingEvent share one union, and a play request fills in the
+		// event pointer - so this compared a pointer against a handle, never matched, and a sound
+		// killed before it started played anyway.
+		if( req && req->m_usePendingEvent && req->m_pendingEvent
+				&& req->m_pendingEvent->getPlayingHandle() == audioEvent )
 		{
 			req->deleteInstance();
 			ait = m_audioRequests.erase(ait);
@@ -2943,7 +2952,9 @@ void MilesAudioManager::processRequest( AudioRequest *req )
 	{
 		case AR_Play:
 		{
-			playAudioEvent(req->m_pendingEvent);
+			// hand the event over: from here it belongs to the playing list, or to playAudioEvent
+			// to free if it cannot be played
+			playAudioEvent(req->releasePendingEvent());
 			break;
 		}
 		case AR_Pause:
