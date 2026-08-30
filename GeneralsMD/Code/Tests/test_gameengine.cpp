@@ -4240,7 +4240,16 @@ struct NetPacketFileReader : public NetPacket
 {
 	using NetPacket::readFileMessage;
 	using NetPacket::readFileAnnounceMessage;
+	using NetPacket::GetBufferSizeNeededForCommand;
 };
+
+/* The size of nothing is nothing.  This one hands back a byte count, but its guard against a null
+	 command returned TRUE - so a caller sizing a buffer reserved one byte for a command that is not
+	 there. */
+TEST(sizing_a_null_command_asks_for_no_bytes)
+{
+	CHECK_EQ( (Int)NetPacketFileReader::GetBufferSizeNeededForCommand( NULL ), 0 );
+}
 
 TEST(an_overlong_transfer_filename_is_truncated_instead_of_overflowing)
 {

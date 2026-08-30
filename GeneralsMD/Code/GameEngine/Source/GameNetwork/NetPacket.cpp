@@ -249,7 +249,9 @@ UnsignedInt NetPacket::GetBufferSizeNeededForCommand(NetCommandMsg *msg) {
 	// This is where the fun begins...
 
 	if (msg == NULL) {
-		return TRUE; // There was nothing to add, so it was successful.
+		// this returns a size, not a success flag - the TRUE it used to hand back reserved one
+		// byte for a command that does not exist
+		return 0;
 	}
 
 	switch(msg->getNetCommandType())
