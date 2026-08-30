@@ -2028,6 +2028,9 @@ UpdateSleepTime JetAIUpdate::update()
 		if (m_attackLocoExpireFrame != 0 && now >= m_attackLocoExpireFrame)
 		{
 			m_attackLocoExpireFrame = 0;
+			// the timer ran out and nothing put the normal locomotor back, so an Aurora that had
+			// gone supersonic to attack stayed supersonic for the rest of its life
+			chooseLocomotorSet(LOCOMOTORSET_NORMAL);
 		}
 		if (m_attackersMissExpireFrame != 0 && now >= m_attackersMissExpireFrame)
 		{

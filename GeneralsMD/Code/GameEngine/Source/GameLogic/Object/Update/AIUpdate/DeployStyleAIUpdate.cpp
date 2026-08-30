@@ -148,7 +148,10 @@ UpdateSleepTime DeployStyleAIUpdate::update( void )
 		}
 	}
 	
-	if( isInRange || isInGuardIdleState )
+	// The pathfinder uses a stricter idea of attack range than this does, so being "in range" here
+	// is not enough: a unit still on its way to somewhere would deploy where it stood and start
+	// shooting, then have to pack up again.  It has to be standing still.
+	if( !isTryingToMove && (isInRange || isInGuardIdleState) )
 	{
 		switch( m_state )
 		{

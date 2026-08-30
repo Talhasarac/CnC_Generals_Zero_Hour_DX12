@@ -394,6 +394,9 @@ found and fixed â€” EA's own, not port damage.**
 - An order that names one selected unit when nothing is selected is dropped too, instead of reading off the end of an empty list.
 - Subdual weapons work on a unit that is being healed. Healing could drive the subdual meter below zero and it stayed there, so the next stun gun had to fill a hole before it did anything.
 - A stream of projectiles remembers which ones it fired. The list was cleared into a local of the same name, so the real one started as whatever was in the recycled memory.
+- A unit that has to deploy before firing does it standing still. It used to set up wherever it happened to be when the target came into range, then pack straight back up because it was still on its way somewhere.
+- An Aurora that went supersonic to attack comes back down again. The timer ran out and nothing put the normal engine back.
+- Calling in a gunship selects it for the player who called it, not for everyone watching the match.
 - Something going wrong now writes a readable crash report.
 
 ## Long orders stopped hitching

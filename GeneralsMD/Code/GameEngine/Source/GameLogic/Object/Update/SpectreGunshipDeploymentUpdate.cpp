@@ -242,7 +242,9 @@ Bool SpectreGunshipDeploymentUpdate::initiateIntentToDoSpecialPower(const Specia
 
     // MAKE THE GUNSHIP SELECTED
 
-    TheGameLogic->selectObject( newGunship, TRUE, getObject()->getControllingPlayer()->getPlayerMask(), TRUE );
+    // the last argument says "this is a local selection", and passing TRUE said that on every
+    // machine - so calling in a gunship selected it for everybody watching, not just its owner
+    TheGameLogic->selectObject( newGunship, TRUE, getObject()->getControllingPlayer()->getPlayerMask(), newGunship->isLocallyControlled() );
 
 
   }
