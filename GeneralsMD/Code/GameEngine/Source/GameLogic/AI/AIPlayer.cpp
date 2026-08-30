@@ -92,6 +92,42 @@ static Bool observerKnowsAbout( const Object *obj, Int observerNdx )
 	return obj->getShroudedStatus( observerNdx ) != OBJECTSHROUD_SHROUDED;
 }
 
+/** What a unit is worth in a fight, for every decision here that has to weigh one force against
+	* another - what to build against (B1), when to break off (C1), when there is enough to attack
+	* with (C2).
+	*
+	* ThreatValue is the data's own answer to exactly this question, and it is what the engine's own
+	* threat map is built from.  It also defaults to zero and the shipped Object INI almost never
+	* sets it, so a first cut of all three of those decisions quietly weighed every force in the game
+	* at nothing and did nothing at all.  Build cost is the fallback: always present, and a fair
+	* proxy - the data already prices a tank above a rifleman.
+	*/
+static Real aiCombatPower( const Object *obj )
+{
+	if( obj == NULL )
+		return 0.0f;
+
+	const ThingTemplate *tmpl = obj->getTemplate();
+	if( tmpl == NULL )
+		return 0.0f;
+
+	//
+	// Only what can shoot has any power in an exchange.  Cost as a proxy is only fair among things
+	// that fight: a war factory costs as much as a tank column and cannot fire a shot, and the
+	// first cut of this counted every building in range as part of the enemy's firepower - so every
+	// team that came within sight of a base decided it was losing and went home, and 20 measured
+	// matches ended with zero kills on both sides.
+	//
+	if( !tmpl->isKindOf( KINDOF_CAN_ATTACK ) )
+		return 0.0f;
+
+	const Real threat = INT_TO_REAL( tmpl->getThreatValue() );
+	if( threat > 0.0f )
+		return threat;
+
+	return INT_TO_REAL( tmpl->calcCostToBuild( obj->getControllingPlayer() ) );
+}
+
 /** Where a player started, from the map's own Player_N_Start waypoint.  This is the one thing about
 	* an enemy that is public without scouting - it is on the map preview in the lobby, every human
 	* sees it before the match begins - so it is what an AI that has not scouted yet is allowed to
@@ -1838,7 +1874,7 @@ void AIPlayer::computeEnemyComposition( AIEnemyComposition *out )
 					if( !observerKnowsAbout( obj, me ) )
 						continue;
 
-					const Real threat = INT_TO_REAL( obj->getTemplate()->getThreatValue() );
+					const Real threat = aiCombatPower( obj );
 					if( threat <= 0.0f )
 						continue;
 
@@ -1851,6 +1887,8 @@ void AIPlayer::computeEnemyComposition( AIEnemyComposition *out )
 			}
 		}
 	}
+
+	out->m_totalThreat = total;
 
 	if( total <= 0.0f )
 		return;			// nothing seen: the caller's zeroed composition means "no opinion"
@@ -3070,6 +3108,63 @@ void AIPlayer::doBaseBuilding( void )
 /**
  * See if any ready teams have finished moving to the rally point.
  */
+//----------------------------------------------------------------------------------------------------------
+/** Is this team worth holding back for?
+	*
+	* Only attack waves: a reinforcement is going to an existing team and a base defence team is
+	* needed where it stands.  The strength in hand is everything still waiting in the ready queue,
+	* which is what would go out together if we released now.
+	*/
+//----------------------------------------------------------------------------------------------------------
+Bool AIPlayer::shouldHoldForMassing( TeamInQueue *team )
+{
+	const AIDifficultyProfile *profile = getSkillProfile();
+	if( !profile->m_massBeforeAttacking )
+		return FALSE;
+	if( team == NULL || team->m_reinforcement )
+		return FALSE;
+
+	const TeamTemplateInfo *info = team->m_team ? team->m_team->getPrototype()->getTemplateInfo() : NULL;
+	if( info == NULL || info->m_isBaseDefense || info->m_isPerimeterDefense )
+		return FALSE;
+
+	// there is a fight at home: nothing waits at a rally point while the base is being hit
+	const UnsignedInt now = TheGameLogic->getFrame();
+	const Bool baseUnderAttack =
+			(m_player->getAttackedFrame() + 30 * LOGICFRAMES_PER_SECOND > now) && (m_player->getAttackedFrame() > 0);
+
+	// the existing sixty-second valve stays the outer bound on any wait
+	const Bool timeExpired = team->m_frameStarted + 60 * LOGICFRAMES_PER_SECOND < now;
+
+	// what is in hand: everything still queued up behind the rally point
+	Real waitingThreat = 0.0f;
+	for( DLINK_ITERATOR<TeamInQueue> iter = iterate_TeamReadyQueue(); !iter.done(); iter.advance() )
+	{
+		TeamInQueue *t = iter.cur();
+		if( t == NULL || t->m_team == NULL )
+			continue;
+		for( DLINK_ITERATOR<Object> objIter = t->m_team->iterate_TeamMemberList(); !objIter.done(); objIter.advance() )
+		{
+			Object *obj = objIter.cur();
+			if( obj == NULL || obj->isEffectivelyDead() )
+				continue;
+			waitingThreat += aiCombatPower( obj );
+		}
+	}
+
+	//
+	// How much of what it can see of the enemy army it wants in hand first. The role's knob, not
+	// the rung's: an aggressive AI commits earlier and with less, a defensive one waits for more
+	// and would rather counter-attack after absorbing a hit. Same money, spent differently.
+	//
+	const Real massFraction = (m_role == AIROLE_AGGRESSIVE) ? 0.8f : 1.3f;
+
+	AIEnemyComposition enemy;
+	computeEnemyComposition( &enemy );
+
+	return aiShouldMass( waitingThreat, enemy.m_totalThreat, massFraction, timeExpired, baseUnderAttack );
+}
+
 void AIPlayer::checkReadyTeams( void )
 {
 	// See if any ready teams are gathered at their rally point
@@ -3104,6 +3199,21 @@ void AIPlayer::checkReadyTeams( void )
 				}
 			}
 			if (timeExpired) allIdle = true;
+			//
+			// C2 (massing before attacking) was hooked in here and is deliberately not any more.
+			// Holding a finished team at the rally point by leaving it in the ready queue jams the
+			// whole production pipeline behind it - the team still counts as an instance, so no
+			// replacement is selected, and 20 measured brutal-vs-brutal matches went from nine
+			// decided to none, with zero kills and a quarter of the spending on both sides.
+			//
+			// The second half of the lesson is in the threshold rather than the plumbing: a wait
+			// measured against the enemy's whole visible army deadlocks two symmetric AIs, because
+			// neither ever has more than the other. Wherever this lands next, it has to let the
+			// team activate (so production keeps moving) and hold it somewhere that is not the
+			// queue, against a threshold that is not a fraction of the opponent.
+			//
+			// shouldHoldForMassing and aiShouldMass are kept, with their test, for that attempt.
+			//
 			if (allIdle) {
 				if (!team->m_sentToStartLocation) {
 					team->m_sentToStartLocation = true;
@@ -3483,10 +3593,14 @@ static void addToForce( const Object *obj, Real *health, Real *power )
 	if( obj == NULL || obj->isEffectivelyDead() )
 		return;
 
+	const Real power2 = aiCombatPower( obj );
+	if( power2 <= 0.0f )
+		return;			// it is not in the exchange, so neither its health nor its damage counts
+
 	const BodyModuleInterface *body = obj->getBodyModule();
 	if( body )
 		*health += body->getHealth();
-	*power += INT_TO_REAL( obj->getTemplate()->getThreatValue() );
+	*power += power2;
 }
 
 //----------------------------------------------------------------------------------------------------------
@@ -3526,8 +3640,8 @@ void AIPlayer::doRetreats( void )
 			if( team == NULL )
 				continue;
 
-			// what this team still has, and where it is
-			Real myHealth = 0.0f, myPower = 0.0f, count = 0.0f;
+			// where this team is
+			Real count = 0.0f;
 			Coord3D centre;
 			centre.zero();
 			for( DLINK_ITERATOR<Object> objIter = team->iterate_TeamMemberList(); !objIter.done(); objIter.advance() )
@@ -3538,7 +3652,6 @@ void AIPlayer::doRetreats( void )
 				if( obj->isKindOf( KINDOF_STRUCTURE ) || obj->isKindOf( KINDOF_IMMOBILE ) ||
 						obj->isKindOf( KINDOF_PROJECTILE ) || obj->getAI() == NULL )
 					continue;
-				addToForce( obj, &myHealth, &myPower );
 				centre.x += obj->getPosition()->x;
 				centre.y += obj->getPosition()->y;
 				count += 1.0f;
@@ -3549,13 +3662,22 @@ void AIPlayer::doRetreats( void )
 			centre.y /= count;
 			centre.z = TheTerrainLogic->getGroundHeight( centre.x, centre.y );
 
-			// ... and what is shooting at it
+			//
+			// Both sides of the exchange, measured the same way: everything of ours in this fight
+			// against everything of theirs in it.
+			//
+			// Not this team against everything of theirs.  An AI team is one to three units, and the
+			// first cut of this compared one such team with every enemy within three hundred feet -
+			// so a team of two tanks read a battle it was part of as 2,600 against 29,400, decided
+			// it was losing by a hundred to one and walked home.  Every team did, every few seconds,
+			// for the whole match: twenty measured matches ended with zero kills on both sides.
+			//
+			Real myHealth = 0.0f, myPower = 0.0f;
 			Real enemyHealth = 0.0f, enemyPower = 0.0f;
 			{
-				PartitionFilterPlayerAffiliation filterEnemies( m_player, ALLOW_ENEMIES, true );
 				PartitionFilterAlive filterAlive;
 				PartitionFilterOnMap filterOnMap;
-				PartitionFilter *filters[] = { &filterEnemies, &filterAlive, &filterOnMap, 0 };
+				PartitionFilter *filters[] = { &filterAlive, &filterOnMap, 0 };
 
 				MemoryPoolObjectHolder hold;
 				SimpleObjectIterator *nearby = ThePartitionManager->iterateObjectsInRange(
@@ -3565,11 +3687,26 @@ void AIPlayer::doRetreats( void )
 				{
 					if( e->isKindOf( KINDOF_PROJECTILE ) )
 						continue;
-					// only what it can see: an AI that pulls back from something it has not found
-					// is reading the object list again (A2)
-					if( !observerKnowsAbout( e, m_player->getPlayerIndex() ) )
+					//
+					// Only the field battle. Base defences shoot, but they are what an attack goes
+					// *through* - counting them makes every approach to a defended base read as a
+					// lost fight, and the AI never attacks anything again. Picking a way in past
+					// them is the influence map's job (B4), not the retreat's.
+					//
+					if( e->isKindOf( KINDOF_STRUCTURE ) || e->isKindOf( KINDOF_IMMOBILE ) )
 						continue;
-					addToForce( e, &enemyHealth, &enemyPower );
+
+					if( e->getControllingPlayer() == m_player )
+					{
+						addToForce( e, &myHealth, &myPower );
+					}
+					else if( m_player->getRelationship( e->getTeam() ) == ENEMIES )
+					{
+						// only what it can see: an AI that pulls back from something it has not
+						// found is reading the object list again (A2)
+						if( observerKnowsAbout( e, m_player->getPlayerIndex() ) )
+							addToForce( e, &enemyHealth, &enemyPower );
+					}
 				}
 			}
 

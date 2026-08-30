@@ -1060,6 +1060,22 @@ Real aiRetreatRatio( Real myHealth, Real myPower, Real enemyHealth, Real enemyPo
 	return (ratio > NOT_A_FIGHT) ? NOT_A_FIGHT : ratio;
 }
 
+//-------------------------------------------------------------------------------------------------
+Bool aiShouldMass( Real waitingThreat, Real enemyVisibleThreat, Real massFraction,
+									 Bool timeExpired, Bool baseUnderAttack )
+{
+	if( timeExpired )
+		return FALSE;					// the safety valve: never wait for ever
+	if( baseUnderAttack )
+		return FALSE;					// there is a fight at home; the wave is needed now, wherever it is
+	if( enemyVisibleThreat <= 0.0f )
+		return FALSE;					// nothing found to mass against - waiting would be waiting on nothing
+	if( massFraction <= 0.0f )
+		return FALSE;
+
+	return waitingThreat < massFraction * enemyVisibleThreat;
+}
+
 Real aiCounterScore( const AIEnemyComposition &enemy, const AITeamCapability &team )
 {
 	Real score = 0.0f;

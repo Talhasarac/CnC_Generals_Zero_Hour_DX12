@@ -249,6 +249,10 @@ protected:
 		* individually finished - Sins does exactly that, and keeps losing capital ships for it. */
 	virtual void doRetreats(void);
 
+	/** C2: hold a finished team at the rally point until there is a force worth sending.  A string of
+		* small waves is free veterancy for the other side. */
+	Bool shouldHoldForMassing( TeamInQueue *team );
+
 	virtual void doScouting(void);
 	Object *findScout(void);						///< a spare unit of ours that can do the touring
 	void queueScout(void);							///< ... or build the cheapest one that can

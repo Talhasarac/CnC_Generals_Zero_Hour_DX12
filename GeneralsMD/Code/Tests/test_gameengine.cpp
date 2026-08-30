@@ -5930,3 +5930,41 @@ TEST(retreat_ratio_measures_the_exchange_not_the_health_bar)
 	// the bottom rung has no threshold at all: it never quits, which is what makes it Easy
 	CHECK_EQ( 0.0f, data.m_skill[ AISKILL_EASY ].m_retreatTtkRatio );
 }
+
+
+/** C2: whether a finished wave waits at the rally point or goes now.  EA sent every team the moment
+	 it was ready, and a string of small waves is free veterancy for whoever is on the other end.
+	 Three things override the arithmetic, and each of them is a way of getting the AI stuck if it is
+	 missing. */
+TEST(massing_waits_for_a_force_but_never_waits_for_ever)
+{
+	const Real AGGRESSIVE = 0.8f;		// commits with less
+	const Real DEFENSIVE = 1.3f;		// wants more in hand first
+
+	// half of what the enemy has: not enough for either role
+	CHECK( aiShouldMass( 500.0f, 1000.0f, AGGRESSIVE, FALSE, FALSE ) );
+	CHECK( aiShouldMass( 500.0f, 1000.0f, DEFENSIVE, FALSE, FALSE ) );
+
+	// the role is the difference: at parity the aggressive one goes and the defensive one holds
+	CHECK( !aiShouldMass( 1000.0f, 1000.0f, AGGRESSIVE, FALSE, FALSE ) );
+	CHECK( aiShouldMass( 1000.0f, 1000.0f, DEFENSIVE, FALSE, FALSE ) );
+
+	// the sixty-second valve wins over everything, so a wave can never be parked for ever
+	CHECK( !aiShouldMass( 1.0f, 100000.0f, DEFENSIVE, TRUE, FALSE ) );
+
+	// so does a fight at home: nothing sits at a rally point while the base is being hit
+	CHECK( !aiShouldMass( 1.0f, 100000.0f, DEFENSIVE, FALSE, TRUE ) );
+
+	// nothing found to mass against is not a reason to wait - that is how a fogged AI would park
+	// its whole army for ever having never scouted
+	CHECK( !aiShouldMass( 0.0f, 0.0f, DEFENSIVE, FALSE, FALSE ) );
+
+	// and massing switched off is EA's behaviour: send it
+	CHECK( !aiShouldMass( 1.0f, 100000.0f, 0.0f, FALSE, FALSE ) );
+
+	// the ladder turns it on at Brutal, which is the rung the roadmap puts it at
+	TAiData data;
+	CHECK( !data.m_skill[ AISKILL_HARD ].m_massBeforeAttacking );
+	CHECK( data.m_skill[ AISKILL_BRUTAL ].m_massBeforeAttacking );
+	CHECK( data.m_skill[ AISKILL_MERCILESS ].m_massBeforeAttacking );
+}

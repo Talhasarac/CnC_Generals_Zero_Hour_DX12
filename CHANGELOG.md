@@ -35,6 +35,8 @@ found and fixed — EA's own, not port damage.**
 - It now measures the fight, not the health bar: how long its force lasts against how long it needs to finish yours. A unit at a fifth of its health that still out-damages what is shooting it stays; a full-health one being melted leaves. A health percentage gets both of those backwards.
 - Two levels. From Steady up, a unit that is personally finished pulls out of a fight its team is still winning. From Brutal up, the whole team breaks off when the exchange is lost. Easy never quits - that is part of what makes it easy.
 - It only counts what it can see. An opponent that flinches from something it has not found is reading your unit list again.
+- It weighs a fight by what is in it, not by who is nearby: only things that can shoot count, and buildings do not. Its own base is not a reason to feel safe and yours is not a reason to run.
+- Matches finish. Two of these opponents used to fail to settle 65% of their games inside sixteen minutes; it is half that now, and they end in under seven minutes on average instead of ten.
 
 ## The computer builds against what you field
 
@@ -363,6 +365,9 @@ found and fixed — EA's own, not port damage.**
 - Every fix was proved by putting the bug back and watching the test fail.
 - No debugger here: a crash symboliser, a sampling profiler, probes in live matches.
 - Reverted and recorded: wide FOV, four pathfinding experiments, a three-panel command bar, tree shadows.
+- The opponent's decisions are argued with a number: 20 headless matches per change, same seeds, win rate and match length before and after.
+- That caught two changes that looked right and measured catastrophic - a wave that waited jammed the whole production line, and a retreat rule that counted buildings as gunfire sent every attack home. Both showed up as twenty matches with zero kills.
+- Massing an army before attacking is written and measured but switched off: it needs somewhere to wait that is not the production queue.
 - Bugs deliberately left alone are pinned by a test documenting the behaviour.
 - Infantry shadows were fixed in the wrong place first, and nobody has eyeballed them yet.
 - The shade under smoke vanished between builds and was rewritten from these notes.

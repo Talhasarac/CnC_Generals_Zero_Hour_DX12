@@ -207,8 +207,10 @@ struct AIEnemyComposition
 	Real m_armour;			///< ... that is a vehicle
 	Real m_infantry;
 	Real m_stealth;			///< ... that can go invisible
+	Real m_totalThreat;	///< and the absolute total the shares are taken from, for C2's massing
 
-	AIEnemyComposition() : m_air(0.0f), m_armour(0.0f), m_infantry(0.0f), m_stealth(0.0f) {}
+	AIEnemyComposition() : m_air(0.0f), m_armour(0.0f), m_infantry(0.0f), m_stealth(0.0f),
+												 m_totalThreat(0.0f) {}
 };
 
 //-------------------------------------------------------------------------------------------------
@@ -239,6 +241,17 @@ Real aiCounterScore( const AIEnemyComposition &enemy, const AITeamCapability &te
 	*
 	* 'power' is a stand-in for damage per second - the threat value the data already carries. */
 Real aiRetreatRatio( Real myHealth, Real myPower, Real enemyHealth, Real enemyPower );
+
+/** Hold a finished team at the rally point instead of sending it?
+	*
+	* A string of small waves is free veterancy for whoever is on the other end: EA's AI sent every
+	* team the moment it was ready.  Massing is the change that makes the top rungs dangerous, and
+	* it needs three answers - is there enough, is there time, and is home safe.
+	*
+	* massFraction is how much of what it can see of the enemy army it wants in hand before it
+	* commits: the role's knob, not the rung's.  An aggressive AI presses with less. */
+Bool aiShouldMass( Real waitingThreat, Real enemyVisibleThreat, Real massFraction,
+									 Bool timeExpired, Bool baseUnderAttack );
 
 class TAiData : public Snapshot
 {
