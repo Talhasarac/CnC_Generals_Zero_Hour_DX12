@@ -198,19 +198,18 @@ void PopulatePlayerSlotComboBox(GameWindow *comboBox, Int color, Bool allowTakeo
 	if (!comboBox)
 		return;
 
-	// Three of the six rungs have no shipped string, so they read as plain English rather than as
-	// a MISSING:, and EA's "HardAI" string is left on the seat the lobby calls Brutal.
-	static const struct { const char *key; const WideChar *plainEnglish; SlotState state; } seats[] =
+	// the order the ladder climbs in; what each one is called is SlotStateName's business
+	static const SlotState seats[] =
 	{
-		{ "GUI:Open",      NULL,            SLOT_OPEN },
-		{ "GUI:Closed",    NULL,            SLOT_CLOSED },
-		{ "GUI:HumanSlot", NULL,            SLOT_TAKEOVER },
-		{ "GUI:EasyAI",    NULL,            SLOT_EASY_AI },
-		{ NULL,            L"Steady AI",    SLOT_STEADY_AI },
-		{ "GUI:MediumAI",  NULL,            SLOT_MED_AI },
-		{ NULL,            L"Hard AI",      SLOT_HARD_AI },
-		{ NULL,            L"Brutal AI",    SLOT_BRUTAL_AI },
-		{ NULL,            L"Merciless AI", SLOT_MERCILESS_AI },
+		SLOT_OPEN,
+		SLOT_CLOSED,
+		SLOT_TAKEOVER,
+		SLOT_EASY_AI,
+		SLOT_STEADY_AI,
+		SLOT_MED_AI,
+		SLOT_HARD_AI,
+		SLOT_BRUTAL_AI,
+		SLOT_MERCILESS_AI,
 	};
 
 	// The combo box only grows its listbox when an add crosses the current length, and both
@@ -231,11 +230,10 @@ void PopulatePlayerSlotComboBox(GameWindow *comboBox, Int color, Bool allowTakeo
 	Int shown = 0;
 	for (Int i = 0; i < (Int)(sizeof(seats)/sizeof(seats[0])); ++i)
 	{
-		if (seats[i].state == SLOT_TAKEOVER && !allowTakeover)
+		if (seats[i] == SLOT_TAKEOVER && !allowTakeover)
 			continue;
-		UnicodeString label = seats[i].key ? TheGameText->fetch(seats[i].key) : UnicodeString(seats[i].plainEnglish);
-		GadgetComboBoxAddEntry(comboBox, label, color);
-		GadgetComboBoxSetItemData(comboBox, shown, (void *)seats[i].state);
+		GadgetComboBoxAddEntry(comboBox, SlotStateName(seats[i]), color);
+		GadgetComboBoxSetItemData(comboBox, shown, (void *)seats[i]);
 		++shown;
 	}
 	GadgetComboBoxSetSelectedPos(comboBox, 0);

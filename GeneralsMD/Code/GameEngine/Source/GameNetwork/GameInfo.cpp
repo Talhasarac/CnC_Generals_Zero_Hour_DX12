@@ -1,4 +1,4 @@
-/*
+﻿/*
 **	Command & Conquer Generals Zero Hour(tm)
 **	Copyright 2025 Electronic Arts Inc.
 **
@@ -269,6 +269,33 @@ Bool OptionsCharToSlotState( char c, SlotState *state )
 	return FALSE;
 }
 
+/** What a seat is called wherever one is listed: the lobby's drop-down, the seat itself, the game
+	* info panel, the online browser's tooltip.  Four switch statements used to answer this and no
+	* two of them agreed - EA's shipped strings read "Easy Army" and "Medium Army" next to the
+	* ladder's own "Steady AI" and "Merciless AI", so one drop-down offered both namings at once,
+	* and "GUI:HardAI" sat on the Brutal rung in one file and on the Hard rung in another.
+	*
+	* So the six rungs are named here, in one style, and none of them goes through the shipped
+	* strings any more: three of the six never had one, and a ladder that reads half in EA's words
+	* and half in ours reads like two different lists.  Open, Closed and the takeover seat are not
+	* rungs and keep their localised strings. */
+UnicodeString SlotStateName( SlotState state )
+{
+	switch( state )
+	{
+		case SLOT_OPEN:					return TheGameText->fetch("GUI:Open");
+		case SLOT_TAKEOVER:			return TheGameText->fetch("GUI:HumanSlot");
+		case SLOT_EASY_AI:			return UnicodeString( L"Easy AI" );
+		case SLOT_STEADY_AI:		return UnicodeString( L"Steady AI" );
+		case SLOT_MED_AI:				return UnicodeString( L"Medium AI" );
+		case SLOT_HARD_AI:			return UnicodeString( L"Hard AI" );
+		case SLOT_BRUTAL_AI:		return UnicodeString( L"Brutal AI" );
+		case SLOT_MERCILESS_AI:	return UnicodeString( L"Merciless AI" );
+		case SLOT_CLOSED:
+		default:								return TheGameText->fetch("GUI:Closed");
+	}
+}
+
 void GameSlot::setState( SlotState state, UnicodeString name, UnsignedInt IP )
 {
 	// An opponent seat keeps its colour, faction, team and start spot while it stays an opponent
@@ -297,42 +324,7 @@ void GameSlot::setState( SlotState state, UnicodeString name, UnsignedInt IP )
 		m_state = state;
 		m_isAccepted = true;
 		m_hasMap = true;
-		switch(state)
-		{
-		case SLOT_OPEN:
-			m_name = TheGameText->fetch("GUI:Open");
-			break;
-		case SLOT_EASY_AI:
-			m_name = TheGameText->fetch("GUI:EasyAI");
-			break;
-		case SLOT_MED_AI:
-			m_name = TheGameText->fetch("GUI:MediumAI");
-			break;
-		case SLOT_BRUTAL_AI:
-			m_name = TheGameText->fetch("GUI:HardAI");
-			break;
-		case SLOT_TAKEOVER:
-			m_name = TheGameText->fetch("GUI:HumanSlot");
-			break;
-		//
-		// The three rungs the ladder added. No shipped string for them, so plain English rather
-		// than a MISSING: - and, before these cases existed, they fell through to the default and
-		// every one of them appeared in the lobby as "Closed".
-		//
-		case SLOT_STEADY_AI:
-			m_name = UnicodeString(L"Steady AI");
-			break;
-		case SLOT_HARD_AI:
-			m_name = UnicodeString(L"Hard AI");
-			break;
-		case SLOT_MERCILESS_AI:
-			m_name = UnicodeString(L"Merciless AI");
-			break;
-		case SLOT_CLOSED:
-		default:
-			m_name = TheGameText->fetch("GUI:Closed");
-			break;
-		}
+		m_name = SlotStateName( state );
 	}
 
 	m_IP = IP;

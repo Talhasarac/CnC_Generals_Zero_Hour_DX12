@@ -324,33 +324,8 @@ static void gameTooltip(GameWindow *window,
 		else if (slot && slot->isAI())
 		{
 			++numPlayers;
-			switch(slot->getState())
-			{
-			case SLOT_EASY_AI:
-				tooltip.concat(L'\n');
-				tooltip.concat(TheGameText->fetch("GUI:EasyAI"));
-				break;
-			case SLOT_MED_AI:
-				tooltip.concat(L'\n');
-				tooltip.concat(TheGameText->fetch("GUI:MediumAI"));
-				break;
-			case SLOT_HARD_AI:
-				tooltip.concat(L'\n');
-				tooltip.concat(TheGameText->fetch("GUI:HardAI"));
-				break;
-			case SLOT_STEADY_AI:
-				tooltip.concat(L'\n');
-				tooltip.concat(UnicodeString(L"Steady AI"));
-				break;
-			case SLOT_BRUTAL_AI:
-				tooltip.concat(L'\n');
-				tooltip.concat(UnicodeString(L"Brutal AI"));
-				break;
-			case SLOT_MERCILESS_AI:
-				tooltip.concat(L'\n');
-				tooltip.concat(UnicodeString(L"Merciless AI"));
-				break;
-			}
+			tooltip.concat(L'\n');
+			tooltip.concat(SlotStateName(slot->getState()));
 		}
 	}
 	DEBUG_ASSERTCRASH(numPlayers, ("Tooltipping a 0-player game!\n"));

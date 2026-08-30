@@ -6326,4 +6326,35 @@ TEST(text_keeps_growing_with_the_screen_instead_of_stopping_at_twice)
 		previous = size;
 	}
 }
+/* The lobby, the seat itself, the game info panel and the online browser's tooltip each carried
+	 their own switch over the slot states, and no two agreed: EA's shipped strings read "Easy Army"
+	 and "Medium Army" while the rungs the ladder added were written "Steady AI" and "Merciless AI",
+	 so one drop-down offered a ladder named half one way and half the other - and "GUI:HardAI" sat
+	 on the Brutal rung in one file and on the Hard rung in another.  SlotStateName is the only list
+	 now.  (Only the AI rungs are checked here: Open, Closed and the takeover seat go through
+	 TheGameText, which no test has.) */
+TEST(every_ai_rung_is_named_the_same_way_as_every_other)
+{
+	static const SlotState rungs[] =
+	{
+		SLOT_EASY_AI, SLOT_STEADY_AI, SLOT_MED_AI, SLOT_HARD_AI, SLOT_BRUTAL_AI, SLOT_MERCILESS_AI
+	};
+	const Int numRungs = sizeof(rungs)/sizeof(rungs[0]);
 
+	for (Int i = 0; i < numRungs; ++i)
+	{
+		UnicodeString name = SlotStateName( rungs[i] );
+
+		// a rung with no case of its own used to come back named "Closed"
+		CHECK( name.getLength() > 3 );
+
+		// and one style for the lot: "Easy Army" beside "Steady AI" is what this is here to stop
+		// (CHECK_STR is narrow-char, and casting a WideChar* into it compares one byte and passes)
+		CHECK( wcscmp( name.str() + name.getLength() - 3, L" AI" ) == 0 );
+	}
+
+	// no two rungs share a name, or the drop-down cannot say which one you picked
+	for (Int a = 0; a < numRungs; ++a)
+		for (Int b = a + 1; b < numRungs; ++b)
+			CHECK( wcscmp( SlotStateName( rungs[a] ).str(), SlotStateName( rungs[b] ).str() ) != 0 );
+}

@@ -303,6 +303,7 @@ Bool ParseAsciiStringToGameInfo( GameInfo *game, AsciiString options );
 Bool IsAISlotState( SlotState state );
 char SlotStateToOptionsChar( SlotState state );
 Bool OptionsCharToSlotState( char c, SlotState *state );
+UnicodeString SlotStateName( SlotState state );
 
 
 /**
