@@ -1221,19 +1221,11 @@ void WOLLobbyMenuUpdate( WindowLayout * layout, void *userData)
 									slot->setProfileID( resp.stagingRoom.profileID[i] );
 									slot->setPlayerTemplate( resp.stagingRoom.faction[i] );
 									slot->setColor( resp.stagingRoom.color[i] );
-									if (resp.stagingRoom.profileID[i] == SLOT_EASY_AI)
+									// Every rung of the ladder, not the three the enum happened to start with: an online game
+									// advertising a Steady or a Merciless seat used to show up in the browser as an empty one.
+									if (IsAISlotState((SlotState)resp.stagingRoom.profileID[i]))
 									{
-										slot->setState(SLOT_EASY_AI);
-										++numPlayers;
-									}
-									else if (resp.stagingRoom.profileID[i] == SLOT_MED_AI)
-									{
-										slot->setState(SLOT_MED_AI);
-										++numPlayers;
-									}
-									else if (resp.stagingRoom.profileID[i] == SLOT_BRUTAL_AI)
-									{
-										slot->setState(SLOT_BRUTAL_AI);
+										slot->setState((SlotState)resp.stagingRoom.profileID[i]);
 										++numPlayers;
 									}
 									else if (resp.stagingRoomPlayerNames[i].length())

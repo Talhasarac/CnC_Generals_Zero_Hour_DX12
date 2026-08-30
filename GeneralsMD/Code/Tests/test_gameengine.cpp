@@ -6248,3 +6248,45 @@ TEST(walking_away_breaks_a_capture_but_turning_towards_it_does_not)
 	// and nothing is broken when no power is up: walking is just walking
 	CHECK( !abilityBrokenByMovement( TRUE, FALSE, TRUE, TRUE ) );
 }
+
+/* Every AI seat a lobby offers has to survive the trip to the other machines.  The host writes the
+	 slot list into one options string and every client reads it back; an AI seat is one letter in
+	 there, and the writer used to have four - E, M, P and "everything else is H" - while the enum had
+	 grown to seven states.  Steady, Hard and Merciless all went out as H, so a LAN or online game
+	 that was set up against the rungs in between was played against Brutal on every machine, the
+	 host's included.  These two functions are the one place the letters live now. */
+TEST(every_ai_seat_survives_the_options_string_the_host_sends_round)
+{
+	static const SlotState aiStates[] =
+	{
+		SLOT_EASY_AI, SLOT_STEADY_AI, SLOT_MED_AI, SLOT_HARD_AI, SLOT_BRUTAL_AI, SLOT_MERCILESS_AI,
+		SLOT_TAKEOVER
+	};
+	const Int numAIStates = sizeof(aiStates)/sizeof(aiStates[0]);
+
+	// every state IsAISlotState() claims as a seat has a letter, and it reads back as itself
+	for (Int i = 0; i < numAIStates; ++i)
+	{
+		CHECK( IsAISlotState( aiStates[i] ) );
+		SlotState readBack = SLOT_OPEN;
+		CHECK( OptionsCharToSlotState( SlotStateToOptionsChar( aiStates[i] ), &readBack ) );
+		CHECK_EQ( (Int)aiStates[i], (Int)readBack );
+	}
+
+	// and no two of them share one - the bug was six rungs sharing three letters
+	for (Int a = 0; a < numAIStates; ++a)
+		for (Int b = a + 1; b < numAIStates; ++b)
+			CHECK_NE( SlotStateToOptionsChar( aiStates[a] ), SlotStateToOptionsChar( aiStates[b] ) );
+
+	// the four letters that shipped keep their meaning, or an old replay reads as a different game
+	CHECK_EQ( 'E', SlotStateToOptionsChar( SLOT_EASY_AI ) );
+	CHECK_EQ( 'M', SlotStateToOptionsChar( SLOT_MED_AI ) );
+	CHECK_EQ( 'H', SlotStateToOptionsChar( SLOT_BRUTAL_AI ) );
+	CHECK_EQ( 'P', SlotStateToOptionsChar( SLOT_TAKEOVER ) );
+
+	// a seat that is not an AI one is not written as an AI one, and a letter nobody uses is refused
+	CHECK( !IsAISlotState( SLOT_OPEN ) );
+	CHECK( !IsAISlotState( SLOT_CLOSED ) );
+	CHECK( !IsAISlotState( SLOT_PLAYER ) );
+	CHECK( !OptionsCharToSlotState( 'Q', NULL ) );
+}

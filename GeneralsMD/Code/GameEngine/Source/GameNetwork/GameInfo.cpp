@@ -210,7 +210,7 @@ void GameSlot::setMapAvailability( Bool hasMap )
 	* SLOT_TAKEOVER counts here on purpose: to the lobby it is an ordinary opponent seat that the
 	* host owns and that no network peer is expected to check in from.  It differs in one place only
 	* - the player it creates is human (GameLogic::startNewGame), so no AI is ever attached. */
-static Bool slotStateIsAI( SlotState state )
+Bool IsAISlotState( SlotState state )
 {
 	switch( state )
 	{
@@ -227,12 +227,54 @@ static Bool slotStateIsAI( SlotState state )
 	}
 }
 
+/** The one letter an AI seat is written as in the options string the host sends round.
+	*
+	* 'E', 'M', 'H' and 'P' are what shipped, so they keep their meaning - 'H' is Brutal, from when
+	* Brutal was the top rung and the menu called it Hard.  The three rungs the ladder added take
+	* free letters.  Every seat that was none of the four went out as 'H', which is why picking
+	* Steady or Merciless in the LAN or online lobby handed everybody a Brutal opponent instead. */
+static const struct { SlotState state; char code; } theAISlotCodes[] =
+{
+	{ SLOT_EASY_AI,      'E' },
+	{ SLOT_STEADY_AI,    'S' },
+	{ SLOT_MED_AI,       'M' },
+	{ SLOT_HARD_AI,      'D' },
+	{ SLOT_BRUTAL_AI,    'H' },
+	{ SLOT_MERCILESS_AI, 'X' },
+	{ SLOT_TAKEOVER,     'P' },
+};
+
+char SlotStateToOptionsChar( SlotState state )
+{
+	for (Int i = 0; i < (Int)(sizeof(theAISlotCodes)/sizeof(theAISlotCodes[0])); ++i)
+	{
+		if (theAISlotCodes[i].state == state)
+			return theAISlotCodes[i].code;
+	}
+	DEBUG_ASSERTCRASH(FALSE, ("No options string code for slot state %d", state));
+	return 'H';
+}
+
+Bool OptionsCharToSlotState( char c, SlotState *state )
+{
+	for (Int i = 0; i < (Int)(sizeof(theAISlotCodes)/sizeof(theAISlotCodes[0])); ++i)
+	{
+		if (theAISlotCodes[i].code == c)
+		{
+			if (state)
+				*state = theAISlotCodes[i].state;
+			return TRUE;
+		}
+	}
+	return FALSE;
+}
+
 void GameSlot::setState( SlotState state, UnicodeString name, UnsignedInt IP )
 {
 	// An opponent seat keeps its colour, faction, team and start spot while it stays an opponent
 	// seat - SLOT_TAKEOVER included, or the menu's own refresh (which re-sends the state to the
 	// slot) would wipe the faction and team the moment you picked them.
-	if (!(isAI() && slotStateIsAI( state )))
+	if (!(isAI() && IsAISlotState( state )))
 	{
 		m_color = -1;
 		m_startPos = -1;
@@ -309,7 +351,7 @@ Bool GameSlot::isOccupied( void ) const
 
 Bool GameSlot::isAI( void ) const
 {
-	return slotStateIsAI( m_state );
+	return IsAISlotState( m_state );
 }
 
 Bool GameSlot::isPlayer( AsciiString userName ) const
@@ -1012,16 +1054,7 @@ AsciiString GameInfoToAsciiString( const GameInfo *game )
 		}
 		else if (slot && slot->isAI())
 		{
-			Char c;
-			if (slot->getState() == SLOT_TAKEOVER)
-				c = 'P';
-			else if (slot->getState() == SLOT_EASY_AI)
-				c = 'E';
-			else if (slot->getState() == SLOT_MED_AI)
-				c = 'M';
-			else
-				c = 'H';
-			str.format("C%c,%d,%d,%d,%d:", c,
+			str.format("C%c,%d,%d,%d,%d:", SlotStateToOptionsChar(slot->getState()),
 				slot->getColor(), slot->getPlayerTemplate(),
 				slot->getStartPos(), slot->getTeamNumber());
 		}
@@ -1369,38 +1402,16 @@ Bool ParseAsciiStringToGameInfo(GameInfo *game, AsciiString options)
 								break;
 							}
               
-							switch(*(slotValue.str() + 1))
+							SlotState aiState;
+							if (OptionsCharToSlotState(*(slotValue.str() + 1), &aiState))
 							{
-								case 'E':
-								{
-									newSlot[i].setState(SLOT_EASY_AI);
-									//DEBUG_LOG(("ParseAsciiStringToGameInfo - Easy AI\n"));
-								}
-								break;
-								case 'M':
-								{
-									newSlot[i].setState(SLOT_MED_AI);
-									//DEBUG_LOG(("ParseAsciiStringToGameInfo - Medium AI\n"));
-								}
-								break;
-								case 'P':
-								{
-									newSlot[i].setState(SLOT_TAKEOVER);
-								}
-								break;
-								case 'H':
-								{
-									newSlot[i].setState(SLOT_BRUTAL_AI);
-									//DEBUG_LOG(("ParseAsciiStringToGameInfo - Brutal AI\n"));
-								}
-								break;
-								default:
-								{
-									optionsOk = false;
-									DEBUG_LOG(("ParseAsciiStringToGameInfo - Unknown AI, quitting\n"));
-								}
-								break;
-							}//switch(*rawSlot.str()+1)
+								newSlot[i].setState(aiState);
+							}
+							else
+							{
+								optionsOk = false;
+								DEBUG_LOG(("ParseAsciiStringToGameInfo - Unknown AI, quitting\n"));
+							}
               
 							//Read color index
 							slotValue = strtok_r(NULL,",",&slotPos);

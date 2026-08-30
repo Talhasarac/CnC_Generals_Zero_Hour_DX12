@@ -1140,36 +1140,7 @@ void InitSkirmishGameGadgets( void )
 		}
 		else
 		{
-      GadgetComboBoxAddEntry(comboBoxPlayer[i],TheGameText->fetch("GUI:Open"),white);  // leave this first
-      GadgetComboBoxSetItemData(comboBoxPlayer[i], 0, (void *)SLOT_OPEN);
-			GadgetComboBoxAddEntry(comboBoxPlayer[i],TheGameText->fetch("GUI:Closed"),white);  // leave this first
-      GadgetComboBoxSetItemData(comboBoxPlayer[i], 1, (void *)SLOT_CLOSED);
-			// A seat with no AI behind it, for testing: Shift-Ctrl-T in game hands it to you.
-			GadgetComboBoxAddEntry(comboBoxPlayer[i],TheGameText->fetch("GUI:HumanSlot"),white);
-      GadgetComboBoxSetItemData(comboBoxPlayer[i], 2, (void *)SLOT_TAKEOVER);
-			//
-			// The six-rung ladder (AI-ROADMAP.md D6).  Every rung plays by the player's rules - the
-			// steps are decisions the AI is or is not allowed to make, never money, build speed,
-			// vision or unit stats.  Three of the six have no shipped string, so they read as plain
-			// English rather than as MISSING:; the three that do keep it, and EA's "HardAI" string
-			// now labels the rung that is actually called Hard.
-			//
-			GadgetComboBoxAddEntry(comboBoxPlayer[i],TheGameText->fetch("GUI:EasyAI"),white);
-      GadgetComboBoxSetItemData(comboBoxPlayer[i], 3, (void *)SLOT_EASY_AI);
-			GadgetComboBoxAddEntry(comboBoxPlayer[i],UnicodeString(L"Steady AI"),white);
-      GadgetComboBoxSetItemData(comboBoxPlayer[i], 4, (void *)SLOT_STEADY_AI);
-			GadgetComboBoxAddEntry(comboBoxPlayer[i],TheGameText->fetch("GUI:MediumAI"),white);
-      GadgetComboBoxSetItemData(comboBoxPlayer[i], 5, (void *)SLOT_MED_AI);
-			GadgetComboBoxAddEntry(comboBoxPlayer[i],UnicodeString(L"Hard AI"),white);
-      GadgetComboBoxSetItemData(comboBoxPlayer[i], 6, (void *)SLOT_HARD_AI);
-			GadgetComboBoxAddEntry(comboBoxPlayer[i],UnicodeString(L"Brutal AI"),white);
-      GadgetComboBoxSetItemData(comboBoxPlayer[i], 7, (void *)SLOT_BRUTAL_AI);
-			GadgetComboBoxAddEntry(comboBoxPlayer[i],UnicodeString(L"Merciless AI"),white);
-      GadgetComboBoxSetItemData(comboBoxPlayer[i], 8, (void *)SLOT_MERCILESS_AI);
-			// nine entries now; the layout's list box was sized for five
-			GadgetComboBoxSetMaxDisplay(comboBoxPlayer[i], 9);
-			GadgetComboBoxSetSelectedPos(comboBoxPlayer[i],0);
-
+			PopulatePlayerSlotComboBox(comboBoxPlayer[i], white, TRUE);
 		}
 
 		tmpString.format("SkirmishGameOptionsMenu.wnd:ComboBoxColor%d", i);

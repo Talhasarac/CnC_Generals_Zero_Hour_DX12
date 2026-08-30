@@ -1221,12 +1221,7 @@ void InitWOLGameGadgets( void )
 		}
 		else
 		{
-			GadgetComboBoxAddEntry(comboBoxPlayer[i],TheGameText->fetch("GUI:Open"),GameSpyColor[GSCOLOR_PLAYER_NORMAL]);
-			GadgetComboBoxAddEntry(comboBoxPlayer[i],TheGameText->fetch("GUI:Closed"),GameSpyColor[GSCOLOR_PLAYER_NORMAL]);
-			GadgetComboBoxAddEntry(comboBoxPlayer[i],TheGameText->fetch("GUI:EasyAI"),GameSpyColor[GSCOLOR_PLAYER_NORMAL]);
-			GadgetComboBoxAddEntry(comboBoxPlayer[i],TheGameText->fetch("GUI:MediumAI"),GameSpyColor[GSCOLOR_PLAYER_NORMAL]);
-			GadgetComboBoxAddEntry(comboBoxPlayer[i],TheGameText->fetch("GUI:HardAI"),GameSpyColor[GSCOLOR_PLAYER_NORMAL]);
-			GadgetComboBoxSetSelectedPos(comboBoxPlayer[i],0);
+			PopulatePlayerSlotComboBox(comboBoxPlayer[i], GameSpyColor[GSCOLOR_PLAYER_NORMAL], FALSE);
 		}
 
 		tmpString.format("GameSpyGameOptionsMenu.wnd:ComboBoxColor%d", i);
@@ -2645,7 +2640,8 @@ WindowMsgHandledType WOLGameSetupMenuSystem( GameWindow *window, UnsignedInt msg
 						  // Get
 						  Int pos = -1;
 						  GadgetComboBoxGetSelectedPos(comboBoxPlayer[i], &pos);
-						  if( pos != SLOT_PLAYER && pos >= 0)
+						  SlotState pickedState = (pos >= 0) ? (SlotState)(Int)GadgetComboBoxGetItemData(comboBoxPlayer[i], pos) : SLOT_OPEN;
+						  if( pos >= 0 )
 						  {
 							  if( myGame->getSlot(i)->getState() == SLOT_PLAYER )
 							  {
@@ -2660,16 +2656,16 @@ WindowMsgHandledType WOLGameSetupMenuSystem( GameWindow *window, UnsignedInt msg
 								  TheGameSpyPeerMessageQueue->addRequest(req);
 
 								  UnicodeString name = myGame->getSlot(i)->getName();
-								  myGame->getSlot(i)->setState(SlotState(pos));
+								  myGame->getSlot(i)->setState(pickedState);
 								  myGame->resetAccepted();
 								  TheGameSpyInfo->setGameOptions();
 								  WOLDisplaySlotList();
 								  //TheLAN->OnPlayerLeave(name);
 							  }
-							  else if( myGame->getSlot(i)->getState() != pos )
+							  else if( myGame->getSlot(i)->getState() != pickedState )
 							  {
 								  Bool wasAI = (myGame->getSlot(i)->isAI());
-								  myGame->getSlot(i)->setState(SlotState(pos));
+								  myGame->getSlot(i)->setState(pickedState);
 								  Bool isAI = (myGame->getSlot(i)->isAI());
 								  myGame->resetAccepted();
 								  if (wasAI ^ isAI)

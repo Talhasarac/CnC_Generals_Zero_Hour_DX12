@@ -294,6 +294,16 @@ void        GameInfo::setOldFactionsOnly( Bool oldFactionsOnly ) { m_oldFactions
 AsciiString GameInfoToAsciiString( const GameInfo *game );
 Bool ParseAsciiStringToGameInfo( GameInfo *game, AsciiString options );
 
+//
+// Three things every lobby - skirmish, LAN and online - has to agree on about a slot state, kept
+// here so that appending a rung to the enum above is one edit rather than a hunt through the menus.
+// IsAISlotState() is what GameSlot::isAI() answers with; the two char functions are the AI seat's
+// one-letter code in the options string the host sends every client.
+//
+Bool IsAISlotState( SlotState state );
+char SlotStateToOptionsChar( SlotState state );
+Bool OptionsCharToSlotState( char c, SlotState *state );
+
 
 /**
   * The SkirmishGameInfo class holds information about the skirmish game and

@@ -186,6 +186,61 @@ void ShowUnderlyingGUIElements( Bool show, const char *layoutFilename, const cha
 
 // -----------------------------------------------------------------------------
 
+/** Fill a lobby's player slot combo box with every seat it can offer.
+	*
+	* All three lobbies used to keep their own list.  The LAN and online ones held five entries in
+	* SlotState order and read the choice back as SlotState(position), so the ladder's three added
+	* rungs - appended to the enum, hence out of that order - could not be offered there at all: a
+	* network game had Easy, Medium and Brutal and nothing else.  Every entry now carries the state
+	* it stands for and the position it sits at means nothing. */
+void PopulatePlayerSlotComboBox(GameWindow *comboBox, Int color, Bool allowTakeover)
+{
+	if (!comboBox)
+		return;
+
+	// Three of the six rungs have no shipped string, so they read as plain English rather than as
+	// a MISSING:, and EA's "HardAI" string is left on the seat the lobby calls Brutal.
+	static const struct { const char *key; const WideChar *plainEnglish; SlotState state; } seats[] =
+	{
+		{ "GUI:Open",      NULL,            SLOT_OPEN },
+		{ "GUI:Closed",    NULL,            SLOT_CLOSED },
+		{ "GUI:HumanSlot", NULL,            SLOT_TAKEOVER },
+		{ "GUI:EasyAI",    NULL,            SLOT_EASY_AI },
+		{ NULL,            L"Steady AI",    SLOT_STEADY_AI },
+		{ "GUI:MediumAI",  NULL,            SLOT_MED_AI },
+		{ NULL,            L"Hard AI",      SLOT_HARD_AI },
+		{ NULL,            L"Brutal AI",    SLOT_BRUTAL_AI },
+		{ NULL,            L"Merciless AI", SLOT_MERCILESS_AI },
+	};
+
+	// The combo box only grows its listbox when an add crosses the current length, and both
+	// GadgetListBoxSetItemData and the add itself silently do nothing past it - so make room for
+	// the whole list first, and tell the box how many rows to drop down before the first add.
+	Int numSeats = (Int)(sizeof(seats)/sizeof(seats[0]));
+	if (!allowTakeover)
+		--numSeats;
+	GameWindow *listBox = GadgetComboBoxGetListBox(comboBox);
+	if (listBox)
+	{
+		ListboxData *listData = (ListboxData *)listBox->winGetUserData();
+		if (listData && listData->listLength < numSeats)
+			GadgetListBoxSetListLength(listBox, numSeats);
+	}
+	GadgetComboBoxSetMaxDisplay(comboBox, numSeats);
+
+	Int shown = 0;
+	for (Int i = 0; i < (Int)(sizeof(seats)/sizeof(seats[0])); ++i)
+	{
+		if (seats[i].state == SLOT_TAKEOVER && !allowTakeover)
+			continue;
+		UnicodeString label = seats[i].key ? TheGameText->fetch(seats[i].key) : UnicodeString(seats[i].plainEnglish);
+		GadgetComboBoxAddEntry(comboBox, label, color);
+		GadgetComboBoxSetItemData(comboBox, shown, (void *)seats[i].state);
+		++shown;
+	}
+	GadgetComboBoxSetSelectedPos(comboBox, 0);
+}
+
 void PopulateColorComboBox(Int comboBox, GameWindow *comboArray[], GameInfo *myGame, Bool isObserver)
 {
 	Int numColors = TheMultiplayerSettings->getNumColors();

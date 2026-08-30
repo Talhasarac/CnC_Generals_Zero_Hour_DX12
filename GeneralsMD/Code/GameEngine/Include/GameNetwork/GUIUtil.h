@@ -36,6 +36,10 @@ class GameInfo;
 void ShowUnderlyingGUIElements( Bool show, const char *layoutFilename, const char *parentName,
 															 const char **gadgetsToHide, const char **perPlayerGadgetsToHide );
 
+// Every seat a lobby can offer - Open, Closed and the six rungs of the AI ladder - in one list,
+// each entry tagged with the SlotState it stands for.  allowTakeover adds the empty seat you
+// take over in game, which only the skirmish lobby offers.
+void PopulatePlayerSlotComboBox(GameWindow *comboBox, Int color, Bool allowTakeover);
 void PopulateColorComboBox(Int comboBox, GameWindow *comboArray[], GameInfo *myGame, Bool isObserver = FALSE);
 void PopulatePlayerTemplateComboBox(Int comboBox, GameWindow *comboArray[], GameInfo *myGame, Bool allowObservers );
 void PopulateTeamComboBox(Int comboBox, GameWindow *comboArray[], GameInfo *myGame, Bool isObserver = FALSE);
