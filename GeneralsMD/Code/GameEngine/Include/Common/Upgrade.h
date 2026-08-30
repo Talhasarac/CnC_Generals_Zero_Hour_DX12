@@ -54,7 +54,10 @@ enum UpgradeStatusType
 };
 
 //The maximum number of upgrades. 
-#define UPGRADE_MAX_COUNT 128
+// How many distinct upgrades the game may know about.  A mod that adds its own runs into this, and
+// the failure is silent - the mask simply has no bit left for the new one.  The mask is a bit
+// field, so raising it costs 48 bytes per player and per object that carries one.
+#define UPGRADE_MAX_COUNT 512
 
 typedef BitFlags<UPGRADE_MAX_COUNT>	UpgradeMaskType;
 
