@@ -264,6 +264,9 @@ protected:
 	void queueScout(void);							///< ... or build the cheapest one that can
 	Bool scoutInQueue(void);						///< one is already on order
 	Bool nextScoutTarget(Int slot, const Coord3D *from, Coord3D *pos);	///< the stalest enemy start position worth the walk
+	void updateStartIntel(void);				///< cross off the start positions the scouts have looked at, and deduce the rest
+	void countStartIntel(Int *enemies, Int *occupied, Int *unchecked) const;	///< the three numbers the odds are made of
+	Bool enemyStartGuess(Int playerNdx, Coord3D *pos);	///< where this enemy is, or the best address we have for him
 
 	virtual void doBaseBuilding(void);
 	virtual void checkReadyTeams(void);
@@ -329,7 +332,7 @@ protected:
 	void updateBridgeRepair(void);
 	Bool dozerInQueue(void);
 	Object *findSupplyCenter(Int minSupplies);
-	static void getPlayerStructureBounds(Region2D *bounds, Int playerNdx, Bool conservative = FALSE, Int observerNdx = -1 );
+	void getPlayerStructureBounds(Region2D *bounds, Int playerNdx, Bool conservative = FALSE, Int observerNdx = -1 );
 
 protected:	 
 
@@ -342,7 +345,11 @@ protected:
 	ObjectID	m_scoutID[ MAX_AI_SCOUTS ];	///< the units currently touring the map for us
 	Int				m_scoutTargetFor[ MAX_AI_SCOUTS ];	///< which start position each one is walking to
 	Int				m_scoutTimer;						///< frames until the next scouting check
-	UnsignedInt m_scoutSeenFrame[ MAX_PLAYER_COUNT ];	///< when each enemy start position was last looked at; 0 == never
+	UnsignedInt m_scoutSeenFrame[ MAX_PLAYER_COUNT ];	///< when each start position was last looked at; 0 == never
+	Bool			m_startChecked[ MAX_PLAYER_COUNT ];	///< start positions we have looked at, or deduced without looking
+	Bool			m_startOccupied[ MAX_PLAYER_COUNT ];	///< ... and which of those turned out to hold an enemy
+	Int				m_playerStartNdx[ MAX_PLAYER_COUNT ];	///< the start position each player is known to be at; -1 == not found yet
+	UnsignedInt m_startIntelFrame;			///< frame the above was last brought up to date
 	Int				m_retreatTimer;					///< frames until the next look at how the fights are going
 	Int				m_expandTimer;					///< frames until the next look for somewhere to expand to
 

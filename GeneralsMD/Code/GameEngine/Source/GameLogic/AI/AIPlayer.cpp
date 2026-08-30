@@ -128,25 +128,35 @@ static Real aiCombatPower( const Object *obj )
 	return INT_TO_REAL( tmpl->calcCostToBuild( obj->getControllingPlayer() ) );
 }
 
-/** Where a player started, from the map's own Player_N_Start waypoint.  This is the one thing about
-	* an enemy that is public without scouting - it is on the map preview in the lobby, every human
-	* sees it before the match begins - so it is what an AI that has not scouted yet is allowed to
-	* aim at.  Without it a fogged AI has no coordinates for the enemy at all and every attack team
-	* walks to the map corner. */
-static Bool playerStartPosition( Int playerNdx, Coord3D *pos )
+/** One of the map's own Player_N_Start waypoints, by 0-based position index.  Where the start
+	* positions *are* is public - the map has them, every human can read them off the preview.  Which
+	* of them the enemy is standing on is not, and that is what the AI has to find out. */
+static Bool startPositionLoc( Int startNdx, Coord3D *pos )
 {
-	Player *p = ThePlayerList ? ThePlayerList->getNthPlayer( playerNdx ) : NULL;
-	if( p == NULL || p->getMpStartIndex() < 0 || TheTerrainLogic == NULL )
+	if( startNdx < 0 || startNdx >= MAX_PLAYER_COUNT || TheTerrainLogic == NULL )
 		return FALSE;
 
 	AsciiString name;
-	name.format( "Player_%d_Start", p->getMpStartIndex() + 1 );		// the waypoints are 1-based
+	name.format( "Player_%d_Start", startNdx + 1 );		// the waypoints are 1-based
 	Waypoint *way = TheTerrainLogic->getWaypointByName( name );
 	if( way == NULL )
 		return FALSE;
 
 	*pos = *way->getLocation();
 	return TRUE;
+}
+
+/** Where a player actually started.  This is ground truth, and the AI is only allowed to ask it
+	* where it has earned the answer: standing next to the position with a scout, for its own and its
+	* allies' positions, or once elimination has left nowhere else for an enemy to be.  Everything
+	* that wants an enemy's address goes through enemyStartGuess instead. */
+static Bool playerStartPosition( Int playerNdx, Coord3D *pos )
+{
+	Player *p = ThePlayerList ? ThePlayerList->getNthPlayer( playerNdx ) : NULL;
+	if( p == NULL )
+		return FALSE;
+
+	return startPositionLoc( p->getMpStartIndex(), pos );
 }
 
 
@@ -180,7 +190,11 @@ m_role(AIROLE_AGGRESSIVE)
 	}
 	for (Int startNdx = 0; startNdx < MAX_PLAYER_COUNT; ++startNdx) {
 		m_scoutSeenFrame[startNdx] = 0;		// 0 == never seen, which outranks every real age below
+		m_startChecked[startNdx] = FALSE;
+		m_startOccupied[startNdx] = FALSE;
+		m_playerStartNdx[startNdx] = -1;	// nobody located yet, not even us - updateStartIntel seeds it
 	}
+	m_startIntelFrame = 0;
 
 	m_frameLastBuildingBuilt = TheGameLogic->getFrame();
 	p->setCanBuildUnits(false); // turn off ai production by default.
@@ -4091,24 +4105,257 @@ void AIPlayer::queueScout( void )
 }
 
 //----------------------------------------------------------------------------------------------------------
+/** How often the start-position picture is brought up to date.  doScouting is called every frame and
+	* then sits behind its own timer for up to a rung's scouting interval, which would be far too slow
+	* to notice a scout arriving somewhere. */
+static const Int START_INTEL_RATE = LOGICFRAMES_PER_SECOND;
+
+//----------------------------------------------------------------------------------------------------------
+/** The three numbers the odds are made of: enemies still in the game, positions known to hold one,
+	* and positions nobody has looked at yet. */
+void AIPlayer::countStartIntel( Int *enemies, Int *occupied, Int *unchecked ) const
+{
+	*enemies = *occupied = *unchecked = 0;
+	if( ThePlayerList == NULL )
+		return;
+
+	const Int playerCount = ThePlayerList->getPlayerCount();
+	for( Int i = 0; i < playerCount && i < MAX_PLAYER_COUNT; ++i )
+	{
+		Player *p = ThePlayerList->getNthPlayer( i );
+		if( p == NULL || p == m_player || !p->isPlayerActive() )
+			continue;
+		if( m_player->getRelationship( p->getDefaultTeam() ) == ENEMIES )
+			++(*enemies);
+	}
+
+	for( Int startNdx = 0; startNdx < MAX_PLAYER_COUNT; ++startNdx )
+	{
+		Coord3D there;
+		if( !startPositionLoc( startNdx, &there ) )
+			continue;						// the map does not have this position at all
+		if( m_startOccupied[ startNdx ] )
+			++(*occupied);
+		else if( !m_startChecked[ startNdx ] )
+			++(*unchecked);
+	}
+}
+
+//----------------------------------------------------------------------------------------------------------
 /**
- * Where this scout goes next.  Everyone already knows where the start positions are - the lobby
- * shows them, and playerStartPosition reads the same public fact - so this is never a search for the
- * enemy.  What has to be found out is what is standing on them *now*, which makes the question "whose
- * picture is worth the walk", not "where is he".
+ * Keep the picture of who is where up to date, and deduce whatever the picture already implies.
  *
- * So the pick is a score, recomputed on every arrival, rather than a blind lap of the player list:
+ * Two things happen here.  A scout standing within sight of a start position answers that position:
+ * an enemy is standing on it, or it is empty and crossed off for good.  And then the arithmetic:
+ * every position known to hold an enemy accounts for one of them, so what is left is unlocated
+ * enemies over unchecked positions.  1v3 on an eight-position map starts at 3/7 and rises to 3/6 and
+ * 3/5 as the empty ones are crossed off.
+ *
+ * The moment it reaches 1 there is nothing left to find out - the remaining positions all hold an
+ * enemy, and no walk can say anything a subtraction has not already said.  A two-player map is that
+ * same case at its first step: one enemy, one position, 1/1, settled before a scout is even built.
+ * The scouts are then free to go and look at what is standing there, which is the part that never
+ * stops being worth knowing.
+ */
+void AIPlayer::updateStartIntel( void )
+{
+	const UnsignedInt now = TheGameLogic->getFrame();
+	if( m_startIntelFrame != 0 && now < m_startIntelFrame + START_INTEL_RATE )
+		return;
+	m_startIntelFrame = now;
+
+	if( ThePlayerList == NULL )
+		return;
+
+	const Int playerCount = ThePlayerList->getPlayerCount();
+
+	//
+	// Seed: where we are, and where our allies are, is not something anyone has to go and find out.
+	// It also takes those positions out of the candidate list, which is what makes the 1v3 example
+	// seven candidates rather than eight.
+	//
+	for( Int i = 0; i < playerCount && i < MAX_PLAYER_COUNT; ++i )
+	{
+		Player *p = ThePlayerList->getNthPlayer( i );
+		if( p == NULL || m_playerStartNdx[ i ] >= 0 )
+			continue;
+		//
+		// ALLIES, not "anything that is not an enemy": the neutral and civilian players are neither,
+		// and they report start index 0.  Letting them through crossed off the map's first start
+		// position for every AI that was not itself standing on it - so whoever did start there was
+		// permanently believed to be somewhere else.
+		//
+		if( p != m_player && m_player->getRelationship( p->getDefaultTeam() ) != ALLIES )
+			continue;
+
+		const Int startNdx = p->getMpStartIndex();
+		if( startNdx >= 0 && startNdx < MAX_PLAYER_COUNT )
+		{
+			m_playerStartNdx[ i ] = startNdx;
+			m_startChecked[ startNdx ] = TRUE;
+		}
+	}
+
+	//
+	// What the scouts can see from where they are standing.  This is the entire cost of the
+	// information: a unit had to walk there.
+	//
+	for( Int slot = 0; slot < MAX_AI_SCOUTS; ++slot )
+	{
+		Object *scout = TheGameLogic->findObjectByID( m_scoutID[ slot ] );
+		if( scout == NULL || scout->isEffectivelyDead() )
+			continue;
+
+		const Coord3D *at = scout->getPosition();
+		Real see = scout->getVisionRange();
+		if( see < 1.0f )
+			see = 1.0f;
+
+		for( Int startNdx = 0; startNdx < MAX_PLAYER_COUNT; ++startNdx )
+		{
+			//
+			// A deduced position is checked without anyone knowing whose it is - the elimination says
+			// an enemy is there, not which one.  So this keeps looking at positions already crossed
+			// off until each has a name against it; only an empty one, or one already pinned to a
+			// player, is finished with.
+			//
+			Bool pinned = FALSE;
+			for( Int i = 0; i < MAX_PLAYER_COUNT; ++i )
+				if( m_playerStartNdx[ i ] == startNdx )
+					pinned = TRUE;
+			if( m_startChecked[ startNdx ] && (pinned || !m_startOccupied[ startNdx ]) )
+				continue;
+
+			Coord3D there;
+			if( !startPositionLoc( startNdx, &there ) )
+				continue;
+
+			const Real dx = there.x - at->x;
+			const Real dy = there.y - at->y;
+			if( dx*dx + dy*dy > see*see )
+				continue;			// not close enough to say anything about it
+
+			m_startChecked[ startNdx ] = TRUE;
+			m_scoutSeenFrame[ startNdx ] = now;
+
+			for( Int i = 0; i < playerCount && i < MAX_PLAYER_COUNT; ++i )
+			{
+				Player *p = ThePlayerList->getNthPlayer( i );
+				if( p == NULL || p == m_player || p->getMpStartIndex() != startNdx )
+					continue;
+				if( m_player->getRelationship( p->getDefaultTeam() ) != ENEMIES )
+					continue;
+
+				m_startOccupied[ startNdx ] = TRUE;
+				m_playerStartNdx[ i ] = startNdx;			// and now we know whose it is, not just that it is someone's
+				DEBUG_LOG(("AI player %d found player %d at start position %d\n",
+									 m_player->getPlayerIndex(), i, startNdx + 1));
+			}
+		}
+	}
+
+	// the elimination: as many enemies left to place as there are places left to put them
+	Int enemies = 0, occupied = 0, unchecked = 0;
+	countStartIntel( &enemies, &occupied, &unchecked );
+	if( aiStartOccupiedOdds( enemies - occupied, unchecked ) < 1.0f )
+		return;
+
+	for( Int startNdx = 0; startNdx < MAX_PLAYER_COUNT; ++startNdx )
+	{
+		Coord3D there;
+		if( m_startChecked[ startNdx ] || !startPositionLoc( startNdx, &there ) )
+			continue;
+
+		//
+		// Deduced, not seen: we know an enemy is here without knowing which one, and that is enough
+		// to attack it and enough to stop searching for it.  Which of them it is gets settled by the
+		// first unit that arrives, above.
+		//
+		m_startChecked[ startNdx ] = TRUE;
+		m_startOccupied[ startNdx ] = TRUE;
+		DEBUG_LOG(("AI player %d deduced an enemy at start position %d without going there\n",
+							 m_player->getPlayerIndex(), startNdx + 1));
+	}
+}
+
+//----------------------------------------------------------------------------------------------------------
+/**
+ * The best address this AI has for an enemy, which is not always his real one.
+ *
+ * Found him: his position.  Not found him: the nearest position deduced to hold *an* enemy, and
+ * failing that the nearest one nobody has looked at.  It never returns somewhere already crossed off
+ * as empty, and it never returns nothing while there is anywhere left he could be - a fogged AI with
+ * no coordinates at all sends every attack team to the map corner.
+ *
+ * Attacking the best guess is also how the guess gets corrected: the team that arrives can see.
+ */
+Bool AIPlayer::enemyStartGuess( Int playerNdx, Coord3D *pos )
+{
+	if( playerNdx >= 0 && playerNdx < MAX_PLAYER_COUNT && m_playerStartNdx[ playerNdx ] >= 0 )
+		return startPositionLoc( m_playerStartNdx[ playerNdx ], pos );
+
+	Coord3D from = m_baseCenter;
+	if( !m_baseCenterSet )
+		playerStartPosition( m_player->getPlayerIndex(), &from );
+
+	Int best = -1;
+	Real bestDistSqr = 0.0f;
+	Bool bestOccupied = FALSE;
+
+	for( Int startNdx = 0; startNdx < MAX_PLAYER_COUNT; ++startNdx )
+	{
+		Coord3D there;
+		if( !startPositionLoc( startNdx, &there ) )
+			continue;
+		if( m_startChecked[ startNdx ] && !m_startOccupied[ startNdx ] )
+			continue;			// looked, empty; he is not there
+
+		Bool someoneElses = FALSE;
+		for( Int i = 0; i < MAX_PLAYER_COUNT; ++i )
+			if( i != playerNdx && m_playerStartNdx[ i ] == startNdx )
+				someoneElses = TRUE;
+		if( someoneElses )
+			continue;
+
+		const Real dx = there.x - from.x;
+		const Real dy = there.y - from.y;
+		const Real distSqr = dx*dx + dy*dy;
+		const Bool occupied = m_startOccupied[ startNdx ];
+
+		// a position known to hold someone beats a maybe, whatever the distances say
+		if( best < 0 || (occupied && !bestOccupied) ||
+				(occupied == bestOccupied && distSqr < bestDistSqr) )
+		{
+			best = startNdx;
+			bestDistSqr = distSqr;
+			bestOccupied = occupied;
+			*pos = there;
+		}
+	}
+
+	return (best >= 0);
+}
+
+//----------------------------------------------------------------------------------------------------------
+/**
+ * Where this scout goes next.  Two jobs, in that order.
+ *
+ * Searching: a start position nobody has looked at might be an enemy's, and updateStartIntel says
+ * how likely that is - 3/7 in a 1v3 on an eight-position map.  Every unchecked position carries the
+ * same odds, though, so the odds cancel out of the comparison and what is left is the nearest one:
+ * the cheapest question to answer first.  What the odds are actually for is knowing when to stop.
+ *
+ * Touring: once every enemy is placed there is nothing left to search for, and the job becomes
+ * keeping the picture of the bases current.  That is the stalest one per step walked -
  *
  *     score = frames since we last looked there / distance to walk there
  *
- * A position nobody has looked at yet has never been stamped, so its age is the whole match so far
- * and it beats everything that has been seen - and among those, the near one goes first.  Recomputing
- * on arrival is what makes a scout drop a base the other scout has just refreshed and take the far
- * one nobody has been to all match.
+ * - recomputed at every arrival, so a scout drops a base the other scout has just refreshed and
+ * takes the one nobody has been to in a while.  A picture younger than this rung's scouting interval
+ * is not worth the walk at all: the scout stays where it is, keeping vision on what it can already
+ * see, and is asked again in a couple of seconds.
  *
- * And a picture younger than this rung's scouting interval is not worth the walk at all: the scout
- * stays where it is - which keeps vision on what it can already see - and is asked again in a couple
- * of seconds.  That is the trip this used to make for nothing, every lap, at 100% certainty.
+ * Somewhere crossed off as empty is never a target for either job.
  */
 Bool AIPlayer::nextScoutTarget( Int slot, const Coord3D *from, Coord3D *pos )
 {
@@ -4125,45 +4372,46 @@ Bool AIPlayer::nextScoutTarget( Int slot, const Coord3D *from, Coord3D *pos )
 	if( m_scoutTargetFor[ slot ] >= 0 && m_scoutTargetFor[ slot ] < MAX_PLAYER_COUNT )
 		m_scoutSeenFrame[ m_scoutTargetFor[ slot ] ] = now;
 
-	const Int count = ThePlayerList->getPlayerCount();
 	const AIDifficultyProfile *profile = getSkillProfile();
 	const UnsignedInt fresh = REAL_TO_INT_CEIL( profile->m_scoutIntervalSeconds * LOGICFRAMES_PER_SECOND );
 
 	Int bestNdx = -1;
 	Real bestScore = 0.0f;
+	Bool bestSearching = FALSE;
 	Coord3D bestPos;
 
-	for( Int i = 0; i < count && i < MAX_PLAYER_COUNT; ++i )
+	for( Int startNdx = 0; startNdx < MAX_PLAYER_COUNT; ++startNdx )
 	{
-		Player *p = ThePlayerList->getNthPlayer( i );
-		if( p == NULL || p == m_player )
+		Coord3D there;
+		if( !startPositionLoc( startNdx, &there ) )
 			continue;
-		if( m_player->getRelationship( p->getDefaultTeam() ) != ENEMIES )
-			continue;
+
+		const Bool searching = !m_startChecked[ startNdx ];
+		if( !searching && !m_startOccupied[ startNdx ] )
+			continue;			// crossed off, or ours: nothing there to go and see
 
 		Bool taken = FALSE;
 		for( Int other = 0; other < MAX_AI_SCOUTS; ++other )
-			if( other != slot && m_scoutID[ other ] != INVALID_ID && m_scoutTargetFor[ other ] == i )
+			if( other != slot && m_scoutID[ other ] != INVALID_ID && m_scoutTargetFor[ other ] == startNdx )
 				taken = TRUE;
 		if( taken )
 			continue;			// the other scout is already on its way there
 
-		Coord3D there;
-		if( !playerStartPosition( i, &there ) )
-			continue;
+		const Real dx = there.x - from->x;
+		const Real dy = there.y - from->y;
+		const Real dist = (Real)sqrt( dx*dx + dy*dy );
 
-		Real dx = there.x - from->x;
-		Real dy = there.y - from->y;
-		Real dist = (Real)sqrt( dx*dx + dy*dy );
-
-		Real score = aiScoutScore( now, m_scoutSeenFrame[ i ], dist, fresh );
+		const Real score = aiScoutScore( now, m_scoutSeenFrame[ startNdx ], dist, fresh );
 		if( score <= 0.0f )
 			continue;			// looked at recently enough that the walk would buy nothing
 
-		if( bestNdx < 0 || score > bestScore )
+		// finding an enemy beats refreshing one already found, whatever the ages say
+		if( bestNdx < 0 || (searching && !bestSearching) ||
+				(searching == bestSearching && score > bestScore) )
 		{
-			bestNdx = i;
+			bestNdx = startNdx;
 			bestScore = score;
+			bestSearching = searching;
 			bestPos = there;
 		}
 	}
@@ -4185,6 +4433,10 @@ Bool AIPlayer::nextScoutTarget( Int slot, const Coord3D *from, Coord3D *pos )
  */
 void AIPlayer::doScouting( void )
 {
+	// cheap, on its own one-second clock, and it has to run whether or not the scouts need an order:
+	// this is where an arrival turns into an answer, and where the answers turn into a deduction
+	updateStartIntel();
+
 	if( --m_scoutTimer > 0 )
 		return;
 	m_scoutTimer = SCOUT_CHECK_RATE;
@@ -4594,11 +4846,17 @@ void AIPlayer::xfer( Xfer *xfer )
 			xfer->xferInt( &m_scoutTargetFor[ scoutSlot ] );
 		}
 	}
-	// when each start position was last looked at, so a loaded game does not re-tour a map it knows
+	// what has been looked at and what was found there, so a loaded game does not search a map it
+	// has already searched - or forget an enemy it had located
 	if( version >= 4 )
 	{
 		for( Int startNdx = 0; startNdx < MAX_PLAYER_COUNT; ++startNdx )
+		{
 			xfer->xferUnsignedInt( &m_scoutSeenFrame[ startNdx ] );
+			xfer->xferBool( &m_startChecked[ startNdx ] );
+			xfer->xferBool( &m_startOccupied[ startNdx ] );
+			xfer->xferInt( &m_playerStartNdx[ startNdx ] );
+		}
 	}
 	if( version >= 3 )
 	{
@@ -5024,11 +5282,12 @@ void AIPlayer::getPlayerStructureBounds( Region2D *bounds, Int playerNdx, Bool c
 	if (firstStructure && firstObject && observerNdx >= 0) {
 		//
 		// The observer has seen nothing of this player at all - the opening minutes, before anyone
-		// has scouted.  Everyone knows where the start positions are, so aim at theirs rather than
-		// at the (0,0) corner this function would otherwise report.
+		// has scouted.  Aim at the best address we have for him rather than at the (0,0) corner this
+		// function would otherwise report: his real position if a scout has found him, and until then
+		// whichever start position the elimination says is likeliest to be his.
 		//
 		Coord3D start;
-		if (playerStartPosition(playerNdx, &start)) {
+		if (enemyStartGuess(playerNdx, &start)) {
 			bounds->lo.x = bounds->hi.x = start.x;
 			bounds->lo.y = bounds->hi.y = start.y;
 		}

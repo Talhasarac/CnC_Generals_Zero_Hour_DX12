@@ -5944,10 +5944,9 @@ TEST(retreat_ratio_measures_the_exchange_not_the_health_bar)
 }
 
 
-/** A3's scouting is a tour, not a search: the start positions are public - the lobby shows them and
-	 playerStartPosition reads the same fact - so the AI never has to find the enemy, only find out
-	 what is standing there now.  That turns the target pick into "whose picture is stalest per step
-	 walked", recomputed at every arrival, and it is what stopped the scout walking a blind lap of the
+/** The second half of scouting: once every enemy has been placed there is nothing left to search for,
+	 and the job becomes keeping the picture of their bases current.  That is the stalest one per step
+	 walked, recomputed at every arrival - which is what stopped the scout walking a blind lap of the
 	 player list past bases the other scout had just refreshed. */
 TEST(scouting_goes_where_the_picture_is_stalest_per_step)
 {
@@ -5983,6 +5982,46 @@ TEST(scouting_goes_where_the_picture_is_stalest_per_step)
 	// standing on the thing does not divide by zero, and is still the best place to look from
 	CHECK( aiScoutScore( NOW, 0, 0.0f, FRESH ) > 0.0f );
 	CHECK_EQ( aiScoutScore( NOW, 0, 0.0f, FRESH ), aiScoutScore( NOW, 0, 1.0f, FRESH ) );
+}
+
+
+/** The first half of scouting: finding out which start position each enemy is on, which the AI is no
+	 longer told.  Elimination is the whole model - every position known to hold an enemy accounts for
+	 one of them, so the rest are the unlocated enemies spread over the positions nobody has looked at,
+	 and each empty answer makes the remaining ones likelier.
+
+	 The number that matters is the one at the top: certainty arrives by subtraction, and a walk to
+	 confirm it is a walk spent on nothing. */
+TEST(elimination_narrows_the_start_positions_until_it_knows)
+{
+	// 1v3 on an eight-position map: seven positions are not mine, three of them hold an enemy
+	CHECK_NEAR( 3.0f / 7.0f, aiStartOccupiedOdds( 3, 7 ), 0.0001f );
+
+	// cross an empty one off and the rest get likelier - which is the whole reason to go and look
+	CHECK_NEAR( 3.0f / 6.0f, aiStartOccupiedOdds( 3, 6 ), 0.0001f );
+	CHECK_NEAR( 3.0f / 5.0f, aiStartOccupiedOdds( 3, 5 ), 0.0001f );
+	CHECK( aiStartOccupiedOdds( 3, 5 ) > aiStartOccupiedOdds( 3, 6 ) );
+	CHECK( aiStartOccupiedOdds( 3, 6 ) > aiStartOccupiedOdds( 3, 7 ) );
+
+	// finding one instead accounts for it: two enemies left over the six positions still unchecked
+	CHECK_NEAR( 2.0f / 6.0f, aiStartOccupiedOdds( 2, 6 ), 0.0001f );
+
+	// three enemies with three places left to be is not a guess, and not worth a walk
+	CHECK_EQ( 1.0f, aiStartOccupiedOdds( 3, 3 ) );
+	CHECK_EQ( 1.0f, aiStartOccupiedOdds( 3, 2 ) );		// nothing is more certain than certain
+
+	// a two-player map is that same rule at its first step - one enemy, one position - so it is
+	// settled before the scout is built, and the scout goes to see what is there rather than where
+	CHECK_EQ( 1.0f, aiStartOccupiedOdds( 1, 1 ) );
+
+	// nobody left to find, or nowhere left to look, is the opposite of certainty - not 1.0
+	CHECK_EQ( 0.0f, aiStartOccupiedOdds( 0, 7 ) );
+	CHECK_EQ( 0.0f, aiStartOccupiedOdds( 3, 0 ) );
+	CHECK_EQ( 0.0f, aiStartOccupiedOdds( -1, 7 ) );
+
+	// and in between it stays a probability
+	CHECK( aiStartOccupiedOdds( 1, 8 ) > 0.0f );
+	CHECK( aiStartOccupiedOdds( 1, 8 ) < 1.0f );
 }
 
 

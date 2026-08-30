@@ -275,6 +275,20 @@ Bool aiShouldMass( Real waitingThreat, Real enemyVisibleThreat, Real massFractio
 	*/
 Real aiScoutScore( UnsignedInt now, UnsignedInt lastSeenFrame, Real distance, UnsignedInt freshFrames );
 
+/** The odds that any one start position nobody has looked at yet is an enemy's, given how many
+	* enemies are still unaccounted for.  1v3 on an eight-position map: three enemies over the seven
+	* positions that are not mine, so 3/7 each.  Cross an empty one off and it is 3/6, then 3/5 - the
+	* remaining ones get likelier with every empty answer, which is the whole reason to ask.
+	*
+	* Find one instead and it accounts for itself: two left over five.
+	*
+	* It reaches 1.0 when there are as many enemies left to place as positions left to look at, and
+	* that is the case worth having the arithmetic for - walking there confirms something already
+	* known, so the AI can stop searching and spend the trip on what is actually standing there.  A
+	* two-player map is that case at its first step: one enemy, one position, 1/1, known before the
+	* scout is even built. */
+Real aiStartOccupiedOdds( Int unlocatedEnemies, Int uncheckedPositions );
+
 /** How attractive an enemy player is to go after, as a cost - lower is better, and it is a squared
 	* distance with the other terms folded into it so the units stay comparable.
 	*

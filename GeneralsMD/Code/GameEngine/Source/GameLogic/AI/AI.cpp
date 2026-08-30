@@ -1110,6 +1110,18 @@ Real aiScoutScore( UnsignedInt now, UnsignedInt lastSeenFrame, Real distance, Un
 }
 
 //-------------------------------------------------------------------------------------------------
+Real aiStartOccupiedOdds( Int unlocatedEnemies, Int uncheckedPositions )
+{
+	if( unlocatedEnemies <= 0 || uncheckedPositions <= 0 )
+		return 0.0f;											// nobody left to find, or nowhere left to look
+
+	if( unlocatedEnemies >= uncheckedPositions )
+		return 1.0f;											// nowhere else for them to be: this is deduced, not guessed
+
+	return (Real)unlocatedEnemies / (Real)uncheckedPositions;
+}
+
+//-------------------------------------------------------------------------------------------------
 Real aiRoleMassFraction( AIRole role )
 {
 	switch( role )
