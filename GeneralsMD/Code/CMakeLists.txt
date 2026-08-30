@@ -497,7 +497,13 @@ add_custom_command(TARGET generals POST_BUILD
           ${CMAKE_CURRENT_SOURCE_DIR}/../Run/Data/INI/
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
           ${CMAKE_CURRENT_SOURCE_DIR}/Data/Patch.str
-          ${CMAKE_CURRENT_SOURCE_DIR}/../Run/Data/)
+          ${CMAKE_CURRENT_SOURCE_DIR}/../Run/Data/
+  # The startup splash.  WinMain loads it from a loose file next to the exe, so
+  # the fork's own artwork is a tracked master here rather than a hand-made file
+  # in gitignored Run/.
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          ${CMAKE_CURRENT_SOURCE_DIR}/Data/Install_Final.bmp
+          ${CMAKE_CURRENT_SOURCE_DIR}/../Run/)
 add_dependencies(generals d3d8to9)
 
 # ===========================================================================
