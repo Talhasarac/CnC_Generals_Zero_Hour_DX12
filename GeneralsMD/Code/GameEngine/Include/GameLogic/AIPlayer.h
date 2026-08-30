@@ -34,6 +34,7 @@
 #include "Common/GameMemory.h"
 #include "Common/Snapshot.h"
 #include "GameLogic/AI.h"			// AISkillLevel, AIRole and the difficulty profile the ladder reads
+#include "Common/GameCommon.h"		// MAX_PLAYER_COUNT, for the per-enemy scouting stamps
 
 enum { INVALID_SKILLSET_SELECTION = -1 };
 
@@ -262,7 +263,7 @@ protected:
 	Object *findScout(void);						///< a spare unit of ours that can do the touring, not already scouting
 	void queueScout(void);							///< ... or build the cheapest one that can
 	Bool scoutInQueue(void);						///< one is already on order
-	Bool nextScoutTarget(Int slot, Coord3D *pos);	///< the next enemy start position for this scout
+	Bool nextScoutTarget(Int slot, const Coord3D *from, Coord3D *pos);	///< the stalest enemy start position worth the walk
 
 	virtual void doBaseBuilding(void);
 	virtual void checkReadyTeams(void);
@@ -341,6 +342,7 @@ protected:
 	ObjectID	m_scoutID[ MAX_AI_SCOUTS ];	///< the units currently touring the map for us
 	Int				m_scoutTargetFor[ MAX_AI_SCOUTS ];	///< which start position each one is walking to
 	Int				m_scoutTimer;						///< frames until the next scouting check
+	UnsignedInt m_scoutSeenFrame[ MAX_PLAYER_COUNT ];	///< when each enemy start position was last looked at; 0 == never
 	Int				m_retreatTimer;					///< frames until the next look at how the fights are going
 	Int				m_expandTimer;					///< frames until the next look for somewhere to expand to
 

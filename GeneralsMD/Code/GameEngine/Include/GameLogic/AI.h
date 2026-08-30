@@ -261,6 +261,20 @@ Real aiRetreatRatio( Real myHealth, Real myPower, Real enemyHealth, Real enemyPo
 Bool aiShouldMass( Real waitingThreat, Real enemyVisibleThreat, Real massFraction,
 									 Bool timeExpired, Bool baseUnderAttack );
 
+/** How badly one place wants looking at, per step walked there.  A3's scouting is never a search -
+	* the start positions are public, the lobby shows them - so the question is not "where is he" but
+	* "whose picture is worth the walk", and the answer is the stalest one per unit of distance:
+	*
+	*     score = frames since we last looked there / distance to walk there
+	*
+	* lastSeenFrame 0 means never looked, which makes the age the whole match so far and puts those
+	* ahead of everything already seen - nearest first among them, since the distance still divides.
+	*
+	* A picture younger than freshFrames scores 0: the trip buys nothing, and not making it is the
+	* whole point.  So 0 means "do not go", not "go last".
+	*/
+Real aiScoutScore( UnsignedInt now, UnsignedInt lastSeenFrame, Real distance, UnsignedInt freshFrames );
+
 /** How attractive an enemy player is to go after, as a cost - lower is better, and it is a squared
 	* distance with the other terms folded into it so the units stay comparable.
 	*

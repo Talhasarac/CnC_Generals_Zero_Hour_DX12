@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   Runs a batch of headless skirmishes and reports the win rate.
 
@@ -27,6 +27,8 @@ param(
 	[int] $Players = 2,
 	# easy | medium | brutal (anything else is read as brutal by the game)
 	[string] $Difficulty = "brutal",
+	# rung for the odd-numbered slots; empty means the same as -Difficulty, so a rung plays itself
+	[string] $Difficulty2 = "",
 	# a match that has not been decided by here is a result in itself: the AI cannot finish
 	[int] $MaxFrames = 30000,
 	# names this batch's logs, so two batches can be compared afterwards
@@ -69,6 +71,8 @@ for ($i = 0; $i -lt $Runs; $i++) {
 		"-maxframes", $MaxFrames,
 		"-logPrefix", $prefix
 	)
+	# a second rung for the odd slots, so one rung can be played against another
+	if ($Difficulty2) { $args += "-aidiff2"; $args += $Difficulty2 }
 
 	Write-Host ("[{0,3}/{1}] seed {2} cells {3} ... " -f ($i + 1), $Runs, $i, $cells) -NoNewline
 	$sw = [Diagnostics.Stopwatch]::StartNew()
@@ -115,7 +119,7 @@ for ($i = 0; $i -lt $Runs; $i++) {
 
 # ---------------------------------------------------------------------------------------------
 Write-Host ""
-Write-Host "=== $Tag : $Runs matches, $Players players, $Difficulty, cap $MaxFrames frames ==="
+Write-Host "=== $Tag : $Runs matches, $Players players, $Difficulty$(if ($Difficulty2) { " vs " + $Difficulty2 }), cap $MaxFrames frames ==="
 
 $decided = @($rows | Where-Object { $_.Why -eq "decided" })
 Write-Host ("decided {0}/{1}   frame-limited {2}   failed {3}" -f
@@ -147,7 +151,7 @@ $summary = foreach ($p in $slotIds) {
 		AvgSpent = [math]::Round(($mine | Measure-Object Spent -Average).Average, 0)
 	}
 }
-$summary | Format-Table -AutoSize
+if ($summary) { $summary | Format-Table -AutoSize | Out-String | Write-Host }
 
 # the per-match detail, for whoever wants to look at one game rather than the average
 $csv = Join-Path $RunDir "$Tag-batch.csv"

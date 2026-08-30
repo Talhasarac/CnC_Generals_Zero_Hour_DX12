@@ -1197,15 +1197,23 @@ Int parseNoFPSLimit(char *args[], int num)
 	 instead of being paced against wall clock, audio is silenced, and the process quits by itself
 	 the moment the match is decided.  A window and a D3D device are still created - W3D reaches into
 	 drawables and the asset manager throughout, so a true null display is a much larger change than
-	 skipping the one draw call is worth.  Pair it with -autoskirmish and -observer for a soak run.
+	 skipping the one draw call is worth.  That window is forced windowed and tiny: nothing is ever
+	 drawn into it, and a fullscreen device would take the desktop's display mode away from whoever
+	 is using the machine while the batch runs.  -xres/-yres after -headless still win if a run
+	 wants a real back buffer.  Pair it with -autoskirmish and -observer for a soak run.
 
 	 Audio goes off because at several hundred logic frames a second the game hands the mixer a few
 	 thousand events a second that nobody will hear; -headless is for a machine, not a listener. */
+enum { HEADLESS_RESOLUTION = 100 };	// big enough for a legal back buffer, small enough to ignore
+
 Int parseHeadless(char *args[], int num)
 {
 	if (TheWritableGlobalData)
 	{
 		TheWritableGlobalData->m_headless = TRUE;
+		TheWritableGlobalData->m_windowed = TRUE;
+		TheWritableGlobalData->m_xResolution = HEADLESS_RESOLUTION;
+		TheWritableGlobalData->m_yResolution = HEADLESS_RESOLUTION;
 		TheWritableGlobalData->m_audioOn = FALSE;
 		TheWritableGlobalData->m_musicOn = FALSE;
 		TheWritableGlobalData->m_soundsOn = FALSE;

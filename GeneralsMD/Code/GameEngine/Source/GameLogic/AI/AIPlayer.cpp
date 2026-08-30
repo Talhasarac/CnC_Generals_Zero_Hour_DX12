@@ -176,8 +176,10 @@ m_role(AIROLE_AGGRESSIVE)
 {
 	for (Int scoutSlot = 0; scoutSlot < MAX_AI_SCOUTS; ++scoutSlot) {
 		m_scoutID[scoutSlot] = INVALID_ID;
-		// a different start position each, so two scouts do not walk the same lap together
-		m_scoutTargetFor[scoutSlot] = scoutSlot;
+		m_scoutTargetFor[scoutSlot] = -1;	// nothing looked at yet; the score picks the first target
+	}
+	for (Int startNdx = 0; startNdx < MAX_PLAYER_COUNT; ++startNdx) {
+		m_scoutSeenFrame[startNdx] = 0;		// 0 == never seen, which outranks every real age below
 	}
 
 	m_frameLastBuildingBuilt = TheGameLogic->getFrame();
@@ -4090,29 +4092,88 @@ void AIPlayer::queueScout( void )
 
 //----------------------------------------------------------------------------------------------------------
 /**
- * The next enemy start position to go and look at.  Everyone knows where the start positions are;
- * what is on them is what has to be found out.  The list is walked round and round, so the same one
- * unit that opens the map keeps it up to date for the rest of the match.
+ * Where this scout goes next.  Everyone already knows where the start positions are - the lobby
+ * shows them, and playerStartPosition reads the same public fact - so this is never a search for the
+ * enemy.  What has to be found out is what is standing on them *now*, which makes the question "whose
+ * picture is worth the walk", not "where is he".
+ *
+ * So the pick is a score, recomputed on every arrival, rather than a blind lap of the player list:
+ *
+ *     score = frames since we last looked there / distance to walk there
+ *
+ * A position nobody has looked at yet has never been stamped, so its age is the whole match so far
+ * and it beats everything that has been seen - and among those, the near one goes first.  Recomputing
+ * on arrival is what makes a scout drop a base the other scout has just refreshed and take the far
+ * one nobody has been to all match.
+ *
+ * And a picture younger than this rung's scouting interval is not worth the walk at all: the scout
+ * stays where it is - which keeps vision on what it can already see - and is asked again in a couple
+ * of seconds.  That is the trip this used to make for nothing, every lap, at 100% certainty.
  */
-Bool AIPlayer::nextScoutTarget( Int slot, Coord3D *pos )
+Bool AIPlayer::nextScoutTarget( Int slot, const Coord3D *from, Coord3D *pos )
 {
-	if( slot < 0 || slot >= MAX_AI_SCOUTS )
+	if( slot < 0 || slot >= MAX_AI_SCOUTS || from == NULL )
 		return FALSE;
 
-	const Int count = ThePlayerList->getPlayerCount();
-	for( Int tries = 0; tries < count; ++tries )
-	{
-		m_scoutTargetFor[ slot ] = (m_scoutTargetFor[ slot ] + 1) % count;
+	const UnsignedInt now = TheGameLogic->getFrame();
 
-		Player *p = ThePlayerList->getNthPlayer( m_scoutTargetFor[ slot ] );
+	//
+	// This is only ever called with an idle scout, so the last leg is over: whatever it was sent to
+	// look at, it has now looked at.  (A scout that went idle because its path failed stamps a look it
+	// never took - that costs one target staying stale for a cycle, not a wrong decision.)
+	//
+	if( m_scoutTargetFor[ slot ] >= 0 && m_scoutTargetFor[ slot ] < MAX_PLAYER_COUNT )
+		m_scoutSeenFrame[ m_scoutTargetFor[ slot ] ] = now;
+
+	const Int count = ThePlayerList->getPlayerCount();
+	const AIDifficultyProfile *profile = getSkillProfile();
+	const UnsignedInt fresh = REAL_TO_INT_CEIL( profile->m_scoutIntervalSeconds * LOGICFRAMES_PER_SECOND );
+
+	Int bestNdx = -1;
+	Real bestScore = 0.0f;
+	Coord3D bestPos;
+
+	for( Int i = 0; i < count && i < MAX_PLAYER_COUNT; ++i )
+	{
+		Player *p = ThePlayerList->getNthPlayer( i );
 		if( p == NULL || p == m_player )
 			continue;
 		if( m_player->getRelationship( p->getDefaultTeam() ) != ENEMIES )
 			continue;
-		if( playerStartPosition( m_scoutTargetFor[ slot ], pos ) )
-			return TRUE;
+
+		Bool taken = FALSE;
+		for( Int other = 0; other < MAX_AI_SCOUTS; ++other )
+			if( other != slot && m_scoutID[ other ] != INVALID_ID && m_scoutTargetFor[ other ] == i )
+				taken = TRUE;
+		if( taken )
+			continue;			// the other scout is already on its way there
+
+		Coord3D there;
+		if( !playerStartPosition( i, &there ) )
+			continue;
+
+		Real dx = there.x - from->x;
+		Real dy = there.y - from->y;
+		Real dist = (Real)sqrt( dx*dx + dy*dy );
+
+		Real score = aiScoutScore( now, m_scoutSeenFrame[ i ], dist, fresh );
+		if( score <= 0.0f )
+			continue;			// looked at recently enough that the walk would buy nothing
+
+		if( bestNdx < 0 || score > bestScore )
+		{
+			bestNdx = i;
+			bestScore = score;
+			bestPos = there;
+		}
 	}
-	return FALSE;
+
+	if( bestNdx < 0 )
+		return FALSE;			// everything worth seeing has been seen recently enough
+
+	m_scoutTargetFor[ slot ] = bestNdx;
+	*pos = bestPos;
+	return TRUE;
 }
 
 //----------------------------------------------------------------------------------------------------------
@@ -4166,7 +4227,7 @@ void AIPlayer::doScouting( void )
 			continue;			// still on its way
 
 		Coord3D goal;
-		if( nextScoutTarget( slot, &goal ) )
+		if( nextScoutTarget( slot, scout->getPosition(), &goal ) )
 		{
 			ai->aiMoveToPosition( &goal, CMD_FROM_AI );
 			ordered = TRUE;
@@ -4369,7 +4430,7 @@ void AIPlayer::xfer( Xfer *xfer )
 {
 
 	// version
-	XferVersion currentVersion = 3;		// 2: the scout   3: skill rung and role
+	XferVersion currentVersion = 4;		// 2: the scout   3: skill rung and role   4: the scouting stamps
 	XferVersion version = currentVersion;
 	xfer->xferVersion( &version, currentVersion );
 
@@ -4532,6 +4593,12 @@ void AIPlayer::xfer( Xfer *xfer )
 			xfer->xferObjectID( &m_scoutID[ scoutSlot ] );
 			xfer->xferInt( &m_scoutTargetFor[ scoutSlot ] );
 		}
+	}
+	// when each start position was last looked at, so a loaded game does not re-tour a map it knows
+	if( version >= 4 )
+	{
+		for( Int startNdx = 0; startNdx < MAX_PLAYER_COUNT; ++startNdx )
+			xfer->xferUnsignedInt( &m_scoutSeenFrame[ startNdx ] );
 	}
 	if( version >= 3 )
 	{

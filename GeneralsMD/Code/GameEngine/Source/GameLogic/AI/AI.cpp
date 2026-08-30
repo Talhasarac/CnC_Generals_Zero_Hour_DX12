@@ -1011,15 +1011,31 @@ Real AI::getAdjustedVisionRangeForObject(const Object *object, Int factorsToCons
 	*
 	* Read the columns down, not across: nothing here is money, build speed, vision or unit stats.
 	*
+	*
+	* Two columns were settled by measurement rather than by design, and both are worth reading
+	* before touching them again:
+	*
+	*  - retreatTtkRatio started at the roadmap's 0.5-0.85.  That is a force quitting a fight it is
+	*    very nearly winning, and it measured as one: turning retreat off entirely scored better
+	*    than 0.85 did.  These are the "clearly losing" numbers, and at 0.5 retreat is worth about a
+	*    win in twenty over having none.
+	*
+	*  - useInfluenceMapForAttackLane is FALSE everywhere, deliberately.  It works - it aims at the
+	*    enemy's most valuable visible cell instead of the middle of his base - and over 20 matches
+	*    it cost two wins.  Aiming at the money means walking past the army; the roadmap's actual
+	*    proposal is to enter where the *defence density* is lowest, which is the threat map rather
+	*    than the cash map, and that is the next thing to try.  getMostValuableVisibleLocation and
+	*    influenceMapAttackGoal are kept for it.
+	*
 	*                      scoutS maxSc react decis   cntr  mass  ttk   indiv team  infl  focus  save   harv  expand guard hoard */
 static const AIDifficultyProfile s_defaultSkillLadder[ AISKILL_COUNT ] =
 {
 	/* Easy      */ { 90.0f, 1, 15.0f, 10.0f,  0.00f, FALSE, 0.00f, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE,     0 },
-	/* Steady    */ { 75.0f, 1, 10.0f,  8.0f,  0.00f, FALSE, 0.50f, TRUE,  FALSE, FALSE, FALSE, FALSE, TRUE,  FALSE, FALSE,     0 },
-	/* Medium    */ { 60.0f, 1,  6.0f,  5.0f,  0.25f, FALSE, 0.60f, TRUE,  FALSE, FALSE, TRUE,  TRUE,  TRUE,  TRUE,  FALSE, 10000 },
-	/* Hard      */ { 45.0f, 2,  3.0f,  4.0f,  0.60f, FALSE, 0.70f, TRUE,  FALSE, FALSE, TRUE,  TRUE,  TRUE,  TRUE,  FALSE,  8000 },
-	/* Brutal    */ { 30.0f, 2,  1.0f,  2.0f,  0.85f, TRUE,  0.80f, TRUE,  TRUE,  FALSE, TRUE,  TRUE,  TRUE,  TRUE,  TRUE,   5000 },
-	/* Merciless */ { 25.0f, 2,  0.0f,  1.5f,  1.00f, TRUE,  0.85f, TRUE,  TRUE,  TRUE,  TRUE,  TRUE,  TRUE,  TRUE,  TRUE,   4000 }
+	/* Steady    */ { 75.0f, 1, 10.0f,  8.0f,  0.00f, FALSE, 0.30f, TRUE,  FALSE, FALSE, FALSE, FALSE, TRUE,  FALSE, FALSE,     0 },
+	/* Medium    */ { 60.0f, 1,  6.0f,  5.0f,  0.25f, FALSE, 0.35f, TRUE,  FALSE, FALSE, TRUE,  TRUE,  TRUE,  TRUE,  FALSE, 10000 },
+	/* Hard      */ { 45.0f, 2,  3.0f,  4.0f,  0.60f, FALSE, 0.40f, TRUE,  FALSE, FALSE, TRUE,  TRUE,  TRUE,  TRUE,  FALSE,  8000 },
+	/* Brutal    */ { 30.0f, 2,  1.0f,  2.0f,  0.85f, TRUE,  0.45f, TRUE,  TRUE,  FALSE, TRUE,  TRUE,  TRUE,  TRUE,  TRUE,   5000 },
+	/* Merciless */ { 25.0f, 2,  0.0f,  1.5f,  1.00f, TRUE,  0.50f, TRUE,  TRUE,  FALSE, TRUE,  TRUE,  TRUE,  TRUE,  TRUE,   4000 }
 };
 
 //-------------------------------------------------------------------------------------------------
@@ -1074,6 +1090,21 @@ Bool aiShouldMass( Real waitingThreat, Real enemyVisibleThreat, Real massFractio
 		return FALSE;
 
 	return waitingThreat < massFraction * enemyVisibleThreat;
+}
+
+//-------------------------------------------------------------------------------------------------
+Real aiScoutScore( UnsignedInt now, UnsignedInt lastSeenFrame, Real distance, UnsignedInt freshFrames )
+{
+	// 0 == never looked, and now - 0 is bigger than any real age, so those sort to the front by itself
+	const UnsignedInt age = now - lastSeenFrame;
+
+	if( lastSeenFrame != 0 && age < freshFrames )
+		return 0.0f;					// the picture is still good; the walk would buy nothing
+
+	if( distance < 1.0f )
+		distance = 1.0f;			// already standing on it - the best place to look from, and no divide by zero
+
+	return (Real)age / distance;
 }
 
 //-------------------------------------------------------------------------------------------------

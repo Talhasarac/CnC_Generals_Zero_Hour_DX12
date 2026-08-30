@@ -5817,6 +5817,9 @@ TEST(the_difficulty_ladder_climbs_in_every_direction_it_should)
 		CHECK( upper.m_retreatIndividualUnits >= lower.m_retreatIndividualUnits );
 		CHECK( upper.m_retreatTeams >= lower.m_retreatTeams );
 		CHECK( upper.m_useInfluenceMapForAttackLane >= lower.m_useInfluenceMapForAttackLane );
+		// ... and it is off at every rung today: it measured as two wins in twenty worse than
+		// aiming at the base. See the note on the table in AI.cpp before switching it back on.
+		CHECK( !upper.m_useInfluenceMapForAttackLane );
 		CHECK( upper.m_focusFire >= lower.m_focusFire );
 		CHECK( upper.m_savesSciencePoints >= lower.m_savesSciencePoints );
 		CHECK( upper.m_adaptiveHarvesters >= lower.m_adaptiveHarvesters );
@@ -5921,15 +5924,64 @@ TEST(retreat_ratio_measures_the_exchange_not_the_health_bar)
 	// already dead is not a fight to stay in either
 	CHECK_NEAR( 0.0f, aiRetreatRatio( 0.0f, 10.0f, 10.0f, 10.0f ), 0.0001f );
 
-	// and the ladder's thresholds mean what they say: at Brutal's 0.8 a force that lasts three
-	// quarters as long as the one it is fighting breaks off, and one that lasts as long does not
+	//
+	// The ladder's thresholds mean what they say, and where they sit was measured rather than
+	// guessed: at the roadmap's 0.8 a force quit a fight it was very nearly winning, and Merciless
+	// lost 4-7 to Easy - which does not know how to retreat and simply kept shooting.  They are
+	// "clearly losing" numbers now.  A force that lasts a third as long as the one it faces breaks
+	// off at every rung that retreats at all; one at parity never does.
+	//
 	TAiData data;
 	const Real brutal = data.m_skill[ AISKILL_BRUTAL ].m_retreatTtkRatio;
-	CHECK( aiRetreatRatio( 75.0f, 10.0f, 100.0f, 10.0f ) < brutal );
+	CHECK( aiRetreatRatio( 30.0f, 10.0f, 100.0f, 10.0f ) < brutal );
 	CHECK( aiRetreatRatio( 100.0f, 10.0f, 100.0f, 10.0f ) >= brutal );
+	CHECK( aiRetreatRatio( 75.0f, 10.0f, 100.0f, 10.0f ) >= brutal );		// three quarters is not lost
+	CHECK( brutal < 0.6f );		// anything above this is quitting fights it can win
 
 	// the bottom rung has no threshold at all: it never quits, which is what makes it Easy
 	CHECK_EQ( 0.0f, data.m_skill[ AISKILL_EASY ].m_retreatTtkRatio );
+}
+
+
+/** A3's scouting is a tour, not a search: the start positions are public - the lobby shows them and
+	 playerStartPosition reads the same fact - so the AI never has to find the enemy, only find out
+	 what is standing there now.  That turns the target pick into "whose picture is stalest per step
+	 walked", recomputed at every arrival, and it is what stopped the scout walking a blind lap of the
+	 player list past bases the other scout had just refreshed. */
+TEST(scouting_goes_where_the_picture_is_stalest_per_step)
+{
+	const UnsignedInt NOW = 30000;			// a bit over sixteen minutes in
+	const UnsignedInt FRESH = 60 * 30;	// a rung's scouting interval, in frames
+
+	// a place nobody has been to carries the largest age there is, so at equal walks it goes first
+	CHECK( aiScoutScore( NOW, 0, 1000.0f, FRESH ) > aiScoutScore( NOW, 1, 1000.0f, FRESH ) );
+	CHECK( aiScoutScore( NOW, 0, 1000.0f, FRESH ) > aiScoutScore( NOW, NOW - FRESH, 1000.0f, FRESH ) );
+
+	// ... and among places nobody has been to, the near one goes first
+	CHECK( aiScoutScore( NOW, 0, 100.0f, FRESH ) > aiScoutScore( NOW, 0, 4000.0f, FRESH ) );
+
+	// distance is a divisor, not a veto: a picture twenty times as old is worth twice the walk
+	CHECK( aiScoutScore( NOW, NOW - 20000, 1000.0f, FRESH ) > aiScoutScore( NOW, NOW - 5000, 500.0f, FRESH ) );
+
+	// and the trade goes the other way when the far one is only slightly staler - a scout that
+	// crosses the map for a marginally older picture is a scout that is never anywhere useful
+	CHECK( aiScoutScore( NOW, NOW - 4000, 4000.0f, FRESH ) < aiScoutScore( NOW, NOW - 3800, 100.0f, FRESH ) );
+
+	//
+	// The trip this used to make every lap for nothing: the round robin walked to the next start
+	// position whether or not it had just been there, at 100% certainty about where it was.  A
+	// picture younger than the rung's interval now scores zero, which the caller reads as "stay".
+	//
+	CHECK_EQ( 0.0f, aiScoutScore( NOW, NOW - 10, 100.0f, FRESH ) );
+	CHECK_EQ( 0.0f, aiScoutScore( NOW, NOW, 100.0f, FRESH ) );
+	CHECK( aiScoutScore( NOW, NOW - FRESH, 100.0f, FRESH ) > 0.0f );		// exactly due is due
+
+	// no rung is allowed to keep a scout parked for ever: every picture goes stale eventually
+	CHECK( aiScoutScore( NOW, 1, 100.0f, FRESH ) > 0.0f );
+
+	// standing on the thing does not divide by zero, and is still the best place to look from
+	CHECK( aiScoutScore( NOW, 0, 0.0f, FRESH ) > 0.0f );
+	CHECK_EQ( aiScoutScore( NOW, 0, 0.0f, FRESH ), aiScoutScore( NOW, 0, 1.0f, FRESH ) );
 }
 
 

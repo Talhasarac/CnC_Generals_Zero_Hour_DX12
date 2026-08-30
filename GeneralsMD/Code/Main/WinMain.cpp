@@ -958,6 +958,11 @@ Int APIENTRY WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance,
 				ApplicationIsWindowed=true;
 				ApplicationIsBorderless=true;
 			}
+			// same again: -headless draws nothing, so it has no business owning the display mode.
+			// The device is created windowed (parseHeadless) and dx8wrapper then shrinks this
+			// window to the headless resolution - it only has to be born windowed.
+			if (stricmp(token,"-headless")==0)
+				ApplicationIsWindowed=true;
 			token = nextParam(NULL, "\" ");	   
 		}
 
