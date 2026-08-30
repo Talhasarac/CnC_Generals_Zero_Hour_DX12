@@ -39,6 +39,7 @@
 #include "GameNetwork/GameDataMatch.h"
 #include "GameNetwork/LANAPI.h"
 #include "GameNetwork/LANAPICallbacks.h"
+#include "GameNetwork/NetworkUtil.h"
 #include "GameClient/MapUtil.h"
 
 void LANAPI::handleRequestLocations( LANMessage *msg, UnsignedInt senderIP )
@@ -295,7 +296,24 @@ void LANAPI::handleRequestJoin( LANMessage *msg, UnsignedInt senderIP )
 				}
 			}
 
-			// We're the host, so see if he has a duplicate name
+			// We're the host, and the name he sends is his own choosing.  It ends up in the game
+			// state string the lobby passes around, which is parsed on commas, colons and
+			// semicolons - so a name holding one of those rewrites everyone's idea of who is in
+			// the room.  Control characters and lone surrogates do their own damage in a text
+			// field, and a name of nothing but spaces looks like an empty seat.
+			if (canJoin && !IsUsablePlayerName(msg->name))
+			{
+				// deny as a duplicate name: the client already knows how to show that one
+				reply.LANMessageType = LANMessage::MSG_JOIN_DENY;
+				reply.GameNotJoined.reason = LANAPIInterface::RET_DUPLICATE_NAME;
+				reply.GameNotJoined.gameIP = m_localIP;
+				reply.GameNotJoined.playerIP = senderIP;
+				canJoin = false;
+
+				DEBUG_LOG(("LANAPI::handleRequestJoin - join denied, the name holds characters a name may not.\n"));
+			}
+
+			// Then see if he has a duplicate name
 			for (player = 0; canJoin && player<MAX_SLOTS; ++player)
 			{
 				LANGameSlot *slot = m_currentGame->getLANSlot(player);
@@ -313,53 +331,35 @@ void LANAPI::handleRequestJoin( LANMessage *msg, UnsignedInt senderIP )
 				}
 			}
 
-			// See if there's room
-			// First get the number of players currently in the room.
-			Int numPlayers = 0;
-			for (player = 0; player < MAX_SLOTS; ++player)
+			// See if there's room.  An open slot is room: the host is the one who opens and closes
+			// them, and the map's own number of starting positions used to overrule that - so a
+			// four position map turned away the fifth player even when the host had left a seat
+			// open for him, and the slot he was refused stayed open on everyone's screen.
+			for (player = 0; canJoin && player<MAX_SLOTS; ++player)
 			{
-				if (m_currentGame->getLANSlot(player)->isOccupied()
-					&& !(m_currentGame->getLANSlot(player)->getPlayerTemplate() == PLAYERTEMPLATE_OBSERVER))
+				if (m_currentGame->getLANSlot(player)->isOpen())
 				{
-					++numPlayers;
-				}
-			}
-			
-			// now get the number of starting spots on the map.
-			Int numStartingSpots = MAX_SLOTS;
-			const MapMetaData *md = TheMapCache->findMap(m_currentGame->getMap());
-			if (md != NULL)
-			{
-				numStartingSpots = md->m_numPlayers;
-			}
+					// OK, add him in.
+					reply.LANMessageType = LANMessage::MSG_JOIN_ACCEPT;
+					wcsncpy(reply.GameJoined.gameName, m_currentGame->getName().str(), g_lanGameNameLength);
+					reply.GameJoined.gameName[g_lanGameNameLength] = 0;
+					reply.GameJoined.slotPosition = player;
+					reply.GameJoined.gameIP = m_localIP;
+					reply.GameJoined.playerIP = senderIP;
 
-			if (numPlayers < numStartingSpots) {
-				for (player = 0; canJoin && player<MAX_SLOTS; ++player)
-				{
-					if (m_currentGame->getLANSlot(player)->isOpen())
-					{
-						// OK, add him in.
-						reply.LANMessageType = LANMessage::MSG_JOIN_ACCEPT;
-						wcsncpy(reply.GameJoined.gameName, m_currentGame->getName().str(), g_lanGameNameLength);
-						reply.GameJoined.gameName[g_lanGameNameLength] = 0;
-						reply.GameJoined.slotPosition = player;
-						reply.GameJoined.gameIP = m_localIP;
-						reply.GameJoined.playerIP = senderIP;
+					LANGameSlot newSlot;
+					newSlot.setState(SLOT_PLAYER, UnicodeString(msg->name));
+					newSlot.setIP(senderIP);
+					newSlot.setPort(NETWORK_BASE_PORT_NUMBER);
+					newSlot.setLastHeard(timeGetTime());
+					newSlot.setSerial(msg->GameToJoin.serial);
+					m_currentGame->setSlot(player,newSlot);
+					DEBUG_LOG(("LANAPI::handleRequestJoin - added player %ls at ip 0x%08x to the game\n", msg->name, senderIP));
 
-						LANGameSlot newSlot;
-						newSlot.setState(SLOT_PLAYER, UnicodeString(msg->name));
-						newSlot.setIP(senderIP);
-						newSlot.setPort(NETWORK_BASE_PORT_NUMBER);
-						newSlot.setLastHeard(timeGetTime());
-						newSlot.setSerial(msg->GameToJoin.serial);
-						m_currentGame->setSlot(player,newSlot);
-						DEBUG_LOG(("LANAPI::handleRequestJoin - added player %ls at ip 0x%08x to the game\n", msg->name, senderIP));
+					OnPlayerJoin(player, UnicodeString(msg->name));
+					responseIP = 0;
 
-						OnPlayerJoin(player, UnicodeString(msg->name));
-						responseIP = 0;
-
-						break;
-					}
+					break;
 				}
 			}
 			if (canJoin && player == MAX_SLOTS)

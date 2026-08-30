@@ -4424,6 +4424,35 @@ TEST(a_transferred_file_has_to_be_what_its_name_says_it_is)
 	CHECK( !IsValidTransferFileContent( "maps\\foo\\foo.tga", text, 8 ) );
 }
 
+/* The name a joining player sends goes into the game state string the lobby passes around, and that
+	 string is parsed on commas, colons and semicolons - so a name holding one of those rewrites
+	 everyone's idea of who is in the room.  It was taken exactly as sent. */
+TEST(a_player_name_from_another_machine_cannot_rewrite_the_lobby)
+{
+	CHECK( IsUsablePlayerName( L"Olcay" ) );
+	CHECK( IsUsablePlayerName( L"[GLA] scud" ) );
+	CHECK( IsUsablePlayerName( L"\x00fcmit" ) );				// accents and non-latin are fine
+
+	// the three separators the game state string is cut on
+	CHECK( !IsUsablePlayerName( L"a,b" ) );
+	CHECK( !IsUsablePlayerName( L"a:b" ) );
+	CHECK( !IsUsablePlayerName( L"a;b" ) );
+
+	// control characters, in both bands, and the line separators
+	CHECK( !IsUsablePlayerName( L"a\nb" ) );
+	CHECK( !IsUsablePlayerName( L"a\x0085" "b" ) );
+	CHECK( !IsUsablePlayerName( L"a\x2028" "b" ) );
+
+	// half a surrogate pair is not a character
+	CHECK( !IsUsablePlayerName( L"a\xd800" "b" ) );
+
+	// a name has to have something in it
+	CHECK( !IsUsablePlayerName( L"" ) );
+	CHECK( !IsUsablePlayerName( L"   " ) );
+	CHECK( !IsUsablePlayerName( L"\x3000\x00a0" ) );			// ideographic and no-break spaces
+	CHECK( !IsUsablePlayerName( NULL ) );
+}
+
 TEST(a_transferred_name_cannot_climb_out_of_its_directory)
 {
 	CHECK( IsSafeTransferPath( "maps\\foo\\foo.map" ) );

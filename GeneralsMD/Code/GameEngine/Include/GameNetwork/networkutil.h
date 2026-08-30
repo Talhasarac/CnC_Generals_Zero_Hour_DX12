@@ -53,6 +53,11 @@ AsciiString GetAsciiNetCommandType(NetCommandType type);
 Bool IsSafeTransferPath(const AsciiString &filePath);
 Bool IsValidTransferFileContent(const AsciiString &filePath, const UnsignedByte *data, UnsignedInt dataSize);
 
+/* Whether a player name another machine sends us may be shown and put in the lobby's game state
+   string.  Refuses the separators that string is parsed on, control characters, lone surrogates,
+   and a name made of nothing but spaces. */
+Bool IsUsablePlayerName(const WideChar *playerName);
+
 // Command ids are sixteen bits wide and wrap.  Ordering them with < or > puts every command
 // issued after a wrap in front of every command issued before it, so the answer comes from the
 // distance between them instead: newVal is newer when it sits within half the id space ahead of

@@ -432,3 +432,49 @@ Bool IsValidTransferFileContent(const AsciiString &filePath, const UnsignedByte 
 
 	return TRUE;
 }
+
+//----------------------------------------------------------------------------------------------
+// A player name another machine sends us.
+//
+// The name goes into the game state string the lobby passes around, and that string is parsed on
+// commas, colons and semicolons - so a name holding one of those rewrites everyone's idea of who
+// is in the room.  Control characters and half a surrogate pair do their own damage in a text
+// field, and a name made only of spaces reads as an empty seat.
+//----------------------------------------------------------------------------------------------
+
+static Bool isCharacterANameMayNotHold(const WideChar c)
+{
+	return c < L' '														// C0 controls
+		|| c == L',' || c == L':' || c == L';'							// the game state separators
+		|| (c >= L'\x007f' && c <= L'\x009f')							// DEL and the C1 controls
+		|| c == L'\x2028' || c == L'\x2029'								// line and paragraph separators
+		|| (c >= L'\xd800' && c <= L'\xdfff');							// lone surrogates
+}
+
+static Bool isSpaceCharacter(const WideChar c)
+{
+	return c == L' '
+		|| c == L'\xa0'													// no-break space
+		|| c == L'\x1680'												// ogham space mark
+		|| (c >= L'\x2000' && c <= L'\x200a')							// en/em, figure, thin, hair
+		|| c == L'\x202f'												// narrow no-break space
+		|| c == L'\x205f'												// medium mathematical space
+		|| c == L'\x3000';												// ideographic space
+}
+
+Bool IsUsablePlayerName(const WideChar *playerName)
+{
+	if (playerName == NULL)
+		return FALSE;
+
+	Bool sawSomethingReadable = FALSE;
+	for (const WideChar *c = playerName; *c; ++c)
+	{
+		if (isCharacterANameMayNotHold(*c))
+			return FALSE;
+		if (!isSpaceCharacter(*c))
+			sawSomethingReadable = TRUE;
+	}
+
+	return sawSomethingReadable;
+}
