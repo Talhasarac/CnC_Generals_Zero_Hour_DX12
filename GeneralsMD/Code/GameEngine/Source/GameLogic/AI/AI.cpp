@@ -1101,6 +1101,20 @@ Real aiEnemyCost( Real distSqr, Bool crippled, Bool alreadyTargetedByAnotherAI,
 	return (cost < 0.0f) ? 0.0f : cost;
 }
 
+//-------------------------------------------------------------------------------------------------
+Int aiHoardAdjustedDelay( Int frames, Int money, Int hoardAt )
+{
+	if( hoardAt <= 0 || money <= hoardAt || frames <= 1 )
+		return frames;
+
+	Real scale = INT_TO_REAL( hoardAt ) / INT_TO_REAL( money );		// 2x the cash -> half the wait
+	if( scale < 0.25f )
+		scale = 0.25f;																							// and no faster than four times
+
+	Int out = REAL_TO_INT_CEIL( INT_TO_REAL( frames ) * scale );
+	return (out < 1) ? 1 : out;
+}
+
 Real aiCounterScore( const AIEnemyComposition &enemy, const AITeamCapability &team )
 {
 	Real score = 0.0f;

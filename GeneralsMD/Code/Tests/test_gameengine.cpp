@@ -6012,3 +6012,38 @@ TEST(enemy_choice_prefers_the_weak_the_rich_and_the_near)
 	CHECK( aiEnemyCost( CLOSE_BY, FALSE, FALSE, FALSE, -5.0f ) <=
 				 aiEnemyCost( CLOSE_BY, FALSE, FALSE, FALSE, 0.0f ) );
 }
+
+
+/** B6: the classic AI disease is sitting on twenty thousand cash while trickling out one unit at a
+	 time.  The existing delays move with wealth, but only one step - past the Wealthy threshold a
+	 hoard of any size buys the same discount.  This is the second step, and it is a decision to
+	 spend faster rather than a production multiplier, which is the line D10 draws. */
+TEST(a_cash_hoard_shortens_the_wait_but_only_so_far)
+{
+	// under the threshold nothing changes at all
+	CHECK_EQ( 300, aiHoardAdjustedDelay( 300, 4000, 5000 ) );
+	CHECK_EQ( 300, aiHoardAdjustedDelay( 300, 5000, 5000 ) );
+
+	// twice the threshold, half the wait
+	CHECK_EQ( 150, aiHoardAdjustedDelay( 300, 10000, 5000 ) );
+
+	// and it stops at four times, however big the pile gets
+	CHECK_EQ( 75, aiHoardAdjustedDelay( 300, 20000, 5000 ) );
+	CHECK_EQ( 75, aiHoardAdjustedDelay( 300, 200000, 5000 ) );
+	CHECK_EQ( 75, aiHoardAdjustedDelay( 300, 2000000, 5000 ) );
+
+	// no threshold is the bottom two rungs, and is EA's behaviour: never hurry
+	CHECK_EQ( 300, aiHoardAdjustedDelay( 300, 999999, 0 ) );
+
+	// a delay never goes to zero, or the AI would try to build on every frame
+	CHECK( aiHoardAdjustedDelay( 1, 999999, 100 ) >= 1 );
+	CHECK( aiHoardAdjustedDelay( 2, 999999, 100 ) >= 1 );
+
+	// the ladder switches it on at Medium and tightens it as you climb
+	TAiData data;
+	CHECK_EQ( 0, data.m_skill[ AISKILL_EASY ].m_cashHoardThreshold );
+	CHECK_EQ( 0, data.m_skill[ AISKILL_STEADY ].m_cashHoardThreshold );
+	CHECK( data.m_skill[ AISKILL_MEDIUM ].m_cashHoardThreshold > 0 );
+	CHECK( data.m_skill[ AISKILL_MERCILESS ].m_cashHoardThreshold <
+				 data.m_skill[ AISKILL_MEDIUM ].m_cashHoardThreshold );
+}

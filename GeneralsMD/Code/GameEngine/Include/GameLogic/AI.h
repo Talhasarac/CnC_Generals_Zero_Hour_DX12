@@ -268,6 +268,14 @@ Bool aiShouldMass( Real waitingThreat, Real enemyVisibleThreat, Real massFractio
 Real aiEnemyCost( Real distSqr, Bool crippled, Bool alreadyTargetedByAnotherAI,
 									Bool isAttackingMe, Real economyShare );
 
+/** Shorten a build delay when the money is piling up.  The classic AI disease is sitting on twenty
+	* thousand cash while trickling one unit out at a time; the delays already move with wealth
+	* (TAiData's Wealthy/Poor rates), but only one step, and a hoard walks straight past it.
+	*
+	* Twice the threshold halves the delay, four times quarters it, and it stops there - this is a
+	* decision to spend faster, not a production multiplier, and D10 draws that line. */
+Int aiHoardAdjustedDelay( Int frames, Int money, Int hoardAt );
+
 class TAiData : public Snapshot
 {
 public:

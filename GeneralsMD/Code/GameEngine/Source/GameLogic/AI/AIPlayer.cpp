@@ -329,6 +329,32 @@ void AIPlayer::checkForSupplyCenter( BuildListInfo *info, Object *bldg )
 			}
 			resInfo = resInfo->m_next;
 		}
+		//
+		// Adaptive harvesters (B6): the three INI numbers do not know how much supply is actually
+		// parked next to this centre.  One extra gatherer per warehouse beyond the first within the
+		// safe radius, capped at two extra - a centre with three piles beside it can keep more
+		// trucks busy, and one with a single pile cannot.
+		//
+		if( getSkillProfile()->m_adaptiveHarvesters )
+		{
+			Int warehouses = 0;
+			PartitionFilterAcceptByKindOf supplyOnly( MAKE_KINDOF_MASK( KINDOF_SUPPLY_SOURCE ), KINDOFMASK_NONE );
+			PartitionFilterAlive filterAlive;
+			PartitionFilter *filters[] = { &supplyOnly, &filterAlive, 0 };
+
+			MemoryPoolObjectHolder hold;
+			SimpleObjectIterator *nearby = ThePartitionManager->iterateObjectsInRange(
+					bldg->getPosition(), TheAI->getAiData()->m_supplyCenterSafeRadius, FROM_CENTER_2D, filters );
+			hold.hold( nearby );
+			for( Object *w = nearby->first(); w; w = nearby->next() )
+				++warehouses;
+
+			Int extra = warehouses - 1;
+			if( extra < 0 ) extra = 0;
+			if( extra > 2 ) extra = 2;
+			desiredGatherers += extra;
+		}
+
 		info->setSupplyBuilding(true);
 		info->setCurrentGatherers(-1);
 		info->setDesiredGatherers(desiredGatherers+1); // get a freebie with the supply depots.
@@ -3054,13 +3080,15 @@ void AIPlayer::queueUnits( void )
  */
 Int AIPlayer::computeStructureDelay( void )
 {
-	return computeBuildDelay( TheAI->getAiData()->m_structureSeconds,
+	return aiHoardAdjustedDelay( computeBuildDelay( TheAI->getAiData()->m_structureSeconds,
 													  m_player->getMoney()->countMoney(),
 													  TheAI->getAiData()->m_resourcesPoor,
 													  TheAI->getAiData()->m_resourcesWealthy,
 													  TheAI->getAiData()->m_structuresPoorMod,
 													  TheAI->getAiData()->m_structuresWealthyMod,
-													  getBuildRateScale() );
+													  getBuildRateScale() ),
+															 m_player->getMoney()->countMoney(),
+															 getSkillProfile()->m_cashHoardThreshold );
 }
 
 //----------------------------------------------------------------------------------------------------------
@@ -3100,13 +3128,15 @@ Int AIPlayer::computeBuildDelay( Real seconds, Int money, Int poorAt, Int wealth
  */
 Int AIPlayer::computeTeamDelay( void )
 {
-	return computeBuildDelay( (Real)m_teamSeconds,
+	return aiHoardAdjustedDelay( computeBuildDelay( (Real)m_teamSeconds,
 													  m_player->getMoney()->countMoney(),
 													  TheAI->getAiData()->m_resourcesPoor,
 													  TheAI->getAiData()->m_resourcesWealthy,
 													  TheAI->getAiData()->m_teamPoorMod,
 													  TheAI->getAiData()->m_teamWealthyMod,
-													  getBuildRateScale() );
+													  getBuildRateScale() ),
+															 m_player->getMoney()->countMoney(),
+															 getSkillProfile()->m_cashHoardThreshold );
 }
 
 //----------------------------------------------------------------------------------------------------------
