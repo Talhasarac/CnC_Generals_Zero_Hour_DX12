@@ -46,7 +46,8 @@
 //-------------------------------------------------------------------------------------------------
 ProjectileStreamUpdate::ProjectileStreamUpdate( Thing *thing, const ModuleData* moduleData ) : UpdateModule( thing, moduleData )
 {
-	ObjectID m_projectileIDs[MAX_PROJECTILE_STREAM];
+	// this declared a *local* array of the same name and filled that in, so the member it was meant
+	// to clear was left holding whatever the pool block had in it
 	for( Int index = 0; index < MAX_PROJECTILE_STREAM; index++ )
 	{
 		m_projectileIDs[index] = INVALID_ID;

@@ -261,7 +261,9 @@ static void doSetRallyPoint( Object *obj, const Coord3D& pos )
 
 static Object * getSingleObjectFromSelection(const AIGroup *currentlySelectedGroup)
 {
-	if( currentlySelectedGroup )
+	// an empty group is not the same as no group: the iterator below was taken from an empty
+	// vector and dereferenced
+	if( currentlySelectedGroup && !currentlySelectedGroup->isEmpty() )
 	{
 		const VecObjectID& selectedObjects = currentlySelectedGroup->getAllIDs();
 		DEBUG_ASSERTCRASH(selectedObjects.size() == 1, ("Trying to get single object from multiple selection!"));

@@ -391,6 +391,9 @@ found and fixed â€” EA's own, not port damage.**
 - A unit that kills itself survives its own turn now.
 - Sniping an empty bike, formation moves and hacker evasion no longer crash.
 - An order naming a player who is not there is dropped instead of crashing.
+- An order that names one selected unit when nothing is selected is dropped too, instead of reading off the end of an empty list.
+- Subdual weapons work on a unit that is being healed. Healing could drive the subdual meter below zero and it stayed there, so the next stun gun had to fill a hole before it did anything.
+- A stream of projectiles remembers which ones it fired. The list was cleared into a local of the same name, so the real one started as whatever was in the recycled memory.
 - Something going wrong now writes a readable crash report.
 
 ## Long orders stopped hitching

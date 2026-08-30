@@ -470,7 +470,7 @@ Int AIGroup::getCount( void )
 /**
  * Returns true if the group has no members
  */
-Bool AIGroup::isEmpty( void )
+Bool AIGroup::isEmpty( void ) const
 {
 	return m_memberList.empty();
 }

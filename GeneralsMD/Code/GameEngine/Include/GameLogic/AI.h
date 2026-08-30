@@ -1178,7 +1178,7 @@ public:
 	void computeIndividualDestination( Coord3D *dest, const Coord3D *groupDest, 
 		Object *obj, const Coord3D *center, Bool isFormation ); ///< compute destination of individual object, based on group destination
 	Int getCount( void );										///< return the number of objects in the group
-	Bool isEmpty( void );										///< returns true if the group has no members
+	Bool isEmpty( void ) const;								///< returns true if the group has no members
 	void queueUpgrade( const UpgradeTemplate *upgrade );	///< queue an upgrade
 
 	void add( Object *obj );								///< add object to group

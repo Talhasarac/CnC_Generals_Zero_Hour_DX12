@@ -1297,7 +1297,12 @@ void ActiveBody::internalAddSubdualDamage( Real delta )
 	const ActiveBodyModuleData *data = getActiveBodyModuleData();
 
 	m_currentSubdualDamage += delta;
+	// The cap was applied at the top and nothing held the bottom, so healing that outruns weak
+	// subdual damage drives this below zero - and it stays there, building up a buffer the next
+	// subduing weapon has to fill before it does anything at all.
 	m_currentSubdualDamage = min(m_currentSubdualDamage, data->m_subdualDamageCap);
+	if (m_currentSubdualDamage < 0.0f)
+		m_currentSubdualDamage = 0.0f;
 }
 
 //-------------------------------------------------------------------------------------------------

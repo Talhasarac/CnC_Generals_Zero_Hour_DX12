@@ -4176,7 +4176,9 @@ void Object::xfer( Xfer *xfer )
 	Drawable *draw = getDrawable();
 	DrawableID drawableID = draw ? draw->getID() : INVALID_DRAWABLE_ID;
 	xfer->xferDrawableID( &drawableID );
-	if( xfer->getXferMode() == XFER_LOAD )
+	// the line above already allows for there being no drawable; this one did not, so an object
+	// without one - which is every object in a headless run - faulted on load
+	if( draw && xfer->getXferMode() == XFER_LOAD )
 	{
 
 		// change the ID of the drawable attached to be the same ID as it was when it was saved
