@@ -29,6 +29,12 @@ found and fixed â€” EA's own, not port damage.**
 - It scouts. There was no such thing as scouting in the computer opponent - it never needed to look, because it could already see everything. One cheap unit now tours the enemy start positions and keeps going round for the rest of the match, replaced out of spare change when it dies. Every difficulty scouts; an opponent that never looks reads as broken, not as easy.
 - Nor does it read your base off the map. Where your base is, what it is worth, which supply dock to expand to and where to aim a superweapon all came off a walk of your object list, in the shroud, from the first second of the match. The computer now only counts what it can see, plus the buildings it has already found - buildings do not walk away. Before it has scouted you, all it knows is where you started, which is on the map preview anyway.
 
+## Generals powers the computer actually meant to buy
+
+- It spent every promotion point the moment it had one, on whatever in its list happened to be cheap enough. The strong three-point ability at the end of the list was never reached, because the points were always already gone.
+- From Medium up it saves. If the next thing in its own list is only out of reach on points, it waits for them instead of buying filler.
+- Which list it draws from now follows its personality, so the powers coming at you tell you which kind of opponent you are facing.
+
 ## The computer comes in where you are thin
 
 - The game has kept a value-and-danger map of every square of the battlefield, per player, since 2003. It has a query interface and even a debug view. Nothing in the computer opponent had ever read it - its only users were two map-script actions almost nobody used.

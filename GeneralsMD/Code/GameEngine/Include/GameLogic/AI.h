@@ -189,6 +189,7 @@ struct AIDifficultyProfile
 	Bool	m_retreatTeams;									///< ... and break off the whole team when the fight is lost
 	Bool	m_useInfluenceMapForAttackLane;
 	Bool	m_focusFire;
+	Bool	m_savesSciencePoints;				///< wait for the next power in the set instead of buying filler
 
 	// Economy: decisions only, never multipliers
 	Bool	m_adaptiveHarvesters;

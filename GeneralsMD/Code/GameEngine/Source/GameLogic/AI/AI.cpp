@@ -1011,15 +1011,15 @@ Real AI::getAdjustedVisionRangeForObject(const Object *object, Int factorsToCons
 	*
 	* Read the columns down, not across: nothing here is money, build speed, vision or unit stats.
 	*
-	*                      scoutS maxSc react decis   cntr  mass  ttk   indiv team  infl  focus   harv  expand guard hoard */
+	*                      scoutS maxSc react decis   cntr  mass  ttk   indiv team  infl  focus  save   harv  expand guard hoard */
 static const AIDifficultyProfile s_defaultSkillLadder[ AISKILL_COUNT ] =
 {
-	/* Easy      */ { 90.0f, 1, 15.0f, 10.0f,  0.00f, FALSE, 0.00f, FALSE, FALSE, FALSE, FALSE,  FALSE, FALSE, FALSE,     0 },
-	/* Steady    */ { 75.0f, 1, 10.0f,  8.0f,  0.00f, FALSE, 0.50f, TRUE,  FALSE, FALSE, FALSE,  TRUE,  FALSE, FALSE,     0 },
-	/* Medium    */ { 60.0f, 1,  6.0f,  5.0f,  0.25f, FALSE, 0.60f, TRUE,  FALSE, FALSE, TRUE,   TRUE,  TRUE,  FALSE, 10000 },
-	/* Hard      */ { 45.0f, 2,  3.0f,  4.0f,  0.60f, FALSE, 0.70f, TRUE,  FALSE, FALSE, TRUE,   TRUE,  TRUE,  FALSE,  8000 },
-	/* Brutal    */ { 30.0f, 2,  1.0f,  2.0f,  0.85f, TRUE,  0.80f, TRUE,  TRUE,  FALSE, TRUE,   TRUE,  TRUE,  TRUE,   5000 },
-	/* Merciless */ { 25.0f, 2,  0.0f,  1.5f,  1.00f, TRUE,  0.85f, TRUE,  TRUE,  TRUE,  TRUE,   TRUE,  TRUE,  TRUE,   4000 }
+	/* Easy      */ { 90.0f, 1, 15.0f, 10.0f,  0.00f, FALSE, 0.00f, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE,     0 },
+	/* Steady    */ { 75.0f, 1, 10.0f,  8.0f,  0.00f, FALSE, 0.50f, TRUE,  FALSE, FALSE, FALSE, FALSE, TRUE,  FALSE, FALSE,     0 },
+	/* Medium    */ { 60.0f, 1,  6.0f,  5.0f,  0.25f, FALSE, 0.60f, TRUE,  FALSE, FALSE, TRUE,  TRUE,  TRUE,  TRUE,  FALSE, 10000 },
+	/* Hard      */ { 45.0f, 2,  3.0f,  4.0f,  0.60f, FALSE, 0.70f, TRUE,  FALSE, FALSE, TRUE,  TRUE,  TRUE,  TRUE,  FALSE,  8000 },
+	/* Brutal    */ { 30.0f, 2,  1.0f,  2.0f,  0.85f, TRUE,  0.80f, TRUE,  TRUE,  FALSE, TRUE,  TRUE,  TRUE,  TRUE,  TRUE,   5000 },
+	/* Merciless */ { 25.0f, 2,  0.0f,  1.5f,  1.00f, TRUE,  0.85f, TRUE,  TRUE,  TRUE,  TRUE,  TRUE,  TRUE,  TRUE,  TRUE,   4000 }
 };
 
 //-------------------------------------------------------------------------------------------------
@@ -1164,6 +1164,7 @@ void AI::parseSkillLevel(INI *ini, void *instance, void* /*store*/, const void* 
 		{ "RetreatTeams",							INI::parseBool, NULL, offsetof( AIDifficultyProfile, m_retreatTeams ) },
 		{ "UseInfluenceMapForAttackLane", INI::parseBool, NULL, offsetof( AIDifficultyProfile, m_useInfluenceMapForAttackLane ) },
 		{ "FocusFire",								INI::parseBool, NULL, offsetof( AIDifficultyProfile, m_focusFire ) },
+		{ "SavesSciencePoints",				INI::parseBool, NULL, offsetof( AIDifficultyProfile, m_savesSciencePoints ) },
 		{ "AdaptiveHarvesters",				INI::parseBool, NULL, offsetof( AIDifficultyProfile, m_adaptiveHarvesters ) },
 		{ "SelfTriggeredExpansion",		INI::parseBool, NULL, offsetof( AIDifficultyProfile, m_selfTriggeredExpansion ) },
 		{ "DefendExpansions",					INI::parseBool, NULL, offsetof( AIDifficultyProfile, m_defendExpansions ) },

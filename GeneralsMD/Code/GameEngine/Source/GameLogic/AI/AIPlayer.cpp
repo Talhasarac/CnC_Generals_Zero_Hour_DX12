@@ -3462,7 +3462,21 @@ void AIPlayer::doUpgradesAndSkills( void )
 			}
 		}
 		if (isSkirmishAI()) {
-			m_skillsetSelector = GameLogicRandomValue(0, limit);
+			//
+			// Split the designers' skill sets between the two roles rather than rolling across all
+			// of them (D8).  This makes no claim about which set is which - only that an aggressive
+			// AI and a defensive one draw from different halves, so the powers you see coming tell
+			// you which one you are facing.  Still a roll, so repeat matches still differ.
+			//
+			if (limit > 0) {
+				const Int half = limit / 2;
+				if (m_role == AIROLE_AGGRESSIVE)
+					m_skillsetSelector = GameLogicRandomValue(0, half);
+				else
+					m_skillsetSelector = GameLogicRandomValue(half, limit);
+			} else {
+				m_skillsetSelector = 0;
+			}
 		} else {
 			m_skillsetSelector = 0; // Non-skirmish default to 0.  jba.
 		}
@@ -3479,9 +3493,25 @@ void AIPlayer::doUpgradesAndSkills( void )
 			case 3: skillset = &sideInfo->m_skillSet4; break;
 			case 4: skillset = &sideInfo->m_skillSet5; break;
 		}
+		const Bool saves = getSkillProfile()->m_savesSciencePoints;
 		Int i;
 		for (i=0; i<skillset->m_numSkills; i++) {
 			ScienceType science = skillset->m_skills[i];
+
+			//
+			// Saving up (B5).  EA walked the whole set and bought the first thing it could afford,
+			// so a point went on filler while the ability the set is actually built around sat two
+			// points away for ever.  If the next thing in the designer's own order is only out of
+			// reach on points, stop here and keep them; anything else - already owned, or blocked
+			// by a rank we have not reached - is skipped as before.
+			//
+			if (saves && !m_player->hasScience(science)) {
+				const Int cost = TheScienceStore->getSciencePurchaseCost(science);
+				if (cost > m_player->getSciencePurchasePoints()) {
+					break;
+				}
+			}
+
 			if (m_player->isCapableOfPurchasingScience(science)) {
 				if (m_player->attemptToPurchaseScience(science)) {
 						AsciiString msg = TheNameKeyGenerator->keyToName(m_player->getPlayerNameKey());

@@ -5818,6 +5818,7 @@ TEST(the_difficulty_ladder_climbs_in_every_direction_it_should)
 		CHECK( upper.m_retreatTeams >= lower.m_retreatTeams );
 		CHECK( upper.m_useInfluenceMapForAttackLane >= lower.m_useInfluenceMapForAttackLane );
 		CHECK( upper.m_focusFire >= lower.m_focusFire );
+		CHECK( upper.m_savesSciencePoints >= lower.m_savesSciencePoints );
 		CHECK( upper.m_adaptiveHarvesters >= lower.m_adaptiveHarvesters );
 		CHECK( upper.m_selfTriggeredExpansion >= lower.m_selfTriggeredExpansion );
 		CHECK( upper.m_defendExpansions >= lower.m_defendExpansions );
