@@ -347,6 +347,7 @@ found and fixed â€” EA's own, not port damage.**
 - Two blocks of 2003 assembly destroyed registers and took down the main menu.
 - Quitting faulted twice every time; it now takes about half a second.
 - A long chat message or an unusual map name could kill the process.
+- Nor can a map handed to you over the network, however long a name the other machine gives it.
 - The window no longer goes *Not Responding* during the menu's camera moves.
 - Poison clouds, mine clearing, garrison kills and crew-killing weapons: all traced and fixed.
 - Blowing up a full transport is survivable now, in every remaining variant.

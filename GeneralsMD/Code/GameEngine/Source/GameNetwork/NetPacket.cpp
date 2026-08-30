@@ -26,6 +26,7 @@
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
 
+#include "stringex.h"
 #include "GameNetwork/NetPacket.h"
 #include "GameNetwork/NetCommandMsg.h"
 #include "GameNetwork/NetworkDefs.h"
@@ -5708,15 +5709,13 @@ NetCommandMsg * NetPacket::readWrapperMessage(UnsignedByte *data, Int &i) {
 NetCommandMsg * NetPacket::readFileMessage(UnsignedByte *data, Int &i) {
 	NetFileCommandMsg *msg = newInstance(NetFileCommandMsg);
 	char filename[_MAX_PATH];
-	char *c = filename;
 
-	while (data[i] != 0) {
-		*c = data[i];
-		++c;
-		++i;
-	}
-	*c = 0;
-	++i;
+	// The sender decides how long this string is, and the old loop copied it into a _MAX_PATH
+	// stack buffer one byte at a time with nothing stopping it - a longer name overwrote the
+	// stack.  Bound the copy; i still advances over the whole name, truncated or not, so the
+	// rest of the message is read from the right offset either way.
+	i += strlcpy(filename, (const char *)(data + i), sizeof(filename));
+	++i;												// step over the terminator
 	msg->setPortableFilename(AsciiString(filename));	// it's transferred as a portable filename
 
 	UnsignedInt dataLength = 0;
@@ -5738,15 +5737,13 @@ NetCommandMsg * NetPacket::readFileMessage(UnsignedByte *data, Int &i) {
 NetCommandMsg * NetPacket::readFileAnnounceMessage(UnsignedByte *data, Int &i) {
 	NetFileAnnounceCommandMsg *msg = newInstance(NetFileAnnounceCommandMsg);
 	char filename[_MAX_PATH];
-	char *c = filename;
 
-	while (data[i] != 0) {
-		*c = data[i];
-		++c;
-		++i;
-	}
-	*c = 0;
-	++i;
+	// The sender decides how long this string is, and the old loop copied it into a _MAX_PATH
+	// stack buffer one byte at a time with nothing stopping it - a longer name overwrote the
+	// stack.  Bound the copy; i still advances over the whole name, truncated or not, so the
+	// rest of the message is read from the right offset either way.
+	i += strlcpy(filename, (const char *)(data + i), sizeof(filename));
+	++i;												// step over the terminator
 	msg->setPortableFilename(AsciiString(filename));	// it's transferred as a portable filename
 
 	UnsignedShort fileID = 0;

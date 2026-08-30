@@ -57,6 +57,7 @@
 #include "GameClient/Gadget.h"
 #include "GameNetwork/NetworkUtil.h"
 #include "GameNetwork/NetCommandList.h"
+#include "GameNetwork/NetPacket.h"
 #include "GameNetwork/GameInfo.h"
 #include <float.h>
 #include "GameClient/Water.h"
@@ -4227,6 +4228,75 @@ TEST(netcommand_list_orders_a_burst_of_acks_by_acknowledged_command)
 	CHECK_EQ( expected, 13 );
 
 	list->deleteInstance();
+}
+
+/* The file transfer messages carry a filename the sender chooses the length of, and the reader
+	 copied it into a _MAX_PATH stack buffer a byte at a time with nothing stopping it.  A name
+	 longer than that overwrote the stack of whoever was parsing the packet - a host feeding a
+	 client, or a client feeding the host.  The copy is bounded now; the read offset still steps
+	 over the whole name, so everything after it in the message is still read from the right place. */
+struct NetPacketFileReader : public NetPacket
+{
+	using NetPacket::readFileMessage;
+	using NetPacket::readFileAnnounceMessage;
+};
+
+TEST(an_overlong_transfer_filename_is_truncated_instead_of_overflowing)
+{
+	static const Int NAME_LEN = 400;					// _MAX_PATH is 260
+	UnsignedByte buf[NAME_LEN + 1 + sizeof(UnsignedInt) + 4];
+	Int at = 0;
+	Int k;
+	for( k = 0; k < NAME_LEN; ++k )
+		buf[at++] = (UnsignedByte)('a' + (k % 26));
+	buf[at++] = 0;
+
+	UnsignedInt dataLength = 4;
+	memcpy( buf + at, &dataLength, sizeof(dataLength) );
+	at += sizeof(dataLength);
+	buf[at++] = 0xDE; buf[at++] = 0xAD; buf[at++] = 0xBE; buf[at++] = 0xEF;
+
+	Int i = 0;
+	NetCommandMsg *msg = NetPacketFileReader::readFileMessage( buf, i );
+	NetFileCommandMsg *fileMsg = (NetFileCommandMsg *)msg;
+
+	// the name is cut to the buffer rather than written past it
+	CHECK_EQ( fileMsg->getPortableFilename().getLength(), _MAX_PATH - 1 );
+
+	// ...but the offset walked the whole name, so what follows it still parses
+	CHECK_EQ( i, at );
+	CHECK_EQ( (Int)fileMsg->getFileLength(), 4 );
+	CHECK_EQ( (Int)fileMsg->getFileData()[0], 0xDE );
+	CHECK_EQ( (Int)fileMsg->getFileData()[3], 0xEF );
+
+	msg->detach();
+}
+
+TEST(an_overlong_announced_filename_is_truncated_instead_of_overflowing)
+{
+	static const Int NAME_LEN = 400;
+	UnsignedByte buf[NAME_LEN + 1 + sizeof(UnsignedShort) + sizeof(UnsignedByte)];
+	Int at = 0;
+	Int k;
+	for( k = 0; k < NAME_LEN; ++k )
+		buf[at++] = (UnsignedByte)('a' + (k % 26));
+	buf[at++] = 0;
+
+	UnsignedShort fileID = 0x1234;
+	memcpy( buf + at, &fileID, sizeof(fileID) );
+	at += sizeof(fileID);
+	buf[at++] = 0x5A;									// player mask
+
+	Int i = 0;
+	NetCommandMsg *msg = NetPacketFileReader::readFileAnnounceMessage( buf, i );
+	NetFileAnnounceCommandMsg *announce = (NetFileAnnounceCommandMsg *)msg;
+
+	CHECK_EQ( announce->getPortableFilename().getLength(), _MAX_PATH - 1 );
+	CHECK_EQ( i, at );
+	CHECK_EQ( (Int)announce->getFileID(), 0x1234 );
+	CHECK_EQ( (Int)announce->getPlayerMask(), 0x5A );
+
+	msg->detach();
 }
 
 //////////////////////////////////////////////////////////////////////////////
