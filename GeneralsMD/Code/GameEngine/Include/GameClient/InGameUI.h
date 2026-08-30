@@ -585,6 +585,7 @@ public:  // ********************************************************************
 	// producer's queue it is, and where it was drawn this frame.
 	//
 	enum { PRODUCTION_STRIP_ROW_MAX = 16 };	///< cameos one row will draw; the rest become a "+N"
+	enum { PRODUCTION_STRIP_WATCH_MAX = 5 };	///< and while watching, where eight rows share the screen
 	enum { PRODUCTION_STRIP_ROWS = 8 };			///< playing: the global row and the selected producer's row.
 																					///  watching: one row per player, so eight of them
 	struct ProductionStripSlot
@@ -916,6 +917,7 @@ protected:
 	Real												m_hudLogicHz;						///< logic frames actually simulated per real second
 	UnsignedInt									m_hudRealClockBaseMs;		///< wall clock the two elapsed-time readouts were aligned at
 	UnsignedInt									m_hudLastDrawMs;				///< wall clock of the previous overlay draw, so a pause can be taken back out of it
+	Int													m_hudOverlayBottom;			///< bottom of that corner plate, so the superweapon timers start under it
 	// A script time freeze stops the logic clock, and the military subtitle's counters are
 	// logic frames, so they have to be stepped by hand while it lasts.  These two turn the
 	// wall clock into that step without drift: every update works out how many 30Hz frames

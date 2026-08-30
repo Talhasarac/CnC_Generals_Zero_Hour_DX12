@@ -1076,6 +1076,7 @@ InGameUI::InGameUI()
 	m_hudLogicHz = 0.0f;
 	m_hudRealClockBaseMs = 0;
 	m_hudLastDrawMs = 0;
+	m_hudOverlayBottom = 0;
 	for( Int incomeBucket = 0; incomeBucket < INCOME_SAMPLES; incomeBucket++ )
 		m_incomeSamples[ incomeBucket ] = 0;
 	m_incomeSampleCount = 0;
@@ -4107,6 +4108,14 @@ void InGameUI::postDraw( void )
 //	Int superweaponCount = 0;
 		Int startX = (Int)(m_superweaponPosition.x * TheDisplay->getWidth());
 		Int startY = (Int)(m_superweaponPosition.y * TheDisplay->getHeight());
+
+		//
+		// The corner clock plate owns the top right, and the first timer was drawn straight
+		// underneath it - a superweapon counting down behind the readout is one nobody can read.
+		// The list starts below the plate whenever the plate is up.
+		//
+		if( TheGlobalData->m_showHudOverlay && startY < m_hudOverlayBottom + 4 )
+			startY = m_hudOverlayBottom + 4;
 		
 		Int bottomMargin = (Int)( (Real)TheTacticalView->getHeight() * 0.82f ); 
 			
@@ -5895,6 +5904,9 @@ void InGameUI::drawHudOverlay( void )
 	TheDisplay->drawFillRect( x - pad, y - 1, textWidth + pad*2, textHeight + 2,
 														GameMakeColor( 0, 0, 0, 140 ) );
 
+	// the superweapon timers read this to start below the plate rather than behind it
+	m_hudOverlayBottom = y - 1 + textHeight + 2;
+
 	m_hudDisplayString->draw( x, y, GameMakeColor( 235, 235, 235, 255 ), GameMakeColor( 0, 0, 0, 255 ) );
 }
 
@@ -6007,12 +6019,13 @@ struct ProductionStripGather
 	InGameUI::ProductionStripSlot *slot;
 	Int *count;
 	Int *total;
+	Int max;						///< cameos this row will draw; the rest are counted into the "+N"
 };
 
 static void gatherProductionStrip( Object *obj, void *userData )
 {
 	ProductionStripGather *g = (ProductionStripGather *)userData;
-	appendProducerQueue( obj, g->slot, g->count, InGameUI::PRODUCTION_STRIP_ROW_MAX, g->total );
+	appendProducerQueue( obj, g->slot, g->count, g->max, g->total );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -6214,6 +6227,8 @@ void InGameUI::drawProductionStrip( void )
 			watch.slot = m_productionStrip[ row ];
 			watch.count = &m_productionStripCount[ row ];
 			watch.total = &m_productionStripTotal[ row ];
+			// eight rows are on screen at once here, so each one is the five soonest and a "+N"
+			watch.max = PRODUCTION_STRIP_WATCH_MAX;
 			p->iterateObjects( gatherProductionStrip, &watch );
 
 			if( m_productionStripCount[ row ] > 0 )
@@ -6229,6 +6244,7 @@ void InGameUI::drawProductionStrip( void )
 		gather.slot = m_productionStrip[ 0 ];
 		gather.count = &m_productionStripCount[ 0 ];
 		gather.total = &m_productionStripTotal[ 0 ];
+		gather.max = PRODUCTION_STRIP_ROW_MAX;
 		player->iterateObjects( gatherProductionStrip, &gather );
 
 		//

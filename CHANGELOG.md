@@ -238,6 +238,7 @@ found and fixed â€” EA's own, not port damage.**
 - Workers go back to collecting supplies when they finish.
 - Every countdown reads real seconds and answers the game speed.
 - The clock and frame-rate readout is drawn on top of everything.
+- The superweapon countdowns start below that readout instead of behind it.
 - A game opens with nothing selected, so your first click is not a rally point.
 - The tilde key opens the general's promotions.
 - `S` stops your units again; the key was simply never bound.
@@ -249,7 +250,7 @@ found and fixed â€” EA's own, not port damage.**
 - Aircraft always show how many attack runs they have left.
 - The corner readout separates game time from real time, and sim rate from fps.
 - Pausing stops both clocks.
-- Watching a match, the strip becomes every player's queue at once: one row each, bordered in that player's colour.
+- Watching a match, the strip becomes every player's queue at once: one row each, bordered in that player's colour, showing the five that land soonest and a count of the rest.
 - Watching, the bars over the buildings are everyone's too - what each factory is turning out, and how long the superweapons have left. An observer used to see none of it.
 
 ## Placing buildings
