@@ -200,12 +200,39 @@ void GameSlot::setMapAvailability( Bool hasMap )
 	}
 }
 
+/** Which slot states are an opponent seat.
+	*
+	* This used to be written out as a list in three places, and appending the ladder's three rungs to
+	* the enum broke two of them: the seat came back named "Closed" because setState's name switch
+	* had no case for it, and its start position was wiped on every menu refresh because the guard
+	* below did not recognise it as still being the same kind of seat.  One function, three callers.
+	*
+	* SLOT_TAKEOVER counts here on purpose: to the lobby it is an ordinary opponent seat that the
+	* host owns and that no network peer is expected to check in from.  It differs in one place only
+	* - the player it creates is human (GameLogic::startNewGame), so no AI is ever attached. */
+static Bool slotStateIsAI( SlotState state )
+{
+	switch( state )
+	{
+		case SLOT_EASY_AI:
+		case SLOT_STEADY_AI:
+		case SLOT_MED_AI:
+		case SLOT_HARD_AI:
+		case SLOT_BRUTAL_AI:
+		case SLOT_MERCILESS_AI:
+		case SLOT_TAKEOVER:
+			return TRUE;
+		default:
+			return FALSE;
+	}
+}
+
 void GameSlot::setState( SlotState state, UnicodeString name, UnsignedInt IP )
 {
 	// An opponent seat keeps its colour, faction, team and start spot while it stays an opponent
 	// seat - SLOT_TAKEOVER included, or the menu's own refresh (which re-sends the state to the
 	// slot) would wipe the faction and team the moment you picked them.
-	if (!(isAI() &&  (state == SLOT_EASY_AI || state == SLOT_MED_AI || state == SLOT_BRUTAL_AI || state == SLOT_TAKEOVER)))
+	if (!(isAI() && slotStateIsAI( state )))
 	{
 		m_color = -1;
 		m_startPos = -1;
@@ -245,6 +272,20 @@ void GameSlot::setState( SlotState state, UnicodeString name, UnsignedInt IP )
 		case SLOT_TAKEOVER:
 			m_name = TheGameText->fetch("GUI:HumanSlot");
 			break;
+		//
+		// The three rungs the ladder added. No shipped string for them, so plain English rather
+		// than a MISSING: - and, before these cases existed, they fell through to the default and
+		// every one of them appeared in the lobby as "Closed".
+		//
+		case SLOT_STEADY_AI:
+			m_name = UnicodeString(L"Steady AI");
+			break;
+		case SLOT_HARD_AI:
+			m_name = UnicodeString(L"Hard AI");
+			break;
+		case SLOT_MERCILESS_AI:
+			m_name = UnicodeString(L"Merciless AI");
+			break;
 		case SLOT_CLOSED:
 		default:
 			m_name = TheGameText->fetch("GUI:Closed");
@@ -268,12 +309,7 @@ Bool GameSlot::isOccupied( void ) const
 
 Bool GameSlot::isAI( void ) const
 {
-	// SLOT_TAKEOVER counts here on purpose: to the lobby it is an ordinary opponent seat that the
-	// host owns and that no network peer is expected to check in from.  It differs in one place
-	// only - the player it creates is human (GameLogic::startNewGame), so no AI is ever attached.
-	return m_state == SLOT_EASY_AI || m_state == SLOT_MED_AI || m_state == SLOT_BRUTAL_AI ||
-				 m_state == SLOT_STEADY_AI || m_state == SLOT_HARD_AI || m_state == SLOT_MERCILESS_AI ||
-				 m_state == SLOT_TAKEOVER;
+	return slotStateIsAI( m_state );
 }
 
 Bool GameSlot::isPlayer( AsciiString userName ) const

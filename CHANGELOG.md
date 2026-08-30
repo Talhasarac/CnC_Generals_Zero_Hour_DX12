@@ -79,7 +79,8 @@ found and fixed â€” EA's own, not port damage.**
 - Easy, Steady, Medium, Hard, Brutal, Merciless. Medium to Brutal used to be a cliff; the steps in between are where a player actually needs them.
 - Every level plays by your rules. No level gets extra money, cheaper units, faster building, longer vision or tougher units - in either direction. What changes is what the computer is allowed to decide: how often it looks at the map, how long it takes to react, whether it counters what you field, whether it masses before attacking, whether it pulls damaged units out.
 - Each step up switches on exactly one new thing, so you can say in a sentence what you get for climbing.
-- Measured, not asserted: Merciless beats Easy 15-0 over 32 headless matches with the seats swapped both ways, on twice the army and twice the spending. Easy is slow and brave. Steady saves its damaged units. Medium expands on its own. Hard counters your build. Brutal masses and commits. Merciless is the ceiling - everything on, no hesitation.
+- Measured, not asserted: Merciless beats Easy 15-0 over 32 headless matches with the seats swapped both ways, on twice the army and twice the spending.
+- The three new levels showed up in the lobby as "Closed" and lost their start position on the map every time the list refreshed. Both fixed. Easy is slow and brave. Steady saves its damaged units. Medium expands on its own. Hard counters your build. Brutal masses and commits. Merciless is the ceiling - everything on, no hesitation.
 - Making Easy easier means giving it worse decisions, never less money. That is the whole promise.
 - The computer also picks a personality each match and keeps it: one plays for the attack, the other for the base. Same resources, spent differently.
 
@@ -266,7 +267,7 @@ found and fixed â€” EA's own, not port damage.**
 ## Where the money is, and where it is coming from
 
 - Supply piles and docks say what is left in them, in cash, over the pile. No more guessing which expansion is worth taking from the art on the model.
-- Everything on the field prices itself off its top right corner, at its owner's price. What that push cost, and what he just lost.
+- Every build button carries its price in the top right corner, opposite the build time already in the other one. It was only ever in the tooltip, which means hovering one button at a time to compare two of them.
 - A worker fetching or handing over a box shows a bar while it works.
 - Hackers show how far off the next payout is. So do the black market and the oil derricks.
 - Factories take a hundred units in the queue, not nine. The build queue only ever had nine buttons and that had become the limit.

@@ -3082,6 +3082,7 @@ void ControlBar::setControlCommand( GameWindow *button, const CommandButton *com
 	// time of whatever used to live in that window.
 	GadgetButtonSetCount( button, 0 );
 	GadgetButtonSetSeconds( button, 0 );
+	GadgetButtonSetCost( button, 0 );
 
 	setCommandBarBorder(button, commandButton->getCommandButtonMappedBorderType());
 	

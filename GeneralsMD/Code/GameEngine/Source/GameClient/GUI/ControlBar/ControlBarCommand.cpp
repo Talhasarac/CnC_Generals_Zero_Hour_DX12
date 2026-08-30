@@ -829,7 +829,16 @@ void ControlBar::updateContextCommand( void )
 			const ThingTemplate *tmpl = command->getThingTemplate();
 			Player *localPlayer = ThePlayerList ? ThePlayerList->getLocalPlayer() : NULL;
 			if( tmpl && localPlayer )
+			{
 				GadgetButtonSetSeconds( win, ControlBar_secondsFromFrames( (Real)tmpl->calcTimeToBuild( localPlayer ) ) );
+				//
+				// ... and what it costs, in the opposite corner.  The price was only ever in the
+				// tooltip, which means hovering one button at a time to compare two of them - and
+				// it is the other half of the question the seconds answer.  It is this player's
+				// price, so a faction discount or a general's promotion shows in it.
+				//
+				GadgetButtonSetCost( win, tmpl->calcCostToBuild( localPlayer ) );
+			}
 		}
 
 		//
@@ -849,7 +858,10 @@ void ControlBar::updateContextCommand( void )
 			const UpgradeTemplate *ut = command->getUpgradeTemplate();
 			Player *localPlayer = ThePlayerList ? ThePlayerList->getLocalPlayer() : NULL;
 			if( ut && localPlayer )
+			{
 				GadgetButtonSetSeconds( win, ControlBar_secondsFromFrames( (Real)ut->calcTimeToBuild( localPlayer ) ) );
+				GadgetButtonSetCost( win, ut->calcCostToBuild( localPlayer ) );
+			}
 
 			if( queuedHere )
 			{

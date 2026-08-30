@@ -605,6 +605,7 @@ PushButtonData * getNewPushButtonData( void )
 	p->drawClock = NO_CLOCK;
 	p->drawCount = 0;
 	p->drawSeconds = 0;
+	p->drawCost = 0;
 	p->barPercent = -1;
 	p->barColor = GAME_COLOR_UNDEFINED;
 	p->overlayImage = NULL;
@@ -732,6 +733,28 @@ void GadgetButtonSetSeconds( GameWindow *g, Int seconds )
 			return;
 	}
 	pData->drawSeconds = seconds;
+	g->winSetUserData(pData);
+}
+
+// GadgetButtonSetCost ========================================================
+/** Set the price drawn in the button's top right corner, 0 for none.  What one
+	* of these costs is the other half of what a build decision needs, next to
+	* the seconds already in the opposite corner.  Unlike the seconds it is not
+	* cleared by GadgetButtonClearClock - a price does not change per frame. */
+//=============================================================================
+void GadgetButtonSetCost( GameWindow *g, Int cost )
+{
+	if( g == NULL )
+		return;
+
+	PushButtonData *pData = (PushButtonData *)g->winGetUserData();
+	if(!pData)
+	{
+		pData = getNewPushButtonData();
+		if(!pData)
+			return;
+	}
+	pData->drawCost = cost;
 	g->winSetUserData(pData);
 }
 

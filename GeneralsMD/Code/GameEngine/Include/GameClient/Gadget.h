@@ -437,6 +437,7 @@ typedef struct _PushButtonData
 	Color colorBorder;			///< The color for the border around the button
 	Int drawCount;					///< when > 0, a small number badge drawn in the bottom right corner
 	Int drawSeconds;				///< when > 0, a seconds label drawn in the bottom left corner
+	Int drawCost;						///< when > 0, a price drawn in the top right corner
 	Int barPercent;					///< when >= 0, a thin bar drawn along the bottom edge (experience)
 	Color barColor;					///< colour of that bar
 	void *userData;					///< random additional data we can set

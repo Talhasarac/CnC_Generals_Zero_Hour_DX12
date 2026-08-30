@@ -420,8 +420,6 @@ Drawable::Drawable( const ThingTemplate *thingTemplate, DrawableStatus statusBit
 	m_lastConstructDisplayed = -1.0f;
 	m_supplyCashDisplayString = NULL;
 	m_lastSupplyCashDisplayed = -1;
-	m_costDisplayString = NULL;
-	m_lastCostDisplayed = -1;
 	
 	//Added By Sadullah Nader
 	//Fix for the building percent
@@ -585,10 +583,6 @@ Drawable::~Drawable()
 	if( m_supplyCashDisplayString )
 		TheDisplayStringManager->freeDisplayString( m_supplyCashDisplayString );
 	m_supplyCashDisplayString = NULL;
-
-	if( m_costDisplayString )
-		TheDisplayStringManager->freeDisplayString( m_costDisplayString );
-	m_costDisplayString = NULL;
 
 	if ( m_captionDisplayString )
 		TheDisplayStringManager->freeDisplayString( m_captionDisplayString );
@@ -2877,7 +2871,6 @@ void Drawable::drawIconUI( void )
 		drawCaption( healthBarRegion );
 		drawConstructPercent( healthBarRegion );
 		drawSupplyCash( healthBarRegion );
-		drawUnitCost( healthBarRegion );
 
 		//All Icons Below only draw on ALIVE things, so  bail here -------------------------
 		if( obj->isEffectivelyDead() || obj->isKindOf( KINDOF_IGNORED_IN_GUI )) // object explicitly wants nothing to do with these icons, so...
@@ -3935,60 +3928,6 @@ void Drawable::drawSupplyCash( const IRegion2D *healthBarRegion )
 																	 GameMakeColor( 0, 0, 0, 255 ) );
 
 }  // end drawSupplyCash
-
-//-------------------------------------------------------------------------------------------------
-/** What this thing cost to build, written off its top right corner.  The price of everything on
-	* the field is otherwise only visible in the command bar, and only for what you can build right
-	* now - so "is that push worth trading for" and "what did he just lose" were questions you
-	* answered from memory.  It is the owner's price, so a faction discount shows.
-	*
-	* Anything the player never bought - scenery, wreckage, projectiles, civilians - prices at zero
-	* and says nothing, which is the whole filter this needs. */
-//-------------------------------------------------------------------------------------------------
-void Drawable::drawUnitCost( const IRegion2D *healthBarRegion )
-{
-	if( healthBarRegion == NULL )
-		return;
-
-	Object *obj = getObject();
-	if( obj == NULL || obj->isEffectivelyDead() || obj->isKindOf( KINDOF_IGNORED_IN_GUI ) )
-		return;
-
-	// shrouded ground keeps its secrets: what was there when you last looked is not news
-	if( obj->getShroudedStatus( ThePlayerList->getLocalPlayer()->getPlayerIndex() ) != OBJECTSHROUD_CLEAR )
-		return;
-
-	Int cost = getTemplate() ? getTemplate()->calcCostToBuild( obj->getControllingPlayer() ) : 0;
-	if( cost <= 0 )
-		return;
-
-	if( m_costDisplayString == NULL )
-	{
-		m_costDisplayString = TheDisplayStringManager->newDisplayString();
-		m_costDisplayString->setFont( TheFontLibrary->getFont( TheInGameUI->getDrawableCaptionFontName(),
-											TheGlobalLanguageData->adjustFontSize( TheInGameUI->getDrawableCaptionPointSize() - 2 ),
-											FALSE ) );
-	}
-
-	if( m_lastCostDisplayed != cost )
-	{
-		UnicodeString buffer;
-		buffer.format( L"$%d", cost );
-		m_costDisplayString->setText( buffer );
-		m_lastCostDisplayed = cost;
-	}
-
-	Int width, height;
-	m_costDisplayString->getSize( &width, &height );
-
-	// hangs off the right end of the health bar, above it - clear of the veterancy chevron on the
-	// bar's own right end and of the queue count that is right-aligned onto it
-	m_costDisplayString->draw( healthBarRegion->hi.x + 2, healthBarRegion->lo.y - height,
-														 GameMakeColor( 235, 210, 120, 255 ),
-														 GameMakeColor( 0, 0, 0, 255 ) );
-
-}  // end drawUnitCost
-
 
 //-------------------------------------------------------------------------------------------------
 /** Draw caption */

@@ -231,6 +231,46 @@ static void drawSecondsBadge( GameWindow *window, Int seconds )
 
 }  // end drawSecondsBadge
 
+// drawCostBadge ==============================================================
+/** Draw a "$1200" price in the button's top right corner - what one of these
+	* costs.  The opposite corner from the seconds, and the two together are the
+	* whole of what a build decision asks: how much, and how long. */
+//=============================================================================
+static void drawCostBadge( GameWindow *window, Int cost )
+{
+	static DisplayString *label = NULL;
+	ICoord2D origin, size, textPos;
+	Int width, height;
+
+	if( label == NULL )
+	{
+		label = TheDisplayStringManager->newDisplayString();
+		if( label == NULL )
+			return;
+	}
+
+	UnicodeString text;
+	text.format( L"$%d", cost );
+	label->setText( text );
+
+	if( label->getFont() != window->winGetFont() )
+		label->setFont( window->winGetFont() );
+
+	window->winGetScreenPosition( &origin.x, &origin.y );
+	window->winGetSize( &size.x, &size.y );
+	label->getSize( &width, &height );
+
+	textPos.x = origin.x + size.x - width - 3;
+	textPos.y = origin.y + 1;
+
+	// same translucent plate the other two badges wear - button art can be any colour
+	TheDisplay->drawFillRect( textPos.x - 2, textPos.y, width + 4, height,
+														GameMakeColor( 0, 0, 0, 160 ) );
+	label->draw( textPos.x, textPos.y, GameMakeColor( 235, 210, 120, 255 ),
+							 GameMakeColor( 0, 0, 0, 255 ) );
+
+}  // end drawCostBadge
+
 // drawButtonBar ==============================================================
 /** Draw a thin progress bar along the button's bottom edge (experience) */
 //=============================================================================
@@ -394,6 +434,9 @@ void W3DGadgetPushButtonDraw( GameWindow *window, WinInstanceData *instData )
 
 		if( pData->drawSeconds > 0 )
 			drawSecondsBadge( window, pData->drawSeconds );
+
+		if( pData->drawCost > 0 )
+			drawCostBadge( window, pData->drawCost );
 
 		if( pData->barPercent >= 0 )
 			drawButtonBar( window, pData->barPercent, pData->barColor );
@@ -573,6 +616,9 @@ void W3DGadgetPushButtonImageDrawOne( GameWindow *window,
 
 		if( pData->drawSeconds > 0 )
 			drawSecondsBadge( window, pData->drawSeconds );
+
+		if( pData->drawCost > 0 )
+			drawCostBadge( window, pData->drawCost );
 
 		if( pData->barPercent >= 0 )
 			drawButtonBar( window, pData->barPercent, pData->barColor );
@@ -838,6 +884,9 @@ void W3DGadgetPushButtonImageDrawThree(GameWindow *window, WinInstanceData *inst
 
 		if( pData->drawSeconds > 0 )
 			drawSecondsBadge( window, pData->drawSeconds );
+
+		if( pData->drawCost > 0 )
+			drawCostBadge( window, pData->drawCost );
 
 		if( pData->barPercent >= 0 )
 			drawButtonBar( window, pData->barPercent, pData->barColor );
