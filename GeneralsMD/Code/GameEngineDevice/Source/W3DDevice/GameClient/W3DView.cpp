@@ -207,6 +207,9 @@ void W3DView::setHeight(Int height)
 	// extend View functionality
 	View::setHeight(height);
 
+	// the visible area just changed shape - showing or hiding the control bar comes through here
+	m_cameraConstraintValid = false;
+
 	Vector2 vMin,vMax;
 	m_3DCamera->Set_Aspect_Ratio((Real)getWidth()/(Real)height);
  	m_3DCamera->Get_Viewport(vMin,vMax);
@@ -2026,6 +2029,10 @@ void W3DView::setPitch( Real angle )
 	// call our base class, we are extending functionality
 	View::setPitch( angle );
 
+	// how close to the map edge the camera may come depends on the pitch - pitched up it sees
+	// further, so the same position shows more of the world past the border
+	m_cameraConstraintValid = false;
+
 
 	m_doingMoveCameraOnWaypointPath = false;
 	m_doingRotateCamera = false;
@@ -2162,6 +2169,9 @@ void W3DView::setZoomToMax( void )
 void W3DView::setFieldOfView( Real angle )
 {
 	View::setFieldOfView( angle );
+
+	// a wider field of view sees further past the map edge from the same place
+	m_cameraConstraintValid = false;
 
 #if defined(_DEBUG) || defined(_INTERNAL)
 	// this is only for testing, and recalculating the 
