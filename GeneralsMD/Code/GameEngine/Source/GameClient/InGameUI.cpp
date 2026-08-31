@@ -132,14 +132,19 @@ static Int stripPixels( Int nominal )
 //-------------------------------------------------------------------------------------------------
 /** A countdown short enough to be written inside a cameo: bare seconds while there are fewer than
 	* sixty of them, m:ss once there are more.  A tank takes seconds and a superweapon charges for
-	* minutes, and both are written into the same little box. */
+	* minutes, and both are written into the same little box.
+	*
+	* 'plainSeconds' keeps the bare count however big it gets.  A superweapon is read as "how long
+	* until I can fire it", and against that question 3:20 is a number you have to convert before
+	* you can compare it with anything else on the screen - every other countdown the HUD writes is
+	* in seconds. */
 //-------------------------------------------------------------------------------------------------
-static void formatStripSeconds( UnicodeString *text, Int seconds )
+static void formatStripSeconds( UnicodeString *text, Int seconds, Bool plainSeconds = FALSE )
 {
 	if( seconds < 0 )
 		seconds = 0;
 
-	if( seconds < 60 )
+	if( seconds < 60 || plainSeconds )
 		text->format( L"%d", seconds );
 	else
 		text->format( L"%d:%2.2d", seconds / 60, seconds % 60 );
@@ -6077,7 +6082,7 @@ void InGameUI::updateStripCameoSize( void )
 	* is a shape rather than a number: it answers "nearly" and never "eleven seconds".  Both strips
 	* put the number in the middle of the box, over the sweep. */
 //-------------------------------------------------------------------------------------------------
-void InGameUI::drawStripSeconds( Int x, Int y, Int w, Int h, Int seconds )
+void InGameUI::drawStripSeconds( Int x, Int y, Int w, Int h, Int seconds, Bool plainSeconds )
 {
 	if( m_stripSecondsString == NULL )
 	{
@@ -6088,7 +6093,7 @@ void InGameUI::drawStripSeconds( Int x, Int y, Int w, Int h, Int seconds )
 	}
 
 	UnicodeString text;
-	formatStripSeconds( &text, seconds );
+	formatStripSeconds( &text, seconds, plainSeconds );
 	m_stripSecondsString->setText( text );
 
 	Int textWidth = 0, textHeight = 0;
@@ -6169,14 +6174,16 @@ void InGameUI::drawSuperweaponStrip( void )
 		top = m_hudOverlayBottom + plate;
 
 	//
-	// one flash for the whole strip rather than one per icon, so every charged superweapon blinks
-	// together instead of each on its own clock
+	// one pulse for the whole strip rather than one per icon, so every charged superweapon breathes
+	// together instead of each on its own clock.  SuperweaponCountdownFlashDuration is half a cycle
+	// (dark to bright), so the INI knob still says how fast the strip blinks.
 	//
-	if( m_superweaponFlashDuration != 0.0f &&
-			TheGameLogic->getFrame() >= m_superweaponLastFlashFrame + (Int)(m_superweaponFlashDuration) )
+	Real pulse = 1.0f;
+	if( m_superweaponFlashDuration >= 1.0f )
 	{
-		m_superweaponUsedFlashColor = !m_superweaponUsedFlashColor;
-		m_superweaponLastFlashFrame = TheGameLogic->getFrame();
+		const Real period = 2.0f * m_superweaponFlashDuration;
+		const Real phase = (Real)( TheGameLogic->getFrame() % (UnsignedInt)period ) / period;
+		pulse = 0.5f - 0.5f * (Real)cos( 2.0 * PI * phase );
 	}
 
 	const Int right = TheDisplay->getWidth() - edge;
@@ -6217,26 +6224,33 @@ void InGameUI::drawSuperweaponStrip( void )
 			// bar's own clock: the scrim covers what is still to be charged and is swept off as
 			// the charge runs.
 			//
+			UnsignedByte r, g, b, a;
+			GameGetColorComponents( slot->color, &r, &g, &b, &a );
+
 			if( !slot->ready )
 			{
 				TheDisplay->drawRemainingRectClock( x, y, cameoW, cameoH, slot->percent,
 																						GameMakeColor( 0, 0, 0, 130 ) );
-				drawStripSeconds( x, y, cameoW, cameoH, slot->seconds );
+				//
+				// bare seconds, however many there are: this strip is read against the other
+				// countdowns on the screen, and m:ss is a number you have to convert first
+				//
+				drawStripSeconds( x, y, cameoW, cameoH, slot->seconds, TRUE );
+			}
+			else
+			{
+				//
+				// Charged: no number at all - zero seconds is not information - and the cameo itself
+				// breathes in the owning player's colour instead.  A ready superweapon is the one
+				// thing on this strip that wants to be noticed rather than looked up, and a
+				// translucent wash over the picture says whose it is in the same stroke.
+				//
+				const UnsignedByte washAlpha = (UnsignedByte)( 30.0f + 90.0f * pulse );
+				TheDisplay->drawFillRect( x, y, cameoW, cameoH, GameMakeColor( r, g, b, washAlpha ) );
 			}
 
-			//
-			// The border is whose weapon it is - the colour the timer was registered with - except
-			// while it is charged, where it flashes: a ready superweapon is the one thing on this
-			// strip that wants to be noticed rather than looked up.
-			//
-			Color border = slot->color;
-			UnsignedByte r, g, b, a;
-			GameGetColorComponents( border, &r, &g, &b, &a );
-			border = GameMakeColor( r, g, b, 255 );
-			if( slot->ready && !m_superweaponUsedFlashColor )
-				border = m_superweaponFlashColor;
-
-			TheDisplay->drawOpenRect( x, y, cameoW, cameoH, 2.0f, border );
+			// the border is whose weapon it is - the colour the timer was registered with
+			TheDisplay->drawOpenRect( x, y, cameoW, cameoH, 2.0f, GameMakeColor( r, g, b, 255 ) );
 		}
 
 		//

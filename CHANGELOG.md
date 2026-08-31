@@ -278,6 +278,7 @@ found and fixed â€” EA's own, not port damage.**
 - The clock and frame-rate readout is drawn on top of everything.
 - The superweapon countdowns are pictures now, not a list of names: the same strip treatment, in the top right corner, under that readout. Each one wears its own seconds and a sweeping clock, the next to land sits at the right hand end, and if you are watching more than eighteen of them the rest become a count.
 - Every button's corner markings - the hotkey, the price, the time, the number queued - sit flush in the corners instead of floating a few pixels inside them, and are set a size smaller than the button's own text: four labels at full size were eating the picture they were meant to annotate.
+- A superweapon's wait is written in plain seconds - 200, not 3:20 - so it compares with every other countdown on the screen at a glance. Once it is charged the number goes away entirely and the picture itself breathes in your colour, which is the one thing you want to catch out of the corner of your eye.
 - The countdown inside a strip picture lost its black backing plate. On a picture that small the plate was most of the picture; the number now sits straight on the sweeping clock.
 - A game opens with nothing selected, so your first click is not a rally point.
 - The tilde key opens the general's promotions.

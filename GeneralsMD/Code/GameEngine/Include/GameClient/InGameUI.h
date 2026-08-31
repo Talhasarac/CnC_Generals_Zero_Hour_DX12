@@ -921,7 +921,7 @@ protected:
 	void drawProductionStrip( void );			///< the production queue rows above the control bar
 	void drawProductionStripRow( Int row, Int y );	///< one of those rows, at that top edge
 	void updateStripCameoSize( void );		///< cameo box both strips draw into, in the command bar's aspect
-	void drawStripSeconds( Int x, Int y, Int w, Int h, Int seconds );	///< countdown written inside a cameo
+	void drawStripSeconds( Int x, Int y, Int w, Int h, Int seconds, Bool plainSeconds = FALSE );	///< countdown written inside a cameo
 	void addSuperweaponIcon( const Image *image, Int seconds, Int percent, Bool ready, Color color );
 	void drawSuperweaponStrip( void );		///< those icons, top right, soonest at the right hand end
 
