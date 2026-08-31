@@ -420,6 +420,7 @@ enum {
 enum { MAX_STRUCTURE_INVENTORY_BUTTONS = 10 }; // there are this many physical buttons in "inventory" windows for structures
 enum { MAX_BUILD_QUEUE_BUTTONS = 9 };// physical button count for the build queue
 enum { MAX_SPECIAL_POWER_SHORTCUTS = 11};
+enum { SPECIAL_POWER_SHORTCUT_COLS = 3 };	///< general's powers side by side in one row; the rest wrap upward
 class CommandSet : public Overridable
 {
 
@@ -694,9 +695,16 @@ public:
 		a mouse click would.  This is what the COMMAND_SLOTnn grid keys are wired to. */
 	void pressCommandButton( Int index );
 
-	/** press the index'th visible general's power shortcut button, exactly as a mouse click
-		would.  This is what the SHORTCUT_SLOTnn keys (F1..F8) are wired to. */
+	/** The general's powers are laid out SPECIAL_POWER_SHORTCUT_COLS to a row, so one key press
+		cannot reach eleven of them.  The first press picks a row (F1 is the row in the corner,
+		F2 the one above it) and the second picks a power inside that row (F1 is the rightmost),
+		which puts every power two keystrokes away: F1-F1, F2-F1, F2-F3.  This is what the
+		SHORTCUT_SLOTnn keys are wired to. */
 	void pressSpecialPowerShortcut( Int index );
+
+	/** forget a half-finished row-then-power keystroke, so the next key picks a row again.
+		TRUE when there was one to forget. */
+	Bool clearSpecialPowerShortcutRow( void );
 
 	/** A builder with more structures than BUILD_PAGE_ONE_SIZE does not show them all at once.
 		The command bar opens on two menu buttons instead - Q and W - and each one opens its
@@ -935,6 +943,8 @@ protected:
 
 	void populateSpecialPowerShortcut( Player *player);
 	void updateSpecialPowerShortcut( void );
+	void arrangeSpecialPowerShortcutGrid( void );	///< re-lay the layout's single column as rows of SPECIAL_POWER_SHORTCUT_COLS
+	Int countVisibleSpecialPowerShortcuts( void );	///< how many slots carry a power right now, which is not the command set's size
 	
 	static const Image* calculateVeterancyOverlayForThing( const ThingTemplate *thingTemplate );
 	static const Image* calculateVeterancyOverlayForObject( const Object *obj );
@@ -995,6 +1005,8 @@ protected:
 	GameWindow *m_specialPowerShortcutButtonParents[ MAX_SPECIAL_POWER_SHORTCUTS ];
 	DisplayString *m_shortcutDisplayStrings[ MAX_SPECIAL_POWER_SHORTCUTS ];
 	Int m_currentlyUsedSpecialPowersButtons; ///< Value will be <= MAX_SPECIAL_POWER_SHORTCUTS;
+	Int m_specialPowerShortcutRow;					 ///< row a first key press picked, -1 when none is pending
+	UnsignedInt m_specialPowerShortcutRowMs;  ///< millisecond that row was picked on, for CHORD_TIMEOUT_MS
 
 
 	WindowLayout *m_specialPowerLayout;

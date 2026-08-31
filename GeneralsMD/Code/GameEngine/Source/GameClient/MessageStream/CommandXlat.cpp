@@ -3231,6 +3231,10 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 				cancelledSomething = TRUE;
 			}
 
+			// a general's power row picked but not yet spent goes the same way
+			if( TheControlBar && TheControlBar->clearSpecialPowerShortcutRow() )
+				cancelledSomething = TRUE;
+
 			if( TheInGameUI->getPendingPlaceType() != NULL )
 			{
 				TheInGameUI->placeBuildAvailable( NULL, NULL );

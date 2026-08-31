@@ -1088,6 +1088,8 @@ ControlBar::ControlBar( void )
 	}
 
 	m_specialPowerShortcutParent = NULL;
+	m_specialPowerShortcutRow = -1;
+	m_specialPowerShortcutRowMs = 0;
 	m_specialPowerLayout = NULL;
 	m_scienceLayout = NULL;
 	m_rightHUDWindow = NULL;
@@ -1644,6 +1646,24 @@ void ControlBar::update( void )
 		if( nowShowing != m_chordDrawableID )
 			dropChord();
 	}
+
+	//
+	// a general's power row goes the same way: it expires on its own, and it drops the moment the
+	// bar it was picked against is off screen - hidden with the command bar, animated out, or
+	// repopulated with fewer powers than the row names.  Otherwise a key pressed in a hurry and
+	// then thought better of sits armed, and the next one fires a power instead of picking a row
+	//
+	if( m_specialPowerShortcutRow >= 0 )
+	{
+		const Int visibleRows = ( countVisibleSpecialPowerShortcuts() + SPECIAL_POWER_SHORTCUT_COLS - 1 )
+														/ SPECIAL_POWER_SHORTCUT_COLS;
+		if( timeGetTime() - m_specialPowerShortcutRowMs > CHORD_TIMEOUT_MS
+				|| m_specialPowerShortcutParent == NULL
+				|| m_specialPowerShortcutParent->winIsHidden()
+				|| m_specialPowerShortcutRow >= visibleRows )
+			clearSpecialPowerShortcutRow();
+	}
+
 	if(m_controlBarSchemeManager)
 		m_controlBarSchemeManager->update();
 
@@ -2426,6 +2446,13 @@ CBCommandStatus ControlBar::processContextSensitiveButtonClick( GameWindow *butt
 {
 
 	//
+	// clicking anything on the bar ends a half-typed general's power row - the player has clearly
+	// moved on, and the keys go back to picking rows instead of one of them firing a power.  The
+	// keyboard path spends its own row before it sends this, so it is already clear by here
+	//
+	clearSpecialPowerShortcutRow();
+
+	//
 	// The right button only ever takes things back out of a queue - the build queue panel no
 	// longer sits in the right HUD to click on. It never runs the command: firing a build or a
 	// special power off the right button would make every mis-click on the bar expensive.
@@ -2613,12 +2640,76 @@ Drawable *ControlBar::findStandInBuilder( Bool freeOnly )
 //-------------------------------------------------------------------------------------------------
 /** Press the index'th general's power shortcut button, as a mouse click would */
 //-------------------------------------------------------------------------------------------------
+Bool ControlBar::clearSpecialPowerShortcutRow( void )
+{
+	if( m_specialPowerShortcutRow < 0 )
+		return FALSE;
+
+	m_specialPowerShortcutRow = -1;
+	m_specialPowerShortcutRowMs = 0;
+	return TRUE;
+
+}  // end clearSpecialPowerShortcutRow
+
+//-------------------------------------------------------------------------------------------------
+/** How many of the slots carry a power right now.  populateSpecialPowerShortcut() fills them from
+	* the corner and hides the rest, so the ones in use are always the first n - and n is not
+	* m_currentlyUsedSpecialPowersButtons, which is how many the general's command set holds in all. */
+//-------------------------------------------------------------------------------------------------
+Int ControlBar::countVisibleSpecialPowerShortcuts( void )
+{
+	Int count = 0;
+	for( Int i = 0; i < m_currentlyUsedSpecialPowersButtons && i < MAX_SPECIAL_POWER_SHORTCUTS; i++ )
+	{
+		GameWindow *win = m_specialPowerShortcutButtons[ i ];
+		if( win == NULL || win->winIsHidden() )
+			break;
+		count++;
+	}
+	return count;
+
+}  // end countVisibleSpecialPowerShortcuts
+
+//-------------------------------------------------------------------------------------------------
+/** One key cannot reach eleven powers laid out three to a row, so it takes two: the first press
+	* picks the row - F1 the row in the corner, F2 the one above it - and the second picks the power
+	* in it, F1 being the rightmost.  Until a row is picked only the head of each row is labelled,
+	* with the key that picks that row; once one is, the labels move onto its three powers. */
+//-------------------------------------------------------------------------------------------------
 void ControlBar::pressSpecialPowerShortcut( Int index )
 {
-	if( index < 0 || index >= m_currentlyUsedSpecialPowersButtons || m_specialPowerShortcutParent == NULL )
+	if( index < 0 || m_specialPowerShortcutParent == NULL || m_specialPowerShortcutParent->winIsHidden() )
 		return;
 
-	GameWindow *win = m_specialPowerShortcutButtons[ index ];
+	//
+	// what the keys can reach is what is on screen, not the size of the command set the general
+	// could eventually fill: a USA player with three powers has one row, and arming the second
+	// one would swallow the key after it with nothing to spend it on
+	//
+	const Int visible = countVisibleSpecialPowerShortcuts();
+	const Int rows = ( visible + SPECIAL_POWER_SHORTCUT_COLS - 1 ) / SPECIAL_POWER_SHORTCUT_COLS;
+
+	// nothing pending: this press names a row and stops there
+	if( m_specialPowerShortcutRow < 0 )
+	{
+		if( index < rows )
+		{
+			m_specialPowerShortcutRow = index;
+			m_specialPowerShortcutRowMs = timeGetTime();
+		}
+		return;
+	}
+
+	//
+	// a row is pending: this press names the power in it, and either way the row is spent - a key
+	// that names no power in that row simply cancels
+	//
+	const Int slot = m_specialPowerShortcutRow * SPECIAL_POWER_SHORTCUT_COLS + index;
+	clearSpecialPowerShortcutRow();
+	if( index >= SPECIAL_POWER_SHORTCUT_COLS || slot >= visible )
+		return;
+
+	GameWindow *win = m_specialPowerShortcutButtons[ slot ];
 	if( win == NULL || win->winIsHidden() || m_specialPowerShortcutParent->winIsHidden() )
 		return;
 
@@ -3935,10 +4026,113 @@ void ControlBar::initSpecialPowershortcutBar( Player *player)
 
 		windowName.format( parentName, i+1 );
 		id = TheNameKeyGenerator->nameToKey( windowName.str() );
-		m_specialPowerShortcutButtonParents[ i ] = 
+		m_specialPowerShortcutButtonParents[ i ] =
 			TheWindowManager->winGetWindowFromId( m_specialPowerShortcutParent, id );
 	}  // end for i
 
+	arrangeSpecialPowerShortcutGrid();
+
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The shipped layout is one slot wide and eleven tall, so a general late in a game runs his powers
+	* from the radar all the way to the top of the screen - a column nobody can take in at a glance.
+	* The same slots are re-laid here as rows of SPECIAL_POWER_SHORTCUT_COLS, filling right to left
+	* and then upward, so the first shortcut keeps the corner it has always been in and the bar grows
+	* sideways instead of climbing.
+	*
+	* Every measurement is read back off the layout - each side ships its own bar, and the loader has
+	* already scaled it to the running resolution - so nothing here is in 800x600 pixels. */
+//-------------------------------------------------------------------------------------------------
+void ControlBar::arrangeSpecialPowerShortcutGrid( void )
+{
+	if( m_specialPowerShortcutParent == NULL || m_currentlyUsedSpecialPowersButtons < 2 )
+		return;
+
+	//
+	// the two lowest slots give the step the artwork was drawn with: the column runs upward, so
+	// the second slot sits above the first and the difference is one row
+	//
+	Int firstX, firstY, secondX, secondY, slotWidth, slotHeight;
+	m_specialPowerShortcutButtonParents[ 0 ]->winGetPosition( &firstX, &firstY );
+	m_specialPowerShortcutButtonParents[ 1 ]->winGetPosition( &secondX, &secondY );
+	m_specialPowerShortcutButtonParents[ 0 ]->winGetSize( &slotWidth, &slotHeight );
+
+	const Int rowStep = firstY - secondY;
+	if( rowStep <= 0 || slotWidth <= 0 || slotHeight <= 0 )
+		return;
+
+	//
+	// where the cameo goes is the hole in the tray artwork, not a guess: SATraySmall is the 60x56
+	// patch at 413,1 of SAControlBar512_001.tga and its transparent middle runs x 4..48, y 9..46.
+	// Those are fractions of the art, so they hold at whatever size the loader gave the tray
+	//
+	const Int ART_WIDTH = 60;
+	const Int ART_HEIGHT = 56;
+	const Int HOLE_X = 4;
+	const Int HOLE_Y = 9;
+	const Int HOLE_WIDTH = 45;
+	const Int HOLE_HEIGHT = 38;
+
+	//
+	// the tray's right edge is the thick one - eleven of the artwork's sixty columns.  A row set
+	// side by side shows that slab between every pair of cameos, so each slot after the rightmost
+	// slides eight (of the tray's authored forty-eight) back under its neighbour, and the rightmost
+	// is drawn last so it covers the slab rather than being covered by it
+	//
+	const Int TRAY_WIDTH = 48;
+	const Int OVERLAP = 8;
+	const Int columnStep = slotWidth - ( slotWidth * OVERLAP ) / TRAY_WIDTH;
+
+	const Int columns = MIN( m_currentlyUsedSpecialPowersButtons, (Int)SPECIAL_POWER_SHORTCUT_COLS );
+	const Int widen = ( columns - 1 ) * columnStep;
+
+	//
+	// the bar itself has to cover the columns we are adding.  winPointInChild only descends into
+	// the children of a window the cursor is already inside, so a button hanging off the left edge
+	// of its parent would draw fine and never take a click.
+	//
+	Int barX, barY, barWidth, barHeight;
+	m_specialPowerShortcutParent->winGetPosition( &barX, &barY );
+	m_specialPowerShortcutParent->winGetSize( &barWidth, &barHeight );
+	m_specialPowerShortcutParent->winSetSize( barWidth + widen, barHeight );
+	m_specialPowerShortcutParent->winSetPosition( barX - widen, barY );
+
+	//
+	// slot positions are relative to that bar, so widening it to the left moves every slot right by
+	// the same amount first: the rightmost column has to land back where the old column stood
+	//
+	for( Int i = 0; i < MAX_SPECIAL_POWER_SHORTCUTS; i++ )
+	{
+		GameWindow *slot = m_specialPowerShortcutButtonParents[ i ];
+		GameWindow *button = m_specialPowerShortcutButtons[ i ];
+		if( slot == NULL || button == NULL )
+			continue;
+
+		const Int column = i % SPECIAL_POWER_SHORTCUT_COLS;
+		const Int row = i / SPECIAL_POWER_SHORTCUT_COLS;
+
+		slot->winSetPosition( firstX + widen - column * columnStep, firstY - row * rowStep );
+
+		//
+		// the cameo fills that hole exactly, rounded to the nearest pixel.  The layout put it at
+		// 1,7 39x27, which sat over the frame on the left and left a gap under it
+		//
+		button->winSetSize( ( slotWidth * HOLE_WIDTH + ART_WIDTH / 2 ) / ART_WIDTH,
+											 ( slotHeight * HOLE_HEIGHT + ART_HEIGHT / 2 ) / ART_HEIGHT );
+		button->winSetPosition( ( slotWidth * HOLE_X + ART_WIDTH / 2 ) / ART_WIDTH,
+														( slotHeight * HOLE_Y + ART_HEIGHT / 2 ) / ART_HEIGHT );
+	}
+
+	//
+	// children draw from the tail of the list back to the head, so the head is the one on top.
+	// Bringing them to the top in reverse leaves slot 1 at the head and the order running down
+	// the list from there: in a row the slot to the right covers the one to its left, and the row
+	// nearest the corner covers the row above it.
+	//
+	for( Int j = MAX_SPECIAL_POWER_SHORTCUTS - 1; j >= 0; j-- )
+		if( m_specialPowerShortcutButtonParents[ j ] )
+			m_specialPowerShortcutButtonParents[ j ]->winBringToTop();
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -3961,6 +4155,9 @@ void ControlBar::populateSpecialPowerShortcut( Player *player)
 {
 	const CommandSet *commandSet;
 	Int i;
+
+	// the bar is being rebuilt, so a row picked against the old one means nothing
+	clearSpecialPowerShortcutRow();
 	if(!player || !player->getPlayerTemplate() 
 			|| !player->isLocalPlayer() || m_currentlyUsedSpecialPowersButtons == 0
 			|| m_specialPowerShortcutButtons == NULL || m_specialPowerShortcutButtonParents == NULL)
@@ -4362,12 +4559,25 @@ void ControlBar::drawSpecialPowerShortcutMultiplierText()
 		// the button's text: the key that presses it (SHORTCUT_SLOTnn, F1..), then how many
 		// of its superweapons are ready - a "1" is superfluous (Lorenzen)
 		UnicodeString text;
-		// the bar holds MAX_SPECIAL_POWER_SHORTCUTS buttons, but only eight SHORTCUT_SLOT meta
-		// events existed, so slots 9-11 could never be labelled or bound. They have events now;
-		// whether they carry a key is up to CommandMap.ini, and getMetaKeyLabel returns empty
-		// for an unbound one.
-		if( i < MAX_SPECIAL_POWER_SHORTCUTS )
-			text = getMetaKeyLabel( (GameMessage::Type)(GameMessage::MSG_META_SHORTCUT_SLOT01 + i) );
+
+		//
+		// a power takes two keys, so only the half of them that the next press can reach is
+		// labelled: with no row pending that is the head of each row, carrying the key that
+		// picks the row; with one pending it is that row's powers, carrying their own keys.
+		// Which key a slot number means is up to CommandMap.ini - getMetaKeyLabel returns
+		// nothing for an unbound one.
+		//
+		Int keySlot = -1;
+		if( m_specialPowerShortcutRow < 0 )
+		{
+			if( i % SPECIAL_POWER_SHORTCUT_COLS == 0 )
+				keySlot = i / SPECIAL_POWER_SHORTCUT_COLS;
+		}
+		else if( i / SPECIAL_POWER_SHORTCUT_COLS == m_specialPowerShortcutRow )
+			keySlot = i % SPECIAL_POWER_SHORTCUT_COLS;
+
+		if( keySlot >= 0 && keySlot < MAX_SPECIAL_POWER_SHORTCUTS )
+			text = getMetaKeyLabel( (GameMessage::Type)(GameMessage::MSG_META_SHORTCUT_SLOT01 + keySlot) );
 
 		const SpecialPowerTemplate *spTemplate = command->getSpecialPowerTemplate();
 		Int numReady = 0;
