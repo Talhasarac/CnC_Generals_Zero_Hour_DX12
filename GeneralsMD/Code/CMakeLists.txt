@@ -466,6 +466,20 @@ target_include_directories(generals PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/Main ${G
 # A .map turns the "fault offset" in the Windows Application Error event into a
 # function name without a debugger: find the last entry whose RVA is <= the offset.
 target_link_options(generals PRIVATE /MAP)
+# A 32-bit process gets 2GB of user address space by default; this asks for the
+# whole 4GB, which 64-bit Windows hands over with no /3GB switch and no reboot.
+# 4GB is the ceiling and there is no way past it here - the pointer is 32 bits,
+# and x64 is rejected by this port on purpose (the code is full of 32-bit __asm).
+#
+# Measured need: an eight-player Merciless match on Twilight Flame peaks at 978MB
+# of virtual address space, so it is at half the old limit already, and a 2003
+# engine walking into that wall does not report it - it stalls for a third of a
+# second at a time and then dies inside ntdll's heap.
+#
+# The classic risk is code that treats a pointer as a signed 32-bit int, which
+# only breaks once an allocation lands above 2GB. Nothing here is known to; if a
+# pointer-signedness bug ever surfaces, this is the first line to suspect.
+target_link_options(generals PRIVATE /LARGEADDRESSAWARE)
 set_target_properties(generals PROPERTIES CXX_STANDARD 17)
 target_link_libraries(generals PRIVATE gameenginedevice
   winmm dsound wsock32 ole32 oleaut32 uuid)
