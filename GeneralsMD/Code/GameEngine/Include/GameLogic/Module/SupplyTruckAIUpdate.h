@@ -49,6 +49,17 @@ inline Real dockActionProgress( UnsignedInt now, UnsignedInt start, UnsignedInt 
 }
 
 //-------------------------------------------------------------------------------------------------
+/** Is there another box in this for the docker after the one just handed over?  Asked the moment a
+	* box changes hands, so that a docking that is finished ends there and then: a docker that stays
+	* docked spends another whole action delay before finding out there was nothing left to take,
+	* and the bar over its head fills again for a box that never arrives. */
+//-------------------------------------------------------------------------------------------------
+inline Bool supplyDockHasNextBox( Int stockLeft, Int dockerBoxes, Int dockerMax )
+{
+	return stockLeft > 0 && dockerBoxes < dockerMax;
+}
+
+//-------------------------------------------------------------------------------------------------
 class SupplyTruckStateMachine : public StateMachine
 {
 	MEMORY_POOL_GLUE_WITH_USERLOOKUP_CREATE( SupplyTruckStateMachine, "SupplyTruckStateMachine" );

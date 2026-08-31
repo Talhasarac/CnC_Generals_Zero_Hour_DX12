@@ -6163,6 +6163,28 @@ TEST(a_dock_action_bar_fills_across_its_window_and_shows_nothing_outside_it)
 	CHECK( dockActionProgress( 100, 100, 100 ) < 0.0f );
 }
 
+/** A docking ends on the frame the last box changes hands, not one action delay later.  Both ends
+	 can finish it: the docker filling up, or the pile running out.  Staying docked past that point
+	 cost a worker a whole extra delay per trip standing at a pile it could take nothing from. */
+TEST(a_supply_docking_ends_on_the_box_that_finishes_it)
+{
+	// mid-load: pile has plenty, worker has room
+	CHECK( supplyDockHasNextBox( 40, 3, 8 ) );
+
+	// the box that fills the worker is the last one
+	CHECK( !supplyDockHasNextBox( 40, 8, 8 ) );
+	CHECK( !supplyDockHasNextBox( 40, 9, 8 ) );		// over-full is still full
+
+	// so is the box that empties the pile, even for a worker with room left
+	CHECK( !supplyDockHasNextBox( 0, 3, 8 ) );
+
+	// and both at once
+	CHECK( !supplyDockHasNextBox( 0, 8, 8 ) );
+
+	// one box left and room for it: worth staying for
+	CHECK( supplyDockHasNextBox( 1, 7, 8 ) );
+}
+
 
 /** EA's floor and ceil nudged the value by the largest float below one and truncated.  The nudge
 	 does not survive the addition: for anything from 2 upwards, f + 0.99999994 rounds to f + 1, so

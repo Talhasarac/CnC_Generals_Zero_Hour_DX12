@@ -628,13 +628,20 @@ StateReturnType AIDockProcessDockState::update( void )
 	// Some dockers can have a delay built in
 	if( TheGameLogic->getFrame() < m_nextDockActionFrame )
 		return STATE_CONTINUE;
-	setNextDockActionFrame();
 
 	Object *drone = findMyDrone();
 
 	// invoke the dock's action until it tells us it is done or the dock becomes closed
 	if( dock->isDockOpen() == false || dock->action( getMachineOwner(), drone ) == false )
 		return STATE_SUCCESS;
+
+	//
+	// Only now, with one more transfer actually going to happen, does the next window open. It
+	// used to be opened before the action, so the very transfer that ended the docking restarted
+	// the bar over the worker's head and then walked off: the worker left the moment its own
+	// progress bar reset to nothing, which is what "it leaves before it has finished" looks like.
+	//
+	setNextDockActionFrame();
 
 	return STATE_CONTINUE;
 }

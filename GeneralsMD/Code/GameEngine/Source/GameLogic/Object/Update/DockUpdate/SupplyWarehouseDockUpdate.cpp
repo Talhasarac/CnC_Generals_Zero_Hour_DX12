@@ -132,6 +132,15 @@ Bool SupplyWarehouseDockUpdate::action( Object* docker, Object *drone )
 			}
 		}
 
+		//
+		// A docker that is full, or a warehouse with nothing left in it, has no next box - so say
+		// so now, on the frame the last one is handed over. Answering TRUE bought the worker one
+		// more whole action delay standing at the warehouse taking nothing, with the bar over its
+		// head filling a second time for a box that was never coming.
+		//
+		if( !supplyDockHasNextBox( m_boxesStored, ai->getNumberBoxes(), ai->getMaxBoxes() ) )
+			return FALSE;
+
 		return TRUE;
 	}
 	else 
