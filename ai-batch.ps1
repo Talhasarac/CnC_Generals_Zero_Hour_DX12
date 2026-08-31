@@ -19,6 +19,12 @@
   .\ai-batch.ps1 -Runs 20 -Tag base
   .\ai-batch.ps1 -Runs 20 -Tag counter-comp -Difficulty brutal
     ... then compare the two win rates.
+
+.EXAMPLE
+  .\ai-batch.ps1 -Runs 8 -Map "Twilight Flame" -Difficulty merciless -Exe generals_perf.exe
+    A fixed map instead of a generated one, so the terrain and the unit load are the same in every
+    batch, and the PERF_TIMERS exe, so the run also prints where the frame went. That is the pair
+    of switches THREADING-ROADMAP.md section 0 is measured with.
 #>
 param(
 	# how many matches to play
@@ -33,8 +39,14 @@ param(
 	[int] $MaxFrames = 30000,
 	# names this batch's logs, so two batches can be compared afterwards
 	[string] $Tag = "ai",
-	# map sizes to spread the batch over, in playable cells a side
+	# map sizes to spread the batch over, in playable cells a side. Ignored when -Map is given.
 	[int[]] $MapCells = @(96, 128, 160),
+	# a shipped map to play instead of a generated one, e.g. "Twilight Flame". A generated map is
+	# a different map per seed, which is what a change to the AI wants; one hand-made map instead
+	# holds the terrain still, which is what a change to the *renderer* wants - the shadow, particle
+	# and skinning load has to be the same on both sides of the comparison or the number means
+	# nothing. The seed still varies the match.
+	[string] $Map = "",
 	# first seed of the batch. A change tuned against seeds 0..23 has to be confirmed on seeds it
 	# was not tuned on, or the number is a fit to twenty-four maps rather than a result
 	[int] $SeedStart = 0,
@@ -53,8 +65,10 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$exe = Join-Path $RunDir $Exe
-if (-not (Test-Path $exe)) {
+# PowerShell variable names are case-insensitive, so this must not be called $exe: it would be the
+# same variable as the -Exe parameter and the summary line would print the whole path back.
+$exePath = Join-Path $RunDir $Exe
+if (-not (Test-Path $exePath)) {
 	throw "no $Exe in $RunDir - build first (build.bat Release copies it there)"
 }
 
@@ -75,9 +89,16 @@ for ($i = 0; $i -lt $Runs; $i++) {
 	# rather than an AI against an idle human seat (see the observer note in setupAutoSkirmish).
 	# -multiInstance: the single-instance guard counts a headless run as "Generals is already
 	# running" and bails at once, so a batch cannot be measured while a copy of the game is open
-	$args = @(
-		"-headless", "-quickstart", "-noshellmap", "-observer", "-multiInstance",
-		"-randommap", $seed, $Players, $cells,
+	$args = @("-headless", "-quickstart", "-noshellmap", "-observer", "-multiInstance")
+	if ($Map) {
+		# -map wants the path the map cache holds, and WinMain's tokenizer honours double quotes -
+		# which every shipped map name needs, because they all have a space in them.
+		$args += "-map"
+		$args += ('"Maps\{0}\{0}.map"' -f $Map)
+	} else {
+		$args += @("-randommap", $seed, $Players, $cells)
+	}
+	$args += @(
 		"-autoskirmish", $Players,
 		"-aidiff", $Difficulty,
 		"-seed", $seed,
@@ -88,9 +109,10 @@ for ($i = 0; $i -lt $Runs; $i++) {
 	if ($Difficulty2) { $args += "-aidiff2"; $args += $Difficulty2 }
 	if ($ExtraArgs.Count) { $args += $ExtraArgs }
 
-	Write-Host ("[{0,3}/{1}] seed {2} cells {3} ... " -f ($i + 1), $Runs, $seed, $cells) -NoNewline
+	$where = if ($Map) { $Map } else { "$cells cells" }
+	Write-Host ("[{0,3}/{1}] seed {2} {3} ... " -f ($i + 1), $Runs, $seed, $where) -NoNewline
 	$sw = [Diagnostics.Stopwatch]::StartNew()
-	$proc = Start-Process -FilePath $exe -ArgumentList $args -WorkingDirectory $RunDir -PassThru
+	$proc = Start-Process -FilePath $exePath -ArgumentList $args -WorkingDirectory $RunDir -PassThru
 	if (-not $proc.WaitForExit($TimeoutMinutes * 60 * 1000)) {
 		$proc.Kill()
 		Write-Host "KILLED (wedged past $TimeoutMinutes min)"
@@ -112,9 +134,35 @@ for ($i = 0; $i -lt $Runs; $i++) {
 	# baseline: search time and count say what it cost, nopath/outofcells say whether it broke,
 	# blocked/stuck say whether the traffic jams it was aimed at actually got shorter
 	$pf = [pscustomobject]@{ FindMs = 0.0; Finds = 0; Expands = 0; NoPath = 0; OutOfCells = 0; Blocked = 0; Stuck = 0 }
+	# THREADING-ROADMAP.md section 0: the per-scope frame cost, present only in a PERF_TIMERS
+	# build (-Exe generals_perf.exe), and the job pool's own report, present in every build.
+	$perf = @{}
+	$jobs = $null
+	# Stability, which is a different question from speed: the tail of the frame-time distribution
+	# and the count of frames that missed a 60Hz budget. Present in every build.
+	$ft = $null
+	$spikes = 0
 
 	foreach ($line in Get-Content $log) {
-		if ($line -match "HEADLESS RESULT: (.+?) on frame (\d+)") {
+		if ($line -match "HEADLESS PERF (\S+): ([\d.]+) \(([\d.]+)\) x([\d.]+) worst ([\d.]+)") {
+			$perf[$Matches[1]] = [pscustomobject]@{
+				Net = [double]$Matches[2]; Gross = [double]$Matches[3]; Calls = [double]$Matches[4]
+				Worst = [double]$Matches[5]
+			}
+		}
+		elseif ($line -match "HEADLESS FRAMETIME: (\d+) frames \| mean ([\d.]+) p50 ([\d.]+) p95 ([\d.]+) p99 ([\d.]+) p99\.9 ([\d.]+) worst ([\d.]+) ms \(frame (\d+)\) \| over 16\.7ms (\d+) .* \| over 33\.3ms (\d+) ") {
+			$ft = [pscustomobject]@{
+				Frames = [int]$Matches[1]; Mean = [double]$Matches[2]; P50 = [double]$Matches[3]
+				P95 = [double]$Matches[4]; P99 = [double]$Matches[5]; P999 = [double]$Matches[6]
+				Worst = [double]$Matches[7]; WorstAt = [int]$Matches[8]
+				Over16 = [int]$Matches[9]; Over33 = [int]$Matches[10]
+			}
+		}
+		elseif ($line -match "HEADLESS SPIKE:") { $spikes++ }
+		elseif ($line -match "HEADLESS JOBS: (\d+) worker threads, (\d+) allocations from a job") {
+			$jobs = [pscustomobject]@{ Workers = [int]$Matches[1]; Allocs = [int]$Matches[2] }
+		}
+		elseif ($line -match "HEADLESS RESULT: (.+?) on frame (\d+)") {
 			$why = $Matches[1]
 			$frames = [int]$Matches[2]
 		}
@@ -150,12 +198,12 @@ for ($i = 0; $i -lt $Runs; $i++) {
 	$winnerText = if ($null -ne $winner) { "player $winner" } else { "no winner" }
 	Write-Host ("{0}, {1}, frame {2}, {3:n0}s" -f $why, $winnerText, $frames, $sw.Elapsed.TotalSeconds)
 
-	$rows += [pscustomobject]@{ Seed = $seed; Cells = $cells; Why = $why; Frames = $frames; Wall = $sw.Elapsed.TotalSeconds; Slots = $slots; Pf = $pf }
+	$rows += [pscustomobject]@{ Seed = $seed; Cells = $cells; Why = $why; Frames = $frames; Wall = $sw.Elapsed.TotalSeconds; Slots = $slots; Pf = $pf; Perf = $perf; Jobs = $jobs; Ft = $ft; Spikes = $spikes }
 }
 
 # ---------------------------------------------------------------------------------------------
 Write-Host ""
-Write-Host "=== $Tag : $Runs matches, $Players players, $Difficulty$(if ($Difficulty2) { " vs " + $Difficulty2 }), cap $MaxFrames frames$(if ($ExtraArgs.Count) { ", " + ($ExtraArgs -join ' ') }) ==="
+Write-Host "=== $Tag : $Runs matches, $Players players, $Difficulty$(if ($Difficulty2) { " vs " + $Difficulty2 }), $(if ($Map) { "on $Map" } else { "generated maps" }), $Exe, cap $MaxFrames frames$(if ($ExtraArgs.Count) { ", " + ($ExtraArgs -join ' ') }) ==="
 
 $decided = @($rows | Where-Object { $_.Why -eq "decided" })
 Write-Host ("decided {0}/{1}   frame-limited {2}   failed {3}" -f
@@ -206,6 +254,55 @@ if ($pfRows.Count -gt 0) {
 	$totFrames = ($pfRows | Measure-Object Frames -Sum).Sum
 	$totBlocked = ($pfRows | ForEach-Object { $_.Pf.Blocked } | Measure-Object -Sum).Sum
 	Write-Host ("blocked unit-frames per 1000 logic frames: {0:n1}" -f (1000.0 * $totBlocked / $totFrames))
+}
+
+# Stability. A mean frame time is the statistic that hides a stutter, so this reports the tail:
+# how bad the worst frames were and how many of them missed a 60Hz budget. Per 1000 frames, because
+# a longer batch would otherwise look worse than a short one.
+$ftRows = @($rows | Where-Object { $null -ne $_.Ft -and $_.Ft.Frames -gt 0 })
+if ($ftRows.Count -gt 0) {
+	$totFt = ($ftRows | ForEach-Object { $_.Ft.Frames } | Measure-Object -Sum).Sum
+	$totOver16 = ($ftRows | ForEach-Object { $_.Ft.Over16 } | Measure-Object -Sum).Sum
+	$totOver33 = ($ftRows | ForEach-Object { $_.Ft.Over33 } | Measure-Object -Sum).Sum
+	$worst = $ftRows | Sort-Object -Property { $_.Ft.Worst } -Descending | Select-Object -First 1
+	Write-Host ("frame time: mean {0:n2} p50 {1:n2} p99 {2:n2} p99.9 {3:n2} ms | worst {4:n1} ms (seed {5}, logic frame {6})" -f
+		(($ftRows | ForEach-Object { $_.Ft.Mean } | Measure-Object -Average).Average),
+		(($ftRows | ForEach-Object { $_.Ft.P50 } | Measure-Object -Average).Average),
+		(($ftRows | ForEach-Object { $_.Ft.P99 } | Measure-Object -Average).Average),
+		(($ftRows | ForEach-Object { $_.Ft.P999 } | Measure-Object -Average).Average),
+		$worst.Ft.Worst, $worst.Seed, $worst.Ft.WorstAt)
+	Write-Host ("stutters per 1000 frames: {0:n2} over 16.7ms, {1:n2} over 33.3ms  ({2} and {3} in {4:n0} frames)" -f
+		(1000.0 * $totOver16 / $totFt), (1000.0 * $totOver33 / $totFt), $totOver16, $totOver33, $totFt)
+}
+
+# THREADING-ROADMAP.md 3.1's safety net. Present in every build, so a run that quietly started
+# allocating inside a job says so here rather than six weeks later as a perf regression.
+$jobRows = @($rows | Where-Object { $null -ne $_.Jobs })
+if ($jobRows.Count -gt 0) {
+	$workers = ($jobRows[0].Jobs.Workers)
+	$allocs = ($jobRows | ForEach-Object { $_.Jobs.Allocs } | Measure-Object -Sum).Sum
+	Write-Host ("job pool: {0} worker threads, {1} allocations from a job{2}" -f
+		$workers, $allocs, $(if ($allocs -gt 0) { "  <== must be 0, see THREADING-ROADMAP.md 1.1" } else { "" }))
+}
+
+# THREADING-ROADMAP.md section 0. Only a PERF_TIMERS build fills these in; the table is what
+# decides whether anything below section 3 is worth threading at all.
+$perfRows = @($rows | Where-Object { $null -ne $_.Perf -and $_.Perf.Count -gt 0 })
+if ($perfRows.Count -gt 0) {
+	$names = $perfRows | ForEach-Object { $_.Perf.Keys } | Sort-Object -Unique
+	$table = foreach ($n in $names) {
+		$mine = @($perfRows | Where-Object { $_.Perf.ContainsKey($n) } | ForEach-Object { $_.Perf[$n] })
+		[pscustomobject]@{
+			Scope        = $n
+			"us/frame"   = [math]::Round(($mine | Measure-Object Net -Average).Average, 1)
+			"gross"      = [math]::Round(($mine | Measure-Object Gross -Average).Average, 1)
+			"calls/frame"= [math]::Round(($mine | Measure-Object Calls -Average).Average, 2)
+			# the stability column: a scope averaging nothing whose worst frame is 20ms is a stutter
+			"worst us"   = [math]::Round(($mine | Measure-Object Worst -Maximum).Maximum, 0)
+		}
+	}
+	Write-Host "per-frame cost by scope (net microseconds, averaged over the batch):"
+	$table | Sort-Object -Property "us/frame" -Descending | Format-Table -AutoSize | Out-String | Write-Host
 }
 
 # the per-match detail, for whoever wants to look at one game rather than the average

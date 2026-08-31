@@ -451,6 +451,7 @@ found and fixed â€” EA's own, not port damage.**
 - The minimap's fog is painted in memory and handed over once a frame.
 - Minimap dots and terrain go over in one go, not one trip per dot.
 - The terrain's lowest-point sweep is read along the grain now.
+- Putting a building on uneven ground froze the picture for a sixteenth of a second. Levelling the dirt under a foundation asked the game to re-light every blade of grass on the map - sixty-one milliseconds, measured, for a patch a few paces wide. It now redoes the patch. Over a seven-minute four-way battle that took the worst frame of the match from 82 milliseconds down to 19, and left nothing at all above a thirtieth of a second.
 
 ## Sound, video, and getting it to start at all
 
@@ -486,6 +487,10 @@ found and fixed â€” EA's own, not port damage.**
 - The shade under smoke vanished between builds and was rewritten from these notes.
 - The missing tree shadows were found by painting them red, not by reasoning.
 - Zoom toward the cursor was fixed twice and is argued from code, not watched.
+- The frame was finally measured rather than guessed at: 2003's own stopwatches were switched back on for a separate measurement build, and a seven-minute four-way match with two hundred and seventy units on the map was timed scope by scope.
+- That killed a plan. Spreading the shadow work over sixteen cores would have bought two percent of a frame; particles, four hundredths of one percent. Nine tenths of the time is spent handing triangles to the graphics card, which no amount of threads makes faster. The plan is written down, with the numbers, so nobody spends a fortnight rediscovering it.
+- One thing did come out of it: sixteen thousand five hundred lock operations per frame, all on the same lock, every time a scrap of memory is taken or given back. That is the next thing worth chasing.
+- Then the question changed from "how fast" to "how steady", and the stopwatch had to change with it: an average is exactly the number that hides a stutter. The game now keeps the shape of every frame it draws and reports the worst ones, with the name of what took the time. The building-foundation freeze above was found that way, in one run, having been in the game since 2003.
 
 ---
 

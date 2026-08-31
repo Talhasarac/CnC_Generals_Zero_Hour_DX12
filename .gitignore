@@ -1,5 +1,7 @@
-# CMake build tree
+# CMake build trees. build-perf/ is the -DPERF_TIMERS=ON measurement tree, which lives beside the
+# shipping one so both exes can sit in Run/ at once (THREADING-ROADMAP.md section 0).
 build/
+build-perf/
 
 # Build/test logs from the CMake port loop
 *.log
