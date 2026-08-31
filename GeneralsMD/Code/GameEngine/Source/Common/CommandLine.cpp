@@ -1262,6 +1262,33 @@ Int parseMaxGameFrames(char *args[], int num)
 	return 2;
 }
 
+/* -autocamera [seconds]: every so often, put the camera wherever the fighting is.
+	 *
+	 * A soak run watches from a free camera that never moves, and a camera that never moves is the
+	 * one thing a real player's never is.  Everything a moving camera drags in behind it - the
+	 * terrain window scrolling, shroud updates, models and textures loading the first time they come
+	 * on screen - is invisible to a run that stares at one spot, which is exactly the blind spot a
+	 * stutter likes to live in.  Default 5 seconds if no number is given. */
+Int parseAutoCamera(char *args[], int num)
+{
+	if (TheWritableGlobalData)
+	{
+		Int seconds = 5;
+		Int consumed = 1;
+		// The value is optional, so only take the next word if it is actually a number.
+		if (num > 1 && args[1] && args[1][0] >= '0' && args[1][0] <= '9')
+		{
+			seconds = atoi(args[1]);
+			consumed = 2;
+		}
+		if (seconds < 1)
+			seconds = 1;
+		TheWritableGlobalData->m_autoCameraSeconds = seconds;
+		return consumed;
+	}
+	return 1;
+}
+
 /* -netgame <ip>[,<ip>...] starts a LAN game against those addresses with no lobby in front of it,
 	 and -netslot <n> says which of them this copy is.  Every machine is given the same slot list in
 	 the same order, which is all the lobby ever agreed on: the slot list, the map and the seed.  A
@@ -1501,6 +1528,7 @@ static CommandLineParam params[] =
 	{ "-observer", parseObserver },
 	{ "-headless", parseHeadless },
 	{ "-maxframes", parseMaxGameFrames },
+	{ "-autocamera", parseAutoCamera },
 	{ "-replay", parseReplay },
 	{ "-netgame", parseNetGame },
 	{ "-netslot", parseNetSlot },

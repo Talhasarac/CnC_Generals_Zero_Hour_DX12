@@ -51,6 +51,7 @@
 #include "Common/GlobalData.h"
 #include "Common/PerfTimer.h"
 #include "Common/JobSystem.h"
+#include "GameLogic/TerrainLogic.h"		// -autocamera needs the map extent and the ground height
 #include "Common/RandomValue.h"
 #include "Common/NameKeyGenerator.h"
 #include "Common/ModuleFactory.h"
@@ -1215,6 +1216,132 @@ static void reportFrameTimeStats( void )
 }
 
 /** -----------------------------------------------------------------------------------------------
+ * -autocamera <n>: every n seconds, put the camera where the fighting is.
+ *
+ * A soak run watches from a free camera that never moves, and everything a moving camera drags in
+ * behind it - the terrain window scrolling, the shroud, models and textures loading the first time
+ * they come on screen - is invisible to a run that stares at one spot.  That is exactly the blind
+ * spot a stutter likes to live in, so the measurement has to move the camera itself.
+ *
+ * "Where the fighting is" is decided the cheapest way that actually works: a coarse grid over the
+ * map, one tally pass over every playable player's units, and the cell holding units from the most
+ * sides wins.  A cell with two armies in it beats a cell with a bigger single army, which is the
+ * difference between watching a battle and watching a base.  One walk of the object lists every n
+ * seconds costs nothing next to the logic frame it rides on.
+ */
+enum { AUTOCAM_GRID = 16 };
+static Int s_autoCamUnits[ AUTOCAM_GRID * AUTOCAM_GRID ];
+static UnsignedInt s_autoCamSides[ AUTOCAM_GRID * AUTOCAM_GRID ];
+
+struct AutoCamTally
+{
+	UnsignedInt sideBit;
+	Real originX, originY, spanX, spanY;
+};
+
+static void autoCameraTallyObject( Object *obj, void *userData )
+{
+	AutoCamTally *t = (AutoCamTally *)userData;
+	if( obj == NULL )
+		return;
+	// Units, not buildings: a base sits still and is not what anyone would look at.
+	if( !obj->isKindOf( KINDOF_INFANTRY ) && !obj->isKindOf( KINDOF_VEHICLE ) &&
+			!obj->isKindOf( KINDOF_AIRCRAFT ) )
+		return;
+
+	const Coord3D *pos = obj->getPosition();
+	Int cx = (Int)(( pos->x - t->originX ) / t->spanX * AUTOCAM_GRID);
+	Int cy = (Int)(( pos->y - t->originY ) / t->spanY * AUTOCAM_GRID);
+	if( cx < 0 ) cx = 0;
+	if( cy < 0 ) cy = 0;
+	if( cx >= AUTOCAM_GRID ) cx = AUTOCAM_GRID - 1;
+	if( cy >= AUTOCAM_GRID ) cy = AUTOCAM_GRID - 1;
+
+	const Int cell = cy * AUTOCAM_GRID + cx;
+	++s_autoCamUnits[ cell ];
+	s_autoCamSides[ cell ] |= t->sideBit;
+}
+
+static Int autoCameraCountBits( UnsignedInt v )
+{
+	Int n = 0;
+	while( v ) { n += (v & 1); v >>= 1; }
+	return n;
+}
+
+static void updateAutoCamera( void )
+{
+	if( TheGlobalData->m_autoCameraSeconds <= 0 || TheTacticalView == NULL || TheTerrainLogic == NULL )
+		return;
+	if( !TheGameLogic->isInGame() || TheGameLogic->isInShellGame() )
+		return;
+
+	/* This runs once per *render* frame, and the renderer is uncapped - so a plain modulo of the
+		 logic frame fires ten times over on the one frame it is due, each time walking every object
+		 list in the game.  Remember the frame it last acted on instead. */
+	static UnsignedInt lastMoveFrame = 0xffffffff;
+	const UnsignedInt frame = TheGameLogic->getFrame();
+	const UnsignedInt period = (UnsignedInt)TheGlobalData->m_autoCameraSeconds * LOGICFRAMES_PER_SECOND;
+	if( frame == lastMoveFrame || (frame % period) != 0 )
+		return;
+	lastMoveFrame = frame;
+
+	Region3D extent;
+	TheTerrainLogic->getExtent( &extent );
+	AutoCamTally tally;
+	tally.originX = extent.lo.x;
+	tally.originY = extent.lo.y;
+	tally.spanX = extent.width();
+	tally.spanY = extent.height();
+	if( tally.spanX <= 1.0f || tally.spanY <= 1.0f )
+		return;						// no map to speak of
+
+	for( Int i = 0; i < AUTOCAM_GRID * AUTOCAM_GRID; ++i )
+	{
+		s_autoCamUnits[ i ] = 0;
+		s_autoCamSides[ i ] = 0;
+	}
+
+	for( Int p = 0; p < ThePlayerList->getPlayerCount() && p < MAX_PLAYER_COUNT; ++p )
+	{
+		Player *player = ThePlayerList->getNthPlayer( p );
+		if( !player->isPlayableSide() || player->isPlayerObserver() )
+			continue;
+		tally.sideBit = (UnsignedInt)1 << p;
+		player->iterateObjects( autoCameraTallyObject, &tally );
+	}
+
+	/* Contested first, crowded second.  Squaring the number of sides present is enough to make any
+		 two-sided cell outrank any one-sided one at realistic army sizes, without a special case. */
+	Int bestCell = -1;
+	Int bestScore = 0;
+	for( Int c = 0; c < AUTOCAM_GRID * AUTOCAM_GRID; ++c )
+	{
+		if( s_autoCamUnits[ c ] == 0 )
+			continue;
+		const Int sides = autoCameraCountBits( s_autoCamSides[ c ] );
+		const Int score = s_autoCamUnits[ c ] * sides * sides;
+		if( score > bestScore )
+		{
+			bestScore = score;
+			bestCell = c;
+		}
+	}
+	if( bestCell < 0 )
+		return;						// nobody has a unit anywhere; leave the camera alone
+
+	Coord3D look;
+	look.x = tally.originX + ( (bestCell % AUTOCAM_GRID) + 0.5f ) * tally.spanX / AUTOCAM_GRID;
+	look.y = tally.originY + ( (bestCell / AUTOCAM_GRID) + 0.5f ) * tally.spanY / AUTOCAM_GRID;
+	look.z = TheTerrainLogic->getGroundHeight( look.x, look.y );
+	TheTacticalView->lookAt( &look );
+
+	DEBUG_LOG(("AUTOCAMERA: frame %d -> (%.0f,%.0f), %d units from %d sides\n",
+						 frame, look.x, look.y,
+						 s_autoCamUnits[ bestCell ], autoCameraCountBits( s_autoCamSides[ bestCell ] )));
+}
+
+/** -----------------------------------------------------------------------------------------------
  * Why an unattended run is over, or NULL while it is still going.  The string is what the log line
  * says, so the reason and the report of it cannot drift apart.
  *
@@ -1493,6 +1620,7 @@ void GameEngine::update( void )
 		}
 
 		updateHeadlessRun();
+		updateAutoCamera();
 
 #ifdef DEBUG_LOGGING
 		fpsFrames++;
