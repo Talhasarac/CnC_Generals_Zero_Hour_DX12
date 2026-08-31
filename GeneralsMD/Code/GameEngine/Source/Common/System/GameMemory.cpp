@@ -52,6 +52,7 @@
 #include "Common/Errors.h"
 #include "Common/GlobalData.h"
 #include "Common/PerfTimer.h"
+#include "Common/JobSystem.h"
 #ifdef MEMORYPOOL_DEBUG
 #include "GameClient/ClientRandomValue.h"
 #endif
@@ -1629,6 +1630,17 @@ Int MemoryPool::freeBlob(MemoryPoolBlob* blob)
 */
 void* MemoryPool::allocateBlockDoNotZeroImplementation(DECLARE_LITERALSTRING_ARG1)
 {
+	/* THREADING-ROADMAP.md 1.1 and 3.1.  Every pool in the game shares the one critical section
+		 below, so an allocation inside a job does not crash - it serializes the whole fork against
+		 every other thread, and the parallel work turns back into a queue plus lock overhead.  That
+		 failure mode is invisible: the output is correct and the frame is slower.  So it is counted
+		 here, where it happens, and reported at the end of a run.
+
+		 A count and not a DEBUG_ASSERTCRASH because this tree's Debug config cannot link standalone
+		 (CLAUDE.md, Hard constraints), so a _DEBUG-only check would never once run. */
+	if (JobSystem::isWorkerThread())
+		JobSystem::noteWorkerAllocation();
+
 	ScopedCriticalSection scopedCriticalSection(TheMemoryPoolCriticalSection);
 
 	if (m_firstBlobWithFreeBlocks != NULL && !m_firstBlobWithFreeBlocks->hasAnyFreeBlocks()) 

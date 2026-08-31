@@ -94,6 +94,8 @@
 #include "GameLogic/Module/QueueProductionExitUpdate.h"
 #include "GameLogic/Module/SupplyCenterProductionExitUpdate.h"
 #include "WWMath/matrix3d.h"
+#include "Common/JobSystem.h"
+#include "Common/CriticalSection.h"
 #include "GameClient/Drawable.h"
 #include "Common/BuildAssistant.h"
 #include "GameLogic/Object.h"
@@ -7230,4 +7232,234 @@ TEST(a_mirrored_image_is_the_same_piece_of_texture_the_other_way_round)
 
 	mirrored->deleteInstance();
 	source->deleteInstance();
+}
+
+//-------------------------------------------------------------------------------------------------
+// THREADING-ROADMAP.md 3.1 - the fork-join pool.
+//
+// Everything the roadmap puts on top of this pool is a pure function over an array, so the pool
+// itself is the only place a data race can be introduced by construction rather than by review -
+// and there is no TSan on MSVC/Win32 x86 (section 7).  These tests are therefore about the two
+// promises the callers rely on and nothing else: every item runs exactly once, and a worker
+// computes floats the way the rest of the game does.
+//-------------------------------------------------------------------------------------------------
+
+enum { JOB_TEST_MAX = 4096 };
+static Int s_jobVisits[ JOB_TEST_MAX ];
+static UnsignedInt s_jobFPMode[ JOB_TEST_MAX ];
+static Int s_jobWorkerFlag[ JOB_TEST_MAX ];
+static volatile LONG s_jobWorkerSeen = 0;
+static volatile LONG s_jobWaitedOnce = 0;
+
+/* The forking thread works the queue too, and a job body that does nothing at all is finished long
+	 before a worker is out of WaitForSingleObject - so a test that wants to observe a worker has to
+	 hold the first item until one turns up.  One bounded wait per fork, and none at all once a
+	 worker has been seen, so this costs nothing when the pool is behaving. */
+static void jobTestWaitForAWorker( void )
+{
+	if( JobSystem::isWorkerThread() )
+	{
+		InterlockedExchange( (LONG *)&s_jobWorkerSeen, 1 );
+		return;
+	}
+	if( s_jobWorkerSeen || InterlockedExchange( (LONG *)&s_jobWaitedOnce, 1 ) != 0 )
+		return;
+
+	const DWORD deadline = ::GetTickCount() + 500;
+	while( !s_jobWorkerSeen && ::GetTickCount() < deadline )
+		::Sleep( 0 );
+}
+
+static void jobTestCount( Int index, void * )
+{
+	// Each item owns its own slot, so this needs no lock and no atomic - which is the shape every
+	// job on the roadmap has to have.
+	++s_jobVisits[ index ];
+}
+
+static void jobTestRecordFPU( Int index, void * )
+{
+	jobTestWaitForAWorker();
+	s_jobFPMode[ index ] = getFPMode();
+	s_jobWorkerFlag[ index ] = JobSystem::isWorkerThread() ? 1 : 0;
+}
+
+static void jobTestAllocate( Int index, void * )
+{
+	// Deliberately breaks the no-allocation rule, to prove the counter that watches for it is not
+	// simply stuck at zero.
+	jobTestWaitForAWorker();
+	Image *img = newInstance( Image );
+	s_jobVisits[ index ] = 1;
+	img->deleteInstance();
+}
+
+static void resetJobVisits( void )
+{
+	s_jobWorkerSeen = 0;
+	s_jobWaitedOnce = 0;
+	for( Int i = 0; i < JOB_TEST_MAX; ++i )
+	{
+		s_jobVisits[ i ] = 0;
+		s_jobFPMode[ i ] = 0;
+		s_jobWorkerFlag[ i ] = 0;
+	}
+}
+
+/* The one thing every caller assumes: the range is covered, once, and parallel_for does not come
+	 back before that is true.  Run over a spread of counts and granularities, including the ones
+	 that make the split uneven and the ones that collapse it to a single chunk. */
+TEST(parallel_for_runs_every_item_exactly_once)
+{
+	static const Int counts[] = { 0, 1, 2, 3, 7, 8, 63, 64, 65, 1000, 4096 };
+	static const Int grains[] = { 1, 2, 3, 16, 4096 };
+
+	JobSystem::shutdown();
+	JobSystem::init( 4 );
+	CHECK_EQ( 4, JobSystem::workerCount() );
+
+	const Int numCounts = (Int)(sizeof(counts)/sizeof(counts[0]));
+	const Int numGrains = (Int)(sizeof(grains)/sizeof(grains[0]));
+	for( Int c = 0; c < numCounts; ++c )
+	{
+		for( Int g = 0; g < numGrains; ++g )
+		{
+			resetJobVisits();
+			JobSystem::parallel_for( counts[c], grains[g], jobTestCount, NULL );
+
+			Int seen = 0;
+			for( Int i = 0; i < JOB_TEST_MAX; ++i )
+			{
+				if( i < counts[c] )
+					seen += (s_jobVisits[ i ] == 1) ? 1 : 0;
+				else
+					CHECK_EQ( 0, s_jobVisits[ i ] );		// never runs past the end of the range
+			}
+			CHECK_EQ( counts[c], seen );
+		}
+	}
+
+	// A granularity below 1 is a caller mistake, not a division by zero.
+	resetJobVisits();
+	JobSystem::parallel_for( 10, 0, jobTestCount, NULL );
+	for( Int i = 0; i < 10; ++i )
+		CHECK_EQ( 1, s_jobVisits[ i ] );
+
+	JobSystem::shutdown();
+}
+
+/* A machine with one core, or a build that asks for no pool, has to run the same code rather than
+	 a second single-threaded implementation nobody tests. */
+TEST(parallel_for_with_no_workers_still_runs_everything)
+{
+	JobSystem::shutdown();
+	JobSystem::init( 0 );
+	CHECK_EQ( 0, JobSystem::workerCount() );
+
+	resetJobVisits();
+	JobSystem::parallel_for( 100, 4, jobTestCount, NULL );
+	for( Int i = 0; i < 100; ++i )
+		CHECK_EQ( 1, s_jobVisits[ i ] );
+
+	// and on the calling thread, so nothing inside a job may believe it is on a worker
+	resetJobVisits();
+	JobSystem::parallel_for( 8, 1, jobTestRecordFPU, NULL );
+	for( Int i = 0; i < 8; ++i )
+		CHECK_EQ( 0, s_jobWorkerFlag[ i ] );
+
+	JobSystem::shutdown();
+}
+
+/* THREADING-ROADMAP.md 1.3.  The FPU control word is per-thread and a new thread starts on the
+	 CRT default, not on what setFPMode() left on the main thread.  A worker that computes floats at
+	 a different precision or rounding mode produces results that differ from the main thread's for
+	 no visible reason - the kind of bug that never crashes and never reproduces. */
+TEST(a_job_computes_floats_the_way_the_game_does)
+{
+	setFPMode();
+
+	JobSystem::shutdown();
+	JobSystem::init( 4 );
+
+	resetJobVisits();
+	// One item per chunk over a range far bigger than the pool, so every worker takes some.
+	JobSystem::parallel_for( 512, 1, jobTestRecordFPU, NULL );
+
+	Int ranOnAWorker = 0;
+	for( Int i = 0; i < 512; ++i )
+	{
+		CHECK_EQ( expectedFPMode(), s_jobFPMode[ i ] );
+		ranOnAWorker += s_jobWorkerFlag[ i ];
+	}
+	// ...and the check above was not vacuous because the main thread ran all of it
+	CHECK( ranOnAWorker > 0 );
+
+	// the fork left the calling thread's own mode alone
+	CHECK_EQ( expectedFPMode(), getFPMode() );
+
+	JobSystem::shutdown();
+}
+
+/* THREADING-ROADMAP.md 1.1: every MemoryPool in the game shares one critical section, so an
+	 allocation inside a job does not crash - it quietly serializes the fork.  The counter is the
+	 only thing that can see that happen, so it has to be shown to move. */
+TEST(an_allocation_inside_a_job_is_counted)
+{
+	JobSystem::shutdown();
+	JobSystem::init( 4 );
+
+	const Int before = JobSystem::workerAllocationCount();
+
+	resetJobVisits();
+	JobSystem::parallel_for( 256, 1, jobTestCount, NULL );
+	CHECK_EQ( before, JobSystem::workerAllocationCount() );		// a well-behaved job costs nothing
+
+	/* WinMain installs this and nothing else does, so in a test binary the pools are unguarded -
+		 and the job below allocates from several threads at once on purpose.  Without it this test
+		 corrupts a pool and hangs, which is itself the point of section 1.1: the allocator is safe
+		 to call from a worker only because that one global lock is there. */
+	CriticalSection poolLock;
+	TheMemoryPoolCriticalSection = &poolLock;
+
+	resetJobVisits();
+	JobSystem::parallel_for( 256, 1, jobTestAllocate, NULL );
+
+	TheMemoryPoolCriticalSection = NULL;
+
+	CHECK( JobSystem::workerAllocationCount() > before );
+
+	JobSystem::shutdown();
+}
+
+/* The pool is torn down inside ~GameEngine, on the way out of a process that may be quitting from
+	 anywhere.  It has to survive being stopped without ever being started, being stopped twice, and
+	 being started again afterwards - none of which may hang. */
+TEST(the_pool_survives_being_started_and_stopped_repeatedly)
+{
+	JobSystem::shutdown();
+	JobSystem::shutdown();									// no pool: nothing to do, and no wait to hang on
+	CHECK_EQ( 0, JobSystem::workerCount() );
+
+	for( Int round = 0; round < 3; ++round )
+	{
+		JobSystem::init( 3 );
+		CHECK_EQ( 3, JobSystem::workerCount() );
+
+		JobSystem::init( 8 );									// already running: ignored, not a second pool
+		CHECK_EQ( 3, JobSystem::workerCount() );
+
+		resetJobVisits();
+		JobSystem::parallel_for( 200, 1, jobTestCount, NULL );
+		for( Int i = 0; i < 200; ++i )
+			CHECK_EQ( 1, s_jobVisits[ i ] );
+
+		JobSystem::shutdown();
+		CHECK_EQ( 0, JobSystem::workerCount() );
+
+		// and with the pool down, the same call still covers the range
+		resetJobVisits();
+		JobSystem::parallel_for( 200, 1, jobTestCount, NULL );
+		for( Int i = 0; i < 200; ++i )
+			CHECK_EQ( 1, s_jobVisits[ i ] );
+	}
 }
