@@ -453,6 +453,15 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 				UnsignedInt pickType = getPickTypesForContext( true /*TheInGameUI->isInForceAttackMode()*/ );
 				
 				Drawable *underCursor = TheTacticalView->pickDrawable( &pixel, TheInGameUI->isInForceAttackMode(), (PickType) pickType );
+
+				//
+				// a click on a health bar selects its owner, so the cursor has to say so before the
+				// click - the same fallback, in the same order, as the point pick in
+				// W3DView::iterateDrawablesInRegion
+				//
+				if( underCursor == NULL )
+					underCursor = TheGameClient->pickDrawableByHealthBar( &pixel );
+
 				Object *objUnderCursor = underCursor ? underCursor->getObject() : NULL;
 
 				if( objUnderCursor && (!objUnderCursor->isEffectivelyDead() || objUnderCursor->isKindOf( KINDOF_ALWAYS_SELECTABLE )) )

@@ -1901,6 +1901,8 @@ void W3DView::draw( void )
 	/// @todo we might want to consider wiping this iterate out if there is nothing to post draw
 	//
 	TheGameClient->resetRenderedObjectCount();
+	// the post draw is where health bars are drawn, and each one records where it landed
+	TheGameClient->clearHealthBarPickRegions();
 	TheGameClient->iterateDrawablesInRegion( &axisAlignedRegion, drawablePostDraw, this );
 
 	TheGameClient->flushTextBearingDrawables();
@@ -2299,6 +2301,18 @@ Int W3DView::iterateDrawablesInRegion( IRegion2D *screenRegion,
 	{
 		// Allow all drawables to be picked.
 		onlyDrawableToTest = pickDrawable(&screenRegion->lo, TRUE, (PickType) getPickTypesForContext(TheInGameUI->isInForceAttackMode()));
+
+		//
+		// Nothing under the cursor in the scene, so a health bar is allowed to answer for its owner.
+		// Every bar is on in this fork, which makes a unit's bar the one part of it that is never
+		// hidden behind a building or lost in a crowd - and infantry at full zoom out is a handful of
+		// pixels of model under a bar that is easier to hit than the man.  Fallback order matters: a
+		// bar hangs in the air above its own unit and so overlaps whatever stands behind it, so it may
+		// only answer a click that would otherwise have missed everything.
+		//
+		if (onlyDrawableToTest == NULL)
+			onlyDrawableToTest = TheGameClient->pickDrawableByHealthBar(&screenRegion->lo);
+
 		if (onlyDrawableToTest == NULL) {
 			return 0;
 		}

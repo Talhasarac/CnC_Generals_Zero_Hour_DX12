@@ -496,6 +496,9 @@ void GameClient::reset( void )
 	m_drawableVector.clear();
 	m_drawableVector.resize(DRAWABLE_HASH_SIZE, NULL);
 
+	// last frame's health bars belong to the map we are leaving
+	m_healthBarPickList.clear();
+
 	// need to reset the in game UI to clear drawables before they are destroyed
 	TheInGameUI->reset();
 
@@ -1087,6 +1090,79 @@ void GameClient::flushTextBearingDrawables( void )
 	  (*it)->drawUIText();
 
 	m_textBearingDrawableList.clear();
+}
+
+// ------------------------------------------------------------------------------------------------
+Bool GameClient_healthBarPickHit( const IRegion2D& region, const ICoord2D& screen, Int pad )
+{
+	return screen.x >= region.lo.x - pad && screen.x <= region.hi.x + pad &&
+				 screen.y >= region.lo.y - pad && screen.y <= region.hi.y + pad;
+}
+
+// ------------------------------------------------------------------------------------------------
+Int GameClient_healthBarPickScore( const IRegion2D& region, const ICoord2D& screen )
+{
+	const Int dx = screen.x - (region.lo.x + region.hi.x) / 2;
+	const Int dy = screen.y - (region.lo.y + region.hi.y) / 2;
+
+	return dx * dx + dy * dy;
+}
+
+// ------------------------------------------------------------------------------------------------
+void GameClient::addHealthBarPickRegion( Drawable *draw, const IRegion2D& region )
+{
+	HealthBarPickEntry entry;
+
+	entry.region = region;
+	entry.id = draw->getID();
+
+	m_healthBarPickList.push_back( entry );
+}
+
+// ------------------------------------------------------------------------------------------------
+void GameClient::clearHealthBarPickRegions( void )
+{
+	m_healthBarPickList.clear();
+}
+
+// ------------------------------------------------------------------------------------------------
+/** Pick by health bar.  This is a *fallback*: the callers reach it only when the pick ray found
+	* nothing at all, so it can never take a click away from the unit whose model was actually under
+	* the cursor - a bar floats above its own unit and so sits over whatever is standing behind it,
+	* and "I clicked the tank at the back and got the one in front" would be worse than the miss it
+	* is fixing.  It is also selection-only: the command translators keep the ray, or right-clicking
+	* bare ground under a bar would order an attack instead of a move. */
+// ------------------------------------------------------------------------------------------------
+Drawable *GameClient::pickDrawableByHealthBar( const ICoord2D *screen )
+{
+	// the bar is three pixels of art; the click target is the bar plus a finger's width of slack
+	const Int pad = REAL_TO_INT_CEIL( 3.0f * TheUIScale() );
+
+	Drawable *best = NULL;
+	Int bestScore = 0;
+
+	for( HealthBarPickListIterator it = m_healthBarPickList.begin(); it != m_healthBarPickList.end(); ++it )
+	{
+		if( !GameClient_healthBarPickHit( it->region, *screen, pad ) )
+			continue;
+
+		const Int score = GameClient_healthBarPickScore( it->region, *screen );
+		if( best != NULL && score >= bestScore )
+			continue;
+
+		//
+		// the list is last frame's drawing and this is this frame's click, so a drawable that died in
+		// between is genuinely gone
+		//
+		Drawable *draw = findDrawableByID( it->id );
+		if( draw == NULL )
+			continue;
+
+		best = draw;
+		bestScore = score;
+	}
+
+	return best;
 }
 
 // ------------------------------------------------------------------------------------------------

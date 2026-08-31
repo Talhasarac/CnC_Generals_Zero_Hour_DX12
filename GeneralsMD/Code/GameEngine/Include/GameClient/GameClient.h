@@ -65,6 +65,18 @@ typedef void (*GameClientFuncPtr)( Drawable *draw, void *userData );
 typedef std::vector<Drawable*> DrawablePtrVector;
 
 //-----------------------------------------------------------------------------
+/** Does this screen pixel land on a health bar's click target?  `pad` widens the drawn rectangle
+	* on all four sides - a bar is three pixels tall, which is a bar to read, not a bar to hit. */
+//-----------------------------------------------------------------------------
+extern Bool GameClient_healthBarPickHit( const IRegion2D& region, const ICoord2D& screen, Int pad );
+
+//-----------------------------------------------------------------------------
+/** Squared pixel distance from the click to the centre of a bar.  When bars overlap - a column of
+	* tanks seen side on - the one whose middle the cursor is nearest wins. */
+//-----------------------------------------------------------------------------
+extern Int GameClient_healthBarPickScore( const IRegion2D& region, const ICoord2D& screen );
+
+//-----------------------------------------------------------------------------
 /** The Client message dispatcher, this is the last "translator" on the message
 	* stream before the messages go to the network for processing.  It gives
 	* the client itself the opportunity to respond to any messages on the stream
@@ -114,6 +126,11 @@ public:
 																										CommandTranslator::CommandEvaluateType cmdType );
 	void addTextBearingDrawable( Drawable *tbd );
 	void flushTextBearingDrawables( void);
+
+	void addHealthBarPickRegion( Drawable *draw, const IRegion2D& region );	///< a drawable that just drew a health bar, and where
+	void clearHealthBarPickRegions( void );																	///< start a fresh frame's worth
+	Drawable *pickDrawableByHealthBar( const ICoord2D *screen );						///< the drawable whose health bar is under this pixel, if any
+
 	void updateFakeDrawables(void);
 	
 	virtual void removeFromRayEffects( Drawable *draw );  ///< remove the drawable from the ray effect system if present
@@ -211,6 +228,22 @@ private:
 	typedef std::list< Drawable* > TextBearingDrawableList;
 	typedef TextBearingDrawableList::iterator TextBearingDrawableListIterator;
 	TextBearingDrawableList m_textBearingDrawableList;	///< the drawables that have registered here during drawablepostdraw
+
+	//
+	// Where each health bar was drawn this frame.  The bars are a 2D overlay - they are not in the
+	// scene the pick ray is cast against - so a click that lands on one hits nothing.  Recording the
+	// rectangles as they are drawn costs nothing (they are already computed) and inherits every rule
+	// the drawing has: shrouded, hidden and scenery objects never register, so they can never be
+	// picked this way.
+	//
+	struct HealthBarPickEntry
+	{
+		IRegion2D region;
+		DrawableID id;
+	};
+	typedef std::vector< HealthBarPickEntry > HealthBarPickList;
+	typedef HealthBarPickList::iterator HealthBarPickListIterator;
+	HealthBarPickList m_healthBarPickList;
 };
 
 //Kris: Try not to use this if possible. In every case I found in the code base, the status was always Drawable::SELECTED.

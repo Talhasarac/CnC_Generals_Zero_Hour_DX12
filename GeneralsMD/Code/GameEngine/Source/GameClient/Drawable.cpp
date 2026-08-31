@@ -4246,6 +4246,14 @@ void Drawable::drawHealthBar(const IRegion2D* healthBarRegion)
 		Real healthBoxHeight = max(3, healthBarRegion->hi.y - healthBarRegion->lo.y);
 		Real healthBoxOutlineSize = 1.0f;
 
+		//
+		// past every bail-out above, so this drawable really is wearing a bar this frame: hand the
+		// rectangle to the client so a click that lands on it can find its way back here.  The bar is
+		// 2D overlay and the pick ray only knows about the 3D scene, so without this a click on a bar
+		// hits nothing at all.
+		//
+		TheGameClient->addHealthBarPickRegion( this, *healthBarRegion );
+
 		// draw the health box outline
 		TheDisplay->drawOpenRect( healthBarRegion->lo.x, healthBarRegion->lo.y, healthBoxWidth, healthBoxHeight,
 															healthBoxOutlineSize, outlineColor );

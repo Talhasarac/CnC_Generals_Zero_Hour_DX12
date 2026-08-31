@@ -5599,6 +5599,68 @@ TEST(an_owned_structure_always_wears_a_health_bar)
 	CHECK( Drawable_structureShowsHealthBar( FALSE, FALSE, TRUE, FALSE ) == TRUE );
 }
 
+/** The bar is a 2D overlay drawn after the scene, so the pick ray knows nothing about it and a
+	 click that lands on one used to hit bare ground.  Every bar is on in this fork, which makes it
+	 the one part of a unit that is never behind a building - and at full zoom out a rifleman is a
+	 few pixels of model under a bar that is easier to hit than the man.  The bar is three pixels
+	 tall, so the click target is the drawn rectangle plus slack on every side. */
+TEST(a_click_lands_on_a_health_bar_plus_its_slack)
+{
+	IRegion2D bar;
+	bar.lo.x = 100;
+	bar.lo.y = 50;
+	bar.hi.x = 140;
+	bar.hi.y = 53;
+
+	ICoord2D onTheBar = { 120, 51 };
+	CHECK( GameClient_healthBarPickHit( bar, onTheBar, 0 ) == TRUE );
+
+	// the drawn edges are in
+	ICoord2D corner = { 100, 50 };
+	CHECK( GameClient_healthBarPickHit( bar, corner, 0 ) == TRUE );
+
+	// four pixels above the bar is a miss on the art and a hit on the target you can actually click
+	ICoord2D justAbove = { 120, 46 };
+	CHECK( GameClient_healthBarPickHit( bar, justAbove, 0 ) == FALSE );
+	CHECK( GameClient_healthBarPickHit( bar, justAbove, 4 ) == TRUE );
+
+	// and the slack is slack, not a free pass: the rest of the screen is on no bar at all
+	ICoord2D elsewhere = { 400, 300 };
+	CHECK( GameClient_healthBarPickHit( bar, elsewhere, 4 ) == FALSE );
+}
+
+/** A column of tanks seen side on stacks its bars on top of each other, so one pixel can be on two
+	 of them.  Whichever bar the cursor is nearest the middle of wins - the alternative is list
+	 order, which is drawing order, which is nothing the player can see. */
+TEST(overlapping_health_bars_go_to_the_one_the_cursor_is_nearest)
+{
+	IRegion2D nearBar;
+	nearBar.lo.x = 100;
+	nearBar.lo.y = 52;
+	nearBar.hi.x = 140;
+	nearBar.hi.y = 55;
+
+	IRegion2D farBar;
+	farBar.lo.x = 110;
+	farBar.lo.y = 50;
+	farBar.hi.x = 150;
+	farBar.hi.y = 53;
+
+	// dead centre of the near bar, and inside the far one too
+	ICoord2D pixel = { 120, 53 };
+	CHECK( GameClient_healthBarPickHit( nearBar, pixel, 0 ) == TRUE );
+	CHECK( GameClient_healthBarPickHit( farBar, pixel, 0 ) == TRUE );
+
+	CHECK( GameClient_healthBarPickScore( nearBar, pixel ) < GameClient_healthBarPickScore( farBar, pixel ) );
+
+	// the score is the squared pixel distance to the centre, so it is zero on the middle of a bar
+	CHECK_EQ( GameClient_healthBarPickScore( nearBar, pixel ), 0 );
+
+	// three pixels to the right of centre is nine, not three - ordering only, never a distance
+	ICoord2D offCentre = { 123, 53 };
+	CHECK_EQ( GameClient_healthBarPickScore( nearBar, offCentre ), 9 );
+}
+
 /** Ground you have already scouted stays buildable after your units leave it, so a base can be
 	 planned out into the fog and the builder sent to walk there.  Shroud - terrain nobody of yours
 	 has ever laid eyes on - is still off limits, which is what stops the map being read through a
