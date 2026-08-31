@@ -2354,6 +2354,62 @@ TEST(pathfind_zone_flatten_collapses_a_deep_chain_in_one_pass)
 extern Int ControlBar_secondsFromFrames( Real frames );
 extern Int ControlBar_secondsFromFramesAt( Real frames, Int logicFps );
 extern Int ControlBar_experiencePercent( Int currentExp, Int levelExp, Int nextLevelExp );
+extern Int ControlBar_purchaseScienceRank( Int column, Int depth, Int *indexOut );
+
+TEST(controlbar_promotion_columns_map_to_the_screens_three_rows)
+{
+	Int index = -1;
+
+	/* GeneralsExpPoints.wnd puts the 1 point row across the top: one button per column, and the
+	   fifth column - the one only the 3 point block is wide enough to have - has none */
+	CHECK_EQ( ControlBar_purchaseScienceRank( 0, 0, &index ), 1 );
+	CHECK_EQ( index, 0 );
+	CHECK_EQ( ControlBar_purchaseScienceRank( 3, 0, &index ), 1 );
+	CHECK_EQ( index, 3 );
+	CHECK_EQ( ControlBar_purchaseScienceRank( 4, 0, &index ), 0 );
+	CHECK_EQ( index, -1 );
+
+	/* the 3 point block is filled down each column in turn - Rank3Number0..2 are the first
+	   column, 3..5 the second - which is the whole reason a column is a chain and not a row */
+	CHECK_EQ( ControlBar_purchaseScienceRank( 0, 1, &index ), 3 );
+	CHECK_EQ( index, 0 );
+	CHECK_EQ( ControlBar_purchaseScienceRank( 0, 3, &index ), 3 );
+	CHECK_EQ( index, 2 );
+	CHECK_EQ( ControlBar_purchaseScienceRank( 1, 1, &index ), 3 );
+	CHECK_EQ( index, 3 );
+	CHECK_EQ( ControlBar_purchaseScienceRank( 4, 3, &index ), 3 );
+	CHECK_EQ( index, MAX_PURCHASE_SCIENCE_RANK_3 - 1 );
+
+	/* the 5 point row along the bottom, four wide like the top one */
+	CHECK_EQ( ControlBar_purchaseScienceRank( 0, PURCHASE_SCIENCE_COLUMN_DEPTH - 1, &index ), 8 );
+	CHECK_EQ( index, 0 );
+	CHECK_EQ( ControlBar_purchaseScienceRank( 4, PURCHASE_SCIENCE_COLUMN_DEPTH - 1, &index ), 0 );
+
+	/* every column reaches exactly the depths the layout has, and nothing past them */
+	CHECK_EQ( ControlBar_purchaseScienceRank( 0, PURCHASE_SCIENCE_COLUMN_DEPTH, &index ), 0 );
+	CHECK_EQ( ControlBar_purchaseScienceRank( PURCHASE_SCIENCE_COLUMNS, 0, &index ), 0 );
+	CHECK_EQ( ControlBar_purchaseScienceRank( -1, 0, &index ), 0 );
+	CHECK_EQ( ControlBar_purchaseScienceRank( 0, -1, &index ), 0 );
+
+	/* no two cells name the same button: the mapping is a bijection onto the 23 windows */
+	Int seen1 = 0, seen3 = 0, seen8 = 0;
+	for( Int column = 0; column < PURCHASE_SCIENCE_COLUMNS; column++ )
+	{
+		for( Int depth = 0; depth < PURCHASE_SCIENCE_COLUMN_DEPTH; depth++ )
+		{
+			Int slot = -1;
+			switch( ControlBar_purchaseScienceRank( column, depth, &slot ) )
+			{
+				case 1:	CHECK( (seen1 & (1 << slot)) == 0 ); seen1 |= (1 << slot); break;
+				case 3:	CHECK( (seen3 & (1 << slot)) == 0 ); seen3 |= (1 << slot); break;
+				case 8:	CHECK( (seen8 & (1 << slot)) == 0 ); seen8 |= (1 << slot); break;
+			}
+		}
+	}
+	CHECK_EQ( seen1, (1 << MAX_PURCHASE_SCIENCE_RANK_1) - 1 );
+	CHECK_EQ( seen3, (1 << MAX_PURCHASE_SCIENCE_RANK_3) - 1 );
+	CHECK_EQ( seen8, (1 << MAX_PURCHASE_SCIENCE_RANK_8) - 1 );
+}
 
 TEST(controlbar_seconds_round_up_and_never_reach_zero_early)
 {

@@ -3225,6 +3225,13 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 			//
 			Bool cancelledSomething = FALSE;
 
+			// the general's promotion screen closes on escape like every other overlay in the game
+			if( TheControlBar && TheControlBar->isPurchaseScienceVisible() )
+			{
+				TheControlBar->hidePurchaseScience();
+				cancelledSomething = TRUE;
+			}
+
 			if( TheControlBar && TheControlBar->isChordArmed() )
 			{
 				TheControlBar->dropChord();

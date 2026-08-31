@@ -1110,6 +1110,21 @@ GameMessageDisposition SelectionTranslator::translateGameMessage(const GameMessa
 		case GameMessage::MSG_META_SELECT_TEAM9:
 		{
 			Int group = t - GameMessage::MSG_META_SELECT_TEAM0;
+
+			//
+			// while the general's promotion screen is open the number keys belong to it: 1 to 5 are
+			// its five columns, and the science a key would buy wears that number in its corner.
+			// A screen that fills the middle of the display and answers nothing on the keyboard is
+			// the thing being fixed, so group selection gives way for as long as it is up.
+			//
+			if( TheControlBar && TheControlBar->isPurchaseScienceVisible()
+					&& group >= 1 && group <= PURCHASE_SCIENCE_COLUMNS )
+			{
+				TheControlBar->pressPurchaseScienceColumn( group - 1 );
+				disp = DESTROY_MESSAGE;
+				break;
+			}
+
 			if ( isValidHotkeySquadIndex( group ) )
 			{
 				DEBUG_LOG(("META: select team %d\n",group));

@@ -1090,6 +1090,8 @@ ControlBar::ControlBar( void )
 	m_specialPowerShortcutParent = NULL;
 	m_specialPowerShortcutRow = -1;
 	m_specialPowerShortcutRowMs = 0;
+	m_purchaseScienceColumn = -1;
+	m_purchaseScienceColumnMs = 0;
 	m_specialPowerLayout = NULL;
 	m_scienceLayout = NULL;
 	m_rightHUDWindow = NULL;
@@ -1780,7 +1782,12 @@ void ControlBar::update( void )
 	}
 	
 	if(!m_contextParent[ CP_PURCHASE_SCIENCE ]->winIsHidden())
+	{
 		updateContextPurchaseScience();
+		updatePurchaseScienceHotKeys();
+	}
+	else
+		clearPurchaseScienceColumn();
 
 	//
 	// a stand-in builder is not selected, so no deselect event tells us when it dies or when a
@@ -3703,6 +3710,8 @@ void ControlBar::showPurchaseScience( void )
 
 void ControlBar::hidePurchaseScience( void )
 {
+	clearPurchaseScienceColumn();
+
 	if(m_contextParent[ CP_PURCHASE_SCIENCE ]->winIsHidden())
 		return;
 
@@ -3725,6 +3734,214 @@ void ControlBar::hidePurchaseScience( void )
 //				//m_generalsScreenAnimate->reverseAnimateWindow();
 //		}
 }
+
+Bool ControlBar::isPurchaseScienceVisible( void )
+{
+	return m_contextParent[ CP_PURCHASE_SCIENCE ] && !m_contextParent[ CP_PURCHASE_SCIENCE ]->winIsHidden();
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The button 'depth' rows down a promotion screen column: the 1 point science on top, the three
+	* 3 point ones under it, the 5 point one at the bottom.  The 3 point block is the only one five
+	* columns wide, so the fifth column has a top and a bottom that do not exist. */
+//-------------------------------------------------------------------------------------------------
+/** Which of the screen's three rows a column and depth land in - 1, 3 or 8 for the point cost the
+	* row sells, 0 where the layout has no button - and the index inside that row's window array.
+	* A free function so the mapping can be checked without standing a ControlBar up. */
+Int ControlBar_purchaseScienceRank( Int column, Int depth, Int *indexOut )
+{
+	if( indexOut )
+		*indexOut = -1;
+
+	if( column < 0 || column >= PURCHASE_SCIENCE_COLUMNS || depth < 0 )
+		return 0;
+
+	if( depth == 0 )
+	{
+		if( column >= MAX_PURCHASE_SCIENCE_RANK_1 )
+			return 0;
+		if( indexOut )
+			*indexOut = column;
+		return 1;
+	}
+
+	if( depth <= PURCHASE_SCIENCE_RANK_3_PER_COLUMN )
+	{
+		const Int slot = column * PURCHASE_SCIENCE_RANK_3_PER_COLUMN + ( depth - 1 );
+		if( slot >= MAX_PURCHASE_SCIENCE_RANK_3 )
+			return 0;
+		if( indexOut )
+			*indexOut = slot;
+		return 3;
+	}
+
+	if( depth == PURCHASE_SCIENCE_COLUMN_DEPTH - 1 )
+	{
+		if( column >= MAX_PURCHASE_SCIENCE_RANK_8 )
+			return 0;
+		if( indexOut )
+			*indexOut = column;
+		return 8;
+	}
+
+	return 0;
+
+}  // end ControlBar_purchaseScienceRank
+
+GameWindow *ControlBar::purchaseScienceWindow( Int column, Int depth )
+{
+	Int index = -1;
+	switch( ControlBar_purchaseScienceRank( column, depth, &index ) )
+	{
+		case 1:	return m_sciencePurchaseWindowsRank1[ index ];
+		case 3:	return m_sciencePurchaseWindowsRank3[ index ];
+		case 8:	return m_sciencePurchaseWindowsRank8[ index ];
+	}
+
+	return NULL;
+
+}  // end purchaseScienceWindow
+
+//-------------------------------------------------------------------------------------------------
+/** What a press on that column would buy: the topmost science in it that is on screen and can be
+	* bought this instant.  populatePurchaseScience() has already done that arithmetic - it enables
+	* exactly the ones the player has the prerequisites and the points for - so a science already
+	* owned, still locked, or too expensive is skipped and the key reaches the next one down. */
+//-------------------------------------------------------------------------------------------------
+GameWindow *ControlBar::purchaseScienceCandidate( Int column )
+{
+	for( Int depth = 0; depth < PURCHASE_SCIENCE_COLUMN_DEPTH; depth++ )
+	{
+		GameWindow *win = purchaseScienceWindow( column, depth );
+		if( win == NULL || win->winIsHidden() )
+			continue;
+		if( BitTest( win->winGetStatus(), WIN_STATUS_ENABLED ) )
+			return win;
+	}
+
+	return NULL;
+
+}  // end purchaseScienceCandidate
+
+//-------------------------------------------------------------------------------------------------
+/** forget a marked column, so the next number marks one again */
+//-------------------------------------------------------------------------------------------------
+Bool ControlBar::clearPurchaseScienceColumn( void )
+{
+	if( m_purchaseScienceColumn < 0 )
+		return FALSE;
+
+	m_purchaseScienceColumn = -1;
+	m_purchaseScienceColumnMs = 0;
+	return TRUE;
+
+}  // end clearPurchaseScienceColumn
+
+//-------------------------------------------------------------------------------------------------
+/** Paint the column numbers onto the promotion screen.  With nothing marked every column wears its
+	* key on the science that key would buy next; once a column is marked it is the only number left
+	* on the screen, which is what says the same key again spends the point. */
+//-------------------------------------------------------------------------------------------------
+void ControlBar::updatePurchaseScienceHotKeys( void )
+{
+	if( !isPurchaseScienceVisible() )
+	{
+		clearPurchaseScienceColumn();
+		return;
+	}
+
+	// a column marked and then thought better of expires on its own, like an armed builder chord
+	if( m_purchaseScienceColumn >= 0
+			&& timeGetTime() - m_purchaseScienceColumnMs > CHORD_TIMEOUT_MS )
+		clearPurchaseScienceColumn();
+
+	// the promotion screen ships its own big yellow font; the key reads like a command bar label
+	GameWindow *model = m_commandWindows[ 0 ];
+
+	for( Int column = 0; column < PURCHASE_SCIENCE_COLUMNS; column++ )
+	{
+		GameWindow *candidate = purchaseScienceCandidate( column );
+
+		UnicodeString label;
+		if( m_purchaseScienceColumn < 0 || m_purchaseScienceColumn == column )
+			label = getMetaKeyLabel( (GameMessage::Type)( GameMessage::MSG_META_SELECT_TEAM1 + column ) );
+
+		for( Int depth = 0; depth < PURCHASE_SCIENCE_COLUMN_DEPTH; depth++ )
+		{
+			GameWindow *win = purchaseScienceWindow( column, depth );
+			if( win == NULL )
+				continue;
+
+			if( win == candidate && label.isEmpty() == FALSE )
+			{
+				if( model )
+				{
+					win->winSetFont( model->winGetFont() );
+					win->winSetEnabledTextColors( model->winGetEnabledTextColor(), model->winGetEnabledTextBorderColor() );
+					win->winSetHiliteTextColors( model->winGetHiliteTextColor(), model->winGetHiliteTextBorderColor() );
+				}
+
+				// the shortcut flag is what puts the label in the corner instead of the middle
+				win->winSetStatus( WIN_STATUS_SHORTCUT_BUTTON );
+				GadgetButtonSetText( win, label );
+			}
+			else
+			{
+				win->winClearStatus( WIN_STATUS_SHORTCUT_BUTTON );
+				GadgetButtonSetText( win, UnicodeString( L"" ) );
+			}
+		}
+	}
+
+}  // end updatePurchaseScienceHotKeys
+
+//-------------------------------------------------------------------------------------------------
+/** A promotion point is spent for good, so the number keys buy in two presses like the general's
+	* powers fire in two: the first press marks the next science that column will sell you, the same
+	* key again buys it.  Another number marks that column instead, Escape closes the screen, and a
+	* mark left alone for CHORD_TIMEOUT_MS drops by itself. */
+//-------------------------------------------------------------------------------------------------
+void ControlBar::pressPurchaseScienceColumn( Int column )
+{
+	if( !isPurchaseScienceVisible() || column < 0 || column >= PURCHASE_SCIENCE_COLUMNS )
+		return;
+
+	GameWindow *win = purchaseScienceCandidate( column );
+
+	// a first press, or a press on some other column: this one only marks
+	if( m_purchaseScienceColumn != column )
+	{
+		m_purchaseScienceColumn = column;
+		m_purchaseScienceColumnMs = timeGetTime();
+		updatePurchaseScienceHotKeys();
+
+		// a column with nothing left to sell says so rather than sitting there armed
+		if( win == NULL && TheAudio )
+		{
+			AudioEventRTS disabledClick( "GUIClickDisabled" );
+			TheAudio->addAudioEvent( &disabledClick );
+			clearPurchaseScienceColumn();
+		}
+		return;
+	}
+
+	// the same key again: buy what it marked
+	clearPurchaseScienceColumn();
+	if( win == NULL )
+		return;
+
+	// GenExpParent runs GeneralsExpPointsSystem, the callback a real click on the cameo reaches
+	TheWindowManager->winSendSystemMsg( m_contextParent[ CP_PURCHASE_SCIENCE ], GBM_SELECTED,
+																			(WindowMsgData)win, win->winGetWindowId() );
+	if( TheAudio )
+	{
+		AudioEventRTS buttonClick( "GUIGenShortcutClick" );
+		TheAudio->addAudioEvent( &buttonClick );
+	}
+
+	updatePurchaseScienceHotKeys();
+
+}  // end pressPurchaseScienceColumn
 
 void ControlBar::togglePurchaseScience( void )
 {

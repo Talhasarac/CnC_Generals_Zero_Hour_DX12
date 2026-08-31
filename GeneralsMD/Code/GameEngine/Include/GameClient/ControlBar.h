@@ -417,6 +417,15 @@ enum {
 			 MAX_PURCHASE_SCIENCE_RANK_3 = 15,
 			 MAX_PURCHASE_SCIENCE_RANK_8 = 4,
 			};
+//
+// GeneralsExpPoints.wnd lays the promotion screen out in five columns: the 1 point row across the
+// top (x 247, 315, 383, 451), the 3 point block three deep under it (the same four x plus 520) and
+// the 5 point row along the bottom.  So Rank3Number0..2 sit in the first column, 3..5 in the
+// second, and a column is one science chain read top to bottom.
+//
+enum { PURCHASE_SCIENCE_COLUMNS = 5 };
+enum { PURCHASE_SCIENCE_RANK_3_PER_COLUMN = 3 };
+enum { PURCHASE_SCIENCE_COLUMN_DEPTH = 1 + PURCHASE_SCIENCE_RANK_3_PER_COLUMN + 1 };
 enum { MAX_STRUCTURE_INVENTORY_BUTTONS = 10 }; // there are this many physical buttons in "inventory" windows for structures
 enum { MAX_BUILD_QUEUE_BUTTONS = 9 };// physical button count for the build queue
 enum { MAX_SPECIAL_POWER_SHORTCUTS = 11};
@@ -706,6 +715,15 @@ public:
 		TRUE when there was one to forget. */
 	Bool clearSpecialPowerShortcutRow( void );
 
+	/** The promotion screen answers the group keys while it is open: 1 to 5 name its five columns.
+		A promotion point is spent for good, so it takes two presses like the general's powers do -
+		the first marks the next science the column will sell you, the same key again buys it.  A
+		different number marks that column instead, and CHORD_TIMEOUT_MS of nothing drops the mark. */
+	void pressPurchaseScienceColumn( Int column );
+
+	/** forget a marked column.  TRUE when there was one to forget. */
+	Bool clearPurchaseScienceColumn( void );
+
 	/** A builder with more structures than BUILD_PAGE_ONE_SIZE does not show them all at once.
 		The command bar opens on two menu buttons instead - Q and W - and each one opens its
 		own page of structures, so a structure is two keystrokes away (Q-Q, Q-A, ... W-Q, ...)
@@ -753,6 +771,7 @@ public:
 	void showPurchaseScience( void );
 	void hidePurchaseScience( void );
 	void togglePurchaseScience( void );
+	Bool isPurchaseScienceVisible( void );
 
 	void showSpecialPowerShortcut( void );
 	void hideSpecialPowerShortcut( void );
@@ -1007,6 +1026,19 @@ protected:
 	Int m_currentlyUsedSpecialPowersButtons; ///< Value will be <= MAX_SPECIAL_POWER_SHORTCUTS;
 	Int m_specialPowerShortcutRow;					 ///< row a first key press picked, -1 when none is pending
 	UnsignedInt m_specialPowerShortcutRowMs;  ///< millisecond that row was picked on, for CHORD_TIMEOUT_MS
+
+	Int m_purchaseScienceColumn;						 ///< promotion screen column a first key press marked, -1 when none
+	UnsignedInt m_purchaseScienceColumnMs;	 ///< millisecond it was marked on, for CHORD_TIMEOUT_MS
+
+	/** the window a press on that column would buy from: the topmost science in it that is on
+		screen and can be bought right now.  NULL when the column has nothing to sell. */
+	GameWindow *purchaseScienceCandidate( Int column );
+
+	/** the window sitting 'depth' rows down column 'column', NULL where the layout has no button */
+	GameWindow *purchaseScienceWindow( Int column, Int depth );
+
+	/** paint the column numbers onto the sciences those keys would buy, and mark the armed one */
+	void updatePurchaseScienceHotKeys( void );
 
 
 	WindowLayout *m_specialPowerLayout;
