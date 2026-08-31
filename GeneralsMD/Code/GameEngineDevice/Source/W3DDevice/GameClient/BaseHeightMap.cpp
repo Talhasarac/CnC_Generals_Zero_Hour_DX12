@@ -2402,6 +2402,35 @@ void BaseHeightMapRenderObjClass::terrainHeightChanged( Int x, Int y )
 		if (y + PAD > m_dirtyRegion.hi.y) m_dirtyRegion.hi.y = y + PAD;
 	}
 
+	/* Clamp to the map, here, before anyone can be handed this.
+		 doPartialUpdate() clamps its own copy of the range for the vertex rebuild, but its extra-blend
+		 and shoreline passes walk the *raw* range and only guard against negatives - there is no
+		 upper bound in them at all.  WorldBuilder never noticed because an editor brush is always
+		 inside the map; a foundation two cells from the far edge is not, and the reward for going
+		 over is an out-of-bounds walk of the tile arrays and a heap that dies later, on another
+		 thread, in ntdll, with nothing to point at. */
+	if (m_map)
+	{
+		const Int maxX = m_map->getXExtent() - 1;
+		const Int maxY = m_map->getYExtent() - 1;
+		if (m_dirtyRegion.lo.x < 0 || m_dirtyRegion.lo.y < 0 ||
+				m_dirtyRegion.hi.x > maxX || m_dirtyRegion.hi.y > maxY)
+		{
+			// Logged rather than silently clipped: this line appearing at all is the evidence that
+			// the unguarded walk above was reachable in a real match.
+			static Int clipped = 0;
+			DEBUG_LOG(("TERRAIN DIRTY CLAMP #%d: (%d,%d)-(%d,%d) clipped into 0,0-%d,%d\n",
+								 ++clipped, m_dirtyRegion.lo.x, m_dirtyRegion.lo.y,
+								 m_dirtyRegion.hi.x, m_dirtyRegion.hi.y, maxX, maxY));
+		}
+		if (m_dirtyRegion.lo.x < 0) m_dirtyRegion.lo.x = 0;
+		if (m_dirtyRegion.lo.y < 0) m_dirtyRegion.lo.y = 0;
+		if (m_dirtyRegion.hi.x > maxX) m_dirtyRegion.hi.x = maxX;
+		if (m_dirtyRegion.hi.y > maxY) m_dirtyRegion.hi.y = maxY;
+		if (m_dirtyRegion.hi.x < m_dirtyRegion.lo.x || m_dirtyRegion.hi.y < m_dirtyRegion.lo.y)
+			m_hasDirtyRegion = false;		// entirely off the map: nothing to redraw
+	}
+
 	// Cause the scorches to get updated with new lighting.
 	m_scorchesInBuffer = 0;
 	m_curNumScorchVertices = 0;
