@@ -366,6 +366,36 @@ Real Drawable_effectiveOpacity( Real explicitOpacity, Real stealthOpacity, Bool 
 }
 
 //-------------------------------------------------------------------------------------------------
+/** Whether a structure's health bar belongs on screen.
+	*
+	* A bridge is not a thing you can see: `GenericBridge` carries an empty `W3DDefaultDraw` and one
+	* immortal hit point, the span itself being drawn by the terrain, so its bar hung in mid air over
+	* the middle of the river with no object under it - and so did the landmark bridges' and the
+	* bridge towers'.
+	*
+	* The rest of the map's masonry is nobody's: a row of houses, the concrete apron each of them
+	* stands on - a separate 2000 hit point object of its own - and the scenery of a city map. None
+	* of it is anybody's to lose, and always-on bars turned a built up map into a wall of them.
+	*
+	* Two exceptions, and both are things worth doing something about. A building troops can be put
+	* in: clearing a garrison out of it is a real decision, so its health stays readable. And one
+	* that can be taken - an oil derrick, a hospital, an artillery platform - because whether to walk
+	* in or to level it is exactly the choice its health answers. Anything a player owns keeps its
+	* bar either way. */
+//-------------------------------------------------------------------------------------------------
+Bool Drawable_structureShowsHealthBar( Bool isBridge, Bool isUnowned, Bool isGarrisonable,
+																			Bool isCapturable )
+{
+	if( isBridge )
+		return FALSE;
+
+	if( isUnowned && !isGarrisonable && !isCapturable )
+		return FALSE;
+
+	return TRUE;
+}
+
+//-------------------------------------------------------------------------------------------------
 /** The silhouette is the finished building, not a foundation: the construction model conditions are
 	* left alone until the builder arrives, so what stands on the map is the shape that was under the
 	* cursor.  A drawable with no object behind it is the placement preview itself, which carries the
@@ -4088,6 +4118,27 @@ void Drawable::drawHealthBar(const IRegion2D* healthBarRegion)
 				obj->isKindOf( KINDOF_CRATE ) ||
 				( obj->isKindOf( KINDOF_IMMOBILE ) && !obj->isKindOf( KINDOF_STRUCTURE ) ) )
 			return;
+
+		if( obj->isKindOf( KINDOF_STRUCTURE ) )
+		{
+			const ContainModuleInterface *contain = obj->getContain();
+			const Bool isBridge = obj->isKindOf( KINDOF_BRIDGE ) ||
+														obj->isKindOf( KINDOF_LANDMARK_BRIDGE ) ||
+														obj->isKindOf( KINDOF_BRIDGE_TOWER );
+			//
+			// "nobody's" is a side test, not a player-pointer test: a map hands its houses either to
+			// the neutral player or to a Civilian-faction player of its own, and both are equally not
+			// in the match. Every faction anyone plays is a playable side, so a captured tech building
+			// or a rebuilt GLA hole is owned the moment it changes hands.
+			//
+			const Player *owner = obj->getControllingPlayer();
+			const Bool isUnowned = owner == NULL || !owner->isPlayableSide();
+
+			if( !Drawable_structureShowsHealthBar( isBridge, isUnowned,
+																						 contain != NULL && contain->isGarrisonable(),
+																						 obj->isKindOf( KINDOF_CAPTURABLE ) ) )
+				return;
+		}
 
 		if( obj->isKindOf( KINDOF_FORCEATTACKABLE ) )
 		{

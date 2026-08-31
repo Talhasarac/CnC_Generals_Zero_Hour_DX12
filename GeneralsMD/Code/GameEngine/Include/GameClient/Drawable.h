@@ -78,6 +78,10 @@ const Real PLACEMENT_SILHOUETTE_OPACITY = 0.45f;
 ///< the opacity a drawable is actually drawn at, given what it is doing
 extern Real Drawable_effectiveOpacity( Real explicitOpacity, Real stealthOpacity, Bool awaitingBuilder );
 
+///< whether a structure's health bar is worth drawing at all
+extern Bool Drawable_structureShowsHealthBar( Bool isBridge, Bool isUnowned, Bool isGarrisonable,
+																							Bool isCapturable );
+
 //-----------------------------------------------------------------------------
 //@TODO -- The drawable icon system needs to be implemented in a proper manner -- KM
 //				 Fact 1: Every drawable in the world shouldn't have to have a pointer 

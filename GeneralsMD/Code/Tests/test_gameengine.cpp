@@ -5537,6 +5537,39 @@ TEST(the_placement_silhouette_scales_the_opacity_it_is_given)
 	CHECK_NEAR( Drawable_effectiveOpacity( 0.0f, 1.0f, TRUE ), 0.0f, 0.0001f );
 }
 
+/** A bridge has no object to hang a bar on: GenericBridge is an empty draw module with one immortal
+	 hit point, and the span is drawn by the terrain, so the bar floated in mid air over the water.
+	 Landmark bridges and bridge towers are the same case. */
+TEST(a_bridge_draws_no_health_bar)
+{
+	CHECK( Drawable_structureShowsHealthBar( TRUE, TRUE, FALSE, FALSE ) == FALSE );
+	CHECK( Drawable_structureShowsHealthBar( TRUE, FALSE, FALSE, FALSE ) == FALSE );
+
+	// even a bridge somebody could walk into stays bare - it is still art the terrain draws
+	CHECK( Drawable_structureShowsHealthBar( TRUE, TRUE, TRUE, TRUE ) == FALSE );
+}
+
+/** The map's civilian masonry is nobody's - the houses, and the concrete apron each one stands on,
+	 which is a 2000 hit point object in its own right - so a city map no longer comes up wearing a
+	 bar over every building and a second one at its feet.  A building troops can be put in keeps
+	 its bar, and so does one that can be taken: both are decisions its health answers. */
+TEST(only_a_garrisonable_or_capturable_civilian_building_wears_a_health_bar)
+{
+	CHECK( Drawable_structureShowsHealthBar( FALSE, TRUE, FALSE, FALSE ) == FALSE );
+	CHECK( Drawable_structureShowsHealthBar( FALSE, TRUE, TRUE, FALSE ) == TRUE );
+
+	// a hospital or an artillery platform: walk in or level it, and the bar is what decides
+	CHECK( Drawable_structureShowsHealthBar( FALSE, TRUE, FALSE, TRUE ) == TRUE );
+}
+
+/** Anything a player owns keeps its bar - a barracks is neither garrisonable nor capturable, and
+	 both it and a captured tech building are things the fight turns on. */
+TEST(an_owned_structure_always_wears_a_health_bar)
+{
+	CHECK( Drawable_structureShowsHealthBar( FALSE, FALSE, FALSE, FALSE ) == TRUE );
+	CHECK( Drawable_structureShowsHealthBar( FALSE, FALSE, TRUE, FALSE ) == TRUE );
+}
+
 /** Ground you have already scouted stays buildable after your units leave it, so a base can be
 	 planned out into the fog and the builder sent to walk there.  Shroud - terrain nobody of yours
 	 has ever laid eyes on - is still off limits, which is what stops the map being read through a

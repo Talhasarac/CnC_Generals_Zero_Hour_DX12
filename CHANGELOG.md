@@ -329,6 +329,8 @@ found and fixed â€” EA's own, not port damage.**
 - Every garrisonable building shows how full it is, whoever holds it.
 - A vehicle's load stays private.
 - Lamps, barrels, rocks and bushes no longer wear health bars.
+- Bridges no longer float a health bar over the middle of the river. There was never anything under it: the span is part of the terrain, and the bar belonged to an invisible marker standing in the water.
+- The city itself stops wearing them too. A building nobody owns shows a bar only if there is something to do about it - troops can go inside, or it can be taken. A row of houses does not, and neither does the concrete apron each of them stands on, which is a separate two-thousand-point object that was drawing a second bar down at street level.
 
 ## Twenty-two-year-old bugs, found by testing
 
