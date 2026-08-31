@@ -60,6 +60,7 @@ class WindowLayout;
 class Anim2DTemplate;
 class Anim2D;
 class Shadow;
+class Image;
 enum LegalBuildCode;
 enum KindOfType;
 enum ShadowType;
@@ -197,6 +198,7 @@ public:
 	);
 
 	const SpecialPowerTemplate*	getSpecialPowerTemplate() const { return m_powerTemplate; }
+	Color												getColor() const { return m_color; }
 	void setFont(const AsciiString& superweaponNormalFont, Int superweaponNormalPointSize, Bool superweaponNormalBold);
 	void setText(const UnicodeString& name, const UnicodeString& time);
 	void drawBackdrop(Int x, Int y);				///< plate behind the name and time, so they stay readable over terrain
@@ -601,6 +603,22 @@ public:  // ********************************************************************
 	/// a click landed on the strip: jump to that producer, or cancel the item when 'cancel' is set
 	Bool handleProductionStripClick( const ICoord2D *mouse, Bool cancel );
 
+	//
+	// One superweapon countdown of the top right strip. The list is rebuilt every frame out of
+	// whatever timers are live, so nothing here outlives the draw that filled it in.
+	//
+	enum { SUPERWEAPON_STRIP_COLS = 6 };		///< cameos in one row, the soonest at the right hand end
+	enum { SUPERWEAPON_STRIP_ROWS = 3 };		///< rows of them, and the rest become a "+N"
+	enum { SUPERWEAPON_STRIP_MAX = SUPERWEAPON_STRIP_COLS * SUPERWEAPON_STRIP_ROWS };
+	struct SuperweaponIconSlot
+	{
+		const Image *	image;							///< the cameo the command bar wears for this power
+		Int						seconds;						///< seconds until it can be fired, 0 once it is ready
+		Int						percent;						///< how much of the charge is done, for the radial sweep
+		Bool					ready;							///< charged: it flashes instead of counting
+		Color					color;							///< whose it is, the colour the timer was registered with
+	};
+
 	/// Ingame video playback 
 	virtual void playMovie( const AsciiString& movieName );
 	virtual void stopMovie( void );
@@ -902,6 +920,10 @@ protected:
 	void updateIncomeEstimate( Player *player );	///< income per minute, shown beside the money
 	void drawProductionStrip( void );			///< the production queue rows above the control bar
 	void drawProductionStripRow( Int row, Int y );	///< one of those rows, at that top edge
+	void updateStripCameoSize( void );		///< cameo box both strips draw into, in the command bar's aspect
+	void drawStripSeconds( Int x, Int y, Int w, Int h, Int seconds );	///< countdown written inside a cameo
+	void addSuperweaponIcon( const Image *image, Int seconds, Int percent, Bool ready, Color color );
+	void drawSuperweaponStrip( void );		///< those icons, top right, soonest at the right hand end
 
 	Bool												m_placementRangeRingUp;	///< we put a radius cursor up for a pending structure, so we owe a clear
 	Real												m_placementRingRadius;	///< the radius that ring was built at, so it is not rebuilt every frame
@@ -947,6 +969,15 @@ protected:
 	Int													m_productionStripCameoW;		///< cameo size this frame, in the control bar's aspect
 	Int													m_productionStripCameoH;
 	DisplayString *							m_productionStripOverflow;	///< the "+N" that stands for the rest of a row
+	DisplayString *							m_stripSecondsString;				///< the countdown written inside a cameo, either strip's
+
+	//
+	// The superweapon strip: the same cameos the command bar fires them from, in the top right
+	// under the clock plate, rebuilt every frame from the timers below and laid out soonest first.
+	//
+	SuperweaponIconSlot					m_superweaponIcons[ SUPERWEAPON_STRIP_MAX ];
+	Int													m_superweaponIconCount;		///< icons drawn
+	Int													m_superweaponIconTotal;		///< timers live, drawn or not; the difference is the "+N"
 
 	Coord2D											m_superweaponPosition;
 	Real												m_superweaponFlashDuration;

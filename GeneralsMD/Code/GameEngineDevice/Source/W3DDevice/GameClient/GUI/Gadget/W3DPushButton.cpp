@@ -50,6 +50,7 @@
 
 // USER INCLUDES //////////////////////////////////////////////////////////////
 #include "GameClient/Gadget.h"
+#include "GameClient/GameFont.h"
 #include "GameClient/GameWindowGlobal.h"
 #include "GameClient/GameWindowManager.h"
 #include "GameClient/GadgetPushButton.h"
@@ -81,6 +82,31 @@ void W3DGadgetPushButtonImageDrawThree(GameWindow *window, WinInstanceData *inst
 void W3DGadgetPushButtonImageDrawOne(GameWindow *window, WinInstanceData *instData );
 
 // PRIVATE FUNCTIONS //////////////////////////////////////////////////////////
+
+// getBadgeFont ===============================================================
+/** The font the corner markings wear.
+	*
+	* A hotkey letter, a price, a countdown and a queue count are labels on a picture,
+	* not text to be read at length: at the window's own point size four of them crowd
+	* a button that is barely thirty pixels wide, and the button stops reading as its
+	* own art.  One step down from whatever font the button was given, so the markings
+	* still follow the wnd file and the resolution exactly as the button does. */
+//=============================================================================
+static GameFont *getBadgeFont( GameWindow *window )
+{
+	GameFont *font = window->winGetFont();
+	if( font == NULL )
+		return NULL;
+
+	Int pointSize = font->pointSize * 5 / 6;
+	if( pointSize < 6 )
+		pointSize = 6;
+	if( pointSize >= font->pointSize )
+		return font;
+
+	return TheFontLibrary->getFont( font->nameString, pointSize, font->bold );
+
+}  // end getBadgeFont
 
 // drawButtonText =============================================================
 /** Draw button text to the screen */
@@ -120,9 +146,13 @@ static void drawButtonText( GameWindow *window, WinInstanceData *instData )
 		dropColor = window->winGetEnabledTextBorderColor();
 	}  // end enabled only
 
-	// set our font to that of our parent if not the same
-	if( text->getFont() != window->winGetFont() )
-		text->setFont( window->winGetFont() );
+	// set our font to that of our parent if not the same - except the shortcut letter, which is a
+	// corner marking and wears the marking font
+	GameFont *font = window->winGetFont();
+	if( BitTest( window->winGetStatus(), WIN_STATUS_SHORTCUT_BUTTON ) )
+		font = getBadgeFont( window );
+	if( font != NULL && text->getFont() != font )
+		text->setFont( font );
 
 	// get text size
 	text->getSize( &width, &height );
@@ -174,18 +204,23 @@ static void drawCountBadge( GameWindow *window, Int count )
 	text.format( L"%d", count );
 	badge->setText( text );
 
-	if( badge->getFont() != window->winGetFont() )
-		badge->setFont( window->winGetFont() );
+	GameFont *font = getBadgeFont( window );
+	if( font != NULL && badge->getFont() != font )
+		badge->setFont( font );
 
 	window->winGetScreenPosition( &origin.x, &origin.y );
 	window->winGetSize( &size.x, &size.y );
 	badge->getSize( &width, &height );
 
-	textPos.x = origin.x + size.x - width - 3;
-	textPos.y = origin.y + size.y - height - 1;
+	// the plate is what the eye reads as the badge, so it is the plate that sits in the corner -
+	// hanging it a few pixels short left a stripe of button art outside it and the three badges
+	// looked scattered rather than pinned to the button
+	const Int plateWidth = width + 4;
+	textPos.x = origin.x + size.x - plateWidth + 2;
+	textPos.y = origin.y + size.y - height;
 
 	// same translucent plate the shortcut letter wears - button art can be any colour
-	TheDisplay->drawFillRect( textPos.x - 2, textPos.y, width + 4, height,
+	TheDisplay->drawFillRect( textPos.x - 2, textPos.y, plateWidth, height,
 														GameMakeColor( 0, 0, 0, 160 ) );
 	badge->draw( textPos.x, textPos.y, GameMakeColor( 255, 255, 255, 255 ),
 							 GameMakeColor( 0, 0, 0, 255 ) );
@@ -213,15 +248,16 @@ static void drawSecondsBadge( GameWindow *window, Int seconds )
 	text.format( L"%ds", seconds );
 	label->setText( text );
 
-	if( label->getFont() != window->winGetFont() )
-		label->setFont( window->winGetFont() );
+	GameFont *font = getBadgeFont( window );
+	if( font != NULL && label->getFont() != font )
+		label->setFont( font );
 
 	window->winGetScreenPosition( &origin.x, &origin.y );
 	window->winGetSize( &size.x, &size.y );
 	label->getSize( &width, &height );
 
-	textPos.x = origin.x + 3;
-	textPos.y = origin.y + size.y - height - 1;
+	textPos.x = origin.x + 2;
+	textPos.y = origin.y + size.y - height;
 
 	// same translucent plate the count badge wears - button art can be any colour
 	TheDisplay->drawFillRect( textPos.x - 2, textPos.y, width + 4, height,
@@ -253,18 +289,20 @@ static void drawCostBadge( GameWindow *window, Int cost )
 	text.format( L"$%d", cost );
 	label->setText( text );
 
-	if( label->getFont() != window->winGetFont() )
-		label->setFont( window->winGetFont() );
+	GameFont *font = getBadgeFont( window );
+	if( font != NULL && label->getFont() != font )
+		label->setFont( font );
 
 	window->winGetScreenPosition( &origin.x, &origin.y );
 	window->winGetSize( &size.x, &size.y );
 	label->getSize( &width, &height );
 
-	textPos.x = origin.x + size.x - width - 3;
-	textPos.y = origin.y + 1;
+	const Int plateWidth = width + 4;
+	textPos.x = origin.x + size.x - plateWidth + 2;
+	textPos.y = origin.y;
 
 	// same translucent plate the other two badges wear - button art can be any colour
-	TheDisplay->drawFillRect( textPos.x - 2, textPos.y, width + 4, height,
+	TheDisplay->drawFillRect( textPos.x - 2, textPos.y, plateWidth, height,
 														GameMakeColor( 0, 0, 0, 160 ) );
 	label->draw( textPos.x, textPos.y, GameMakeColor( 235, 210, 120, 255 ),
 							 GameMakeColor( 0, 0, 0, 255 ) );

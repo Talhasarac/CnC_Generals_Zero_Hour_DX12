@@ -256,6 +256,8 @@ found and fixed â€” EA's own, not port damage.**
 - Ordered by time left, so it reads as the order things arrive.
 - Click a picture to jump the camera there; Ctrl-click cancels it.
 - One picture is one order, cut to match the command bar's artwork.
+- The strip is half the size it was: it says the same thing and takes back the screen it was eating.
+- Whatever is actually being built counts down inside its own picture. The ones queued behind it stay blank, because their wait depends on everything in front of them.
 - A unit finishes walking out of its factory before it takes an order.
 - An upgrade stays available if any selected building can still buy it.
 - One right click cancels one thing, counted the moment you press.
@@ -273,7 +275,9 @@ found and fixed â€” EA's own, not port damage.**
 - Workers go back to collecting supplies when they finish.
 - Every countdown reads real seconds and answers the game speed.
 - The clock and frame-rate readout is drawn on top of everything.
-- The superweapon countdowns start below that readout instead of behind it.
+- The superweapon countdowns are pictures now, not a list of names: the same strip treatment, in the top right corner, under that readout. Each one wears its own seconds and a sweeping clock, the next to land sits at the right hand end, and if you are watching more than eighteen of them the rest become a count.
+- Every button's corner markings - the hotkey, the price, the time, the number queued - sit flush in the corners instead of floating a few pixels inside them, and are set a size smaller than the button's own text: four labels at full size were eating the picture they were meant to annotate.
+- The countdown inside a strip picture lost its black backing plate. On a picture that small the plate was most of the picture; the number now sits straight on the sweeping clock.
 - A game opens with nothing selected, so your first click is not a rally point.
 - The tilde key opens the general's promotions.
 - `S` stops your units again; the key was simply never bound.
@@ -310,6 +314,7 @@ found and fixed â€” EA's own, not port damage.**
 - Supply piles and docks say what is left in them, in cash, over the pile. No more guessing which expansion is worth taking from the art on the model.
 - Every build button carries its price in the top right corner, opposite the build time already in the other one. It was only ever in the tooltip, which means hovering one button at a time to compare two of them.
 - A worker fetching or handing over a box shows a bar while it works.
+- That bar is now the work itself. A worker used to reset it to empty at the very moment it finished and then walk away, so every trip looked like it left mid-handover; and after taking its last box it stood at the pile for one more full loading cycle, taking nothing. It leaves the instant the load is done - which is a little more money per trip, on every worker you own.
 - Hackers show how far off the next payout is. So do the black market and the oil derricks.
 - Factories take a hundred units in the queue, not nine. The build queue only ever had nine buttons and that had become the limit.
 
@@ -438,6 +443,7 @@ found and fixed â€” EA's own, not port damage.**
 
 - Audio is real, through the audio library the retail game ships with.
 - The videos play: the intro, the sizzle reel, the mission briefings, the general portraits.
+- The pointer is on screen over them. It used to appear only once the main menu did, so clicking through the logos was done blind.
 - About 5,600 graphics calls are translated to a modern path, none of them touched.
 - No disc, no registry keys, no retail installer â€” a normal install works.
 - The startup screen is this build's own, so you can see which one you launched before the menu loads.
@@ -453,7 +459,7 @@ found and fixed â€” EA's own, not port damage.**
 - An opponent can be set to Human in the skirmish screen: a base with no brain behind it.
 - Its sight is yours from the first frame, and clicking any of it hands you the base itself.
 - Shift-Ctrl-T does the same to any opponent, a computer one included, and walks around the table.
-- Headless, a 23-minute skirmish plays out in 38 seconds, identically every run.
+- Headless, a 23-minute skirmish plays out in 38 seconds, identically every run - and opens no window at all, so twenty of them in a row leave the desktop and the keyboard focus alone.
 - It plays itself over a network too â€” two copies, one real connection.
 - That found every multiplayer replay falsely accusing itself of desync since 2003.
 - Every fix was proved by putting the bug back and watching the test fail.

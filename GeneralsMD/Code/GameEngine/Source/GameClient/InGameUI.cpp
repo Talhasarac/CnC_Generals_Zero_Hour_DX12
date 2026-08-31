@@ -110,11 +110,12 @@ static const RGBColor illegalBuildColor = { 1.0, 0.0, 0.0 };
 // ------------------------------------------------------------------------------------------------
 enum
 {
-	PRODUCTION_STRIP_CAMEO	= 32,		///< nominal cameo edge in pixels; the real one keeps this area
-	PRODUCTION_STRIP_GAP		= 3,		///< space between cameos, and between the two rows
+	PRODUCTION_STRIP_CAMEO	= 16,		///< nominal cameo edge in pixels; the real one keeps this area
+	PRODUCTION_STRIP_GAP		= 2,		///< space between cameos, and between the two rows
 	PRODUCTION_STRIP_LEFT		= 8,		///< inset from the left edge of the screen
 	PRODUCTION_STRIP_LIFT		= 24,		///< clearance above the control bar
-	PRODUCTION_STRIP_MORE		= 34		///< width kept for the "+N" that closes an overflowing row
+	PRODUCTION_STRIP_MORE		= 18,		///< width kept for the "+N" that closes an overflowing row
+	PRODUCTION_STRIP_SECS		= 7			///< point size of the countdown written inside a cameo
 };
 
 //-------------------------------------------------------------------------------------------------
@@ -126,6 +127,43 @@ enum
 static Int stripPixels( Int nominal )
 {
 	return REAL_TO_INT_CEIL( nominal * TheUIScale() );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** A countdown short enough to be written inside a cameo: bare seconds while there are fewer than
+	* sixty of them, m:ss once there are more.  A tank takes seconds and a superweapon charges for
+	* minutes, and both are written into the same little box. */
+//-------------------------------------------------------------------------------------------------
+static void formatStripSeconds( UnicodeString *text, Int seconds )
+{
+	if( seconds < 0 )
+		seconds = 0;
+
+	if( seconds < 60 )
+		text->format( L"%d", seconds );
+	else
+		text->format( L"%d:%2.2d", seconds / 60, seconds % 60 );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The cameo a special power is fired from.  A SpecialPowerTemplate carries no art of its own -
+	* the picture lives on whichever command button launches it - so the button list is what has to
+	* be asked.  A power with no button anywhere (a scripted one, a mod's) draws as an empty box
+	* with its countdown in it, which is still the timer it was asked for. */
+//-------------------------------------------------------------------------------------------------
+static const Image *superweaponCameo( const SpecialPowerTemplate *powerTemplate )
+{
+	if( powerTemplate == NULL || TheControlBar == NULL )
+		return NULL;
+
+	for( const CommandButton *button = TheControlBar->getCommandButtons(); button;
+			 button = button->getNext() )
+	{
+		if( button->getSpecialPowerTemplate() == powerTemplate && button->getButtonImage() )
+			return button->getButtonImage();
+	}
+
+	return NULL;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1104,6 +1142,9 @@ InGameUI::InGameUI()
 	m_productionStripCameoW = PRODUCTION_STRIP_CAMEO;
 	m_productionStripCameoH = PRODUCTION_STRIP_CAMEO;
 	m_productionStripOverflow = NULL;
+	m_stripSecondsString = NULL;
+	m_superweaponIconCount = 0;
+	m_superweaponIconTotal = 0;
 
 	m_superweaponPosition.x = 0.7f;
 	m_superweaponPosition.y = 0.7f;
@@ -4116,48 +4157,26 @@ void InGameUI::postDraw( void )
   //  want to display the timers -- Eva still needs to be checked
 	if (TheGameLogic->getFrame() > 0 )
 	{
-//	Int superweaponCount = 0;
-		Int startX = (Int)(m_superweaponPosition.x * TheDisplay->getWidth());
-		Int startY = (Int)(m_superweaponPosition.y * TheDisplay->getHeight());
-
 		//
-		// The corner clock plate owns the top right, and the first timer was drawn straight
-		// underneath it - a superweapon counting down behind the readout is one nobody can read.
-		// The list starts below the plate whenever the plate is up.
+		// The countdowns are cameos in the top right, not a column of names and clocks running down
+		// over the battlefield. A superweapon is recognised by the picture it is fired from, a name
+		// and a colon and a clock is a paragraph to read at a glance, and eight of them was a wall
+		// of text over the terrain. Everything the loop below finds is gathered into one list and
+		// laid out at the end of it, soonest first.
 		//
-		if( TheGlobalData->m_showHudOverlay && startY < m_hudOverlayBottom + 4 )
-			startY = m_hudOverlayBottom + 4;
-		
-		Int bottomMargin = (Int)( (Real)TheTacticalView->getHeight() * 0.82f ); 
-			
-
-
-		Bool marginExceeded = FALSE;
+		m_superweaponIconCount = 0;
+		m_superweaponIconTotal = 0;
 
 		for (Int i=0; i<MAX_PLAYER_COUNT; ++i)
 		{
-			Color bgColor = GameMakeColor( 0, 0, 0, 255 );
 			for (SuperweaponMap::iterator mapIt = m_superweapons[i].begin(); mapIt != m_superweapons[i].end(); ++mapIt)
 			{
-				AsciiString templateName = mapIt->first;
 				for (SuperweaponList::iterator listIt = mapIt->second.begin(); listIt != mapIt->second.end(); ++listIt)
 				{
 					SuperweaponInfo *info = *listIt;
 					DEBUG_ASSERTCRASH(info, ("No superweapon info!"));
 					if (info && !info->m_hiddenByScript && !info->m_hiddenByScience)
 					{
-						//enforce bottom margin of tactical view
-						if ( startY >= bottomMargin)
-						{
-							UnicodeString ellipsis;
-							ellipsis.format(L"...");
-							info->setText( ellipsis, ellipsis );
-							info->setFont( m_superweaponReadyFont, m_superweaponNormalPointSize, m_superweaponNormalBold );
-							info->drawTime( startX,	startY, m_superweaponFlashColor, bgColor );
-							
-							marginExceeded = TRUE;
-						}
-
 						Object * owningObject = TheGameLogic->findObjectByID(info->m_id);
 						if (owningObject)
 						{
@@ -4250,72 +4269,30 @@ void InGameUI::postDraw( void )
                     info->m_evaReadyPlayed = false; // Reset Eva for next time
                 }
               
-                // draw the text
-                if ( !m_superweaponHiddenByScript && !marginExceeded )
+                // hand it to the strip
+                if ( !m_superweaponHiddenByScript )
                 {
-                  // Similarly, only checking timers is not truly indicitive of readyness.
- 								  Bool changeBolding = (readySecs != info->m_timestamp) || (isReady != info->m_ready) || info->m_forceUpdateText;
- 								  if (changeBolding)
- 								  {
- 									  if (isReady)
-									  {
-										  // go bold - we're good to go
-										  info->setFont( m_superweaponReadyFont, m_superweaponReadyPointSize, m_superweaponReadyBold );
-									  }
-									  else
-									  {
-										  // if we were at 0, we've just fired - kill the bold
-										  if (info->m_timestamp == 0)
-										  {
-											  info->setFont( m_superweaponNormalFont, m_superweaponNormalPointSize, m_superweaponNormalBold );
-										  }
-									  }
-                  
-									  
-									  info->m_forceUpdateText = false;
- 									  info->m_ready = isReady;
-									  info->m_timestamp = readySecs;
-                    Int min = readySecs/60;
-                    Int sec = readySecs - min*60;
-                    AsciiString strIndex;
-                    strIndex.format("GUI:%s", templateName.str());
-                    UnicodeString name, time;
-                    name.format(L"%ls: ", TheGameText->fetch(strIndex.str()).str());
-                    time.format(L"%d:%2.2d", min, sec);
-                    info->setText(name, time);
+                  info->m_forceUpdateText = false;
+                  info->m_ready = isReady;
+                  info->m_timestamp = readySecs;
+
+                  //
+                  // How far through the charge it is, for the radial sweep. The module knows the
+                  // frame it comes ready on and the template knows how long a whole charge takes,
+                  // and the difference between the two is everything that has already been paid.
+                  //
+                  const UnsignedInt reload = info->getSpecialPowerTemplate()->getReloadTime();
+                  Int percent = 100;
+                  if ( !isReady && reload > 0 )
+                  {
+                    const UnsignedInt left = ( module->getReadyFrame() > TheGameLogic->getFrame() )
+                                             ? module->getReadyFrame() - TheGameLogic->getFrame() : 0;
+                    percent = ( left >= reload ) ? 0
+                                                 : REAL_TO_INT( 100.0f * (Real)( reload - left ) / (Real)reload );
                   }
 
-                  info->drawBackdrop( startX, startY );
-
-                  if (isReady)
-								  {
-									  if ( m_superweaponFlashDuration != 0.0f )
-									  {
-										  if ( TheGameLogic->getFrame() >= m_superweaponLastFlashFrame + (Int)(m_superweaponFlashDuration) )
-										  {
-											  m_superweaponUsedFlashColor = !m_superweaponUsedFlashColor;
-											  m_superweaponLastFlashFrame = TheGameLogic->getFrame();
-										  }
-										  info->drawName( startX,
-											  startY, (m_superweaponUsedFlashColor)?0:m_superweaponFlashColor, bgColor );
-										  info->drawTime( startX,
-											  startY, (m_superweaponUsedFlashColor)?0:m_superweaponFlashColor, bgColor );
-									  }
-									  else
-									  {
-										  info->drawName( startX, startY, 0, bgColor );
-										  info->drawTime( startX, startY, 0, bgColor );
-									  }
-								  }
-								  else
-								  {
-									  info->drawName( startX,	startY, 0, bgColor );
-									  info->drawTime( startX, startY, 0, bgColor );
-								  }
-
-								  // increment text spot to next location
-								  startY += info->getHeight();
-
+                  addSuperweaponIcon( superweaponCameo( info->getSpecialPowerTemplate() ),
+                                      readySecs, percent, isReady, info->getColor() );
                 }
                 if (info->getSpecialPowerTemplate()->isSharedNSync())
                   break; // Wow, it is almost too easy!
@@ -4330,6 +4307,8 @@ void InGameUI::postDraw( void )
 				}
 			}
 		}
+
+		drawSuperweaponStrip();
 	}
 
 	// draw named timers
@@ -6065,6 +6044,231 @@ static const ProductionEntry *findStripEntry( ProductionUpdateInterface *pu,
 }
 
 //-------------------------------------------------------------------------------------------------
+/** The cameo box both strips draw into.
+	*
+	* The same cameo art the command bar draws is not square, so drawing it into a square box
+	* squashed it and the strip read as a different set of icons than the bar right below it. Take
+	* the aspect from a real command button and keep the box's area at the nominal size, so a row
+	* stays as long as it was: a wider cameo is a correspondingly shorter one. */
+//-------------------------------------------------------------------------------------------------
+void InGameUI::updateStripCameoSize( void )
+{
+	m_productionStripCameoW = stripPixels( PRODUCTION_STRIP_CAMEO );
+	m_productionStripCameoH = stripPixels( PRODUCTION_STRIP_CAMEO );
+
+	static NameKeyType commandButtonKey = TheNameKeyGenerator->nameToKey( "ControlBar.wnd:ButtonCommand01" );
+	GameWindow *commandButton = TheWindowManager->winGetWindowFromId( NULL, commandButtonKey );
+	if( commandButton == NULL )
+		return;
+
+	ICoord2D buttonSize;
+	commandButton->winGetSize( &buttonSize.x, &buttonSize.y );
+	if( buttonSize.x <= 0 || buttonSize.y <= 0 )
+		return;
+
+	const Real aspect = INT_TO_REAL( buttonSize.x ) / INT_TO_REAL( buttonSize.y );
+	const Real area = INT_TO_REAL( m_productionStripCameoW * m_productionStripCameoH );
+	m_productionStripCameoH = REAL_TO_INT_CEIL( (Real)sqrt( area / aspect ) );
+	m_productionStripCameoW = REAL_TO_INT_CEIL( m_productionStripCameoH * aspect );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Write a countdown inside a cameo.  The radial sweep says how much of the whole is left, which
+	* is a shape rather than a number: it answers "nearly" and never "eleven seconds".  Both strips
+	* put the number in the middle of the box, over the sweep. */
+//-------------------------------------------------------------------------------------------------
+void InGameUI::drawStripSeconds( Int x, Int y, Int w, Int h, Int seconds )
+{
+	if( m_stripSecondsString == NULL )
+	{
+		m_stripSecondsString = TheDisplayStringManager->newDisplayString();
+		m_stripSecondsString->setFont( TheFontLibrary->getFont( m_superweaponNormalFont,
+										TheGlobalLanguageData->adjustFontSize( PRODUCTION_STRIP_SECS ),
+										TRUE ) );
+	}
+
+	UnicodeString text;
+	formatStripSeconds( &text, seconds );
+	m_stripSecondsString->setText( text );
+
+	Int textWidth = 0, textHeight = 0;
+	m_stripSecondsString->getSize( &textWidth, &textHeight );
+
+	const Int textX = x + ( w - textWidth ) / 2;
+	const Int textY = y + ( h - textHeight ) / 2;
+
+	// no plate under it: the cameo is already under the sweep's scrim, and a second black box
+	// inside a sixteen pixel box was most of the cameo - the number read as a label stuck over
+	// the picture instead of a countdown running on it.  The drop shadow carries it.
+	m_stripSecondsString->draw( textX, textY, GameMakeColor( 245, 245, 245, 255 ),
+															GameMakeColor( 0, 0, 0, 255 ) );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Keep one superweapon timer for the strip, in a list sorted by how long it still has to wait -
+	* soonest first.  Everything live is counted; only the ones that will be drawn get a slot. */
+//-------------------------------------------------------------------------------------------------
+void InGameUI::addSuperweaponIcon( const Image *image, Int seconds, Int percent, Bool ready, Color color )
+{
+	m_superweaponIconTotal++;
+
+	// walk back over the ones that come ready later than this and drop it in front of them; ties
+	// keep the order they were met in, so a pair of identical silos stays put frame to frame
+	Int at = m_superweaponIconCount;
+	while( at > 0 && m_superweaponIcons[ at - 1 ].seconds > seconds )
+		at--;
+
+	if( at >= SUPERWEAPON_STRIP_MAX )
+		return;						// everything already kept is sooner: counted into the "+N", not drawn
+
+	if( m_superweaponIconCount < SUPERWEAPON_STRIP_MAX )
+		m_superweaponIconCount++;
+
+	for( Int j = m_superweaponIconCount - 1; j > at; j-- )
+		m_superweaponIcons[ j ] = m_superweaponIcons[ j - 1 ];
+
+	SuperweaponIconSlot *slot = &m_superweaponIcons[ at ];
+	slot->image = image;
+	slot->seconds = seconds;
+	slot->percent = percent;
+	slot->ready = ready;
+	slot->color = color;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The superweapon strip: the cameos gathered this frame, top right, under the clock plate.
+	*
+	* Rows fill from the right, because the right hand end is where the strip is anchored and the
+	* one countdown that matters is the next one to land - it is always in the same place, however
+	* many are behind it.  Three rows of six, and whatever is left over closes the last row as a
+	* "+N", the same way the production strip's rows do. */
+//-------------------------------------------------------------------------------------------------
+void InGameUI::drawSuperweaponStrip( void )
+{
+	if( m_superweaponIconCount < 1 )
+		return;
+
+	if( TheGameLogic == NULL || !TheGameLogic->isInGame() || TheGameLogic->isInShellGame() )
+		return;
+
+	updateStripCameoSize();
+
+	const Int cameoW = m_productionStripCameoW;
+	const Int cameoH = m_productionStripCameoH;
+	const Int gap = stripPixels( PRODUCTION_STRIP_GAP );
+	const Int edge = stripPixels( PRODUCTION_STRIP_LEFT );
+	const Int more = stripPixels( PRODUCTION_STRIP_MORE );
+	const Int plate = stripPixels( 3 );
+
+	//
+	// The corner clock plate owns the top right, so the strip starts under it whenever it is up -
+	// a countdown drawn behind the readout is one nobody can read.
+	//
+	Int top = plate;
+	if( TheGlobalData->m_showHudOverlay && m_hudOverlayBottom + plate > top )
+		top = m_hudOverlayBottom + plate;
+
+	//
+	// one flash for the whole strip rather than one per icon, so every charged superweapon blinks
+	// together instead of each on its own clock
+	//
+	if( m_superweaponFlashDuration != 0.0f &&
+			TheGameLogic->getFrame() >= m_superweaponLastFlashFrame + (Int)(m_superweaponFlashDuration) )
+	{
+		m_superweaponUsedFlashColor = !m_superweaponUsedFlashColor;
+		m_superweaponLastFlashFrame = TheGameLogic->getFrame();
+	}
+
+	const Int right = TheDisplay->getWidth() - edge;
+	const Int hidden = m_superweaponIconTotal - m_superweaponIconCount;
+
+	for( Int row = 0; row < SUPERWEAPON_STRIP_ROWS; row++ )
+	{
+		const Int first = row * SUPERWEAPON_STRIP_COLS;
+		if( first >= m_superweaponIconCount )
+			break;
+
+		Int inRow = m_superweaponIconCount - first;
+		if( inRow > SUPERWEAPON_STRIP_COLS )
+			inRow = SUPERWEAPON_STRIP_COLS;
+
+		const Bool lastRow = ( first + inRow >= m_superweaponIconCount );
+		Int rowWidth = inRow * cameoW + ( inRow - 1 ) * gap;
+		if( hidden > 0 && lastRow )
+			rowWidth += gap + more;
+
+		const Int y = top + row * ( cameoH + gap );
+
+		// one plate behind the row, so the cameos read over any terrain
+		TheDisplay->drawFillRect( right - rowWidth - plate, y - plate,
+															rowWidth + 2 * plate, cameoH + 2 * plate,
+															GameMakeColor( 0, 0, 0, 130 ) );
+
+		for( Int i = 0; i < inRow; i++ )
+		{
+			const SuperweaponIconSlot *slot = &m_superweaponIcons[ first + i ];
+			const Int x = right - cameoW - i * ( cameoW + gap );
+
+			if( slot->image )
+				TheDisplay->drawImage( slot->image, x, y, x + cameoW, y + cameoH );
+
+			//
+			// the same sweep the production cameos wear, and the same way round as the command
+			// bar's own clock: the scrim covers what is still to be charged and is swept off as
+			// the charge runs.
+			//
+			if( !slot->ready )
+			{
+				TheDisplay->drawRemainingRectClock( x, y, cameoW, cameoH, slot->percent,
+																						GameMakeColor( 0, 0, 0, 130 ) );
+				drawStripSeconds( x, y, cameoW, cameoH, slot->seconds );
+			}
+
+			//
+			// The border is whose weapon it is - the colour the timer was registered with - except
+			// while it is charged, where it flashes: a ready superweapon is the one thing on this
+			// strip that wants to be noticed rather than looked up.
+			//
+			Color border = slot->color;
+			UnsignedByte r, g, b, a;
+			GameGetColorComponents( border, &r, &g, &b, &a );
+			border = GameMakeColor( r, g, b, 255 );
+			if( slot->ready && !m_superweaponUsedFlashColor )
+				border = m_superweaponFlashColor;
+
+			TheDisplay->drawOpenRect( x, y, cameoW, cameoH, 2.0f, border );
+		}
+
+		//
+		// whatever did not fit closes the last row as a "+N", on the left hand end: the strip is
+		// read from the right, so the overflow sits at the far end of it
+		//
+		if( hidden > 0 && lastRow )
+		{
+			if( m_productionStripOverflow == NULL )
+			{
+				m_productionStripOverflow = TheDisplayStringManager->newDisplayString();
+				m_productionStripOverflow->setFont( TheFontLibrary->getFont( m_superweaponNormalFont,
+														TheGlobalLanguageData->adjustFontSize( HUD_OVERLAY_POINT_SIZE ),
+														TRUE ) );
+			}
+
+			UnicodeString text;
+			text.format( L"+%d", hidden );
+			m_productionStripOverflow->setText( text );
+
+			Int textWidth = 0, textHeight = 0;
+			m_productionStripOverflow->getSize( &textWidth, &textHeight );
+
+			m_productionStripOverflow->draw( right - rowWidth + ( more - textWidth ) / 2,
+																			 y + ( cameoH - textHeight ) / 2,
+																			 GameMakeColor( 235, 235, 235, 255 ),
+																			 GameMakeColor( 0, 0, 0, 255 ) );
+		}
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
 /** Lay out and draw one row, with its top edge at y. */
 //-------------------------------------------------------------------------------------------------
 void InGameUI::drawProductionStripRow( Int row, Int y )
@@ -6122,10 +6326,35 @@ void InGameUI::drawProductionStripRow( Int row, Int y )
 			// nearly finished one looked alike. Only the head of a building's queue has progress;
 			// everything behind it is waiting and wears the full scrim.
 			//
-			const Int percent = ( pu->firstProduction() == entry )
-													? REAL_TO_INT( entry->getPercentComplete() ) : 0;
+			const Bool building = ( pu->firstProduction() == entry );
+			const Int percent = building ? REAL_TO_INT( entry->getPercentComplete() ) : 0;
 			TheDisplay->drawRemainingRectClock( x, y, cameoW, cameoH,
 																					percent, GameMakeColor( 0, 0, 0, 100 ) );
+
+			//
+			// How long this one still has, written in the middle of it - but only for the item
+			// actually being built. The ones behind it in the queue have no clock running: their
+			// wait depends on everything in front of them, so a number there would be a guess.
+			//
+			if( building )
+			{
+				Player *player = producer->getControllingPlayer();
+				Int totalFrames = 0;
+				if( slot->isUpgrade )
+				{
+					if( entry->getProductionUpgrade() )
+						totalFrames = entry->getProductionUpgrade()->calcTimeToBuild( player );
+				}
+				else if( entry->getProductionObject() )
+					totalFrames = entry->getProductionObject()->calcTimeToBuild( player );
+
+				if( totalFrames > 0 )
+				{
+					const Real left = totalFrames * ( 1.0f - entry->getPercentComplete() / 100.0f );
+					drawStripSeconds( x, y, cameoW, cameoH,
+														ControlBar_secondsFromFrames( left > 0.0f ? left : 0.0f ) );
+				}
+			}
 		}
 
 		//
@@ -6297,28 +6526,7 @@ void InGameUI::drawProductionStrip( void )
 		barTop = barPos.y;
 	}
 
-	//
-	// the same cameo art the command bar draws is not square, so drawing it into a square box
-	// squashed it and the strip read as a different set of icons than the bar right below it.
-	// Take the aspect from a real command button and keep the box's area at the nominal size, so
-	// the row stays as long as it was: a wider cameo is a correspondingly shorter one.
-	//
-	m_productionStripCameoW = stripPixels( PRODUCTION_STRIP_CAMEO );
-	m_productionStripCameoH = stripPixels( PRODUCTION_STRIP_CAMEO );
-	static NameKeyType commandButtonKey = TheNameKeyGenerator->nameToKey( "ControlBar.wnd:ButtonCommand01" );
-	GameWindow *commandButton = TheWindowManager->winGetWindowFromId( NULL, commandButtonKey );
-	if( commandButton )
-	{
-		ICoord2D buttonSize;
-		commandButton->winGetSize( &buttonSize.x, &buttonSize.y );
-		if( buttonSize.x > 0 && buttonSize.y > 0 )
-		{
-			const Real aspect = INT_TO_REAL( buttonSize.x ) / INT_TO_REAL( buttonSize.y );
-			const Real area = INT_TO_REAL( m_productionStripCameoW * m_productionStripCameoH );
-			m_productionStripCameoH = REAL_TO_INT_CEIL( (Real)sqrt( area / aspect ) );
-			m_productionStripCameoW = REAL_TO_INT_CEIL( m_productionStripCameoH * aspect );
-		}
-	}
+	updateStripCameoSize();
 
 	//
 	// rows stack upwards from just above the control bar, last row nearest the bar: playing, that
