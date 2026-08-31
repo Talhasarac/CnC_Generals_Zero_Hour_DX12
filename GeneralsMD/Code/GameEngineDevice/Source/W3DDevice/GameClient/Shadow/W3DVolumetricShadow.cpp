@@ -55,6 +55,7 @@
 #include "W3DDevice/GameClient/W3DVolumetricShadow.h"
 #include "W3DDevice/GameClient/W3DShadow.h"
 #include "WW3D2/statistics.h"
+#include "Common/PerfTimer.h"
 #include "GameLogic/TerrainLogic.h"
 #include "WW3D2/DX8Caps.h"
 #include "GameClient/Drawable.h"
@@ -3673,8 +3674,16 @@ void W3DVolumetricShadowManager::renderStencilShadows( void )
 
 }  // end renderStencilShadows
 
+// THREADING-ROADMAP.md section 0 step 2: the stencil shadow pass had no gather at all, which is
+// exactly the number section 3.2 has to be argued with.  shadowVolumeUpdate/-Submit inside split
+// it into the CPU half and the D3D half.
+DECLARE_PERF_TIMER(stencilShadows)
+DECLARE_PERF_TIMER(shadowVolumeUpdate)
+DECLARE_PERF_TIMER(shadowVolumeSubmit)
+
 void W3DVolumetricShadowManager::renderShadows( Bool forceStencilFill )
 {
+	USE_PERF_TIMER(stencilShadows)
 	W3DVolumetricShadow *shadow;
 	Int numRenderedShadows = 0;
 
@@ -3788,28 +3797,43 @@ void W3DVolumetricShadowManager::renderShadows( Bool forceStencilFill )
 		lastActiveVertexBuffer=NULL;	//reset
 
 		m_dynamicShadowVolumesToRender=NULL;	//clear list of pending dynamic shadows
-		W3DVolumetricShadowRenderTask *shadowDynamicTasksStart,*shadowDynamicTask;
-		
-		// step through each of our shadows and render
-		for( shadow = m_shadowList; shadow; shadow = shadow->m_next )
+		W3DVolumetricShadowRenderTask *shadowDynamicTask;
+
+		/* THREADING-ROADMAP.md 3.2 step 1.  This used to be one loop that alternated between
+			 rebuilding a caster's silhouette on the CPU and submitting the volumes it had just
+			 produced to D3D.  Interleaved like that the CPU half can never be measured on its own,
+			 let alone moved off this thread.  The two passes below do exactly what the one loop did;
+			 nothing about the geometry or the submitted volumes changes.
+
+			 Deferring the submit is safe because RenderVolume reads only m_shadowVolume[light][mesh],
+			 which Update() finished writing, and the mesh transform, which nothing here moves. */
 		{
-			if (shadow->m_isEnabled && !shadow->m_isInvisibleEnabled)
+			// CPU: silhouette and extrusion for every enabled caster.  Touches no D3D state.
+			USE_PERF_TIMER(shadowVolumeUpdate)
+			for( shadow = m_shadowList; shadow; shadow = shadow->m_next )
 			{
-				//Record last added task
-				shadowDynamicTasksStart=m_dynamicShadowVolumesToRender;
-				shadow->Update();
-				shadowDynamicTask=m_dynamicShadowVolumesToRender;
-				while (shadowDynamicTask != shadowDynamicTasksStart)
-				{	//update() added a dynamic shadow
-					//dynamic shadow columes don't need to wait in queue since they
-					//all use the same vertex buffer.  Flush them ASAP.
-					shadow->RenderVolume(shadowDynamicTask->m_meshIndex,shadowDynamicTask->m_lightIndex);
-					//move to next dynamic task
-					shadowDynamicTask=(W3DVolumetricShadowRenderTask *)shadowDynamicTask->m_nextTask;
-					numRenderedShadows++;
-				}
+				if (shadow->m_isEnabled && !shadow->m_isInvisibleEnabled)
+					shadow->Update();
 			}
-		}  // end for
+		}
+
+		{
+			/* D3D: submit the dynamic volumes the pass above accumulated.  They do not have to wait
+				 in the static queue - they all share one vertex buffer - so they go out here.
+
+				 addDynamicShadowTask prepends, so this walk is reverse creation order.  That is the
+				 same order the decrement pass further down already walks the list in, and it is
+				 decided by the list alone, never by the order the CPU pass happened to run in -
+				 which is what step 2 needs before it can put that pass on more than one thread. */
+			USE_PERF_TIMER(shadowVolumeSubmit)
+			for( shadowDynamicTask = m_dynamicShadowVolumesToRender; shadowDynamicTask;
+					 shadowDynamicTask = (W3DVolumetricShadowRenderTask *)shadowDynamicTask->m_nextTask )
+			{
+				shadowDynamicTask->m_parentShadow->RenderVolume( shadowDynamicTask->m_meshIndex,
+																												shadowDynamicTask->m_lightIndex );
+				numRenderedShadows++;
+			}
+		}
 
 		// Set vertex format to that used by static shadow volumes
 		m_pDev->SetVertexShader(W3DBufferManager::getDX8Format(W3DBufferManager::VBM_FVF_XYZ));
