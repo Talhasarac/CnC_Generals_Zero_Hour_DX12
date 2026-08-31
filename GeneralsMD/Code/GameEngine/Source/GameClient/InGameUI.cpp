@@ -1152,8 +1152,12 @@ InGameUI::InGameUI()
 	m_productionStripCameoH = PRODUCTION_STRIP_CAMEO;
 	m_productionStripTray = NULL;
 	m_productionStripTraySource = NULL;
-	m_productionStripOverflow = NULL;
-	m_stripSecondsString = NULL;
+	for( Int stripString = 0; stripString < STRIP_OVERFLOW_STRINGS; stripString++ )
+		m_productionStripOverflow[ stripString ] = NULL;
+	for( Int stripSeconds = 0; stripSeconds < STRIP_SECONDS_STRINGS; stripSeconds++ )
+		m_stripSecondsString[ stripSeconds ] = NULL;
+	for( Int stripQuantity = 0; stripQuantity < STRIP_QUANTITY_STRINGS; stripQuantity++ )
+		m_stripQuantityString[ stripQuantity ] = NULL;
 	m_superweaponIconCount = 0;
 	m_superweaponIconTotal = 0;
 
@@ -5959,10 +5963,12 @@ static void appendProducerQueue( Object *obj, InGameUI::ProductionStripSlot *slo
 
 	Player *owner = obj->getControllingPlayer();
 	Int ahead = 0;					///< frames the queue in front of the current entry still needs
+	Int runAt = -1;					///< where this producer's last item went, so a run of the same thing folds into it
 
 	for( const ProductionEntry *p = pu->firstProduction(); p; p = pu->nextProduction( p ) )
 	{
 		Int id = 0;
+		Int typeKey = 0;
 		Bool isUpgrade = FALSE;
 		Int buildFrames = 0;
 
@@ -5970,12 +5976,16 @@ static void appendProducerQueue( Object *obj, InGameUI::ProductionStripSlot *slo
 		{
 			id = (Int)p->getProductionID();
 			if( p->getProductionObject() )
+			{
 				buildFrames = p->getProductionObject()->calcTimeToBuild( owner );
+				typeKey = (Int)p->getProductionObject()->getTemplateID();
+			}
 		}
 		else if( p->getProductionType() == PRODUCTION_UPGRADE && p->getProductionUpgrade() )
 		{
 			isUpgrade = TRUE;
 			id = (Int)p->getProductionUpgrade()->getUpgradeNameKey();
+			typeKey = id;
 			buildFrames = p->getProductionUpgrade()->calcTimeToBuild( owner );
 		}
 		else
@@ -5998,6 +6008,21 @@ static void appendProducerQueue( Object *obj, InGameUI::ProductionStripSlot *slo
 		(*total)++;
 
 		//
+		// Ten Red Guards queued back to back are one order repeated, not ten things to read: they
+		// fold into the cameo the run started, which wears an "xN".  Only a run does - the same unit
+		// queued again after something else is a second cameo, because that is what the queue looks
+		// like - and only within one producer's queue, so the cameo still stands for a place you can
+		// jump to and an item you can cancel.  The countdown stays the one the run's first item
+		// carries: what the cameo says is when the next of these arrives.
+		//
+		if( runAt >= 0 && runAt < *count && slots[ runAt ].typeKey == typeKey
+				&& slots[ runAt ].isUpgrade == isUpgrade && slots[ runAt ].producer == obj->getID() )
+		{
+			slots[ runAt ].quantity++;
+			continue;
+		}
+
+		//
 		// walk back over the items that finish later than this one and drop it in front of them.
 		// Ties keep the order they were met in, so a base full of identical barracks stays put
 		// instead of shuffling frame to frame.  The selected building's items are a block of their
@@ -6010,6 +6035,9 @@ static void appendProducerQueue( Object *obj, InGameUI::ProductionStripSlot *slo
 																									 slots[ at - 1 ].remaining ) )
 			at--;
 
+		// something else has come between: whatever this producer queues next starts a new run
+		runAt = -1;
+
 		if( at >= max )
 			continue;						// everything already kept finishes sooner: counted, but not drawn
 
@@ -6019,13 +6047,17 @@ static void appendProducerQueue( Object *obj, InGameUI::ProductionStripSlot *slo
 		for( Int j = *count - 1; j > at; j-- )
 			slots[ j ] = slots[ j - 1 ];
 
+		runAt = at;
+
 		InGameUI::ProductionStripSlot *slot = &slots[ at ];
 		slot->producer = obj->getID();
 		slot->id = id;
+		slot->typeKey = typeKey;
 		slot->isUpgrade = isUpgrade;
 		slot->isStructure = FALSE;
 		slot->leads = leads;
 		slot->remaining = remaining;
+		slot->quantity = 1;
 		slot->pos.x = 0;
 		slot->pos.y = 0;
 	}
@@ -6082,10 +6114,13 @@ static void appendStructureUnderConstruction( Object *obj, InGameUI::ProductionS
 	InGameUI::ProductionStripSlot *slot = &slots[ at ];
 	slot->producer = obj->getID();
 	slot->id = 0;
+	slot->typeKey = 0;
 	slot->isUpgrade = FALSE;
 	slot->isStructure = TRUE;
 	slot->leads = FALSE;
 	slot->remaining = remaining;
+	// each site is its own place on the map, so two of the same building stay two cameos
+	slot->quantity = 1;
 	slot->pos.x = 0;
 	slot->pos.y = 0;
 }
@@ -6121,6 +6156,20 @@ static void gatherStripStructures( Object *obj, void *userData )
 }
 
 //-------------------------------------------------------------------------------------------------
+/** Player::iterateObjects callback for a watched player's row: everything that player has coming,
+	* queued in a factory or going up on the ground, in the one line.  Playing, those are two rows
+	* because you act on them differently; watching, a row is a whole player and what is being built
+	* is the same question either way.  Nothing is counted twice - a building under construction
+	* produces nothing until it is finished. */
+//-------------------------------------------------------------------------------------------------
+static void gatherStripEverything( Object *obj, void *userData )
+{
+	ProductionStripGather *g = (ProductionStripGather *)userData;
+	appendProducerQueue( obj, g->slot, g->count, g->max, g->total, FALSE );
+	appendStructureUnderConstruction( obj, g->slot, g->count, g->max, g->total );
+}
+
+//-------------------------------------------------------------------------------------------------
 /** Find the queue entry a slot stands for. Re-read every frame rather than cached: production runs
 	* on the logic clock and this draws on the render clock, so anything held is stale. */
 //-------------------------------------------------------------------------------------------------
@@ -6152,8 +6201,9 @@ static const ProductionEntry *findStripEntry( ProductionUpdateInterface *pu,
 	* between every pair of cameos; mirrored, the rail leads the row and the trays close up behind
 	* it.
 	*
-	* Kept until the bar hands back a different tray - a side change, a mod's own bar - rather than
-	* rebuilt per cameo per frame.  NULL for a side whose template ships no shortcut bar. */
+	* Kept until the bar hands back a different tray - a side change, an observer picking a different
+	* player out of the list, a mod's own bar - rather than rebuilt per cameo per frame.  NULL when
+	* there is no bar and nothing to borrow one from. */
 //-------------------------------------------------------------------------------------------------
 const Image *InGameUI::productionStripTray( void )
 {
@@ -6231,22 +6281,25 @@ Int InGameUI::stripRowStep( Int trayHeight )
 	* is a shape rather than a number: it answers "nearly" and never "eleven seconds".  Both strips
 	* put the number in the middle of the box, over the sweep. */
 //-------------------------------------------------------------------------------------------------
-void InGameUI::drawStripSeconds( Int x, Int y, Int w, Int h, Int seconds, Bool plainSeconds )
+void InGameUI::drawStripSeconds( Int which, Int x, Int y, Int w, Int h, Int seconds, Bool plainSeconds )
 {
-	if( m_stripSecondsString == NULL )
+	// its own string, kept between frames - see m_stripSecondsString
+	DisplayString *&secondsString = m_stripSecondsString[ which ];
+
+	if( secondsString == NULL )
 	{
-		m_stripSecondsString = TheDisplayStringManager->newDisplayString();
-		m_stripSecondsString->setFont( TheFontLibrary->getFont( m_superweaponNormalFont,
+		secondsString = TheDisplayStringManager->newDisplayString();
+		secondsString->setFont( TheFontLibrary->getFont( m_superweaponNormalFont,
 										TheGlobalLanguageData->adjustFontSize( PRODUCTION_STRIP_SECS ),
 										TRUE ) );
 	}
 
 	UnicodeString text;
 	formatStripSeconds( &text, seconds, plainSeconds );
-	m_stripSecondsString->setText( text );
+	secondsString->setText( text );
 
 	Int textWidth = 0, textHeight = 0;
-	m_stripSecondsString->getSize( &textWidth, &textHeight );
+	secondsString->getSize( &textWidth, &textHeight );
 
 	const Int textX = x + ( w - textWidth ) / 2;
 	const Int textY = y + ( h - textHeight ) / 2;
@@ -6254,8 +6307,38 @@ void InGameUI::drawStripSeconds( Int x, Int y, Int w, Int h, Int seconds, Bool p
 	// no plate under it: the cameo is already under the sweep's scrim, and a second black box
 	// inside a sixteen pixel box was most of the cameo - the number read as a label stuck over
 	// the picture instead of a countdown running on it.  The drop shadow carries it.
-	m_stripSecondsString->draw( textX, textY, GameMakeColor( 245, 245, 245, 255 ),
-															GameMakeColor( 0, 0, 0, 255 ) );
+	secondsString->draw( textX, textY, GameMakeColor( 245, 245, 245, 255 ),
+											 GameMakeColor( 0, 0, 0, 255 ) );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The "xN" a folded run of the same item wears, in the cameo's top right corner - the corner the
+	* command bar puts its own count badge in, and the corner the countdown in the middle leaves free.
+	* Kept per cameo for the reason the countdowns are: a DisplayString rebuilds a font surface every
+	* time its text changes, and this one changes only when the run does. */
+//-------------------------------------------------------------------------------------------------
+void InGameUI::drawStripQuantity( Int which, Int x, Int y, Int w, Int quantity )
+{
+	DisplayString *&quantityString = m_stripQuantityString[ which ];
+
+	if( quantityString == NULL )
+	{
+		quantityString = TheDisplayStringManager->newDisplayString();
+		quantityString->setFont( TheFontLibrary->getFont( m_superweaponNormalFont,
+										TheGlobalLanguageData->adjustFontSize( PRODUCTION_STRIP_SECS ),
+										TRUE ) );
+	}
+
+	UnicodeString text;
+	text.format( L"x%d", quantity );
+	quantityString->setText( text );
+
+	Int textWidth = 0, textHeight = 0;
+	quantityString->getSize( &textWidth, &textHeight );
+
+	quantityString->draw( x + w - textWidth - 1, y + 1,
+												GameMakeColor( 255, 255, 255, 255 ),
+												GameMakeColor( 0, 0, 0, 255 ) );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -6322,7 +6405,6 @@ void InGameUI::drawSuperweaponStrip( void )
 	const Image *tray = TheControlBar ? TheControlBar->getSpecialPowerTrayImage() : NULL;
 
 	const Int gap = stripPixels( PRODUCTION_STRIP_GAP );
-	const Int edge = stripPixels( PRODUCTION_STRIP_LEFT );
 	const Int more = stripPixels( PRODUCTION_STRIP_MORE );
 	const Int plate = stripPixels( 3 );
 
@@ -6347,8 +6429,14 @@ void InGameUI::drawSuperweaponStrip( void )
 		pulse = 0.5f - 0.5f * (Real)cos( 2.0 * PI * phase );
 	}
 
-	const Int right = TheDisplay->getWidth() - edge;
+	// flush against the right hand edge: the tray's heavy rail is the edge of the strip, and an inset
+	// leaves it hanging in the middle of nothing.  The production rows keep their inset because their
+	// rail faces the other way, into the screen
+	const Int right = TheDisplay->getWidth();
 	const Int hidden = m_superweaponIconTotal - m_superweaponIconCount;
+
+	// drawn as a batch, for the reason drawProductionStrip() gives - see Display::beginBatch2D
+	TheDisplay->beginBatch2D();
 
 	for( Int row = 0; row < SUPERWEAPON_STRIP_ROWS; row++ )
 	{
@@ -6383,32 +6471,33 @@ void InGameUI::drawSuperweaponStrip( void )
 				TheDisplay->drawFillRect( backX, trayY, trayW, trayH, GameMakeColor( 0, 0, 0, 130 ) );
 		}
 
-		for( Int i = 0; i < inRow; i++ )
+		//
+		// The row goes down a piece at a time - every picture, then every sweep, then every border -
+		// rather than an icon at a time, for the reason drawProductionStripRow() gives: pieces that
+		// want the same thing of the renderer are one draw call when they follow each other and one
+		// draw call each when they do not.  The icons do not overlap, so nothing changes on screen.
+		//
+		for( Int cameoSlot = 0; cameoSlot < inRow; cameoSlot++ )
 		{
-			const SuperweaponIconSlot *slot = &m_superweaponIcons[ first + i ];
-			const Int x = right - trayW + trayHole.x - i * trayStep;
+			const SuperweaponIconSlot *slot = &m_superweaponIcons[ first + cameoSlot ];
+			const Int x = right - trayW + trayHole.x - cameoSlot * trayStep;
 
 			if( slot->image )
 				TheDisplay->drawImage( slot->image, x, y, x + cameoW, y + cameoH );
+		}
 
-			//
-			// the same sweep the production cameos wear, and the same way round as the command
-			// bar's own clock: the scrim covers what is still to be charged and is swept off as
-			// the charge runs.
-			//
-			UnsignedByte r, g, b, a;
-			GameGetColorComponents( slot->color, &r, &g, &b, &a );
+		//
+		// the same sweep the production cameos wear, and the same way round as the command bar's own
+		// clock: the scrim covers what is still to be charged and is swept off as the charge runs
+		//
+		for( Int clockSlot = 0; clockSlot < inRow; clockSlot++ )
+		{
+			const SuperweaponIconSlot *slot = &m_superweaponIcons[ first + clockSlot ];
+			const Int x = right - trayW + trayHole.x - clockSlot * trayStep;
 
 			if( !slot->ready )
-			{
 				TheDisplay->drawRemainingRectClock( x, y, cameoW, cameoH, slot->percent,
 																						GameMakeColor( 0, 0, 0, 130 ) );
-				//
-				// bare seconds, however many there are: this strip is read against the other
-				// countdowns on the screen, and m:ss is a number you have to convert first
-				//
-				drawStripSeconds( x, y, cameoW, cameoH, slot->seconds, TRUE );
-			}
 			else
 			{
 				//
@@ -6417,11 +6506,35 @@ void InGameUI::drawSuperweaponStrip( void )
 				// thing on this strip that wants to be noticed rather than looked up, and a
 				// translucent wash over the picture says whose it is in the same stroke.
 				//
+				UnsignedByte r, g, b, a;
+				GameGetColorComponents( slot->color, &r, &g, &b, &a );
 				const UnsignedByte washAlpha = (UnsignedByte)( 30.0f + 90.0f * pulse );
 				TheDisplay->drawFillRect( x, y, cameoW, cameoH, GameMakeColor( r, g, b, washAlpha ) );
 			}
+		}
 
-			// the border is whose weapon it is - the colour the timer was registered with
+		//
+		// bare seconds, however many there are: this strip is read against the other countdowns on
+		// the screen, and m:ss is a number you have to convert first
+		//
+		for( Int secondsSlot = 0; secondsSlot < inRow; secondsSlot++ )
+		{
+			const SuperweaponIconSlot *slot = &m_superweaponIcons[ first + secondsSlot ];
+			const Int x = right - trayW + trayHole.x - secondsSlot * trayStep;
+
+			if( !slot->ready )
+				drawStripSeconds( PRODUCTION_STRIP_ROWS * PRODUCTION_STRIP_ROW_MAX + first + secondsSlot,
+													x, y, cameoW, cameoH, slot->seconds, TRUE );
+		}
+
+		// the border is whose weapon it is - the colour the timer was registered with
+		for( Int borderSlot = 0; borderSlot < inRow; borderSlot++ )
+		{
+			const SuperweaponIconSlot *slot = &m_superweaponIcons[ first + borderSlot ];
+			const Int x = right - trayW + trayHole.x - borderSlot * trayStep;
+
+			UnsignedByte r, g, b, a;
+			GameGetColorComponents( slot->color, &r, &g, &b, &a );
 			TheDisplay->drawOpenRect( x, y, cameoW, cameoH, 2.0f, GameMakeColor( r, g, b, 255 ) );
 		}
 
@@ -6431,27 +6544,32 @@ void InGameUI::drawSuperweaponStrip( void )
 		//
 		if( hidden > 0 && lastRow )
 		{
-			if( m_productionStripOverflow == NULL )
+			// this strip's own "+N", kept apart from the production rows' - see m_stripSecondsString
+			DisplayString *&overflow = m_productionStripOverflow[ PRODUCTION_STRIP_ROWS ];
+
+			if( overflow == NULL )
 			{
-				m_productionStripOverflow = TheDisplayStringManager->newDisplayString();
-				m_productionStripOverflow->setFont( TheFontLibrary->getFont( m_superweaponNormalFont,
+				overflow = TheDisplayStringManager->newDisplayString();
+				overflow->setFont( TheFontLibrary->getFont( m_superweaponNormalFont,
 														TheGlobalLanguageData->adjustFontSize( HUD_OVERLAY_POINT_SIZE ),
 														TRUE ) );
 			}
 
 			UnicodeString text;
 			text.format( L"+%d", hidden );
-			m_productionStripOverflow->setText( text );
+			overflow->setText( text );
 
 			Int textWidth = 0, textHeight = 0;
-			m_productionStripOverflow->getSize( &textWidth, &textHeight );
+			overflow->getSize( &textWidth, &textHeight );
 
-			m_productionStripOverflow->draw( right - rowWidth + ( more - textWidth ) / 2,
-																			 y + ( cameoH - textHeight ) / 2,
-																			 GameMakeColor( 235, 235, 235, 255 ),
-																			 GameMakeColor( 0, 0, 0, 255 ) );
+			overflow->draw( right - rowWidth + ( more - textWidth ) / 2,
+											y + ( cameoH - textHeight ) / 2,
+											GameMakeColor( 235, 235, 235, 255 ),
+											GameMakeColor( 0, 0, 0, 255 ) );
 		}
 	}
+
+	TheDisplay->endBatch2D();
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -6510,16 +6628,52 @@ void InGameUI::drawProductionStripRow( Int row, Int y )
 			TheDisplay->drawFillRect( backX, trayY, trayW, trayH, GameMakeColor( 0, 0, 0, 130 ) );
 	}
 
-	const Int hidden = m_productionStripTotal[ row ] - count;
+	//
+	// what the "+N" stands for is everything the row does not already show - and a cameo wearing an
+	// "x5" shows five of them, so the run counts as five here or the same items are reported twice
+	//
+	Int shown = 0;
+	for( Int shownSlot = 0; shownSlot < count; shownSlot++ )
+		shown += m_productionStrip[ row ][ shownSlot ].quantity;
+
+	const Int hidden = m_productionStripTotal[ row ] - shown;
+
+	//
+	// What every cameo in the row is to be drawn with, worked out before any of it is drawn.  The
+	// row then goes down a piece at a time - every picture, then every scrim, then every border -
+	// rather than a cameo at a time, because a run of pieces that ask the renderer for the same
+	// thing is one draw call and the same pieces shuffled together are one draw call each.  The
+	// cameos do not overlap, so what lands on the screen is exactly what always did.
+	//
+	struct StripSlotDraw
+	{
+		Int x;										///< left edge of this cameo
+		const Image *cameo;				///< its picture, NULL when the template carries none
+		Int percent;							///< how much of the scrim has been swept off, -1 for no scrim
+		Int seconds;							///< the countdown written across it, -1 for none
+		Int quantity;							///< how many of the same item it stands for, 1 for a lone one
+		Color border;
+		Bool cancelHover;					///< the cursor is on it with ctrl held: this is the one a click cancels
+	};
+	StripSlotDraw slots[ PRODUCTION_STRIP_ROW_MAX ];
 
 	Int trayX = 0;
 	Int x = trayX + trayInsetX;
 	for( Int i = 0; i < count; i++ )
 	{
 		ProductionStripSlot *slot = &m_productionStrip[ row ][ i ];
+		StripSlotDraw *draw = &slots[ i ];
+
 		x = trayX + trayInsetX;
 		slot->pos.x = x;
 		slot->pos.y = y;
+
+		draw->x = x;
+		draw->cameo = NULL;
+		draw->percent = -1;
+		draw->seconds = -1;
+		draw->quantity = slot->quantity;
+		draw->cancelHover = FALSE;
 
 		Object *producer = TheGameLogic->findObjectByID( slot->producer );
 		ProductionUpdateInterface *pu = producer ? producer->getProductionUpdateInterface() : NULL;
@@ -6531,36 +6685,28 @@ void InGameUI::drawProductionStripRow( Int row, Int y )
 			// A building going up carries its own progress rather than a queue entry's: the same
 			// sweep and the same countdown, read off the construction percentage on the object.
 			//
-			const Image *cameo = producer->getTemplate()->getButtonImage();
-			if( cameo )
-				TheDisplay->drawImage( cameo, x, y, x + cameoW, y + cameoH );
+			draw->cameo = producer->getTemplate()->getButtonImage();
 
 			const Real done = producer->getConstructionPercent();
-			TheDisplay->drawRemainingRectClock( x, y, cameoW, cameoH,
-																					REAL_TO_INT( done ), GameMakeColor( 0, 0, 0, 100 ) );
+			draw->percent = REAL_TO_INT( done );
 
 			const Int totalFrames =
 				producer->getTemplate()->calcTimeToBuild( producer->getControllingPlayer() );
 			if( totalFrames > 0 )
 			{
 				const Real left = totalFrames * ( 1.0f - done / 100.0f );
-				drawStripSeconds( x, y, cameoW, cameoH,
-													ControlBar_secondsFromFrames( left > 0.0f ? left : 0.0f ) );
+				draw->seconds = ControlBar_secondsFromFrames( left > 0.0f ? left : 0.0f );
 			}
 		}
 		else if( entry )
 		{
-			const Image *cameo = NULL;
 			if( slot->isUpgrade )
 			{
 				if( entry->getProductionUpgrade() )
-					cameo = entry->getProductionUpgrade()->getButtonImage();
+					draw->cameo = entry->getProductionUpgrade()->getButtonImage();
 			}
 			else if( entry->getProductionObject() )
-				cameo = entry->getProductionObject()->getButtonImage();
-
-			if( cameo )
-				TheDisplay->drawImage( cameo, x, y, x + cameoW, y + cameoH );
+				draw->cameo = entry->getProductionObject()->getButtonImage();
 
 			//
 			// The scrim starts covering the cameo and is swept off as the item is built, the same
@@ -6571,9 +6717,7 @@ void InGameUI::drawProductionStripRow( Int row, Int y )
 			// everything behind it is waiting and wears the full scrim.
 			//
 			const Bool building = ( pu->firstProduction() == entry );
-			const Int percent = building ? REAL_TO_INT( entry->getPercentComplete() ) : 0;
-			TheDisplay->drawRemainingRectClock( x, y, cameoW, cameoH,
-																					percent, GameMakeColor( 0, 0, 0, 100 ) );
+			draw->percent = building ? REAL_TO_INT( entry->getPercentComplete() ) : 0;
 
 			//
 			// How long this one still has, written in the middle of it - but only for the item
@@ -6595,8 +6739,7 @@ void InGameUI::drawProductionStripRow( Int row, Int y )
 				if( totalFrames > 0 )
 				{
 					const Real left = totalFrames * ( 1.0f - entry->getPercentComplete() / 100.0f );
-					drawStripSeconds( x, y, cameoW, cameoH,
-														ControlBar_secondsFromFrames( left > 0.0f ? left : 0.0f ) );
+					draw->seconds = ControlBar_secondsFromFrames( left > 0.0f ? left : 0.0f );
 				}
 			}
 		}
@@ -6607,48 +6750,91 @@ void InGameUI::drawProductionStripRow( Int row, Int y )
 		// the cursor is really on, and an accidental cancel costs the whole item.
 		//
 		// a building already standing on the map is not cancelled from here - it is sold or blown up
-		Bool cancelHover = FALSE;
 		if( !m_productionStripWatching && !slot->isStructure
 				&& TheKeyboard && TheKeyboard->isCtrl() && TheMouse )
 		{
 			const MouseIO *io = TheMouse->getMouseStatus();
-			cancelHover = io && io->pos.x >= x && io->pos.x < x + cameoW &&
-										io->pos.y >= y && io->pos.y < y + cameoH;
+			draw->cancelHover = io && io->pos.x >= x && io->pos.x < x + cameoW &&
+													io->pos.y >= y && io->pos.y < y + cameoH;
 		}
 
 		// same border colours the command bar puts on its build and upgrade buttons - except while
 		// watching, where the border is whose row it is, since that is what the row is there to say
-		Color border = GameMakeColor( 160, 160, 160, 160 );
-		if( cancelHover )
-			border = GameMakeColor( 255, 80, 80, 255 );
+		draw->border = GameMakeColor( 160, 160, 160, 160 );
+		if( draw->cancelHover )
+			draw->border = GameMakeColor( 255, 80, 80, 255 );
 		else if( m_productionStripRowColor[ row ] != 0 )
 		{
 			// the stored player colour's alpha is not ours to trust, the health bars found that out
 			UnsignedByte r, g, b, a;
 			GameGetColorComponents( m_productionStripRowColor[ row ], &r, &g, &b, &a );
-			border = GameMakeColor( r, g, b, 255 );
+			draw->border = GameMakeColor( r, g, b, 255 );
 		}
 		else if( TheControlBar )
-			border = slot->isUpgrade ? TheControlBar->getUpgradeBorderColor()
-															 : TheControlBar->getBuildBorderColor();
+			draw->border = slot->isUpgrade ? TheControlBar->getUpgradeBorderColor()
+																		 : TheControlBar->getBuildBorderColor();
 
-		// a team border is the row's whole label, so it is drawn heavy enough to read as one
-		TheDisplay->drawOpenRect( x, y, cameoW, cameoH,
-															m_productionStripRowColor[ row ] != 0 ? 2.0f : 1.0f, border );
+		trayX += trayStep;
+	}
 
-		if( cancelHover )
+	// the pictures
+	for( Int cameoSlot = 0; cameoSlot < count; cameoSlot++ )
+	{
+		const StripSlotDraw *draw = &slots[ cameoSlot ];
+		if( draw->cameo )
+			TheDisplay->drawImage( draw->cameo, draw->x, y, draw->x + cameoW, y + cameoH );
+	}
+
+	// the sweeps over them
+	for( Int clockSlot = 0; clockSlot < count; clockSlot++ )
+	{
+		const StripSlotDraw *draw = &slots[ clockSlot ];
+		if( draw->percent >= 0 )
+			TheDisplay->drawRemainingRectClock( draw->x, y, cameoW, cameoH,
+																					draw->percent, GameMakeColor( 0, 0, 0, 100 ) );
+	}
+
+	// the countdowns written on them
+	for( Int secondsSlot = 0; secondsSlot < count; secondsSlot++ )
+	{
+		const StripSlotDraw *draw = &slots[ secondsSlot ];
+		if( draw->seconds >= 0 )
+			drawStripSeconds( row * PRODUCTION_STRIP_ROW_MAX + secondsSlot,
+												draw->x, y, cameoW, cameoH, draw->seconds );
+	}
+
+	// how many of the same thing each one stands for, in the corner the countdown leaves free
+	for( Int quantitySlot = 0; quantitySlot < count; quantitySlot++ )
+	{
+		const StripSlotDraw *draw = &slots[ quantitySlot ];
+		if( draw->quantity > 1 )
+			drawStripQuantity( row * PRODUCTION_STRIP_ROW_MAX + quantitySlot,
+												 draw->x, y, cameoW, draw->quantity );
+	}
+
+	// and the borders round them, a team border heavy enough to read as the row's whole label
+	for( Int borderSlot = 0; borderSlot < count; borderSlot++ )
+	{
+		const StripSlotDraw *draw = &slots[ borderSlot ];
+		TheDisplay->drawOpenRect( draw->x, y, cameoW, cameoH,
+															m_productionStripRowColor[ row ] != 0 ? 2.0f : 1.0f,
+															draw->border );
+	}
+
+	for( Int hoverSlot = 0; hoverSlot < count; hoverSlot++ )
+	{
+		const StripSlotDraw *draw = &slots[ hoverSlot ];
+		if( draw->cancelHover )
 		{
 			const Int barInset = cameoW / 4;
 			const Int barHeight = stripPixels( 4 );
 
-			TheDisplay->drawFillRect( x, y, cameoW, cameoH,
+			TheDisplay->drawFillRect( draw->x, y, cameoW, cameoH,
 																GameMakeColor( 190, 0, 0, 120 ) );
-			TheDisplay->drawFillRect( x + barInset, y + ( cameoH - barHeight ) / 2,
+			TheDisplay->drawFillRect( draw->x + barInset, y + ( cameoH - barHeight ) / 2,
 																cameoW - 2 * barInset, barHeight,
 																GameMakeColor( 255, 255, 255, 255 ) );
 		}
-
-		trayX += trayStep;
 	}
 
 	x = trayX + gap;
@@ -6659,31 +6845,57 @@ void InGameUI::drawProductionStripRow( Int row, Int y )
 	//
 	if( hidden > 0 )
 	{
-		if( m_productionStripOverflow == NULL )
+		// this row's own "+N" - see m_stripSecondsString
+		DisplayString *&overflow = m_productionStripOverflow[ row ];
+
+		if( overflow == NULL )
 		{
-			m_productionStripOverflow = TheDisplayStringManager->newDisplayString();
-			m_productionStripOverflow->setFont( TheFontLibrary->getFont( m_superweaponNormalFont,
+			overflow = TheDisplayStringManager->newDisplayString();
+			overflow->setFont( TheFontLibrary->getFont( m_superweaponNormalFont,
 													TheGlobalLanguageData->adjustFontSize( HUD_OVERLAY_POINT_SIZE ),
 													TRUE ) );
 		}
 
 		UnicodeString text;
 		text.format( L"+%d", hidden );
-		m_productionStripOverflow->setText( text );
+		overflow->setText( text );
 
 		Int textWidth = 0, textHeight = 0;
-		m_productionStripOverflow->getSize( &textWidth, &textHeight );
+		overflow->getSize( &textWidth, &textHeight );
 
-		m_productionStripOverflow->draw( x + ( more - textWidth ) / 2,
-																		 y + ( cameoH - textHeight ) / 2,
-																		 GameMakeColor( 235, 235, 235, 255 ),
-																		 GameMakeColor( 0, 0, 0, 255 ) );
+		overflow->draw( x + ( more - textWidth ) / 2,
+										y + ( cameoH - textHeight ) / 2,
+										GameMakeColor( 235, 235, 235, 255 ),
+										GameMakeColor( 0, 0, 0, 255 ) );
 	}
 }
+
+#ifdef DEBUG_LOGGING
+extern Real TheStripGatherMS;
+extern Real TheStripDrawMS;
+
+static Real stripElapsedMS( const Int64 &from, const Int64 &to )
+{
+	Int64 freq;
+	QueryPerformanceFrequency( (LARGE_INTEGER *)&freq );
+	if( freq == 0 )
+		return 0.0f;
+	return (Real)((double)( to - from ) * 1000.0 / (double)freq );
+}
+#endif
 
 //-------------------------------------------------------------------------------------------------
 void InGameUI::drawProductionStrip( void )
 {
+#ifdef DEBUG_LOGGING
+	Int64 tGatherStart, tGatherEnd, tDrawEnd;
+	QueryPerformanceCounter( (LARGE_INTEGER *)&tGatherStart );
+	tGatherEnd = tGatherStart;
+	tDrawEnd = tGatherStart;
+	TheStripGatherMS = 0.0f;
+	TheStripDrawMS = 0.0f;
+#endif
+
 	for( Int row = 0; row < PRODUCTION_STRIP_ROWS; row++ )
 	{
 		m_productionStripCount[ row ] = 0;
@@ -6719,10 +6931,10 @@ void InGameUI::drawProductionStrip( void )
 			watch.slot = m_productionStrip[ row ];
 			watch.count = &m_productionStripCount[ row ];
 			watch.total = &m_productionStripTotal[ row ];
-			// eight rows are on screen at once here, so each one is the five soonest and a "+N"
+			// eight rows are on screen at once here, so each one is the few soonest and a "+N"
 			watch.max = PRODUCTION_STRIP_WATCH_MAX;
 			watch.skip = INVALID_ID;			// nothing is selected in somebody else's base
-			p->iterateObjects( gatherProductionStrip, &watch );
+			p->iterateObjects( gatherStripEverything, &watch );
 
 			if( m_productionStripCount[ row ] > 0 )
 			{
@@ -6775,6 +6987,11 @@ void InGameUI::drawProductionStrip( void )
 		gather.skip = selected;
 		player->iterateObjects( gatherProductionStrip, &gather );
 	}
+
+#ifdef DEBUG_LOGGING
+	QueryPerformanceCounter( (LARGE_INTEGER *)&tGatherEnd );
+	TheStripGatherMS = stripElapsedMS( tGatherStart, tGatherEnd );
+#endif
 
 	//
 	// The rows in use are closed up before they are placed: the sites row is empty for most of a
@@ -6831,6 +7048,13 @@ void InGameUI::drawProductionStrip( void )
 	const Int lowerY = barTop - trayBelow - stripPixels( PRODUCTION_STRIP_LIFT );
 	const Int rowStep = stripRowStep( traySize.y );
 
+	//
+	// The strip is the busiest thing on the screen that is drawn a quad at a time, so it is drawn
+	// as a batch: the rows hand the display their pieces in an order that lets it gather the ones
+	// asking for the same state into single draw calls.  See Display::beginBatch2D.
+	//
+	TheDisplay->beginBatch2D();
+
 	for( Int at = rowsUsed - 1; at >= 0; at-- )
 	{
 		const Int y = lowerY - ( rowsUsed - 1 - at ) * rowStep;
@@ -6838,6 +7062,13 @@ void InGameUI::drawProductionStrip( void )
 			break;
 		drawProductionStripRow( used[ at ], y );
 	}
+
+	TheDisplay->endBatch2D();
+
+#ifdef DEBUG_LOGGING
+	QueryPerformanceCounter( (LARGE_INTEGER *)&tDrawEnd );
+	TheStripDrawMS = stripElapsedMS( tGatherEnd, tDrawEnd );
+#endif
 }
 
 //-------------------------------------------------------------------------------------------------

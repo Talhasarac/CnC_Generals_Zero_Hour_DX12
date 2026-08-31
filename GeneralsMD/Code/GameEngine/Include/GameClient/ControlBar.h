@@ -828,15 +828,23 @@ public:
 	Color getUpgradeBorderColor( void ){return m_commandButtonBorderUpgradeColor;}
 	void updateBorderColor( Color color) {m_commandBarBorderColor = color;	}
 
-	/** The tray one of the general's power shortcuts stands in, down in the corner - this side's own
-		* copy of it, taken off the bar itself rather than named, so a mod's bar brings its own. */
+	/** The tray one of the general's power shortcuts stands in, down in the corner - the tray of
+		* whichever side this bar is showing, taken off the bar itself rather than named, so a mod's
+		* bar brings its own.  Watching a match the bar has no side of its own to read, and the tray
+		* comes out of the layout of the player the bar is looking at instead. */
 	const Image *getSpecialPowerTrayImage( void );
 
 	/** That tray at the size the bar draws it, the hole in it the cameo fills, and the step a row of
-		* them runs at - measured off the loaded bar, so a borrowed tray is the size of the powers'
-		* own at any resolution.  Any out-parameter may be NULL; FALSE when there is no bar. */
+		* them runs at - measured off the same layout the tray came out of, so it is the size of the
+		* powers' own at any resolution.  Any out-parameter may be NULL; FALSE when there is no bar
+		* and no layout to borrow one from. */
 	Bool getSpecialPowerTrayLayout( ICoord2D *traySize, ICoord2D *cameoSize,
 																	ICoord2D *cameoOffset, Int *columnStep );
+
+	/** The tray geometry from one slot's size.  Public because it is the single home of the artwork's
+		* proportions: the bar itself, anything borrowing the look, and the tests all read it here. */
+	static Bool trayLayoutFromSlot( Int slotWidth, Int slotHeight, ICoord2D *traySize,
+																	ICoord2D *cameoSize, ICoord2D *cameoOffset, Int *columnStep );
 
 	/// set the command data into the button
 	void setControlCommand( GameWindow *button, const CommandButton *commandButton );
@@ -1036,6 +1044,27 @@ protected:
 	Int m_currentlyUsedSpecialPowersButtons; ///< Value will be <= MAX_SPECIAL_POWER_SHORTCUTS;
 	Int m_specialPowerShortcutRow;					 ///< row a first key press picked, -1 when none is pending
 	UnsignedInt m_specialPowerShortcutRowMs;  ///< millisecond that row was picked on, for CHORD_TIMEOUT_MS
+
+	/** A tray taken out of a side's shortcut layout without standing that side's bar up: what the
+		* HUD needs while watching somebody else play.  The layout is created, measured and destroyed
+		* on the spot - the image itself belongs to the mapped image collection and outlives it - and
+		* the answer is kept, since a spectator's bar asks for the same side every frame. */
+	struct BorrowedTray
+	{
+		AsciiString layout;					///< the .wnd it came out of, and the key this is found by
+		const Image *image;					///< that layout's slot background, NULL when it has none
+		ICoord2D size;							///< the size the loader gave that slot
+	};
+	enum { MAX_BORROWED_TRAYS = 8 };
+	BorrowedTray m_borrowedTrays[ MAX_BORROWED_TRAYS ];
+	Int m_borrowedTrayCount;
+	const BorrowedTray *borrowTray( const PlayerTemplate *pt );
+
+	/// whose tray this bar shows when it has no bar of its own: the side the bar itself is wearing
+	const PlayerTemplate *specialPowerTraySide( void );
+
+	/// a template of this side that ships a general's power bar, so its tray can be read off it
+	const PlayerTemplate *templateForSide( AsciiString side );
 
 	Int m_purchaseScienceColumn;						 ///< promotion screen column a first key press marked, -1 when none
 	UnsignedInt m_purchaseScienceColumnMs;	 ///< millisecond it was marked on, for CHORD_TIMEOUT_MS

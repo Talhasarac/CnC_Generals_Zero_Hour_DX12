@@ -260,7 +260,20 @@ public:
 	void setControlBarSchemeByPlayer(Player *p);																				///< Based off the playerTemplate, pick the right scheme for the control bar
 	void setControlBarSchemeByPlayerTemplate( const PlayerTemplate *pt, Bool useSmall = FALSE);
 	void setControlBarScheme(AsciiString schemeName);																										///< SchemeName must be a valid INI entry
-	
+
+	/** The side whose bar is on screen right now - the artwork actually being drawn, not whoever the
+		* seat belongs to.  Empty when no scheme is up; "Observer" while watching from no seat at all,
+		* and the side with "Small" on the end for the shell's small bar. */
+	AsciiString getCurrentSide( void ) const
+	{ return m_currentScheme ? m_currentScheme->m_side : AsciiString::TheEmptyString; }
+
+	/** The side another scheme is dressed in, when the one on screen has no artwork of its own.  The
+		* observer bar is a side called "Observer" and every plate on it is American - EA built it out
+		* of that side's art - so the scheme wearing the same right hand plate names the side the bar
+		* is really showing.  Empty when nothing else shares it. */
+	AsciiString getCurrentArtTwinSide( void ) const;
+
+
 	// parse Functions for the INI file
 	const FieldParse *getFieldParse() const { return m_controlBarSchemeFieldParseTable; }								///< returns the parsing fields
 	static const FieldParse m_controlBarSchemeFieldParseTable[];																				///< the parse table

@@ -670,6 +670,15 @@ extern Bool GameEngine_isLogicFrameDue( Real& accumMs, Real elapsedMs, Int logic
 
 TEST(logic_tick_is_wall_clock_paced_not_render_paced)
 {
+	/* The catch-up cap is a duration, so the frames it buys follow the game speed: EA's three
+	   frames at the retail 30fps, and six at 60 rather than the same three - a tenth of a second
+	   either way. */
+	const Int cap30 = GameEngine_logicCatchupMaxFrames( 30 );
+	CHECK_EQ( cap30, 3 );
+	CHECK_EQ( GameEngine_logicCatchupMaxFrames( 60 ), 6 );
+	CHECK_EQ( GameEngine_logicCatchupMaxFrames( 15 ), 2 );
+	CHECK_EQ( GameEngine_logicCatchupMaxFrames( 0 ), 1 );
+
 	/* A 300fps renderer (3.33ms/frame) at 30fps logic: 900 render frames span
 	   3 seconds, which must yield 90 logic frames, not 900. */
 	Real accum = 0.0f;
@@ -686,10 +695,10 @@ TEST(logic_tick_is_wall_clock_paced_not_render_paced)
 	accum = 0.0f;
 	due = 0;
 	while( GameEngine_isLogicFrameDue( accum, due == 0 ? 100.0f : 0.0f, 30 ) )
-		if( ++due >= LOGIC_CATCHUP_MAX_FRAMES )
+		if( ++due >= cap30 )
 			break;
 	CHECK( due > 1 );
-	CHECK( due <= LOGIC_CATCHUP_MAX_FRAMES );
+	CHECK( due <= cap30 );
 
 	/* ...and the debt is capped there, however far behind the pass fell. A one
 	   second stall must not queue thirty frames of catch-up: the surplus is
@@ -697,9 +706,9 @@ TEST(logic_tick_is_wall_clock_paced_not_render_paced)
 	accum = 0.0f;
 	due = 0;
 	while( GameEngine_isLogicFrameDue( accum, due == 0 ? 1000.0f : 0.0f, 30 ) )
-		if( ++due > LOGIC_CATCHUP_MAX_FRAMES )
+		if( ++due > cap30 )
 			break;
-	CHECK_EQ( due, LOGIC_CATCHUP_MAX_FRAMES );
+	CHECK_EQ( due, cap30 );
 
 	/* Over a run the pacer still hands out wall-clock time and no more: 3 seconds
 	   of 20fps passes is 90 logic frames, not 60 (render-paced) and not 180. */
@@ -711,7 +720,7 @@ TEST(logic_tick_is_wall_clock_paced_not_render_paced)
 		while( GameEngine_isLogicFrameDue( accum, ticks == 0 ? 50.0f : 0.0f, 30 ) )
 		{
 			++due;
-			if( ++ticks >= LOGIC_CATCHUP_MAX_FRAMES )
+			if( ++ticks >= cap30 )
 				break;
 		}
 	}
@@ -719,6 +728,25 @@ TEST(logic_tick_is_wall_clock_paced_not_render_paced)
 
 	/* A non-positive fps never throttles (the -noFPSLimit style dev mode). */
 	CHECK( GameEngine_isLogicFrameDue( accum, 0.0f, 0 ) );
+
+	/* And the case the fixed frame count got wrong. At the 60fps game speed a 16fps render pass
+	   (63ms) owes nearly four logic frames; with a cap of three the pacer threw one away every
+	   pass and a match that was merely rendering slowly ran in slow motion - about 40Hz where it
+	   should have been 60. Ten of those passes must still buy a full 60 frames of simulation. */
+	accum = 0.0f;
+	due = 0;
+	const Int cap60 = GameEngine_logicCatchupMaxFrames( 60 );
+	for( Int slowPass = 0; slowPass < 10; ++slowPass )
+	{
+		Int ticks = 0;
+		while( GameEngine_isLogicFrameDue( accum, ticks == 0 ? 63.0f : 0.0f, 60 ) )
+		{
+			++due;
+			if( ++ticks >= cap60 )
+				break;
+		}
+	}
+	CHECK( due >= 36 && due <= 38 );		// 630ms of wall clock at 60Hz, and no more
 }
 
 /* AnimateWindowManager.cpp: the same argument one layer up. The menu animations
@@ -6961,6 +6989,69 @@ TEST(a_queue_cameo_sits_in_the_general_power_tray_the_way_that_bar_sits_in_it)
 	const Int rowWidth = ( (Int)InGameUI::PRODUCTION_STRIP_ROW_MAX - 1 ) * step
 												+ (Int)InGameUI::PRODUCTION_STRIP_TRAY_W;
 	CHECK( rowWidth < 800 );
+}
+
+/* Both strips now ask the control bar for the tray, and the control bar works the whole geometry
+	 out of one number: the size the window loader gave a shortcut slot.  Everything downstream - the
+	 hole the cameo goes in, the step a row runs at - is a fraction of the artwork, so a bar the
+	 loader scaled to a widescreen resolution scales the strips with it instead of leaving 800x600
+	 cameos rattling around inside 1600x900 trays.
+
+	 The numbers checked here are the ones the strip's own constants were authored against: the
+	 shortcut slot is 48x41 in the 800x600 the layouts are written in. */
+TEST(the_strip_tray_geometry_is_a_fraction_of_whatever_size_the_bar_was_loaded_at)
+{
+	ICoord2D tray, cameo, hole;
+	Int step = 0;
+
+	// nothing to measure is FALSE rather than a division by zero
+	CHECK( !ControlBar::trayLayoutFromSlot( 0, 41, &tray, &cameo, &hole, &step ) );
+	CHECK( !ControlBar::trayLayoutFromSlot( 48, 0, &tray, &cameo, &hole, &step ) );
+	CHECK( !ControlBar::trayLayoutFromSlot( -48, -41, &tray, &cameo, &hole, &step ) );
+
+	// the slot the strip's own constants were written against
+	CHECK( ControlBar::trayLayoutFromSlot( (Int)InGameUI::PRODUCTION_STRIP_TRAY_W,
+																				 (Int)InGameUI::PRODUCTION_STRIP_TRAY_H,
+																				 &tray, &cameo, &hole, &step ) );
+
+	// the tray is the slot, whole: it is never squeezed to fit anything
+	CHECK_EQ( (Int)InGameUI::PRODUCTION_STRIP_TRAY_W, tray.x );
+	CHECK_EQ( (Int)InGameUI::PRODUCTION_STRIP_TRAY_H, tray.y );
+
+	// and the cameo is inside it, art and all, both ways
+	CHECK( hole.x >= 0 && hole.y >= 0 );
+	CHECK( hole.x + cameo.x <= tray.x );
+	CHECK( hole.y + cameo.y <= tray.y );
+	CHECK( cameo.x > 0 && cameo.y > 0 );
+
+	// a row closes up rather than separating, and never eats a whole tray
+	CHECK( step > 0 );
+	CHECK( step < tray.x );
+
+	//
+	// Twice the bar, twice everything: an observer borrowing another side's tray gets that side's
+	// slot size, and every one of these has to follow it or the borrowed art comes out with the
+	// cameo hanging over its rail.
+	//
+	ICoord2D bigTray, bigCameo, bigHole;
+	Int bigStep = 0;
+	CHECK( ControlBar::trayLayoutFromSlot( 2 * (Int)InGameUI::PRODUCTION_STRIP_TRAY_W,
+																				 2 * (Int)InGameUI::PRODUCTION_STRIP_TRAY_H,
+																				 &bigTray, &bigCameo, &bigHole, &bigStep ) );
+	CHECK_EQ( 2 * tray.x, bigTray.x );
+	CHECK_EQ( 2 * tray.y, bigTray.y );
+	CHECK_EQ( 2 * step, bigStep );
+	CHECK( bigCameo.x >= 2 * cameo.x - 1 && bigCameo.x <= 2 * cameo.x + 1 );
+	CHECK( bigCameo.y >= 2 * cameo.y - 1 && bigCameo.y <= 2 * cameo.y + 1 );
+	CHECK( bigHole.x + bigCameo.x <= bigTray.x );
+	CHECK( bigHole.y + bigCameo.y <= bigTray.y );
+
+	// every out-parameter is optional: the layout pass only wants the step
+	Int stepOnly = 0;
+	CHECK( ControlBar::trayLayoutFromSlot( (Int)InGameUI::PRODUCTION_STRIP_TRAY_W,
+																				 (Int)InGameUI::PRODUCTION_STRIP_TRAY_H,
+																				 NULL, NULL, NULL, &stepOnly ) );
+	CHECK_EQ( step, stepOnly );
 }
 
 /* Rows of trays stack by the same overlap the trays close up by sideways, so a pile of rows reads

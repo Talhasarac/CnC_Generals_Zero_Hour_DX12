@@ -1116,6 +1116,33 @@ void ControlBarSchemeManager::drawBackground( ICoord2D offset )
 }
 
 //-----------------------------------------------------------------------------
+/** Which side's artwork the bar on screen is wearing, when the scheme's own name is not a side
+	* anything else knows - "Observer".  ControlBar.ini builds that bar entirely out of one faction's
+	* plates (the American ones, down to the logo in the right hand corner), so the scheme that shares
+	* its right hand plate is the side a watcher is really looking at, and anything dressing itself to
+	* match the bar - the HUD strips do - has a side to ask for. */
+//-----------------------------------------------------------------------------
+AsciiString ControlBarSchemeManager::getCurrentArtTwinSide( void ) const
+{
+	if( m_currentScheme == NULL || m_currentScheme->m_rightHUDImage == NULL )
+		return AsciiString::TheEmptyString;
+
+	for( ControlBarSchemeList::const_iterator it = m_schemeList.begin(); it != m_schemeList.end(); ++it )
+	{
+		const ControlBarScheme *scheme = *it;
+		if( scheme == NULL || scheme->m_rightHUDImage != m_currentScheme->m_rightHUDImage )
+			continue;
+		if( scheme->m_side.isEmpty() || scheme->m_side.compareNoCase( m_currentScheme->m_side ) == 0 )
+			continue;
+
+		return scheme->m_side;
+	}
+
+	return AsciiString::TheEmptyString;
+
+}
+
+//-----------------------------------------------------------------------------
 void ControlBarSchemeManager::setControlBarSchemeByPlayerTemplate( const PlayerTemplate *pt, Bool useSmall)
 {
 	if(!pt)

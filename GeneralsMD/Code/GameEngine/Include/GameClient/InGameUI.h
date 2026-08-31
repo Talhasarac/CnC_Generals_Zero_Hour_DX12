@@ -587,7 +587,9 @@ public:  // ********************************************************************
 	// producer's queue it is, and where it was drawn this frame.
 	//
 	enum { PRODUCTION_STRIP_ROW_MAX = 6 };	///< cameos one row will draw; the rest become a "+N"
-	enum { PRODUCTION_STRIP_WATCH_MAX = 5 };	///< and while watching, where eight rows share the screen
+	enum { PRODUCTION_STRIP_WATCH_MAX = 3 };	///< and while watching, where eight rows share the screen
+																					///  and a row is a whole player: three cameos and a "+N",
+																					///  since a run of the same unit is one of them now
 	enum { PRODUCTION_STRIP_ROWS = 8 };			///< playing: the global row and the selected producer's row.
 																					///  watching: one row per player, so eight of them
 
@@ -636,11 +638,17 @@ public:  // ********************************************************************
 		Int						id;									///< a unit's ProductionID, or an upgrade's name key
 																			///  (kept as an Int so this header stays clear of GameLogic)
 		Bool					isUpgrade;					///< which of those two the id means
+		Int						typeKey;						///< what the item is rather than which order it is - a unit's template
+																			///  id, an upgrade's name key - so a run of the same thing queued
+																			///  back to back becomes one cameo
 		Bool					isStructure;				///< the slot is a building going up on the map, not an item in
 																			///  a queue: 'producer' is that building and there is no id
 		Bool					leads;							///< it belongs to the building you have selected, so it stands at the
 																			///  head of the row whatever the rest of the base is finishing
 		Int						remaining;					///< logic frames until this item pops, waiting time ahead of it included
+		Int						quantity;						///< how many of the same thing this cameo stands for: a queue of five
+																			///  Red Guards is one cameo wearing an "x5", not five cameos of
+																			///  the same picture pushing everything else off the row
 		ICoord2D			pos;								///< top left corner of the cameo on screen
 	};
 
@@ -964,9 +972,10 @@ protected:
 	void updateIncomeEstimate( Player *player );	///< income per minute, shown beside the money
 	void drawProductionStrip( void );			///< the production queue rows above the control bar
 	void drawProductionStripRow( Int row, Int y );	///< one of those rows, at that top edge
-	const Image *productionStripTray( void );	///< the power bar's tray, mirrored, kept until that bar changes side
+	const Image *productionStripTray( void );	///< the bar's tray, mirrored, kept until the bar changes side
 	void stripTrayMetrics( ICoord2D *tray, ICoord2D *cameo, ICoord2D *hole, Int *step );	///< that tray's size, its cameo hole, and the column step
-	void drawStripSeconds( Int x, Int y, Int w, Int h, Int seconds, Bool plainSeconds = FALSE );	///< countdown written inside a cameo
+	void drawStripSeconds( Int which, Int x, Int y, Int w, Int h, Int seconds, Bool plainSeconds = FALSE );	///< countdown written inside a cameo
+	void drawStripQuantity( Int which, Int x, Int y, Int w, Int quantity );	///< the "xN" in a cameo's top right corner
 	void addSuperweaponIcon( const Image *image, Int seconds, Int percent, Bool ready, Color color );
 	void drawSuperweaponStrip( void );		///< those icons, top right, soonest at the right hand end
 
@@ -1013,10 +1022,31 @@ protected:
 	Bool												m_productionStripWatching;	///< the rows are every player's, not ours
 	Int													m_productionStripCameoW;		///< cameo size this frame, in the control bar's aspect
 	Int													m_productionStripCameoH;
-	Image *											m_productionStripTray;			///< our mirrored copy of the power bar's tray
+
+	//
+	// The strip's cameos face the other way from the power bar's, so the tray behind them is a
+	// mirrored copy of it.  The whole strip wears one side's metal - the side the bar underneath it
+	// is showing - so one is kept at a time and remade when the bar changes side, which watching a
+	// match it does every time the observer picks a different player out of the list.
+	//
+	Image *											m_productionStripTray;			///< our mirrored copy of the bar's tray
 	const Image *								m_productionStripTraySource;	///< the tray it was made from, so a side change remakes it
-	DisplayString *							m_productionStripOverflow;	///< the "+N" that stands for the rest of a row
-	DisplayString *							m_stripSecondsString;				///< the countdown written inside a cameo, either strip's
+	//
+	// One kept string per cameo, not one string walked across all of them.  A DisplayString
+	// rebuilds its sentence whenever the text it holds changes, and a rebuild is a fresh font
+	// surface, a fresh texture and a surface copy - so a single shared string paid that once per
+	// cameo per frame, and watching a match the strips cost more to draw than the terrain under
+	// them.  Kept per cameo, a countdown rebuilds when its own second changes: once a second.
+	//
+	enum { STRIP_SECONDS_STRINGS = PRODUCTION_STRIP_ROWS * PRODUCTION_STRIP_ROW_MAX
+																 + SUPERWEAPON_STRIP_MAX };
+	enum { STRIP_OVERFLOW_STRINGS = PRODUCTION_STRIP_ROWS + 1 };	///< one per production row, plus the superweapon strip's
+
+	enum { STRIP_QUANTITY_STRINGS = PRODUCTION_STRIP_ROWS * PRODUCTION_STRIP_ROW_MAX };
+
+	DisplayString *							m_productionStripOverflow[ STRIP_OVERFLOW_STRINGS ];	///< the "+N" that stands for the rest of a row
+	DisplayString *							m_stripSecondsString[ STRIP_SECONDS_STRINGS ];			///< the countdown written inside a cameo, either strip's
+	DisplayString *							m_stripQuantityString[ STRIP_QUANTITY_STRINGS ];		///< the "xN" a run of the same item wears
 
 	//
 	// The superweapon strip: the same cameos the command bar fires them from, in the top right

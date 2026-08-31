@@ -1090,6 +1090,7 @@ ControlBar::ControlBar( void )
 	m_specialPowerShortcutParent = NULL;
 	m_specialPowerShortcutRow = -1;
 	m_specialPowerShortcutRowMs = 0;
+	m_borrowedTrayCount = 0;
 	m_purchaseScienceColumn = -1;
 	m_purchaseScienceColumnMs = 0;
 	m_specialPowerLayout = NULL;
@@ -1517,7 +1518,10 @@ void ControlBar::reset( void )
 
 	m_isObserverCommandBar = FALSE; // reset us to use a normal command bar
 	m_observerLookAtPlayer = NULL;
-	
+
+	// the next match has its own sides, and a mod switch reloads the artwork these point at
+	m_borrowedTrayCount = 0;
+
 	if(m_buildToolTipLayout)
 		m_buildToolTipLayout->hide(TRUE);
 	m_showBuildToolTipLayout = FALSE;
@@ -2661,19 +2665,160 @@ Bool ControlBar::clearSpecialPowerShortcutRow( void )
 //-------------------------------------------------------------------------------------------------
 /** The tray a general's power shortcut stands in: the background of one of that bar's slots, taken
 	* off the slot itself.  Each side ships its own bar and its own tray art, so reading it here is
-	* what keeps anything that borrows the look - the production strip does - on the right side's
-	* metal without naming a single image.
+	* what keeps anything that borrows the look - both HUD strips do - on the same side's metal as
+	* the bar underneath them, without naming a single image.
 	*
-	* NULL until that bar exists, and it never exists for a side whose template has no shortcuts. */
+	* Watching a match there is no such bar: FactionObserver ships neither a shortcut layout nor a
+	* button count, so both strips used to fall back to a flat black plate for the whole match.  The
+	* side the observer bar is looking at answers for it instead - one side for the whole HUD, the
+	* one the bar itself is showing. */
 //-------------------------------------------------------------------------------------------------
 const Image *ControlBar::getSpecialPowerTrayImage( void )
 {
-	if( m_specialPowerShortcutParent == NULL || m_specialPowerShortcutButtonParents[ 0 ] == NULL )
-		return NULL;
+	if( m_specialPowerShortcutParent && m_specialPowerShortcutButtonParents[ 0 ] )
+		return m_specialPowerShortcutButtonParents[ 0 ]->winGetEnabledImage( 0 );
 
-	return m_specialPowerShortcutButtonParents[ 0 ]->winGetEnabledImage( 0 );
+	const BorrowedTray *borrowed = borrowTray( specialPowerTraySide() );
+	return borrowed ? borrowed->image : NULL;
 
 }  // end getSpecialPowerTrayImage
+
+//-------------------------------------------------------------------------------------------------
+/** Any template of this side that ships a general's power bar - the generals of one side share that
+	* layout, so which one comes back does not matter, only that it carries the side's tray.  The
+	* shell's bar names its side with "Small" on the end; that is the same art at another size. */
+//-------------------------------------------------------------------------------------------------
+const PlayerTemplate *ControlBar::templateForSide( AsciiString side )
+{
+	if( side.isEmpty() || ThePlayerTemplateStore == NULL )
+		return NULL;
+
+	if( side.endsWithNoCase( "Small" ) )
+		for( Int c = 0; c < 5; c++ )
+			side.removeLastChar();
+
+	for( Int t = 0; t < ThePlayerTemplateStore->getPlayerTemplateCount(); t++ )
+	{
+		const PlayerTemplate *pt = ThePlayerTemplateStore->getNthPlayerTemplate( t );
+		if( pt && pt->getSide().compareNoCase( side ) == 0
+				&& !pt->getSpecialPowerShortcutWinName().isEmpty() )
+			return pt;
+	}
+
+	return NULL;
+
+}  // end templateForSide
+
+//-------------------------------------------------------------------------------------------------
+/** Whose metal the HUD wears when this bar has none of its own.  The answer is the bar on screen and
+	* nothing else: the scheme manager knows which side's artwork it is drawing, so the strips wear
+	* that side even while watching, where the seat at the keyboard has no side at all.
+	*
+	* The scheme names a side, not a general, and the generals of one side share a shortcut layout, so
+	* any template of that side hands over the same tray.  The observer bar's own side is "Observer",
+	* which no template carries, but every plate on that bar is another side's - so the scheme sharing
+	* its right hand plate names the side it is really wearing, and the strips follow the bar rather
+	* than the seat.  Only if even that finds nothing does whoever is being watched, and then the first
+	* side still in the match, answer: a plate of plain black is worse than somebody else's metal, and
+	* it was what the strips wore for whole matches. */
+//-------------------------------------------------------------------------------------------------
+const PlayerTemplate *ControlBar::specialPowerTraySide( void )
+{
+	if( m_controlBarSchemeManager )
+	{
+		const PlayerTemplate *own = templateForSide( m_controlBarSchemeManager->getCurrentSide() );
+		if( own )
+			return own;
+
+		const PlayerTemplate *worn = templateForSide( m_controlBarSchemeManager->getCurrentArtTwinSide() );
+		if( worn )
+			return worn;
+	}
+
+	// the bar wears artwork no side owns; the seat it is showing is the next best answer
+	if( m_observerLookAtPlayer && m_observerLookAtPlayer->getPlayerTemplate()
+			&& !m_observerLookAtPlayer->getPlayerTemplate()->getSpecialPowerShortcutWinName().isEmpty() )
+		return m_observerLookAtPlayer->getPlayerTemplate();
+
+	if( ThePlayerList == NULL )
+		return NULL;
+
+	for( Int i = 0; i < ThePlayerList->getPlayerCount(); i++ )
+	{
+		Player *p = ThePlayerList->getNthPlayer( i );
+		if( p == NULL || !p->isPlayerActive() || !p->isPlayableSide() )
+			continue;
+
+		const PlayerTemplate *pt = p->getPlayerTemplate();
+		if( pt && !pt->getSpecialPowerShortcutWinName().isEmpty() )
+			return pt;
+	}
+
+	return NULL;
+
+}  // end specialPowerTraySide
+
+//-------------------------------------------------------------------------------------------------
+/** Read a side's tray out of its own shortcut layout, once.  Nothing of the layout survives the
+	* call: the Image belongs to the mapped image collection and the size is two integers, so the
+	* windows go straight back.  The lookup is by layout name rather than by template, since the
+	* generals of one side share a bar. */
+//-------------------------------------------------------------------------------------------------
+const ControlBar::BorrowedTray *ControlBar::borrowTray( const PlayerTemplate *pt )
+{
+	if( pt == NULL || pt->getSpecialPowerShortcutWinName().isEmpty() )
+		return NULL;
+
+	const AsciiString layoutName = pt->getSpecialPowerShortcutWinName();
+
+	//
+	// the side at the keyboard is read off the bar it is already showing.  Not an optimization: the
+	// generals of one side share a layout, and a second copy of it would put a second window under
+	// every one of its names for as long as this call runs
+	//
+	if( m_specialPowerLayout && m_specialPowerShortcutButtonParents[ 0 ]
+			&& m_specialPowerLayout->getFilename().compareNoCase( layoutName ) == 0 )
+		return NULL;
+
+	for( Int i = 0; i < m_borrowedTrayCount; i++ )
+		if( m_borrowedTrays[ i ].layout.compareNoCase( layoutName ) == 0 )
+			return m_borrowedTrays[ i ].image ? &m_borrowedTrays[ i ] : NULL;
+
+	if( m_borrowedTrayCount >= MAX_BORROWED_TRAYS )
+		return NULL;			// more sides on one screen than any game ships: they keep the plain plate
+
+	BorrowedTray *slot = &m_borrowedTrays[ m_borrowedTrayCount++ ];
+	slot->layout = layoutName;
+	slot->image = NULL;
+	slot->size.x = 0;
+	slot->size.y = 0;
+
+	WindowLayout *layout = TheWindowManager->winCreateLayout( layoutName );
+	if( layout == NULL )
+		return NULL;					// a mod naming a layout it does not ship: remembered as having no tray
+	layout->hide( TRUE );
+
+	AsciiString parentName = layoutName;
+	parentName.concat( ":ButtonParent1" );
+
+	//
+	// looked up inside our own copy of the bar rather than across every window on screen: a player
+	// who was knocked out still has his own bar loaded, and it carries these very names
+	//
+	GameWindow *slotWindow = TheWindowManager->winGetWindowFromId( layout->getFirstWindow(),
+																			TheNameKeyGenerator->nameToKey( parentName ) );
+	if( slotWindow )
+	{
+		slot->image = slotWindow->winGetEnabledImage( 0 );
+		slotWindow->winGetSize( &slot->size.x, &slot->size.y );
+	}
+
+	layout->destroyWindows();
+	layout->deleteInstance();
+
+	return slot->image ? slot : NULL;
+
+}  // end borrowTray
 
 //-------------------------------------------------------------------------------------------------
 /** That tray at the size the bar itself draws it, the hole in its artwork the cameo fills, and the
@@ -2681,16 +2826,35 @@ const Image *ControlBar::getSpecialPowerTrayImage( void )
 	* already scaled to the running resolution - so nothing here is in 800x600 pixels, and anything
 	* borrowing the look comes out the size of the powers themselves at every resolution.
 	*
-	* Any of the four out-parameters may be NULL.  FALSE when there is no bar to measure. */
+	* Any of the four out-parameters may be NULL.  FALSE when there is no bar and no layout to
+	* borrow one from - the strips then keep the plain plate they had before any of this. */
 //-------------------------------------------------------------------------------------------------
 Bool ControlBar::getSpecialPowerTrayLayout( ICoord2D *traySize, ICoord2D *cameoSize,
 																						ICoord2D *cameoOffset, Int *columnStep )
 {
-	if( m_specialPowerShortcutParent == NULL || m_specialPowerShortcutButtonParents[ 0 ] == NULL )
+	if( m_specialPowerShortcutParent && m_specialPowerShortcutButtonParents[ 0 ] )
+	{
+		Int slotWidth, slotHeight;
+		m_specialPowerShortcutButtonParents[ 0 ]->winGetSize( &slotWidth, &slotHeight );
+		return trayLayoutFromSlot( slotWidth, slotHeight, traySize, cameoSize, cameoOffset, columnStep );
+	}
+
+	// measured off the very layout the tray came out of, so the two always agree
+	const BorrowedTray *borrowed = borrowTray( specialPowerTraySide() );
+	if( borrowed == NULL )
 		return FALSE;
 
-	Int slotWidth, slotHeight;
-	m_specialPowerShortcutButtonParents[ 0 ]->winGetSize( &slotWidth, &slotHeight );
+	return trayLayoutFromSlot( borrowed->size.x, borrowed->size.y,
+														 traySize, cameoSize, cameoOffset, columnStep );
+
+}  // end getSpecialPowerTrayLayout
+
+//-------------------------------------------------------------------------------------------------
+/** The artwork's proportions, applied to whatever size a slot came out at. */
+//-------------------------------------------------------------------------------------------------
+Bool ControlBar::trayLayoutFromSlot( Int slotWidth, Int slotHeight, ICoord2D *traySize,
+																		 ICoord2D *cameoSize, ICoord2D *cameoOffset, Int *columnStep )
+{
 	if( slotWidth <= 0 || slotHeight <= 0 )
 		return FALSE;
 
