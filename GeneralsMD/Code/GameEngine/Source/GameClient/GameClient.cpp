@@ -636,6 +636,14 @@ void GameClient::update( void )
 
 	if(TheGlobalData->m_playIntro || TheGlobalData->m_afterIntro)
 	{
+		//
+		// The cursor stays hidden until the main menu comes up, so through the logos and the
+		// sizzle reel the pointer was gone: clicking through them was aiming blind, and on a
+		// second monitor it looked like the game had hung.
+		//
+		if( TheMouse )
+			TheMouse->setVisibility( TRUE );
+
 		// redraw all views, update the GUI
 		{
 			TheDisplay->DRAW();

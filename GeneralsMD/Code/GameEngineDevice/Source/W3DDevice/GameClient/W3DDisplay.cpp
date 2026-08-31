@@ -1960,14 +1960,20 @@ AGAIN:
 
 				// end of video example code
 
-				// draw the mouse
-				if( TheMouse )
-					TheMouse->DRAW();
-
+				//
+				// The movie goes down before the cursor, not after it. Drawn the other way round a
+				// full screen video covered the pointer, so through the intro and every in-game
+				// cinematic there was nothing on screen to aim the click with.
+				//
 				if ( m_videoStream && m_videoBuffer )
 				{
 					drawVideoBuffer( m_videoBuffer, 0, 0, getWidth(), getHeight() );
 				}
+
+				// draw the mouse
+				if( TheMouse )
+					TheMouse->DRAW();
+
 				if( m_copyrightDisplayString )
 				{
 					Int x, y, dX, dY;
