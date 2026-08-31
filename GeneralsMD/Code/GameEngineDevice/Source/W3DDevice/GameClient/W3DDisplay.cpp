@@ -1680,12 +1680,12 @@ Int W3DDisplay::getLastFrameDrawCalls()
 	return Debug_Statistics::Get_Draw_Calls();
 }
 
-//DECLARE_PERF_TIMER(BigAssRenderLoop)
+DECLARE_PERF_TIMER(BigAssRenderLoop)
 
 // W3DDisplay::draw ===========================================================
 /** Draw the entire W3D Display */
 //=============================================================================
-//DECLARE_PERF_TIMER(W3DDisplay_draw)
+DECLARE_PERF_TIMER(W3DDisplay_draw)
 static Bool s_screenShotPending = FALSE;	// F12 pressed: save the frame at the end of the next draw()
 static void saveScreenShot(void);
 
@@ -1710,7 +1710,7 @@ static Real w3dElapsedMS( const Int64 &from, const Int64 &to )
 
 void W3DDisplay::draw( void )
 {
-	//USE_PERF_TIMER(W3DDisplay_draw)
+	USE_PERF_TIMER(W3DDisplay_draw)
 	static UnsignedInt syncTime = 0;
 
 	extern HWND ApplicationHWnd;
@@ -1957,7 +1957,7 @@ AGAIN:
 	    if ( (TheGameLogic->getFrame() % 30 == 1) || ( ! (!TheGameLogic->isGamePaused() && TheGlobalData->m_TiVOFastMode && TheGameLogic->isInReplayGame())) )
     #endif
 		{
-			//USE_PERF_TIMER(BigAssRenderLoop)
+			USE_PERF_TIMER(BigAssRenderLoop)
 			static Bool couldRender = true;
 			if ((TheGlobalData->m_breakTheMovie == FALSE) && (TheGlobalData->m_disableRender == false) && WW3D::Begin_Render( true, true, Vector3( 0.0f, 0.0f, 0.0f ), TheWaterTransparency->m_minWaterOpacity ) == WW3D_ERROR_OK)		
 			{

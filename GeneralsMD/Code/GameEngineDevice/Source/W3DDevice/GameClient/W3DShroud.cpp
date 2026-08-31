@@ -521,7 +521,7 @@ TextureClass *DummyTexture=NULL;
 //#define LOAD_DUMMY_SHROUD
 
 //-----------------------------------------------------------------------------
-//DECLARE_PERF_TIMER(shroudCopy)
+DECLARE_PERF_TIMER(shroudCopy)
 
 //-----------------------------------------------------------------------------
 /** Updates video memory surface with currently visible shroud data */
@@ -714,7 +714,7 @@ void W3DShroud::render(CameraClass *cam)
 	}
 
 	{
-		//USE_PERF_TIMER(shroudCopy)
+		USE_PERF_TIMER(shroudCopy)
 		DX8Wrapper::_Copy_DX8_Rects(
 				m_pSrcTexture,
 				&srcRect,

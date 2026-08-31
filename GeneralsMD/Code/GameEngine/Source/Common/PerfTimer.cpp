@@ -256,7 +256,7 @@ public:
 		{
 			if (m_outputStats[i].first == id) 
 			{
-				m_outputStats.erase(&m_outputStats[i]);
+				m_outputStats.erase(m_outputStats.begin() + i);
 				return;
 			}
 		}
@@ -272,9 +272,10 @@ static Int s_perfDumpOptions = 0;
 static UnsignedInt s_lastDumpedFrame = 0;
 static char s_buf[256] = "";
 
-PerfGather*		PerfGather::m_active[MAX_ACTIVE_STACK] = { 0 };
-PerfGather**	PerfGather::m_activeHead = &PerfGather::m_active[0];
-Int64					PerfGather::s_stopStartOverhead = -1;
+__declspec(thread) PerfGather*	PerfGather::m_active[MAX_ACTIVE_STACK] = { 0 };
+__declspec(thread) Int					PerfGather::m_activeDepth = 0;
+__declspec(thread) Bool					PerfGather::m_gatherOnThisThread = FALSE;
+Int64													PerfGather::s_stopStartOverhead = -1;
 
 
 //-------------------------------------------------------------------------------------------------
@@ -318,17 +319,25 @@ void PerfGather::removeFromList()
 }
 
 //-------------------------------------------------------------------------------------------------
-PerfGather::PerfGather(const char *identifier) : 
-	m_identifier(identifier), 
-	m_startTime(0), 
-	m_runningTimeGross(0), 
-	m_runningTimeNet(0), 
+// The header has declared this with a netOnly flag since EA added DECLARE_TOTAL_PERF_TIMER;
+// the definition never grew it, because nothing has compiled this file since.  Without the
+// parameter every gather is a net-time gather and DECLARE_TOTAL_PERF_TIMER does not link.
+PerfGather::PerfGather(const char *identifier, Bool netOnly) :
+	m_identifier(identifier),
+	m_startTime(0),
+	m_runningTimeGross(0),
+	m_runningTimeNet(0),
 	m_callCount(0),
+	m_totalTimeNet(0),
+	m_totalTimeGross(0),
+	m_totalCallCount(0),
+	m_worstFrameNet(0),
 	m_next(0),
-	m_prev(0)
+	m_prev(0),
+	m_netTimeOnly(netOnly)
 {
 	//Added By Sadullah Nader
-	//Initializations inserted 
+	//Initializations inserted
 	m_ignore = FALSE;
 	//
 	DEBUG_ASSERTCRASH(strchr(m_identifier, ',') == NULL, ("PerfGather names must not contain commas"));
@@ -360,8 +369,117 @@ void PerfGather::reset()
 }
 
 //-------------------------------------------------------------------------------------------------
+static UnsignedInt s_framesAccumulated = 0;
+
+/*static*/ void PerfGather::accumulateFrame(Real frameMS)
+{
+	// The first second of a match loads assets and would drown every average that follows,
+	// which is the same reason dumpAll() skips it.
+	if (TheGameLogic && TheGameLogic->getFrame() <= 30)
+		return;
+
+	++s_framesAccumulated;
+	for (PerfGather* head = getHeadPtr(); head != NULL; head = head->m_next)
+	{
+		head->m_totalTimeNet += head->m_runningTimeNet;
+		head->m_totalTimeGross += head->m_runningTimeGross;
+		head->m_totalCallCount += head->m_callCount;
+		if (head->m_runningTimeNet > head->m_worstFrameNet)
+			head->m_worstFrameNet = head->m_runningTimeNet;
+	}
+
+	/* A frame nobody would have noticed needs no report; a frame that dropped a picture needs one
+		 while the evidence is still in the gathers, because resetAll() is about to throw it away.
+		 Written as one line so a run's stutters can be read off the log with a grep. */
+	if (frameMS < (Real)SPIKE_MS || s_ticksPerUSec <= 0.0)
+		return;
+
+	char line[1024];
+	Int used = sprintf(line, "HEADLESS SPIKE: frame %d took %.1f ms |",
+										 TheGameLogic ? TheGameLogic->getFrame() : 0, frameMS);
+
+	// The four worst scopes of this frame, by net time.  Four because a fifth has never yet been
+	// the answer and the line has to stay one line.
+	enum { TOP = 4 };
+	const PerfGather* picked[ TOP ] = { 0 };
+	for (Int slot = 0; slot < TOP; ++slot)
+	{
+		const PerfGather* best = NULL;
+		Int64 bestTime = 0;
+		for (const PerfGather* head = getHeadPtr(); head != NULL; head = head->m_next)
+		{
+			if (head->m_runningTimeNet <= bestTime)
+				continue;
+			Bool taken = FALSE;
+			for (Int i = 0; i < slot; ++i)
+				if (picked[i] == head) { taken = TRUE; break; }
+			if (!taken)
+			{
+				best = head;
+				bestTime = head->m_runningTimeNet;
+			}
+		}
+		if (best == NULL)
+			break;
+		picked[ slot ] = best;
+		const double ms = (double)bestTime / s_ticksPerUSec / 1000.0;
+		if (ms < 0.05)
+			break;						// nothing left worth naming
+		if (used > (Int)sizeof(line) - 64)
+			break;
+		used += sprintf(line + used, " %s %.1f", best->m_identifier, ms);
+	}
+	DEBUG_LOG(("%s\n", line));
+}
+
+//-------------------------------------------------------------------------------------------------
+/*static*/ void PerfGather::dumpSummary()
+{
+	if (s_framesAccumulated == 0 || s_ticksPerUSec <= 0.0)
+	{
+		DEBUG_LOG(("HEADLESS PERF: nothing gathered\n"));
+		return;
+	}
+
+	// Sorted by net time, because the only question this table exists to answer is "what is the
+	// frame actually spent on".  Insertion sort over a list that is a few dozen long at most.
+	enum { MAX_ROWS = 256 };
+	const PerfGather* rows[MAX_ROWS];
+	Int numRows = 0;
+	for (const PerfGather* head = getHeadPtr(); head != NULL && numRows < MAX_ROWS; head = head->m_next)
+	{
+		if (head->m_totalCallCount == 0)
+			continue;
+		Int at = numRows++;
+		while (at > 0 && rows[at-1]->m_totalTimeNet < head->m_totalTimeNet)
+		{
+			rows[at] = rows[at-1];
+			--at;
+		}
+		rows[at] = head;
+	}
+
+	DEBUG_LOG(("HEADLESS PERF: %d frames gathered, us/frame net (gross) x calls/frame, worst single frame\n", s_framesAccumulated));
+	for (Int i = 0; i < numRows; ++i)
+	{
+		const PerfGather* g = rows[i];
+		// The worst column is the stability column: a scope whose average is nothing and whose
+		// worst frame is twenty milliseconds is a stutter, and the average alone hides it.
+		DEBUG_LOG(("HEADLESS PERF %s: %.1f (%.1f) x%.2f worst %.1f\n",
+			g->m_identifier,
+			(double)g->m_totalTimeNet / s_ticksPerUSec / s_framesAccumulated,
+			(double)g->m_totalTimeGross / s_ticksPerUSec / s_framesAccumulated,
+			(double)g->m_totalCallCount / s_framesAccumulated,
+			(double)g->m_worstFrameNet / s_ticksPerUSec));
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
 /*static*/ void PerfGather::initPerfDump(const char* fname, Int options)
 {
+	// Whichever thread sets the profile up is the one whose frame is being measured.
+	m_gatherOnThisThread = TRUE;
+
 	PerfGather::termPerfDump();
 
 	strcpy(s_buf, fname);
@@ -607,11 +725,11 @@ void PerfTimer::outputInfo( void )
 		return;
 	}
 
-#if defined(_DEBUG) || defined(_INTERNAL)
+	// Not under _DEBUG/_INTERNAL: the DEBUG_LOG below uses these in every configuration a
+	// PERF_TIMERS build can be, and a Release measurement build is exactly such a configuration.
 	double totalTimeInMS = 1000.0 * m_runningTime / s_ticksPerSec;
 	double avgTimePerFrame = totalTimeInMS / (m_lastFrame - m_startFrame + 1);
 	double avgTimePerCall = totalTimeInMS / m_callCount;
-#endif
 
 	if (m_crashWithInfo) {
 		DEBUG_CRASH(("%s\n"
@@ -645,11 +763,9 @@ void PerfTimer::outputInfo( void )
 //-------------------------------------------------------------------------------------------------
 void PerfTimer::showMetrics( void )
 {
-#if defined(_DEBUG) || defined(_INTERNAL)
 	double totalTimeInMS = 1000.0 * m_runningTime / s_ticksPerSec;
 	double avgTimePerFrame = totalTimeInMS / (m_lastFrame - m_startFrame + 1);
 	double avgTimePerCall = totalTimeInMS / m_callCount;
-#endif
 
 	// we want to work on the thing in the array, so just store a reference.
 	AsciiString &outputStats = s_output.getStatsString(m_identifier);

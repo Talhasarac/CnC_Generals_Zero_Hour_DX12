@@ -64,10 +64,10 @@ Vector3 LightPosWorld[ MAX_SHADOW_LIGHTS ] =
 	Vector3( 94.0161f, 50.499f, 200.0f)
 };
 
-//DECLARE_PERF_TIMER(shadowsRender)
+DECLARE_PERF_TIMER(shadowsRender)
 void DoShadows(RenderInfoClass & rinfo, Bool stencilPass)
 {
-	//USE_PERF_TIMER(shadowsRender)
+	USE_PERF_TIMER(shadowsRender)
 	shadowCameraFrustum=&rinfo.Camera.Get_Frustum();
 	Int projectionCount=0;
 

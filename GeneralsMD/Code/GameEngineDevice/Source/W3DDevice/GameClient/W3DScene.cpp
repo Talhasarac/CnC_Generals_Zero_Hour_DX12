@@ -829,7 +829,7 @@ void RTS3DScene::renderOneObject(RenderInfoClass &rinfo, RenderObjClass *robj, I
 		rinfo.Pop_Override_Flags();	//flags used to disable base pass and only render custom heat vision pass.
 }
 
-//DECLARE_PERF_TIMER(translucentRender)
+DECLARE_PERF_TIMER(translucentRender)
 
 /**Draw everything that was submitted from this scene*/
 void RTS3DScene::Flush(RenderInfoClass & rinfo)
@@ -862,7 +862,7 @@ void RTS3DScene::Flush(RenderInfoClass & rinfo)
 		flushTranslucentObjects(rinfo);	//draw all translucent meshes which don't need per-poly sorting.
 
 	{
-		//USE_PERF_TIMER(translucentRender)
+		USE_PERF_TIMER(translucentRender)
 
 		//don't draw transparent in this mode because they interfere with destination alpha
 		if (m_customPassMode == SCENE_PASS_DEFAULT && Get_Extra_Pass_Polygon_Mode() == EXTRA_PASS_DISABLE)
@@ -950,10 +950,10 @@ void RTS3DScene::updatePlayerColorPasses(void)
 
 #define ZBias 0.0001f
 
-//DECLARE_PERF_TIMER(NonTerrainRender)
+DECLARE_PERF_TIMER(NonTerrainRender)
 void RTS3DScene::Render(RenderInfoClass & rinfo)
 {
-	//USE_PERF_TIMER(NonTerrainRender)
+	USE_PERF_TIMER(NonTerrainRender)
 	DX8Wrapper::Set_Fog(FogEnabled, FogColor, FogStart, FogEnd);
 
 	//Override the behind building selection if it's not available on current hardware (needs stencil).

@@ -1240,10 +1240,10 @@ void Drawable::imitateStealthLook( Drawable& otherDraw )
 //-------------------------------------------------------------------------------------------------
 /** update is called once per frame */
 //-------------------------------------------------------------------------------------------------
-//DECLARE_PERF_TIMER(updateDrawable)
+DECLARE_PERF_TIMER(updateDrawable)
 void Drawable::updateDrawable( void )
 {
-	//USE_PERF_TIMER(updateDrawable)
+	USE_PERF_TIMER(updateDrawable)
 
 	UnsignedInt now = TheGameLogic->getFrame();
 	Object *obj = getObject();

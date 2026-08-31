@@ -3190,7 +3190,7 @@ void ParticleSystemManager::reset( void )
 // ------------------------------------------------------------------------------------------------
 /** Update all particle systems */
 // ------------------------------------------------------------------------------------------------
-//DECLARE_PERF_TIMER(ParticleSystemManager)
+DECLARE_PERF_TIMER(ParticleSystemManager)
 void ParticleSystemManager::update( void )
 {
 	if (m_lastLogicFrameUpdate == TheGameLogic->getFrame()) {
@@ -3200,7 +3200,7 @@ void ParticleSystemManager::update( void )
 	// update the last logic frame.
 	m_lastLogicFrameUpdate = TheGameLogic->getFrame();
 
-	//USE_PERF_TIMER(ParticleSystemManager)
+	USE_PERF_TIMER(ParticleSystemManager)
 	ParticleSystem *sys;
 
 	for(ParticleSystemListIt it = m_allParticleSystemList.begin(); it != m_allParticleSystemList.end();) 

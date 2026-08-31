@@ -88,10 +88,12 @@ void GraphDraw::render()
 	Int start = width * 0.33f;
 	width -= start;
 
+	// Both of these are read only by the two asserts below, which compile out in a Release
+	// PERF_TIMERS build - and BaseType.h:80 makes "initialized but not referenced" an error.
 	Int height = TheDisplay->getHeight();
-
 	Int totalCount = m_graphEntries.size();
-	DEBUG_ASSERTCRASH(totalCount < MAX_GRAPH_VALUES, ("MAX_GRAPH_VALUES must be increased, not all labels will appear (max %d, cur %d).\n",MAX_GRAPH_VALUES,totalCount));
+	(void)height; (void)totalCount;
+	DEBUG_ASSERTCRASH(totalCount < MAX_GRAPH_VALUES,("MAX_GRAPH_VALUES must be increased, not all labels will appear (max %d, cur %d).\n",MAX_GRAPH_VALUES,totalCount));
 	DEBUG_ASSERTCRASH(BAR_HEIGHT * totalCount < height, ("BAR_HEIGHT must be reduced, as bars are being drawn off-screen.\n"));
 	VecGraphEntriesIt it;
 

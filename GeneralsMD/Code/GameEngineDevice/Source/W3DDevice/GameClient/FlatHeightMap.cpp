@@ -457,11 +457,11 @@ void FlatHeightMapRenderObjClass::updateCenter(CameraClass *camera , RefRenderOb
 //=============================================================================
 /** Renders (draws) the terrain. */
 //=============================================================================
-//DECLARE_PERF_TIMER(Terrain_Render)
+DECLARE_PERF_TIMER(Terrain_Render_Flat)
 
 void FlatHeightMapRenderObjClass::Render(RenderInfoClass & rinfo)
 {
-	//USE_PERF_TIMER(Terrain_Render)
+	USE_PERF_TIMER(Terrain_Render_Flat)
 	
 	Int devicePasses;
 	W3DShaderManager::ShaderTypes st;

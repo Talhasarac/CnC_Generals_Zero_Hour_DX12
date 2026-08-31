@@ -608,3 +608,26 @@ if(RELEASE_DEBUG_LOGGING)
   target_compile_definitions(gameenginedevice PRIVATE RELEASE_DEBUG_LOGGING)
   target_compile_definitions(generals PRIVATE RELEASE_DEBUG_LOGGING)
 endif()
+
+# THREADING-ROADMAP.md section 0: the measurement build.  EA's PerfGather call sites are all
+# over the frame already, but PerfTimer.h defines NO_PERF_TIMERS in *both* branches of its
+# #if, so PERF_TIMERS is off in every configuration and every USE_PERF_TIMER compiles to
+# nothing.  This switch turns them on without touching the shipping default: the timers read
+# the TSC on every scope entry and exit, which is not free, so OFF is the right default and
+# any perf claim has to say which build it came from.
+#
+# Only the three targets that include PerfTimer.h get the define.  It must not go on globally:
+# WWVegas' headers reach GameEngine's Debug.h, and a mismatched define across libraries is how
+# you get a link error at best and a silently different struct at worst.
+option(PERF_TIMERS "Compile EA's PerfGather scopes in (measurement build, not for shipping)" OFF)
+if(PERF_TIMERS)
+  target_compile_definitions(gameengine PRIVATE PERF_TIMERS)
+  target_compile_definitions(gameenginedevice PRIVATE PERF_TIMERS)
+  target_compile_definitions(generals PRIVATE PERF_TIMERS)
+  # A measurement build is not the build anyone plays, and its post-build step copies into the
+  # same Run/ directory the shipping one does.  Renaming the output keeps the two side by side -
+  # which is also the only way to measure one against the other without rebuilding in between
+  # (ai-batch.ps1 -Exe takes the name).
+  set_target_properties(generals PROPERTIES OUTPUT_NAME generals_perf)
+  message(STATUS "PERF_TIMERS ON - measurement build, timers cost real time; exe is generals_perf.exe")
+endif()

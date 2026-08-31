@@ -115,13 +115,44 @@ public:
 	static void dumpAll(UnsignedInt frame);
 	static void displayGraph(UnsignedInt frame);
 
+	/* THREADING-ROADMAP.md section 0 step 3: the per-frame CSV answers "what did frame 4312
+		 cost", which is the wrong question when deciding what to thread.  accumulateFrame() folds
+		 the frame that just ended into a running total and dumpSummary() prints the average cost
+		 per frame per scope at the end of the run, next to HEADLESS RESULT.  Call accumulateFrame
+		 exactly once per frame, before resetAll().
+
+		 `frameMS` is the whole loop pass as the eye saw it.  A pass longer than SPIKE_MS gets its
+		 own line in the log with the scopes that owned it, because an average cannot tell you what
+		 a stutter was - only the frame it happened on can, and by the end of the run that frame is
+		 long gone. */
+	enum { SPIKE_MS = 17 };			// one frame at 60Hz; anything longer is visible
+
+	static void accumulateFrame(Real frameMS);
+	static void dumpSummary();
+
 	void reset();
 
 private:
 
+	/* The stack of gathers currently open, so a scope can subtract its children's time from its
+		 own.  Per *thread*, not per process: CriticalSection::enter and FileSystem::openFile both
+		 carry a gather and both are called from threads that are not the main one (the texture
+		 loader, the log writer, the job pool).  Sharing one stack between them walks the head off
+		 the end of the array and corrupts whatever static happens to sit after it - which is what
+		 a PERF_TIMERS build used to die of on its first rendered frame.
+
+		 An index rather than a pointer because a thread-local pointer cannot be initialised with
+		 the address of a thread-local array; the index is zero-initialised per thread for free,
+		 and slot 0 stays the NULL "no parent" sentinel. */
 	enum { MAX_ACTIVE_STACK = 256 };
-	static PerfGather* m_active[MAX_ACTIVE_STACK];
-	static PerfGather** m_activeHead;
+	static __declspec(thread) PerfGather* m_active[MAX_ACTIVE_STACK];
+	static __declspec(thread) Int m_activeDepth;
+	/* TRUE only on the thread initPerfDump() was called from.  The counters below are shared and
+		 an Int64 += is two writes on x86, so a gather on a scope several threads enter (CritSec,
+		 FileSystem) used to report torn nonsense - the FileSystem row came out at 27 *seconds* per
+		 frame.  Only the profiled thread accumulates now, which is also the right answer to the
+		 question the table exists for: where the frame goes is where the main thread goes. */
+	static __declspec(thread) Bool m_gatherOnThisThread;
 	static Int64 s_stopStartOverhead;	// overhead for stop+start a timer
 
 	static PerfGather*& getHeadPtr();
@@ -129,11 +160,20 @@ private:
 	void addToList();
 	void removeFromList();
 
+	/* The counters below are shared, and a gather on a scope that several threads enter (CritSec,
+		 FileSystem) has them incremented from several threads without a lock.  On x86 an Int64 +=
+		 is two writes, so such a row can be off by a torn update.  Left alone deliberately: this is
+		 a measurement build, the affected rows are the ones whose absolute value nobody acts on,
+		 and making them atomic would cost more than the thing being measured. */
 	const char*		m_identifier;
 	Int64					m_startTime;
 	Int64					m_runningTimeGross;
 	Int64					m_runningTimeNet;
 	Int						m_callCount;
+	Int64					m_totalTimeNet;			// summed over every frame accumulateFrame() saw
+	Int64					m_totalTimeGross;
+	Int64					m_totalCallCount;
+	Int64					m_worstFrameNet;		// the single worst frame this scope ever had
 	PerfGather*		m_next;
 	PerfGather*		m_prev;
 	Bool					m_ignore;
@@ -143,7 +183,13 @@ private:
 //-------------------------------------------------------------------------------------------------
 void PerfGather::startTimer()
 {
-	*++m_activeHead = this;
+	if (!m_gatherOnThisThread)
+		return;
+
+	// The depth moves whether or not the slot exists, so start and stop stay balanced even if
+	// something nests deeper than the array; only the parent attribution is lost.
+	if (++m_activeDepth < MAX_ACTIVE_STACK)
+		m_active[m_activeDepth] = this;
 	GetPrecisionTimer(&m_startTime);
 }
 
@@ -151,6 +197,9 @@ void PerfGather::startTimer()
 void PerfGather::stopTimer()
 {
 	DEBUG_ASSERTCRASH(this != NULL, ("I am null, uh oh"));
+
+	if (!m_gatherOnThisThread)
+		return;
 
 	Int64 runTime;
 	GetPrecisionTimer(&runTime);
@@ -163,18 +212,18 @@ void PerfGather::stopTimer()
 	++m_callCount;
 
 #ifdef _DEBUG
-	DEBUG_ASSERTCRASH(*m_activeHead != NULL, ("m_activeHead is null, uh oh"));
-	DEBUG_ASSERTCRASH(*m_activeHead == this, ("I am not the active timer, uh oh"));
-	DEBUG_ASSERTCRASH(m_activeHead >= &m_active[0] && m_activeHead <= &m_active[MAX_ACTIVE_STACK-1], ("active under/over flow"));
+	DEBUG_ASSERTCRASH(m_activeDepth > 0 && m_activeDepth < MAX_ACTIVE_STACK, ("active under/over flow"));
+	DEBUG_ASSERTCRASH(m_active[m_activeDepth] == this, ("I am not the active timer, uh oh"));
 #endif
-	--m_activeHead;
+	--m_activeDepth;
 
-	if (*m_activeHead)
+	PerfGather *parent = (m_activeDepth > 0 && m_activeDepth < MAX_ACTIVE_STACK) ? m_active[m_activeDepth] : NULL;
+	if (parent)
 	{
 		// don't add the time it took for us to actually get the ticks (in startTimer) to our parent...
-		(*m_activeHead)->m_runningTimeGross -= (s_stopStartOverhead);
-		if ((*m_activeHead)->m_netTimeOnly) {
-			(*m_activeHead)->m_runningTimeNet -= (runTime + s_stopStartOverhead);
+		parent->m_runningTimeGross -= (s_stopStartOverhead);
+		if (parent->m_netTimeOnly) {
+			parent->m_runningTimeNet -= (runTime + s_stopStartOverhead);
 		}
 	}
 }

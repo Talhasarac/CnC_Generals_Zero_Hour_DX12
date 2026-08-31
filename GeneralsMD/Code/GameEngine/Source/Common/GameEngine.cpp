@@ -50,6 +50,7 @@
 #include "Common/CDManager.h"
 #include "Common/GlobalData.h"
 #include "Common/PerfTimer.h"
+#include "Common/JobSystem.h"
 #include "Common/RandomValue.h"
 #include "Common/NameKeyGenerator.h"
 #include "Common/ModuleFactory.h"
@@ -244,6 +245,11 @@ GameEngine::~GameEngine()
 	Drawable::killStaticImages();
 
 	_Module.Term();
+
+	/* After everything that could still fork.  parallel_for never returns with work in flight, so
+		 there is nothing to drain here - but a worker parked on the semaphore still has to be told
+		 to leave, or the process waits on it at exit. */
+	JobSystem::shutdown();
 
 #ifdef PERF_TIMERS
 	PerfGather::termPerfDump();
@@ -484,6 +490,10 @@ void GameEngine::init( int argc, char *argv[] )
 	#endif//////////////////////////////////////////////////////////////////////////////
 		
 		m_maxFPS = DEFAULT_MAX_FPS;
+
+		/* THREADING-ROADMAP.md 3.1.  Started before anything can fork and joined in ~GameEngine.
+			 Costs one thread per spare core sitting on a semaphore until something uses it. */
+		JobSystem::init();
 
 		TheSubsystemList = MSGNEW("GameEngineSubsystem") SubsystemInterfaceList;
 		
@@ -1043,6 +1053,10 @@ extern Real TheWindowRepaintMS;		///< ...and the window system's repaint
 extern Real TheStripGatherMS;			///< ...of the overlays, the production strip's sweep
 extern Real TheStripDrawMS;				///< ...and the production strip's own drawing
 
+#endif
+
+// Outside the DEBUG_LOGGING block above on purpose: the frame-time histogram below is not debug
+// instrumentation, it ships, and it needs this.
 static Real engineElapsedMS( const Int64 &from, const Int64 &to )
 {
 	Int64 freq;
@@ -1051,7 +1065,154 @@ static Real engineElapsedMS( const Int64 &from, const Int64 &to )
 		return 0.0f;
 	return (Real)((double)(to - from) * 1000.0 / (double)freq);
 }
-#endif
+
+/** -----------------------------------------------------------------------------------------------
+ * Frame time as a distribution, not as an average.
+ *
+ * A mean is exactly the statistic that hides a stutter: a match that runs at 3ms and hitches to
+ * 120ms four times a minute has a beautiful average and is horrible to play.  What a player feels
+ * is the tail - so this keeps the tail and throws the mean in as an afterthought.
+ *
+ * A fixed histogram, because the alternative is keeping every sample: 0.25ms buckets out to 64ms
+ * plus one overflow bucket, which is 257 Ints of static storage, no allocation, and one add per
+ * frame.  Percentiles come out of the buckets (so they are accurate to a quarter of a millisecond,
+ * which is far finer than anything that matters here); the worst frame is kept exactly, because the
+ * worst frame is the one that gets complained about.
+ */
+class FrameTimeHistogram
+{
+public:
+	enum { BUCKET_COUNT = 257, LAST_BUCKET = BUCKET_COUNT - 1 };
+	static const Real BUCKET_MS;			// width of one bucket
+
+	void reset( void )
+	{
+		m_count = 0;
+		m_sumMS = 0.0;
+		m_worstMS = 0.0f;
+		m_worstAtFrame = 0;
+		for( Int i = 0; i < BUCKET_COUNT; ++i )
+			m_buckets[ i ] = 0;
+	}
+
+	void note( Real ms, UnsignedInt logicFrame )
+	{
+		if( ms < 0.0f )
+			return;										// a clock that went backwards is not a frame time
+
+		++m_count;
+		m_sumMS += ms;
+		if( ms > m_worstMS )
+		{
+			m_worstMS = ms;
+			m_worstAtFrame = logicFrame;
+		}
+
+		Int bucket = (Int)(ms / BUCKET_MS);
+		if( bucket > LAST_BUCKET )
+			bucket = LAST_BUCKET;		// everything past 64ms lands together; it is all "terrible"
+		++m_buckets[ bucket ];
+	}
+
+	Int count( void ) const { return m_count; }
+	Real worstMS( void ) const { return m_worstMS; }
+	UnsignedInt worstAtFrame( void ) const { return m_worstAtFrame; }
+	Real meanMS( void ) const { return m_count ? (Real)(m_sumMS / m_count) : 0.0f; }
+
+	/** The bucket boundary at or below which `fraction` of the frames fall.  Reported as the top of
+		the bucket, so it never claims a frame was faster than it was. */
+	Real percentileMS( Real fraction ) const
+	{
+		if( m_count <= 0 )
+			return 0.0f;
+		const Int target = (Int)(fraction * m_count);
+		Int running = 0;
+		for( Int i = 0; i < BUCKET_COUNT; ++i )
+		{
+			running += m_buckets[ i ];
+			if( running > target )
+				return (i == LAST_BUCKET) ? m_worstMS : (Real)(i + 1) * BUCKET_MS;
+		}
+		return m_worstMS;
+	}
+
+	/** How many frames took longer than `ms`.  This is the stutter count: pick the budget the
+		frame is supposed to fit in and this says how often it did not. */
+	Int countOver( Real ms ) const
+	{
+		Int over = 0;
+		const Int firstBad = (Int)(ms / BUCKET_MS) + 1;
+		for( Int i = firstBad; i < BUCKET_COUNT; ++i )
+			over += m_buckets[ i ];
+		return over;
+	}
+
+private:
+	Int m_buckets[ BUCKET_COUNT ];
+	Int m_count;
+	double m_sumMS;
+	Real m_worstMS;
+	UnsignedInt m_worstAtFrame;
+};
+
+const Real FrameTimeHistogram::BUCKET_MS = 0.25f;
+
+/* One for the whole loop pass - what the player's eye is on - and one for the logic tick alone,
+	 because those are two different stutters with two different fixes: a long render frame drops a
+	 picture, a logic tick over its 33ms budget drops the whole simulation behind the wall clock. */
+static FrameTimeHistogram theFrameTimes;
+static FrameTimeHistogram theLogicTimes;
+static Bool theFrameTimesStarted = FALSE;
+
+void GameEngine_noteFrameTime( Real ms, UnsignedInt logicFrame )
+{
+	if( !theFrameTimesStarted )
+		return;
+	theFrameTimes.note( ms, logicFrame );
+}
+
+void GameEngine_noteLogicTime( Real ms, UnsignedInt logicFrame )
+{
+	if( !theFrameTimesStarted )
+		return;
+	theLogicTimes.note( ms, logicFrame );
+}
+
+/** Start counting.  Called when an unattended run actually begins, so the map load, the first
+	 asset pass and the settling second are not counted as stutters - they are, but they are not the
+	 kind anybody can do anything about, and leaving them in buries the ones that matter. */
+static void startFrameTimeStats( void )
+{
+	theFrameTimes.reset();
+	theLogicTimes.reset();
+	theFrameTimesStarted = TRUE;
+}
+
+static void reportFrameTimeStats( void )
+{
+	if( theFrameTimes.count() <= 0 )
+		return;
+
+	const Real over16 = 100.0f * theFrameTimes.countOver( 16.7f ) / theFrameTimes.count();
+	const Real over33 = 100.0f * theFrameTimes.countOver( 33.3f ) / theFrameTimes.count();
+	DEBUG_LOG(("HEADLESS FRAMETIME: %d frames | mean %.2f p50 %.2f p95 %.2f p99 %.2f p99.9 %.2f worst %.2f ms (frame %d) | over 16.7ms %d (%.2f%%) | over 33.3ms %d (%.2f%%)\n",
+						 theFrameTimes.count(), theFrameTimes.meanMS(),
+						 theFrameTimes.percentileMS( 0.50f ), theFrameTimes.percentileMS( 0.95f ),
+						 theFrameTimes.percentileMS( 0.99f ), theFrameTimes.percentileMS( 0.999f ),
+						 theFrameTimes.worstMS(), theFrameTimes.worstAtFrame(),
+						 theFrameTimes.countOver( 16.7f ), over16,
+						 theFrameTimes.countOver( 33.3f ), over33));
+
+	if( theLogicTimes.count() > 0 )
+	{
+		DEBUG_LOG(("HEADLESS LOGICTIME: %d ticks | mean %.2f p50 %.2f p95 %.2f p99 %.2f p99.9 %.2f worst %.2f ms (frame %d) | over 33.3ms %d\n",
+							 theLogicTimes.count(), theLogicTimes.meanMS(),
+							 theLogicTimes.percentileMS( 0.50f ), theLogicTimes.percentileMS( 0.95f ),
+							 theLogicTimes.percentileMS( 0.99f ), theLogicTimes.percentileMS( 0.999f ),
+							 theLogicTimes.worstMS(), theLogicTimes.worstAtFrame(),
+							 theLogicTimes.countOver( 33.3f )));
+	}
+}
 
 /** -----------------------------------------------------------------------------------------------
  * Why an unattended run is over, or NULL while it is still going.  The string is what the log line
@@ -1079,7 +1240,12 @@ const char *GameEngine_headlessRunResult( UnsignedInt frame, UnsignedInt victory
  */
 static void updateHeadlessRun( void )
 {
-	if (!TheGlobalData->m_headless || !TheGameLogic->isInGame() || TheGameLogic->isInShellGame())
+	/* -autoskirmish counts as unattended even when it draws.  THREADING-ROADMAP.md section 0 step 4
+		 asks for a heavy scenario under a real renderer, and a run that never ends and never writes
+		 its numbers down is not a measurement.  This still cannot fire on a game a person started:
+		 reaching here needs -headless or -autoskirmish, and neither is on a menu. */
+	const Bool unattended = TheGlobalData->m_headless || TheGlobalData->m_autoSkirmishPlayers > 0;
+	if (!unattended || !TheGameLogic->isInGame() || TheGameLogic->isInShellGame())
 		return;
 
 	static DWORD runStartTime = 0;
@@ -1096,6 +1262,12 @@ static void updateHeadlessRun( void )
 	}
 
 	const UnsignedInt frame = TheGameLogic->getFrame();
+
+	/* The frame times start a second in, not at frame 0.  The first counted pass carries the tail
+		 of the map load and came out at two full seconds, which then *is* the worst frame of the
+		 match and buries the 60ms hitch that somebody could actually do something about. */
+	if( !theFrameTimesStarted && frame > runStartFrame + LOGICFRAMES_PER_SECOND )
+		startFrameTimeStats();
 
 	/* The biggest army each side ever fielded, sampled once a second.  The end-of-match counts are
 		 cumulative and cannot tell an AI that massed and traded evenly from one that trickled units
@@ -1136,6 +1308,21 @@ static void updateHeadlessRun( void )
 	// `outofcells` say whether it broke anything, `blocked`/`stuck` say whether it actually
 	// reduced the traffic jams it was supposed to reduce.
 	DEBUG_LOG(("HEADLESS PATHFIND: %s\n", Pathfinder::getMatchProfileReport()));
+
+	/* Stability, which is a different question from speed and is answered by the tail rather than
+		 by the average.  These two lines are the ones a stutter complaint is argued with. */
+	reportFrameTimeStats();
+
+	/* THREADING-ROADMAP.md 3.1's safety net: "no allocation inside a job" is a rule, and a rule
+		 nothing checks is a comment.  allocs must read 0 - anything else means a job took the one
+		 global pool lock and serialized the fork it was supposed to spread. */
+	DEBUG_LOG(("HEADLESS JOBS: %d worker threads, %d allocations from a job\n",
+						 JobSystem::workerCount(), JobSystem::workerAllocationCount()));
+
+	// THREADING-ROADMAP.md section 0 step 3.  Only a PERF_TIMERS build has anything to say here.
+#ifdef PERF_TIMERS
+	PerfGather::dumpSummary();
+#endif
 
 	for( Int i = 0; i < ThePlayerList->getPlayerCount(); ++i )
 	{
@@ -1299,6 +1486,9 @@ void GameEngine::update( void )
 			QueryPerformanceCounter( (LARGE_INTEGER *)&tLogicEnd );
 			logicMS = engineElapsedMS( tLogicStart, tLogicEnd );
 			logicTicks = logicTicksThisPass;
+			// One pass can pay off several ticks of debt; charge the histogram per tick, or a
+			// catch-up burst reads as one enormous logic frame that never actually happened.
+			GameEngine_noteLogicTime( logicMS / (Real)logicTicksThisPass, TheGameLogic->getFrame() );
 #endif
 		}
 
@@ -1382,6 +1572,7 @@ void GameEngine::execute( void )
 	// pretty basic for now
 	while( !m_quitting )
 	{
+		Real thisFrameMS = 0.0f;		// how long this pass took, for the stutter report at the bottom
 
 		//if (TheGlobalData->m_vTune)
 		{
@@ -1415,7 +1606,12 @@ void GameEngine::execute( void )
 #endif
 			
 			{
-				try 
+				/* The whole pass, which is what the eye is on: everything between one picture and
+					 the next, not just the parts somebody remembered to instrument.  Two
+					 QueryPerformanceCounter reads a frame, which is why this is not behind a switch. */
+				Int64 tFrameStart, tFrameEnd;
+				QueryPerformanceCounter( (LARGE_INTEGER *)&tFrameStart );
+				try
 				{
 					// compute a frame
 					update();
@@ -1441,6 +1637,10 @@ void GameEngine::execute( void )
 					}
 					RELEASE_CRASH(("Uncaught Exception in GameEngine::update"));
 				}	// catch
+				QueryPerformanceCounter( (LARGE_INTEGER *)&tFrameEnd );
+				thisFrameMS = engineElapsedMS( tFrameStart, tFrameEnd );
+				GameEngine_noteFrameTime( thisFrameMS,
+																	TheGameLogic ? TheGameLogic->getFrame() : 0 );
 			}	// perf
 
 			{
@@ -1464,6 +1664,7 @@ void GameEngine::execute( void )
 #ifdef PERF_TIMERS
 		if (!m_quitting && TheGameLogic->isInGame() && !TheGameLogic->isInShellGame() && !TheGameLogic->isGamePaused())
 		{
+			PerfGather::accumulateFrame(thisFrameMS);
 			PerfGather::dumpAll(TheGameLogic->getFrame());
 			PerfGather::displayGraph(TheGameLogic->getFrame());
 			PerfGather::resetAll();

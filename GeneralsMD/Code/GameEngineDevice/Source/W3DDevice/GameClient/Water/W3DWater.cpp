@@ -1571,10 +1571,10 @@ void WaterRenderObjClass::renderMirror(CameraClass *cam)
 	*	This algorithm doesn't apply to translucent water, which is rendered into a
 	*   texture and rendered at end of scene. */
 //-------------------------------------------------------------------------------------------------
-//DECLARE_PERF_TIMER(Water)
+DECLARE_PERF_TIMER(Water)
 void WaterRenderObjClass::Render(RenderInfoClass & rinfo)
 {
-	//USE_PERF_TIMER(Water)
+	USE_PERF_TIMER(Water)
 	if (TheTerrainRenderObject && !TheTerrainRenderObject->getMap())
 		return;	//no map has been loaded yet.
 
