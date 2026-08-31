@@ -127,6 +127,17 @@ public:
  	virtual void adjustTerrainLOD(Int adj);
 	virtual void doPartialUpdate(const IRegion2D &partialRange, WorldHeightMap *htMap, RefRenderObjListIterator *pLightsIterator) = 0;
 	virtual void staticLightingChanged(void);
+
+	/** One terrain cell moved - a building foundation flattening the ground under it, say.
+		*
+		* This used to go through staticLightingChanged(), which rebuilds and re-lights every drawn
+		* vertex on the map: 61 ms on a four-player map, a visible stutter, for one cell.  Instead the
+		* cell joins a dirty rectangle that the client flushes once a frame through doPartialUpdate,
+		* which is the same call WorldBuilder has always used for exactly this. */
+	void terrainHeightChanged(Int x, Int y);
+
+	/** The accumulated dirty rectangle, or FALSE if there is none.  Clears it. */
+	Bool takeDirtyRegion(IRegion2D &region);
 	virtual void oversizeTerrain(Int tilesToOversize);
 	virtual void reset(void);
 
@@ -271,6 +282,8 @@ protected:
 	Vector3 m_depthFade;	///<depth based fall off values for r,g,b
 	Bool m_disableTextures;
 	Bool m_needFullUpdate; ///< True if lighting changed, and we need to update all instead of what moved.
+	IRegion2D m_dirtyRegion;	///< cells changed since the client last rebuilt them, in map coordinates
+	Bool m_hasDirtyRegion;		///< ...and whether there are any
 	Bool m_doXNextTime; ///< True if we updated y scroll, and need to do x scroll next frame.
 	Real	m_minHeight;	///<minimum value of height samples in heightmap
 	Real	m_maxHeight;	///<maximum value of height samples in heightmap

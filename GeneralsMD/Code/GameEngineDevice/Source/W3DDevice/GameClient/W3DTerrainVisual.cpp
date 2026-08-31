@@ -946,7 +946,11 @@ void W3DTerrainVisual::setRawMapHeight(const ICoord2D *gridPos, Int height)
  		if (m_logicHeightMap->getHeight(x,y) > height) 
 		{
 			m_logicHeightMap->setRawHeight(x, y, height);
-			m_terrainRenderObject->staticLightingChanged(); // OOH! this could benefit from the new Seismic update code
+			/* This used to be staticLightingChanged(), which rebuilds and re-lights every drawn
+				 vertex on the map - 61 ms, measured, a visible stutter - because one cell moved.  EA
+				 had noticed: "OOH! this could benefit from the new Seismic update code".  It gets a
+				 partial rebuild of the cell's neighbourhood instead. */
+			m_terrainRenderObject->terrainHeightChanged(x, y);
 
 
 #ifdef DO_SEISMIC_SIMULATIONS 

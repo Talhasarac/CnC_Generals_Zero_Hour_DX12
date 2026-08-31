@@ -71,6 +71,7 @@
 #include "GameClient/Water.h"
 
 #include "GameLogic/AIPathfind.h"
+#include "GameLogic/GameLogic.h"
 #include "GameLogic/TerrainLogic.h"
 #include "W3DDevice/GameClient/TerrainTex.h"
 #include "W3DDevice/GameClient/W3DDynamicLight.h"
@@ -1701,10 +1702,18 @@ void HeightMapRenderObjClass::updateCenter(CameraClass *camera , RefRenderObjLis
 	BaseHeightMapRenderObjClass::updateCenter(camera, pLightsIterator);
 
 	m_updating = true;
-	if (m_needFullUpdate) 
+	if (m_needFullUpdate)
   {
 		m_needFullUpdate = false;
+		/* Rebuilding and re-lighting every rendered vertex of the terrain.  This is tens of
+			 milliseconds - a visible stutter - and something as small as one grid cell being lowered
+			 by a building foundation asks for it (W3DTerrainVisual::setRawMapHeight).  Logged with
+			 its cost so a stutter report can be tied to it instead of guessed at. */
+		const DWORD fullUpdateStart = timeGetTime();
 		updateBlock(0, 0, m_x-1, m_y-1, m_map, pLightsIterator);
+		DEBUG_LOG(("TERRAIN FULL UPDATE: %d ms at frame %d\n",
+							 (Int)(timeGetTime() - fullUpdateStart),
+							 TheGameLogic ? TheGameLogic->getFrame() : 0));
 		m_updating = false;
 		return;
 	}
@@ -1915,11 +1924,11 @@ void HeightMapRenderObjClass::updateCenter(CameraClass *camera , RefRenderObjLis
 //=============================================================================
 /** Renders (draws) the terrain. */
 //=============================================================================
-//DECLARE_PERF_TIMER(Terrain_Render)
+DECLARE_PERF_TIMER(Terrain_Render)
 
 void HeightMapRenderObjClass::Render(RenderInfoClass & rinfo)
 {
-	//USE_PERF_TIMER(Terrain_Render)
+	USE_PERF_TIMER(Terrain_Render)
 	
 	Int i,j,devicePasses;
 	W3DShaderManager::ShaderTypes st;

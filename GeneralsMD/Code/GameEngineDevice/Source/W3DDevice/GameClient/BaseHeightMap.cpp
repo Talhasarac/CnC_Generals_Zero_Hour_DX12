@@ -258,6 +258,8 @@ BaseHeightMapRenderObjClass::BaseHeightMapRenderObjClass(void)
 	m_x=0;
 	m_y=0;
 	m_needFullUpdate = false;
+	m_hasDirtyRegion = false;
+	m_dirtyRegion.lo.x = m_dirtyRegion.lo.y = m_dirtyRegion.hi.x = m_dirtyRegion.hi.y = 0;
 	m_showImpassableAreas = false;
 	m_updating = false;
 	//Set height to the maximum value that can be stored.
@@ -2370,6 +2372,54 @@ void BaseHeightMapRenderObjClass::staticLightingChanged( void )
 	m_curNumScorchIndices=0;
 	m_roadBuffer->updateLighting();
 
+}
+
+//=============================================================================
+// BaseHeightMapRenderObjClass::terrainHeightChanged
+//=============================================================================
+/** One cell of the terrain moved.  Everything the old whole-map path did *except* the whole-map
+part: the scorches and the roads still get their lighting redone, because both sit on the ground
+that just moved, and the ground itself joins a dirty rectangle for a partial rebuild. */
+//=============================================================================
+void BaseHeightMapRenderObjClass::terrainHeightChanged( Int x, Int y )
+{
+	/* One cell either side.  A vertex's lighting and normal are computed from its neighbours, so
+		 rebuilding only the cell that moved leaves a seam of stale shading around it. */
+	const Int PAD = 2;
+	if (!m_hasDirtyRegion)
+	{
+		m_dirtyRegion.lo.x = x - PAD;
+		m_dirtyRegion.lo.y = y - PAD;
+		m_dirtyRegion.hi.x = x + PAD;
+		m_dirtyRegion.hi.y = y + PAD;
+		m_hasDirtyRegion = true;
+	}
+	else
+	{
+		if (x - PAD < m_dirtyRegion.lo.x) m_dirtyRegion.lo.x = x - PAD;
+		if (y - PAD < m_dirtyRegion.lo.y) m_dirtyRegion.lo.y = y - PAD;
+		if (x + PAD > m_dirtyRegion.hi.x) m_dirtyRegion.hi.x = x + PAD;
+		if (y + PAD > m_dirtyRegion.hi.y) m_dirtyRegion.hi.y = y + PAD;
+	}
+
+	// Cause the scorches to get updated with new lighting.
+	m_scorchesInBuffer = 0;
+	m_curNumScorchVertices = 0;
+	m_curNumScorchIndices = 0;
+	m_roadBuffer->updateLighting();
+}
+
+//=============================================================================
+// BaseHeightMapRenderObjClass::takeDirtyRegion
+//=============================================================================
+Bool BaseHeightMapRenderObjClass::takeDirtyRegion( IRegion2D &region )
+{
+	if (!m_hasDirtyRegion)
+		return false;
+
+	region = m_dirtyRegion;
+	m_hasDirtyRegion = false;
+	return true;
 }
 
 //=============================================================================

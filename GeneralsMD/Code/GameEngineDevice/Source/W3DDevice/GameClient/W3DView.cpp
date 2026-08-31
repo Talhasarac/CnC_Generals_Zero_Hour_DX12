@@ -1136,10 +1136,10 @@ void W3DView::updateView(void)
 	UPDATE();
 }
 
-//DECLARE_PERF_TIMER(W3DView_updateView)
+DECLARE_PERF_TIMER(W3DView_updateView)
 void W3DView::update(void)
 {
-	//USE_PERF_TIMER(W3DView_updateView)
+	USE_PERF_TIMER(W3DView_updateView)
 	Bool recalcCamera = false;
 	Bool didScriptedMovement = false;
 #ifdef LOG_FRAME_TIMES
@@ -1188,13 +1188,27 @@ void W3DView::update(void)
 	if (waypointElapsedMs > 100)
 		waypointElapsedMs = 100;	// a hitch should not teleport the camera down the path
 
+	IRegion2D dirtyTerrain;
 	if (TheTerrainRenderObject->doesNeedFullUpdate()) {
 		RefRenderObjListIterator *it = W3DDisplay::m_3DScene->createLightsIterator();
 		TheTerrainRenderObject->updateCenter(m_3DCamera, it);
-		if (it) 
+		if (it)
 		{
 		 W3DDisplay::m_3DScene->destroyLightsIterator(it);
 		 it = NULL;
+		}
+	}
+	else if (TheTerrainRenderObject->takeDirtyRegion(dirtyTerrain)) {
+		/* Ground that moved since the last frame - a building foundation flattening its footprint,
+			 mostly.  Rebuilt here rather than through the whole-map path above, which costs 61 ms and
+			 is a stutter the player sees.  Skipped entirely while a full update is already pending,
+			 because that redoes everything anyway. */
+		RefRenderObjListIterator *it = W3DDisplay::m_3DScene->createLightsIterator();
+		TheTerrainRenderObject->doPartialUpdate(dirtyTerrain, TheTerrainRenderObject->getMap(), it);
+		if (it)
+		{
+			W3DDisplay::m_3DScene->destroyLightsIterator(it);
+			it = NULL;
 		}
 	}
 
@@ -1644,10 +1658,10 @@ void W3DView::drawView( void )
 	DRAW();
 }
 
-//DECLARE_PERF_TIMER(W3DView_drawView)
+DECLARE_PERF_TIMER(W3DView_drawView)
 void W3DView::draw( void )
 {
-	//USE_PERF_TIMER(W3DView_drawView)
+	USE_PERF_TIMER(W3DView_drawView)
 	Bool skipRender = false;
 	Bool doExtraRender = false;
 	CustomScenePassModes customScenePassMode  = SCENE_PASS_DEFAULT;
