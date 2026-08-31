@@ -43,6 +43,7 @@
 #include "GameLogic/ScriptEngine.h"
 #include "GameLogic/SidesList.h"
 #include "GameLogic/AIPathfind.h"
+#include "GameLogic/AIPlayer.h"		// for the per-frame AI profile the slow-frame report prints
 #include "GameLogic/Weapon.h"
 
 extern void addIcon(const Coord3D *pos, Real width, Int numFramesDuration, RGBColor color);
@@ -381,6 +382,7 @@ void AI::update( void )
 
 	// run player updates
 	{
+		AIPlayer::resetFrameProfile();
 		ThePlayerList->UPDATE();
 	}
 

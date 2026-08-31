@@ -79,6 +79,7 @@
 #include "GameClient/GameWindowTransitions.h"
 
 #include "GameLogic/AI.h"
+#include "GameLogic/AIPlayer.h"		// for the per-frame AI profile the slow-frame report prints
 #include "GameLogic/AIPathfind.h"
 #include "GameLogic/CaveSystem.h"
 #include "GameLogic/CrateSystem.h"
@@ -4169,12 +4170,13 @@ void GameLogic::update( void )
 			const Real stores = logicElapsedMS( tCommandList, tStores );
 			const Real victory = logicElapsedMS( tStores, tVictory );
 			const Real disabled = logicElapsedMS( tVictory, tFrameEnd );
-			DEBUG_LOG(("SLOW LOGIC FRAME %d: %.1fms | scripts %.1f | objects %.1f | ai %.1f (pathfind %.1f, players %.1f) | partition %.1f | rest %.1f (destroy %.1f, cmdlist %.1f, stores %.1f, victory %.1f, disabled %.1f)\n  sc: %s\n  ob: %s\n  pf: %s\n",
+			DEBUG_LOG(("SLOW LOGIC FRAME %d: %.1fms | scripts %.1f | objects %.1f | ai %.1f (pathfind %.1f, players %.1f) | partition %.1f | rest %.1f (destroy %.1f, cmdlist %.1f, stores %.1f, victory %.1f, disabled %.1f)\n  sc: %s\n  ob: %s\n  pf: %s\n  ai: %s\n",
 								 now, total, scripts, objects, ai, AI::getLastPathfindMS(), AI::getLastPlayerUpdateMS(), partition, rest,
 								 destroy, cmdlist, stores, victory, disabled,
 								 TheScriptEngine->getProfileReport(),
 								 getModuleProfileReport(),
-								 Pathfinder::getProfileReport()));
+								 Pathfinder::getProfileReport(),
+								 AIPlayer::getProfileReport()));
 		}
 	}
 

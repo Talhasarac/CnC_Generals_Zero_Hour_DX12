@@ -162,6 +162,22 @@ static Bool playerStartPosition( Int playerNdx, Coord3D *pos )
 }
 
 
+/* How often each of the periodic jobs re-checks.  Up here rather than beside the function that uses
+	 each one, because the constructor needs them: it spreads the players across each cycle, and it
+	 cannot do that without knowing how long the cycle is.  See the staggering block below. */
+
+/** How often the AI looks for somewhere to expand to.  Long, because an expansion is a building
+	* order and the base builder has its own rhythm to keep. */
+static const Int EXPANSION_CHECK_SECONDS = 60;
+
+/** How often the scout is looked at.  It only ever gets an order when it has arrived, so this is a
+	* check, not a repath. */
+static const Int SCOUT_CHECK_RATE = 2 * LOGICFRAMES_PER_SECOND;
+
+/** How often the AI looks for something to capture.  It only ever gets an order when it is idle, so
+	* this is a check, not a re-path. */
+static const Int CAPTURE_CHECK_RATE = 5 * LOGICFRAMES_PER_SECOND;
+
 // ------------------------------------------------------------------------------------------------
 // ------------------------------------------------------------------------------------------------
 AIPlayer::AIPlayer( Player *p ) :
@@ -244,6 +260,27 @@ m_role(AIROLE_AGGRESSIVE)
 	// ...and EA never initialized this one at all.  updateBridgeRepair returns before reading it
 	// while the repair queue is empty, which it is here, so it has been benign - but only just.
 	m_bridgeTimer = computeUpdatePhase( playerIndex, LOGICFRAMES_PER_SECOND );
+
+	/* The four jobs this fork added start their timers at 1, so every computer player ran every one
+		 of them on the same logic frame - and kept doing so for the rest of the match, because each
+		 re-arms with a fixed interval and so never drifts apart again.
+
+		 Measured on Twilight Flame with eight Merciless AI: doExpansion alone cost 15.4ms of a
+		 16.7ms frame, all of it landing on one frame a minute. Spread across the cycle it is under
+		 6ms, and nothing runs any less often than it did. */
+	/* What is needed is only that the players land on *different* frames, not that they are spread
+		 evenly over the cycle - and the difference matters for the slow ones. Spreading the
+		 once-a-minute expansion check over its whole minute delays the last player's first expansion
+		 by nearly half of one, which showed up as a smaller army over six matches. A two-second
+		 window puts eight players seven frames apart, which is all the convoy needs broken, and
+		 costs nobody anything measurable. The offset is permanent either way: each timer re-arms
+		 with a fixed interval, so players that start apart stay apart. */
+	const Int SPREAD = 2 * LOGICFRAMES_PER_SECOND;
+	m_expandTimer += computeUpdatePhase( playerIndex, SPREAD );
+	m_captureTimer += computeUpdatePhase( playerIndex, SPREAD );
+	m_retreatTimer += computeUpdatePhase( playerIndex, SPREAD );
+	// The scout check's own cycle is already only two seconds, so its full cycle is the window.
+	m_scoutTimer += computeUpdatePhase( playerIndex, SCOUT_CHECK_RATE );
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -3565,30 +3602,100 @@ void AIPlayer::doUpgradesAndSkills( void )
  * Perform computer-controlled player AI
  */
 //DECLARE_PERF_TIMER(AIPlayer_update)
+#ifdef DEBUG_LOGGING
+/* The slow-frame report in GameLogic.cpp could only say "players 16.2ms" - one number for every
+	 computer player and all ten of the jobs each one does. That is enough to know the stutter is in
+	 here and not enough to do anything about it, so this breaks it down the way ScriptEngine and
+	 Pathfinder already break theirs down: per job, plus whichever single player cost the most.
+	 Reset once per logic frame by AI::update. */
+enum { AIP_BASE, AIP_READY, AIP_QUEUED, AIP_TEAM, AIP_UPGRADE,
+			 AIP_BRIDGE, AIP_SCOUT, AIP_RETREAT, AIP_EXPAND, AIP_CAPTURE, AIP_PHASE_COUNT };
+static const char *theAIPhaseName[ AIP_PHASE_COUNT ] =
+	{ "base", "ready", "queued", "team", "upg", "bridge", "scout", "retreat", "expand", "capture" };
+static Real theAIPhaseMS[ AIP_PHASE_COUNT ];
+static Real theAIWorstPlayerMS = 0.0f;
+static Int theAIWorstPlayer = -1;
+static Int theAIPlayersUpdated = 0;
+static Int64 theAIPhaseStart;
+
+static Real aiPlayerElapsedMS( const Int64 &from, const Int64 &to )
+{
+	static Int64 freq = 0;
+	if( freq == 0 )
+		QueryPerformanceFrequency( (LARGE_INTEGER *)&freq );
+	if( freq == 0 )
+		return 0.0f;
+	return (Real)( (double)(to - from) * 1000.0 / (double)freq );
+}
+
+static void aiPhaseBegin( void )
+{
+	QueryPerformanceCounter( (LARGE_INTEGER *)&theAIPhaseStart );
+}
+
+static void aiPhaseEnd( Int phase )
+{
+	Int64 now;
+	QueryPerformanceCounter( (LARGE_INTEGER *)&now );
+	theAIPhaseMS[ phase ] += aiPlayerElapsedMS( theAIPhaseStart, now );
+}
+
+#define AI_PHASE( phase, call )	do { aiPhaseBegin(); call; aiPhaseEnd( phase ); } while(0)
+
+/*static*/ void AIPlayer::resetFrameProfile( void )
+{
+	for( Int i = 0; i < AIP_PHASE_COUNT; ++i )
+		theAIPhaseMS[ i ] = 0.0f;
+	theAIWorstPlayerMS = 0.0f;
+	theAIWorstPlayer = -1;
+	theAIPlayersUpdated = 0;
+}
+
+/*static*/ const char *AIPlayer::getProfileReport( void )
+{
+	static char report[ 512 ];
+	Int used = sprintf( report, "%d ai players, worst player %d %.1fms |",
+											theAIPlayersUpdated, theAIWorstPlayer, theAIWorstPlayerMS );
+	for( Int phase = 0; phase < AIP_PHASE_COUNT; ++phase )
+		used += sprintf( report + used, " %s %.1f", theAIPhaseName[ phase ], theAIPhaseMS[ phase ] );
+	return report;
+}
+#else
+/*static*/ void AIPlayer::resetFrameProfile( void ) { }
+/*static*/ const char *AIPlayer::getProfileReport( void ) { return ""; }
+#define AI_PHASE( phase, call )	call
+#endif
+
 void AIPlayer::update( void )
 {
 	//USE_PERF_TIMER(AIPlayer_update)
+#ifdef DEBUG_LOGGING
+	Int64 playerStart;
+	QueryPerformanceCounter( (LARGE_INTEGER *)&playerStart );
+#endif
 
-	doBaseBuilding();		// See if it's time to build another building.
+	AI_PHASE( AIP_BASE,    doBaseBuilding() );			// See if it's time to build another building.
+	AI_PHASE( AIP_READY,   checkReadyTeams() );			// See if any teams are ready to start.
+	AI_PHASE( AIP_QUEUED,  checkQueuedTeams() );		// See if any teams are complete.
+	AI_PHASE( AIP_TEAM,    doTeamBuilding() );			// See if it's time to start another team.
+	AI_PHASE( AIP_UPGRADE, doUpgradesAndSkills() );	// See if it's time to build an upgrade or buy a skill.
+	AI_PHASE( AIP_BRIDGE,  updateBridgeRepair() );	// Handle any bridge repairs.
+	AI_PHASE( AIP_SCOUT,   doScouting() );					// Keep one unit looking at the map.
+	AI_PHASE( AIP_RETREAT, doRetreats() );					// Break off the fights we are losing.
+	AI_PHASE( AIP_EXPAND,  doExpansion() );					// Go and take the money that is lying around.
+	AI_PHASE( AIP_CAPTURE, doCapture() );						// ... and the money that is standing around.
 
-	checkReadyTeams(); // See if any teams are ready to start.
-
-	checkQueuedTeams(); // See if any teams are complete.
-
-	doTeamBuilding(); // See if it's time to start another team.
-
-	doUpgradesAndSkills(); // See if it's time to build an upgrade or buy a skill.
-
-	updateBridgeRepair(); // Handle any bridge repairs.
-
-	doScouting(); // Keep one unit looking at the map.
-
-	doRetreats(); // Break off the fights we are losing.
-
-	doExpansion(); // Go and take the money that is lying around.
-
-	doCapture(); // ... and the money that is standing around.
-
+#ifdef DEBUG_LOGGING
+	Int64 playerEnd;
+	QueryPerformanceCounter( (LARGE_INTEGER *)&playerEnd );
+	const Real playerMS = aiPlayerElapsedMS( playerStart, playerEnd );
+	++theAIPlayersUpdated;
+	if( playerMS > theAIWorstPlayerMS )
+	{
+		theAIWorstPlayerMS = playerMS;
+		theAIWorstPlayer = m_player ? m_player->getPlayerIndex() : -1;
+	}
+#endif
 }
 
 //----------------------------------------------------------------------------------------------------------
@@ -3711,10 +3818,6 @@ Bool AIPlayer::dozerInQueue( void )
 }
 
 //----------------------------------------------------------------------------------------------------------
-/** How often the AI looks for somewhere to expand to.  Long, because an expansion is a building
-	* order and the base builder has its own rhythm to keep. */
-static const Int EXPANSION_CHECK_SECONDS = 60;
-
 //----------------------------------------------------------------------------------------------------------
 /** Notice that there is money to be had, and go and take it.
 	*
@@ -3989,10 +4092,6 @@ void AIPlayer::doRetreats( void )
 }
 
 //----------------------------------------------------------------------------------------------------------
-/** How often the scout is looked at.  It only ever gets an order when it has arrived, so this is a
-	* check, not a repath. */
-static const Int SCOUT_CHECK_RATE = 2 * LOGICFRAMES_PER_SECOND;
-
 /** The cheapest thing this player could build that can walk somewhere and is not needed elsewhere.
 	* Faction-agnostic on purpose - it lands on the Ranger, the Red Guard, the Rebel and the
 	* Technical without a per-side table to keep, and on whatever a mod's cheapest unit is. */
@@ -4466,10 +4565,6 @@ Bool AIPlayer::nextScoutTarget( Int slot, const Coord3D *from, Coord3D *pos )
 }
 
 //----------------------------------------------------------------------------------------------------------
-/** How often the AI looks for something to capture.  It only ever gets an order when it is idle, so
-	* this is a check, not a re-path. */
-static const Int CAPTURE_CHECK_RATE = 5 * LOGICFRAMES_PER_SECOND;
-
 /** The cheapest infantry this player can build that can walk into a building and own it.  Read off
 	* the command set rather than a per-faction table, so it lands on the Ranger, the Rebel and the
 	* Red Guard - and on whatever a mod gave the ability to. */

@@ -166,6 +166,13 @@ public:
 	
 	virtual Bool computeSuperweaponTarget(const SpecialPowerTemplate *power, Coord3D *pos, Int playerNdx, Real weaponRadius); ///< Calculates best pos for weapon given radius.
 
+	/** What every computer player spent this logic frame, by job, plus whichever single one cost
+		* the most.  The slow-frame report in GameLogic.cpp could only say "players 16.2ms", which is
+		* enough to know a stutter is in here and not enough to do anything about it.  Reset once a
+		* frame by AI::update; empty outside a logging build. */
+	static void resetFrameProfile( void );
+	static const char *getProfileReport( void );
+
 public: // AIPlayer interface, may be overridden by AISkirmishPlayer.  jba.
 
 	virtual void update();											///< simulates the behavior of a player
