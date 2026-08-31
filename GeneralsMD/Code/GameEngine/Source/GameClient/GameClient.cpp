@@ -94,6 +94,32 @@
 /// The GameClient singleton instance
 GameClient *TheGameClient = NULL;
 
+#ifdef DEBUG_LOGGING
+//
+// How long the last TheDisplay->DRAW() took.  The engine's frame rate watchdog reports the client
+// half of the loop as one number, and that number is two very different things added together: the
+// renderer, and everything the client does around it (the window system, the drawables, the UI).
+// Splitting the render out is what says which of the two a slow frame is.
+//
+Real TheClientDrawMS = 0.0f;
+//
+// And the same question one level down, because the renderer's own time is three very different
+// things: the 3D scene, the interface drawn over it, and the window system underneath that.
+// W3DDisplay and W3DInGameUI fill these in; the watchdog prints them.
+//
+Real TheSceneDrawMS = 0.0f;			///< W3DDisplay::drawViews() - the world
+Real TheUIDrawMS = 0.0f;				///< TheInGameUI->DRAW() - everything over the world
+Real TheUIPostDrawMS = 0.0f;		///< InGameUI::postDraw() - the strips and the world overlays
+Real TheWindowRepaintMS = 0.0f;	///< TheWindowManager->winRepaint() - the control bar and dialogs
+//
+// postDraw is mostly the production strip, and the strip is two halves that fail for different
+// reasons: the sweep that reads every player's queues, and the 2D draw that puts the rows on the
+// screen.  A sweep that costs is a data problem; a draw that costs is a batching problem.
+//
+Real TheStripGatherMS = 0.0f;		///< InGameUI::drawProductionStrip() - reading the queues
+Real TheStripDrawMS = 0.0f;			///< InGameUI::drawProductionStrip() - drawing the rows
+#endif
+
 //-------------------------------------------------------------------------------------------------
 /** Fog and shroud hide a drawable from the local player, with one exception: a structure the player
 	* has just planned.  It clears no shroud of its own, so a base planned out into fog would otherwise
@@ -793,15 +819,28 @@ void GameClient::update( void )
 
 	{
 		USE_PERF_TIMER(GameClient_draw)
-			
+
 	// redraw all views, update the GUI
 	//if(TheGameLogic->getFrame() >= 2)
-		
+
 		/* -headless never draws.  The device and every drawable stay alive - this skips the frame,
 			 not the client - which is what makes an unattended run fast: rendering is the larger half
 			 of the loop's wall clock in a normal match. */
 		if (!TheGlobalData->m_headless)
+		{
+#ifdef DEBUG_LOGGING
+			Int64 drawStart, drawEnd;
+			QueryPerformanceCounter( (LARGE_INTEGER *)&drawStart );
+#endif
 			TheDisplay->DRAW();
+#ifdef DEBUG_LOGGING
+			QueryPerformanceCounter( (LARGE_INTEGER *)&drawEnd );
+			Int64 freq;
+			QueryPerformanceFrequency( (LARGE_INTEGER *)&freq );
+			if( freq > 0 )
+				TheClientDrawMS = (Real)((double)(drawEnd - drawStart) * 1000.0 / (double)freq);
+#endif
+		}
 	}
 
 	{

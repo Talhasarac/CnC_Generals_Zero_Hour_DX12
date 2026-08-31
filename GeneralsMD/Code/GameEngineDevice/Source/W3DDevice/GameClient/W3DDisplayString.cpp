@@ -50,6 +50,7 @@
 
 // USER INCLUDES //////////////////////////////////////////////////////////////
 #include "GameClient/GameClient.h"
+#include "GameClient/Display.h"
 #include "W3DDevice/GameClient/W3DDisplayString.h"
 #include "GameClient/HotKey.h"
 #include "GameClient/GameFont.h"
@@ -166,9 +167,18 @@ void W3DDisplayString::draw( Int x, Int y, Color color, Color dropColor, Int xDr
 	Bool needNewPolys = FALSE;
 
 	// sanity
-	if( getTextLength() == 0 )	
+	if( getTextLength() == 0 )
 		return;  // nothing to draw
-	
+
+	//
+	// Text draws through its own renderer, so it goes to the device the moment it is asked for -
+	// while the display may still be holding 2D geometry that was handed over before it.  That
+	// geometry would then be drawn afterwards, on top of the text.  Let it out first.
+	//
+	if( TheDisplay )
+		TheDisplay->flushBatch2D();
+
+
 	// if our font or text has changed we need to build a new sentence
 	if( m_fontChanged || m_textChanged )
 	{

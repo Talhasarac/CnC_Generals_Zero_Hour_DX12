@@ -997,12 +997,20 @@ DECLARE_PERF_TIMER(GameEngine_update)
  *
  * Free function (not a member, not static) so test_gameengine can link straight to it.
  */
+Int GameEngine_logicCatchupMaxFrames( Int logicFps )
+{
+	if (logicFps <= 0)
+		return 1;
+	const Int frames = (Int)(logicFps * LOGIC_CATCHUP_MAX_MS / 1000.0f + 0.5f);
+	return frames < 1 ? 1 : frames;
+}
+
 Bool GameEngine_isLogicFrameDue( Real& accumMs, Real elapsedMs, Int logicFps )
 {
 	if (logicFps <= 0)
 		return TRUE;
 	const Real msPerLogicFrame = 1000.0f / logicFps;
-	const Real maxAccumMs = msPerLogicFrame * LOGIC_CATCHUP_MAX_FRAMES;
+	const Real maxAccumMs = msPerLogicFrame * GameEngine_logicCatchupMaxFrames(logicFps);
 	if (elapsedMs > maxAccumMs)
 		elapsedMs = maxAccumMs;
 	accumMs += elapsedMs;
@@ -1027,6 +1035,14 @@ Bool GameEngine_isLogicFrameDue( Real& accumMs, Real elapsedMs, Int logicFps )
 // half of the loop.  So time both halves of every pass and, once a second, say what the rate was and
 // where the time went - but only when the rate actually dropped, so a smooth match logs nothing.
 //
+extern Real TheClientDrawMS;			///< GameClient.cpp: how long the last TheDisplay->DRAW() took
+extern Real TheSceneDrawMS;				///< ...of which the 3D world
+extern Real TheUIDrawMS;					///< ...and the interface over it
+extern Real TheUIPostDrawMS;			///< ...of which the overlays and the HUD strips
+extern Real TheWindowRepaintMS;		///< ...and the window system's repaint
+extern Real TheStripGatherMS;			///< ...of the overlays, the production strip's sweep
+extern Real TheStripDrawMS;				///< ...and the production strip's own drawing
+
 static Real engineElapsedMS( const Int64 &from, const Int64 &to )
 {
 	Int64 freq;
@@ -1159,22 +1175,33 @@ void GameEngine::update( void )
 		static Real fpsLogicTotal = 0.0f, fpsLogicMax = 0.0f;
 		static Int fpsLogicTicks = 0, fpsCatchupPasses = 0;
 		static DWORD fpsWindowStart = timeGetTime();
-		Int64 tClientStart, tClientEnd, tLogicStart, tLogicEnd;
-		Real clientMS = 0.0f, logicMS = 0.0f;
+		static Real fpsRadarTotal = 0.0f, fpsAudioTotal = 0.0f, fpsDrawTotal = 0.0f, fpsDrawMax = 0.0f;
+		static Real fpsSceneTotal = 0.0f, fpsUITotal = 0.0f, fpsPostTotal = 0.0f, fpsWinTotal = 0.0f;
+		static Real fpsStripGatherTotal = 0.0f, fpsStripDrawTotal = 0.0f;
+		Int64 tClientStart, tClientEnd, tLogicStart, tLogicEnd, tRadarEnd, tAudioEnd;
+		Real clientMS = 0.0f, logicMS = 0.0f, radarMS = 0.0f, audioMS = 0.0f;
 		Int logicTicks = 0;
+		TheClientDrawMS = TheSceneDrawMS = TheUIDrawMS = TheUIPostDrawMS = TheWindowRepaintMS = 0.0f;
+		TheStripGatherMS = TheStripDrawMS = 0.0f;
 		QueryPerformanceCounter( (LARGE_INTEGER *)&tClientStart );
 #endif
 
 		{
-			
+
 			// VERIFY CRC needs to be in this code block.  Please to not pull TheGameLogic->update() inside this block.
 			VERIFY_CRC
 
 			TheRadar->UPDATE();
+#ifdef DEBUG_LOGGING
+			QueryPerformanceCounter( (LARGE_INTEGER *)&tRadarEnd );
+#endif
 
 			/// @todo Move audio init, update, etc, into GameClient update
-			
+
 			TheAudio->UPDATE();
+#ifdef DEBUG_LOGGING
+			QueryPerformanceCounter( (LARGE_INTEGER *)&tAudioEnd );
+#endif
 			TheGameClient->UPDATE();
 			TheMessageStream->propagateMessages();
 
@@ -1182,12 +1209,14 @@ void GameEngine::update( void )
 			{
 				TheNetwork->UPDATE();
 			}
-			 
+
 			TheCDManager->UPDATE();
 		}
 #ifdef DEBUG_LOGGING
 		QueryPerformanceCounter( (LARGE_INTEGER *)&tClientEnd );
 		clientMS = engineElapsedMS( tClientStart, tClientEnd );
+		radarMS = engineElapsedMS( tClientStart, tRadarEnd );
+		audioMS = engineElapsedMS( tRadarEnd, tAudioEnd );
 #endif
 
 
@@ -1258,12 +1287,13 @@ void GameEngine::update( void )
 			// count and the pacer's own accumulator cap stop at LOGIC_CATCHUP_MAX_FRAMES, so a logic
 			// frame that is itself over budget cannot pull the loop into a spiral.
 			Int logicTicksThisPass = 0;
+			const Int maxTicksThisPass = GameEngine_logicCatchupMaxFrames(m_maxFPS);
 			do
 			{
 				TheGameLogic->UPDATE();
 				++logicTicksThisPass;
 			}
-			while (mayCatchUp && logicTicksThisPass < LOGIC_CATCHUP_MAX_FRAMES &&
+			while (mayCatchUp && logicTicksThisPass < maxTicksThisPass &&
 						 GameEngine_isLogicFrameDue(logicAccumMs, 0.0f, m_maxFPS));
 #ifdef DEBUG_LOGGING
 			QueryPerformanceCounter( (LARGE_INTEGER *)&tLogicEnd );
@@ -1277,6 +1307,16 @@ void GameEngine::update( void )
 #ifdef DEBUG_LOGGING
 		fpsFrames++;
 		fpsClientTotal += clientMS;
+		fpsRadarTotal += radarMS;
+		fpsAudioTotal += audioMS;
+		fpsDrawTotal += TheClientDrawMS;
+		fpsSceneTotal += TheSceneDrawMS;
+		fpsUITotal += TheUIDrawMS;
+		fpsPostTotal += TheUIPostDrawMS;
+		fpsWinTotal += TheWindowRepaintMS;
+		fpsStripGatherTotal += TheStripGatherMS;
+		fpsStripDrawTotal += TheStripDrawMS;
+		if( TheClientDrawMS > fpsDrawMax ) fpsDrawMax = TheClientDrawMS;
 		fpsLogicTotal += logicMS;
 		fpsLogicTicks += logicTicks;
 		if( logicTicks > 1 ) fpsCatchupPasses++;
@@ -1293,17 +1333,28 @@ void GameEngine::update( void )
 					// 'hz' is the rate the simulation actually achieved and 'catchup' how many render
 					// frames were dropped to hold it there; hz short of m_maxFPS with catchup passes
 					// present is the logic side being genuinely over budget, not the pacer.
-					DEBUG_LOG(("FPS %.0f over %dms (%d frames, %d hz, %d catchup, logic frame %d) | client avg %.1f max %.1f | logic avg %.1f max %.1f | unaccounted %.1fms\n",
+					DEBUG_LOG(("FPS %.0f over %dms (%d frames, %d hz, %d catchup, logic frame %d) | client avg %.1f max %.1f (render avg %.1f max %.1f [scene %.1f, ui %.1f (post %.1f [strip gather %.1f, draw %.1f], win %.1f), present %.1f], radar %.1f, audio %.1f, rest %.1f) | logic avg %.1f max %.1f | unaccounted %.1fms\n",
 										 fps, (Int)windowMS, fpsFrames,
 										 (Int)((Real)fpsLogicTicks * 1000.0f / (Real)windowMS + 0.5f), fpsCatchupPasses,
 										 TheGameLogic->getFrame(),
 										 fpsClientTotal / fpsFrames, fpsClientMax,
+										 fpsDrawTotal / fpsFrames, fpsDrawMax,
+										 fpsSceneTotal / fpsFrames, fpsUITotal / fpsFrames,
+										 fpsPostTotal / fpsFrames,
+										 fpsStripGatherTotal / fpsFrames, fpsStripDrawTotal / fpsFrames,
+										 fpsWinTotal / fpsFrames,
+										 ( fpsDrawTotal - fpsSceneTotal - fpsUITotal ) / fpsFrames,
+										 fpsRadarTotal / fpsFrames, fpsAudioTotal / fpsFrames,
+										 ( fpsClientTotal - fpsDrawTotal - fpsRadarTotal - fpsAudioTotal ) / fpsFrames,
 										 fpsLogicTotal / fpsFrames, fpsLogicMax,
 										 (Real)windowMS - fpsClientTotal - fpsLogicTotal));
 				}
 				fpsFrames = 0;
 				fpsLogicTicks = fpsCatchupPasses = 0;
 				fpsClientTotal = fpsLogicTotal = 0.0f;
+				fpsRadarTotal = fpsAudioTotal = fpsDrawTotal = fpsDrawMax = 0.0f;
+				fpsSceneTotal = fpsUITotal = fpsPostTotal = fpsWinTotal = 0.0f;
+				fpsStripGatherTotal = fpsStripDrawTotal = 0.0f;
 				fpsClientMax = fpsLogicMax = 0.0f;
 				fpsWindowStart = nowMS;
 			}

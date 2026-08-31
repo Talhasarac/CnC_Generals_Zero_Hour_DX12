@@ -148,8 +148,23 @@ public:
 													Int endX, Int endY, Color color = 0xFFFFFFFF, DrawImageMode mode=DRAW_IMAGE_ALPHA) = 0;
 
 	/// draw a video buffer fit within the screen coordinates
-	virtual void drawVideoBuffer( VideoBuffer *buffer, Int startX, Int startY, 
+	virtual void drawVideoBuffer( VideoBuffer *buffer, Int startX, Int startY,
 													Int endX, Int endY ) = 0;
+
+	/** Every 2D call above is its own draw call at the device: it sets the renderer up, hands it one
+		* quad and draws it.  For a handful of pieces that is nothing; for a strip of cameos with a
+		* tray, a scrim and a border each it is hundreds of draw calls a frame, which the driver
+		* charges for one at a time.  Between beginBatch2D() and endBatch2D() a run of calls that
+		* wants the same state - the same image, or none - is gathered and drawn once.  The order
+		* everything is drawn in is untouched: a call that needs different state draws what is waiting
+		* first.  Displays that do not batch simply draw as they always did. */
+	virtual void beginBatch2D( void ) { }
+	virtual void endBatch2D( void ) { }
+
+	/** Draw whatever a batch is holding, now.  Anything that puts pixels on the screen without going
+		* through the calls above - text, which draws through its own renderer - has to call this
+		* first, or the batch it did not join lands on top of it when it is finally drawn. */
+	virtual void flushBatch2D( void ) { }
 
 	/// FullScreen video playback 
 	virtual void playLogoMovie( AsciiString movieName, Int minMovieLength, Int minCopyrightLength );

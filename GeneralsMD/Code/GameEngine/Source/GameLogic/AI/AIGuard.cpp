@@ -394,7 +394,7 @@ StateReturnType AIGuardInnerState::onEnter( void )
 		Object* nemesis = TheGameLogic->findObjectByID(getGuardMachine()->getNemesisID()) ;
 		if (nemesis == NULL) 
 		{
-			DEBUG_LOG(("Unexpected NULL nemesis in AIGuardInnerState.\n"));
+			DEBUG_LOG_DEV(("Unexpected NULL nemesis in AIGuardInnerState.\n"));
 			return STATE_SUCCESS;
 		}
 		m_enterState = newInstance(AIEnterState)(getMachine());
@@ -414,7 +414,7 @@ StateReturnType AIGuardInnerState::onEnter( void )
 		Object* nemesis = TheGameLogic->findObjectByID(getGuardMachine()->getNemesisID()) ;
 		if (nemesis == NULL) 
 		{
-			DEBUG_LOG(("Unexpected NULL nemesis in AIGuardInnerState.\n"));
+			DEBUG_LOG_DEV(("Unexpected NULL nemesis in AIGuardInnerState.\n"));
 			return STATE_SUCCESS;
 		}
 		m_exitConditions.m_center = pos;
@@ -527,7 +527,7 @@ StateReturnType AIGuardOuterState::onEnter( void )
 	Object* nemesis = TheGameLogic->findObjectByID(getGuardMachine()->getNemesisID()) ;
 	if (nemesis == NULL) 
 	{
-		DEBUG_LOG(("Unexpected NULL nemesis in AIGuardInnerState.\n"));
+		DEBUG_LOG_DEV(("Unexpected NULL nemesis in AIGuardInnerState.\n"));
 		return STATE_SUCCESS;
 	}
 	Object *obj = getMachineOwner();

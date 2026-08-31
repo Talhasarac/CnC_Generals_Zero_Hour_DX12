@@ -120,9 +120,17 @@ class AsciiString;
 		DEBUG_FLAG_LOG_TO_FILE = 0x01,	
 		DEBUG_FLAG_LOG_TO_CONSOLE = 0x02,
 		DEBUG_FLAG_PREPEND_TIME = 0x04,
-#ifdef _INTERNAL
+#if defined(_INTERNAL) || defined(RELEASE_DEBUG_LOGGING)
+		//
 		// by default, _INTERNAL builds log to file, but not to console, in the interest
 		// of speed. want console output? just change this line:
+		//
+		// A release build that logs is here for the same reason and pays the same price twice over:
+		// the console side is OutputDebugString, which takes a system-wide lock and crosses into the
+		// kernel on every line, whether or not anything is listening.  A frame that logs a few
+		// hundred lines - one per object, which the battle plan code does - then spends more time in
+		// that call than in the work the frame was for.  The file is what anybody reads afterwards.
+		//
 		DEBUG_FLAGS_DEFAULT = (DEBUG_FLAG_LOG_TO_FILE)
 #else
 		DEBUG_FLAGS_DEFAULT = (DEBUG_FLAG_LOG_TO_FILE | DEBUG_FLAG_LOG_TO_CONSOLE)
@@ -157,6 +165,19 @@ class AsciiString;
 	#define DEBUG_LOG(m)						((void)0)
 	#define DEBUG_ASSERTLOG(c, m)		((void)0)
 
+#endif
+
+//
+// A line written once per object, or once per drawable per frame, is a development trace: useful
+// with a debugger attached, and in a release build nothing but cost - every line is a flush to
+// disk, and a frame that writes a few hundred of them is a frame the player feels.  DEBUG_LOG_DEV
+// says "this one is a trace": it stays in a debug or internal build and disappears from the release
+// build that logs.  Anything a player's log has to be able to answer stays on plain DEBUG_LOG.
+//
+#if defined(DEBUG_LOGGING) && (defined(_DEBUG) || defined(_INTERNAL))
+	#define DEBUG_LOG_DEV(m)				do { { DebugLog m ; } } while (0)
+#else
+	#define DEBUG_LOG_DEV(m)				((void)0)
 #endif
 
 #ifdef DEBUG_CRASHING

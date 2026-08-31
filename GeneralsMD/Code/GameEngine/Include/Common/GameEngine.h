@@ -36,12 +36,20 @@
 
 #define DEFAULT_MAX_FPS		45
 
-/** How many logic frames of wall-clock debt the pacer will carry and pay back. A render pass
-	slower than one logic frame owes the simulation more than one tick; without a catch-up the
-	game speed just becomes the render speed. The cap is the anti-spiral: when the logic frame
-	itself is what overran, the debt past this many frames is dropped and the match runs slow.
-	See GameEngine_isLogicFrameDue in GameEngine.cpp. */
-#define LOGIC_CATCHUP_MAX_FRAMES	3
+/** How much wall-clock debt the pacer will carry and pay back. A render pass slower than one
+	logic frame owes the simulation more than one tick; without a catch-up the game speed just
+	becomes the render speed. The cap is the anti-spiral: when the logic frame itself is what
+	overran, the debt past this much is dropped and the match runs slow.
+
+	It is a duration, not a frame count, because the frame count that duration buys depends on the
+	game speed. Three frames - the number this used to be - is a tenth of a second at the retail
+	30fps and half that at 60, so picking a faster game speed made the pacer give up on a slow
+	render twice as early: at 60fps a match visibly ran in slow motion the moment the frame rate
+	dropped under 20. See GameEngine_isLogicFrameDue in GameEngine.cpp. */
+#define LOGIC_CATCHUP_MAX_MS	100.0f
+
+/** The above in logic frames, at a given game speed: 3 at the retail 30fps, 6 at 60. */
+Int GameEngine_logicCatchupMaxFrames( Int logicFps );
 
 // forward declarations
 class AudioManager;

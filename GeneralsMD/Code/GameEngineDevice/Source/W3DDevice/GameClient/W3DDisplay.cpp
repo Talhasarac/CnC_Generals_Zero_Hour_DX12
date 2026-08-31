@@ -407,6 +407,10 @@ W3DDisplay::W3DDisplay()
 	for (i=0; i<LightEnvironmentClass::MAX_LIGHTS; i++)
 		m_myLight[i] = NULL;
 	m_2DRender = NULL;
+	m_batch2D = FALSE;
+	m_batch2DOpen = FALSE;
+	m_batch2DKeepOpen = FALSE;
+	m_batch2DImage = NULL;
 	m_isClippedEnabled = FALSE;
 	m_clipRegion.lo.x = 0;
 	m_clipRegion.lo.y = 0;
@@ -1685,6 +1689,25 @@ Int W3DDisplay::getLastFrameDrawCalls()
 static Bool s_screenShotPending = FALSE;	// F12 pressed: save the frame at the end of the next draw()
 static void saveScreenShot(void);
 
+#ifdef DEBUG_LOGGING
+//
+// The frame rate watchdog in GameEngine.cpp reports the renderer as one number.  These split it:
+// the world, and the interface drawn on top of it.  A slow frame is one or the other and they have
+// nothing to do with each other.
+//
+extern Real TheSceneDrawMS;
+extern Real TheUIDrawMS;
+
+static Real w3dElapsedMS( const Int64 &from, const Int64 &to )
+{
+	Int64 freq;
+	QueryPerformanceFrequency( (LARGE_INTEGER *)&freq );
+	if( freq < 1 )
+		return 0.0f;
+	return (Real)((double)(to - from) * 1000.0 / (double)freq);
+}
+#endif
+
 void W3DDisplay::draw( void )
 {
 	//USE_PERF_TIMER(W3DDisplay_draw)
@@ -1953,10 +1976,22 @@ AGAIN:
 					Debug_Statistics::Record_DX8_Polys_And_Vertices(numRenderTargetPolygons,numRenderTargetVertices,ShaderClass::_PresetOpaqueShader);
 
 				// draw all views of the world
+#ifdef DEBUG_LOGGING
+				Int64 tSceneStart, tSceneEnd, tUIEnd;
+				QueryPerformanceCounter( (LARGE_INTEGER *)&tSceneStart );
+#endif
 				drawViews();
+#ifdef DEBUG_LOGGING
+				QueryPerformanceCounter( (LARGE_INTEGER *)&tSceneEnd );
+#endif
 
 				// draw the user interface
 				TheInGameUI->DRAW();
+#ifdef DEBUG_LOGGING
+				QueryPerformanceCounter( (LARGE_INTEGER *)&tUIEnd );
+				TheSceneDrawMS = w3dElapsedMS( tSceneStart, tSceneEnd );
+				TheUIDrawMS = w3dElapsedMS( tSceneEnd, tUIEnd );
+#endif
 
 				// end of video example code
 
@@ -2249,21 +2284,101 @@ void W3DDisplay::setTimeOfDay( TimeOfDay tod )
 	}
 }
 
+// W3DDisplay::setup2D ========================================================
+/** Get the 2D renderer ready for the geometry a drawing call is about to add.  Returns TRUE when
+	* the renderer was emptied for it and the caller has to set its state up - the texture it wants,
+	* or none - and FALSE when a batch is already open in exactly that state and the call may simply
+	* add to it.  Whatever was waiting in a state this call cannot share is drawn first, so nothing
+	* ever changes the order things appear in. */
+//=============================================================================
+Bool W3DDisplay::setup2D( const Image *image, Bool batchable )
+{
+
+	if( m_batch2D && batchable && m_batch2DOpen && m_batch2DKeepOpen && m_batch2DImage == image )
+		return FALSE;		// what is waiting was set up for exactly this: add to it
+
+	flush2D();
+
+	m_batch2DImage = image;
+	m_batch2DKeepOpen = batchable;
+	m_batch2DOpen = TRUE;
+	m_2DRender->Reset();
+	return TRUE;
+
+}  // end setup2D
+
+// W3DDisplay::finish2D =======================================================
+/** The geometry is in.  Outside a batch - and for the calls whose renderer state nobody else can
+	* share - that means draw it now, which is what every one of these calls always did. */
+//=============================================================================
+void W3DDisplay::finish2D( void )
+{
+
+	if( m_batch2D == FALSE || m_batch2DKeepOpen == FALSE )
+		flush2D();
+
+}  // end finish2D
+
+// W3DDisplay::flush2D ========================================================
+/** Draw whatever is waiting in the 2D renderer. */
+//=============================================================================
+void W3DDisplay::flush2D( void )
+{
+
+	if( m_batch2DOpen )
+	{
+		m_2DRender->Render();
+		m_batch2DOpen = FALSE;
+		m_batch2DKeepOpen = FALSE;
+		m_batch2DImage = NULL;
+	}
+
+}  // end flush2D
+
+// W3DDisplay::beginBatch2D ===================================================
+//=============================================================================
+void W3DDisplay::beginBatch2D( void )
+{
+
+	flush2D();
+	m_batch2D = TRUE;
+
+}  // end beginBatch2D
+
+// W3DDisplay::endBatch2D =====================================================
+//=============================================================================
+void W3DDisplay::endBatch2D( void )
+{
+
+	flush2D();
+	m_batch2D = FALSE;
+
+}  // end endBatch2D
+
+// W3DDisplay::flushBatch2D ===================================================
+/** draw what the batch is holding, for a caller that is about to draw around it */
+//=============================================================================
+void W3DDisplay::flushBatch2D( void )
+{
+
+	flush2D();
+
+}  // end flushBatch2D
+
 // W3DDisplay::drawLine =======================================================
 /** draw a line on the display in pixel coordinates with the specified color */
 //=============================================================================
-void W3DDisplay::drawLine( Int startX, Int startY, 
-													 Int endX, Int endY, 
+void W3DDisplay::drawLine( Int startX, Int startY,
+													 Int endX, Int endY,
 													 Real lineWidth,
 													 UnsignedInt lineColor )
 {
-	
-	/// @todo we need to consider the efficiency of the 2D renderer
-	m_2DRender->Reset();
-	m_2DRender->Enable_Texturing( FALSE );
-	m_2DRender->Add_Line( Vector2( startX, startY ), Vector2( endX, endY ), 
+
+	if( setup2D( NULL, TRUE ) )
+		m_2DRender->Enable_Texturing( FALSE );
+	m_2DRender->Add_Line( Vector2( startX, startY ), Vector2( endX, endY ),
 												lineWidth, lineColor );
-	m_2DRender->Render();
+	finish2D();
 
 }  // end drawLine
 
@@ -2276,12 +2391,11 @@ void W3DDisplay::drawLine( Int startX, Int startY,
 													 UnsignedInt lineColor1,UnsignedInt lineColor2 )
 {
 	
-	/// @todo we need to consider the efficiency of the 2D renderer
-	m_2DRender->Reset();
-	m_2DRender->Enable_Texturing( FALSE );
-	m_2DRender->Add_Line( Vector2( startX, startY ), Vector2( endX, endY ), 
+	if( setup2D( NULL, TRUE ) )
+		m_2DRender->Enable_Texturing( FALSE );
+	m_2DRender->Add_Line( Vector2( startX, startY ), Vector2( endX, endY ),
 												lineWidth, lineColor1, lineColor2 );
-	m_2DRender->Render();
+	finish2D();
 
 }  // end drawLine
 
@@ -2324,16 +2438,14 @@ void W3DDisplay::drawOpenRect( Int startX, Int startY, Int width, Int height,
 	}
 	else
 	{
-		/// @todo we need to consider the efficiency of the 2D renderer
-		m_2DRender->Reset();		
-		m_2DRender->Enable_Texturing( FALSE );
-		
-		m_2DRender->Add_Outline( RectClass( startX, startY, 
-																				startX + width, startY + height ), 
+		if( setup2D( NULL, TRUE ) )
+			m_2DRender->Enable_Texturing( FALSE );
+
+		m_2DRender->Add_Outline( RectClass( startX, startY,
+																				startX + width, startY + height ),
 														 lineWidth, lineColor );
 
-		// render it now!
-		m_2DRender->Render();
+		finish2D();
 	}
 
 }  // end drawOpenRect
@@ -2344,15 +2456,13 @@ void W3DDisplay::drawFillRect( Int startX, Int startY, Int width, Int height,
 															 UnsignedInt color )
 {
 
-	/// @todo we need to consider the efficiency of the 2D renderer
-	m_2DRender->Reset();		
-	m_2DRender->Enable_Texturing( FALSE );
-	m_2DRender->Add_Rect( RectClass( startX, startY, 
-																	 startX + width, startY + height ), 
+	if( setup2D( NULL, TRUE ) )
+		m_2DRender->Enable_Texturing( FALSE );
+	m_2DRender->Add_Rect( RectClass( startX, startY,
+																	 startX + width, startY + height ),
 												0, 0, color );
 
-	// render it now!
-	m_2DRender->Render();
+	finish2D();
 
 }  // end drawFillRect
 
@@ -2362,8 +2472,8 @@ void W3DDisplay::drawRectClock(Int startX, Int startY, Int width, Int height, In
 	if(percent < 1 || percent > 100)
 		return;
 
-	m_2DRender->Reset();		
-	m_2DRender->Enable_Texturing( FALSE );
+	if( setup2D( NULL, TRUE ) )
+		m_2DRender->Enable_Texturing( FALSE );
 
 // The rectanges are numberd as follows
 //(x,y)	|---------|
@@ -2508,8 +2618,7 @@ void W3DDisplay::drawRectClock(Int startX, Int startY, Int width, Int height, In
 		}
 	}
 
-	// render it now!
-	m_2DRender->Render();
+	finish2D();
 
 }
 
@@ -2526,8 +2635,8 @@ void W3DDisplay::drawRemainingRectClock(Int startX, Int startY, Int width, Int h
 	if( percent < 0 || percent > 99 )
 		return;
 
-	m_2DRender->Reset();		
-	m_2DRender->Enable_Texturing( FALSE );
+	if( setup2D( NULL, TRUE ) )
+		m_2DRender->Enable_Texturing( FALSE );
 
 // The rectanges are numbered as follows
 //(x,y)	|---------|
@@ -2682,13 +2791,12 @@ void W3DDisplay::drawRemainingRectClock(Int startX, Int startY, Int width, Int h
 
 			//Draw the last part of the 2nd half of rectangle #4
 			Real percentDraw = (Real)( percent - 88 ) / 12;
-			m_2DRender->Add_Tri( Vector2( midX, midY ), Vector2( midX, startY ), Vector2( startX + halfWidth * percentDraw, startY ), 
+			m_2DRender->Add_Tri( Vector2( midX, midY ), Vector2( midX, startY ), Vector2( startX + halfWidth * percentDraw, startY ),
 													 Vector2( 0, 0 ), Vector2( 0, 0 ), Vector2( 0, 0 ), color );
 		}
 	}
 
-	// render it now!
-	m_2DRender->Render();
+	finish2D();
 }
 
 
@@ -2712,36 +2820,42 @@ void W3DDisplay::drawImage( const Image *image, Int startX, Int startY,
 
 	const Region2D *uv = image->getUV();
 
-	m_2DRender->Reset();
-	m_2DRender->Enable_Texturing( TRUE );
-
 	Bool doAlphaReset=FALSE;
 
-	///@todo: Why are we alpha blending all images?  Reduces our fillrate. -MW
-	switch (mode)
+	//
+	// only the plain alpha mode - what nearly every image is drawn in - can share a batch: the
+	// others leave the renderer in a state of their own and have to put it back afterwards.
+	//
+	if( setup2D( image, mode == DRAW_IMAGE_ALPHA ) )
 	{
-		case DRAW_IMAGE_ALPHA:	//nothing to do since alpha is the default state
-			break;
-		case DRAW_IMAGE_GRAYSCALE:
-			m_2DRender->Enable_Grayscale(true);
-			break;
-		case DRAW_IMAGE_ADDITIVE:
-			m_2DRender->Enable_Additive(true);
-			doAlphaReset = TRUE;
-			break;
-		case DRAW_IMAGE_SOLID:
-			m_2DRender->Enable_Additive(false);
-			m_2DRender->Enable_Alpha(false);
-			doAlphaReset = TRUE;
-		default:
-			break;
-	}
+		m_2DRender->Enable_Texturing( TRUE );
 
-	// if we have raw texture data we will use it, otherwise we are referencing filenames
-	if( BitTest( image->getStatus(), IMAGE_STATUS_RAW_TEXTURE ) )
-		m_2DRender->Set_Texture( (TextureClass *)(image->getRawTextureData()) );
-	else
-		m_2DRender->Set_Texture( image->getFilename().str() );
+		///@todo: Why are we alpha blending all images?  Reduces our fillrate. -MW
+		switch (mode)
+		{
+			case DRAW_IMAGE_ALPHA:	//nothing to do since alpha is the default state
+				break;
+			case DRAW_IMAGE_GRAYSCALE:
+				m_2DRender->Enable_Grayscale(true);
+				break;
+			case DRAW_IMAGE_ADDITIVE:
+				m_2DRender->Enable_Additive(true);
+				doAlphaReset = TRUE;
+				break;
+			case DRAW_IMAGE_SOLID:
+				m_2DRender->Enable_Additive(false);
+				m_2DRender->Enable_Alpha(false);
+				doAlphaReset = TRUE;
+			default:
+				break;
+		}
+
+		// if we have raw texture data we will use it, otherwise we are referencing filenames
+		if( BitTest( image->getStatus(), IMAGE_STATUS_RAW_TEXTURE ) )
+			m_2DRender->Set_Texture( (TextureClass *)(image->getRawTextureData()) );
+		else
+			m_2DRender->Set_Texture( image->getFilename().str() );
+	}
 
 	RectClass screen_rect(startX,startY,endX,endY);
 	RectClass uv_rect(uv->lo.x,uv->lo.y,uv->hi.x,uv->hi.y);
@@ -2856,12 +2970,15 @@ void W3DDisplay::drawImage( const Image *image, Int startX, Int startY,
 
 	}  // end else
 
-	m_2DRender->Render();
+	finish2D();
 
 	//reset to default states for next time this method is called.
-	m_2DRender->Enable_Grayscale(false);	//never leave it in this mode
-	if (doAlphaReset)
-		m_2DRender->Enable_Alpha(true);
+	if( mode != DRAW_IMAGE_ALPHA )
+	{
+		m_2DRender->Enable_Grayscale(false);	//never leave it in this mode
+		if (doAlphaReset)
+			m_2DRender->Enable_Alpha(true);
+	}
 
 }  // end drawImage
 
@@ -2926,12 +3043,12 @@ void W3DDisplay::drawVideoBuffer( VideoBuffer *buffer, Int startX, Int startY, I
 {
 	W3DVideoBuffer *vbuffer = (W3DVideoBuffer*) buffer;
 
-	m_2DRender->Reset();
+	setup2D( NULL, FALSE );
 	m_2DRender->Enable_Texturing( TRUE );
 	m_2DRender->Set_Texture( vbuffer->texture() );
 	m_2DRender->Add_Quad( RectClass( startX, startY, endX, endY ),
 												vbuffer->Rect( 0, 0, 1, 1) );
-	m_2DRender->Render();
+	finish2D();
 
 }
 

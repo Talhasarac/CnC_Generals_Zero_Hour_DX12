@@ -441,9 +441,34 @@ void W3DInGameUI::draw( void )
 	if (!g_UT_startTiming)
 #endif
 
+#ifdef DEBUG_LOGGING
+	//
+	// The interface's own half of a frame, split again: the overlays and strips this class draws
+	// over the world, and the window system's repaint of the control bar and every dialog.
+	//
+	extern Real TheUIPostDrawMS;
+	extern Real TheWindowRepaintMS;
+	Int64 tPostStart, tPostEnd, tWinEnd, freq;
+	QueryPerformanceCounter( (LARGE_INTEGER *)&tPostStart );
+#endif
+
 	postDraw();
 
+#ifdef DEBUG_LOGGING
+	QueryPerformanceCounter( (LARGE_INTEGER *)&tPostEnd );
+#endif
+
 	TheWindowManager->winRepaint();
+
+#ifdef DEBUG_LOGGING
+	QueryPerformanceCounter( (LARGE_INTEGER *)&tWinEnd );
+	QueryPerformanceFrequency( (LARGE_INTEGER *)&freq );
+	if( freq > 0 )
+	{
+		TheUIPostDrawMS = (Real)((double)(tPostEnd - tPostStart) * 1000.0 / (double)freq);
+		TheWindowRepaintMS = (Real)((double)(tWinEnd - tPostEnd) * 1000.0 / (double)freq);
+	}
+#endif
 
 	//
 	// The clock/rate plate goes on last, after every window has painted. In postDraw with the rest

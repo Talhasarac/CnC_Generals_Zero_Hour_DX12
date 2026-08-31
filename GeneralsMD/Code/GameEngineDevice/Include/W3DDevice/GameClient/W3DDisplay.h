@@ -116,8 +116,13 @@ public:
 													Int endX, Int endY, Color color = 0xFFFFFFFF, DrawImageMode mode=DRAW_IMAGE_ALPHA);
 
 	/// draw a video buffer fit within the screen coordinates
-	virtual void drawVideoBuffer( VideoBuffer *buffer, Int startX, Int startY, 
+	virtual void drawVideoBuffer( VideoBuffer *buffer, Int startX, Int startY,
 													Int endX, Int endY );
+
+	/// gather the 2D calls made until endBatch2D() into as few draw calls as their state allows
+	virtual void beginBatch2D( void );
+	virtual void endBatch2D( void );
+	virtual void flushBatch2D( void );
 
 	virtual VideoBuffer*	createVideoBuffer( void ) ;							///< Create a video buffer that can be used for this display
 
@@ -164,6 +169,22 @@ protected:
 	Byte m_initialized;												///< TRUE when system is initialized
 	LightClass *m_myLight[LightEnvironmentClass::MAX_LIGHTS];										///< light hack for now
 	Render2DClass *m_2DRender;								///< interface for common 2D functions
+
+	//
+	// The 2D batch (see beginBatch2D).  m_2DRender is the one renderer every 2D call goes through,
+	// so a batch is nothing more than not drawing it until something needs it drawn: the state the
+	// waiting geometry was set up for is kept here and the next call either matches it and adds to
+	// it, or draws it first.
+	//
+	Bool m_batch2D;														///< between beginBatch2D() and endBatch2D()
+	Bool m_batch2DOpen;												///< m_2DRender holds geometry nobody has drawn yet
+	Bool m_batch2DKeepOpen;										///< that geometry's state is one another call can share
+	const Image *m_batch2DImage;							///< the image it is drawn with, NULL for the untextured calls
+
+	Bool setup2D( const Image *image, Bool batchable );	///< set the renderer up, unless what is waiting can take this call
+	void finish2D( void );										///< draw what was added, unless a batch may still add to it
+	void flush2D( void );											///< draw whatever is waiting, now
+
 	IRegion2D m_clipRegion;									///< the clipping region for images
 	Bool m_isClippedEnabled;	///<used by 2D drawing operations to define clip re
 	Real m_averageFPS;		///<average fps over the last 30 frames.

@@ -3747,31 +3747,86 @@ static NameKeyType					theWorstModuleKey = NAMEKEY_INVALID;
 static const ThingTemplate *theWorstModuleThing = NULL;
 static Int								theModuleUpdateCount = 0;
 
+//
+// The worst single module names a hitch, not a cost: a frame where two thousand modules each take
+// a little is exactly as slow and has no worst.  So the sweep is also totalled by kind of module,
+// which is what says whether the frame went on AI, on weapons, or on something nobody suspects.
+// A linear scan over the kinds seen so far - there are a few dozen, not thousands - is cheaper
+// than a map and does not allocate inside the frame.
+//
+enum { MODULE_PROFILE_MAX = 96 };
+static NameKeyType	theModuleKindKey[ MODULE_PROFILE_MAX ];
+static Int64				theModuleKindTicks[ MODULE_PROFILE_MAX ];
+static Int					theModuleKindCount[ MODULE_PROFILE_MAX ];
+static Int					theModuleKindsUsed = 0;
+
 static void resetModuleProfile( void )
 {
 	theWorstModuleTicks = 0;
 	theWorstModuleKey = NAMEKEY_INVALID;
 	theWorstModuleThing = NULL;
 	theModuleUpdateCount = 0;
+	theModuleKindsUsed = 0;
+}
+
+static void addModuleProfile( NameKeyType key, Int64 ticks )
+{
+	for( Int at = 0; at < theModuleKindsUsed; at++ )
+	{
+		if( theModuleKindKey[ at ] == key )
+		{
+			theModuleKindTicks[ at ] += ticks;
+			theModuleKindCount[ at ]++;
+			return;
+		}
+	}
+
+	if( theModuleKindsUsed >= MODULE_PROFILE_MAX )
+		return;								// more kinds than the table holds: the top three are in it already
+
+	theModuleKindKey[ theModuleKindsUsed ] = key;
+	theModuleKindTicks[ theModuleKindsUsed ] = ticks;
+	theModuleKindCount[ theModuleKindsUsed ] = 1;
+	theModuleKindsUsed++;
 }
 
 static const char *getModuleProfileReport( void )
 {
-	static char report[ 256 ];
+	static char report[ 512 ];
+	Int64 freq = 0;
+	QueryPerformanceFrequency( (LARGE_INTEGER *)&freq );
+
 	if( theWorstModuleKey == NAMEKEY_INVALID )
 	{
 		sprintf( report, "%d updates", theModuleUpdateCount );
+		return report;
 	}
-	else
+
+	const Real worstMS = freq ? (Real)( (double)theWorstModuleTicks * 1000.0 / (double)freq ) : 0.0f;
+	Int used = sprintf( report, "%d updates, worst %s on %s %.1fms", theModuleUpdateCount,
+										 TheNameKeyGenerator->keyToName( theWorstModuleKey ).str(),
+										 theWorstModuleThing ? theWorstModuleThing->getName().str() : "<none>",
+										 worstMS );
+
+	// and the three kinds of module the sweep spent the most time in, whatever the worst one was
+	for( Int rank = 0; rank < 3; rank++ )
 	{
-		Int64 freq = 0;
-		QueryPerformanceFrequency( (LARGE_INTEGER *)&freq );
-		const Real worstMS = freq ? (Real)( (double)theWorstModuleTicks * 1000.0 / (double)freq ) : 0.0f;
-		sprintf( report, "%d updates, worst %s on %s %.1fms", theModuleUpdateCount,
-					 TheNameKeyGenerator->keyToName( theWorstModuleKey ).str(),
-					 theWorstModuleThing ? theWorstModuleThing->getName().str() : "<none>",
-					 worstMS );
+		Int best = -1;
+		for( Int at = 0; at < theModuleKindsUsed; at++ )
+			if( theModuleKindTicks[ at ] >= 0 && ( best < 0 || theModuleKindTicks[ at ] > theModuleKindTicks[ best ] ) )
+				best = at;
+
+		if( best < 0 )
+			break;
+
+		const Real ms = freq ? (Real)( (double)theModuleKindTicks[ best ] * 1000.0 / (double)freq ) : 0.0f;
+		used += sprintf( report + used, " | %s %dx/%.1f",
+										 TheNameKeyGenerator->keyToName( theModuleKindKey[ best ] ).str(),
+										 theModuleKindCount[ best ], ms );
+
+		theModuleKindTicks[ best ] = -1;			// taken; the next pass finds the next one down
 	}
+
 	return report;
 }
 #endif
@@ -3988,6 +4043,7 @@ void GameLogic::update( void )
 					QueryPerformanceCounter( (LARGE_INTEGER *)&profModuleEnd );
 					theModuleUpdateCount++;
 					const Int64 profModuleTicks = profModuleEnd - profModuleStart;
+					addModuleProfile( profModuleKey, profModuleTicks );
 					if( profModuleTicks > theWorstModuleTicks )
 					{
 						theWorstModuleTicks = profModuleTicks;

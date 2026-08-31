@@ -35,6 +35,9 @@ param(
 	[string] $Tag = "ai",
 	# map sizes to spread the batch over, in playable cells a side
 	[int[]] $MapCells = @(96, 128, 160),
+	# first seed of the batch. A change tuned against seeds 0..23 has to be confirmed on seeds it
+	# was not tuned on, or the number is a fit to twenty-four maps rather than a result
+	[int] $SeedStart = 0,
 	# where the game is; the default is this repo's own Run directory
 	[string] $RunDir = "$PSScriptRoot\GeneralsMD\Run",
 	# which executable in that directory to play. Two builds can sit side by side under different
@@ -60,8 +63,9 @@ $rows = @()
 
 for ($i = 0; $i -lt $Runs; $i++) {
 
+	$seed = $SeedStart + $i
 	$cells = $MapCells[$i % $MapCells.Count]
-	$prefix = "{0}_{1:d3}" -f $Tag, $i
+	$prefix = "{0}_{1:d3}" -f $Tag, $seed
 	$log = Join-Path $RunDir "$($prefix)DebugLogFile.txt"
 
 	# a stale log from an earlier batch would read as this run's result if the process died early
@@ -73,10 +77,10 @@ for ($i = 0; $i -lt $Runs; $i++) {
 	# running" and bails at once, so a batch cannot be measured while a copy of the game is open
 	$args = @(
 		"-headless", "-quickstart", "-noshellmap", "-observer", "-multiInstance",
-		"-randommap", $i, $Players, $cells,
+		"-randommap", $seed, $Players, $cells,
 		"-autoskirmish", $Players,
 		"-aidiff", $Difficulty,
-		"-seed", $i,
+		"-seed", $seed,
 		"-maxframes", $MaxFrames,
 		"-logPrefix", $prefix
 	)
@@ -84,20 +88,20 @@ for ($i = 0; $i -lt $Runs; $i++) {
 	if ($Difficulty2) { $args += "-aidiff2"; $args += $Difficulty2 }
 	if ($ExtraArgs.Count) { $args += $ExtraArgs }
 
-	Write-Host ("[{0,3}/{1}] seed {2} cells {3} ... " -f ($i + 1), $Runs, $i, $cells) -NoNewline
+	Write-Host ("[{0,3}/{1}] seed {2} cells {3} ... " -f ($i + 1), $Runs, $seed, $cells) -NoNewline
 	$sw = [Diagnostics.Stopwatch]::StartNew()
 	$proc = Start-Process -FilePath $exe -ArgumentList $args -WorkingDirectory $RunDir -PassThru
 	if (-not $proc.WaitForExit($TimeoutMinutes * 60 * 1000)) {
 		$proc.Kill()
 		Write-Host "KILLED (wedged past $TimeoutMinutes min)"
-		$rows += [pscustomobject]@{ Seed = $i; Cells = $cells; Why = "wedged"; Frames = 0; Wall = $sw.Elapsed.TotalSeconds; Slots = @{}; Pf = $null }
+		$rows += [pscustomobject]@{ Seed = $seed; Cells = $cells; Why = "wedged"; Frames = 0; Wall = $sw.Elapsed.TotalSeconds; Slots = @{}; Pf = $null }
 		continue
 	}
 	$sw.Stop()
 
 	if (-not (Test-Path $log)) {
 		Write-Host "NO LOG (exit $($proc.ExitCode))"
-		$rows += [pscustomobject]@{ Seed = $i; Cells = $cells; Why = "no log"; Frames = 0; Wall = $sw.Elapsed.TotalSeconds; Slots = @{}; Pf = $null }
+		$rows += [pscustomobject]@{ Seed = $seed; Cells = $cells; Why = "no log"; Frames = 0; Wall = $sw.Elapsed.TotalSeconds; Slots = @{}; Pf = $null }
 		continue
 	}
 
@@ -146,7 +150,7 @@ for ($i = 0; $i -lt $Runs; $i++) {
 	$winnerText = if ($null -ne $winner) { "player $winner" } else { "no winner" }
 	Write-Host ("{0}, {1}, frame {2}, {3:n0}s" -f $why, $winnerText, $frames, $sw.Elapsed.TotalSeconds)
 
-	$rows += [pscustomobject]@{ Seed = $i; Cells = $cells; Why = $why; Frames = $frames; Wall = $sw.Elapsed.TotalSeconds; Slots = $slots; Pf = $pf }
+	$rows += [pscustomobject]@{ Seed = $seed; Cells = $cells; Why = $why; Frames = $frames; Wall = $sw.Elapsed.TotalSeconds; Slots = $slots; Pf = $pf }
 }
 
 # ---------------------------------------------------------------------------------------------
