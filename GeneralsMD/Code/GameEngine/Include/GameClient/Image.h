@@ -167,6 +167,14 @@ inline void Image::setRawTextureData( void *data ) { m_rawTextureData = data; }
 inline const void *Image::getRawTextureData( void ) const { return m_rawTextureData; }
 inline UnsignedInt Image::getStatus( void ) const { return m_status; }
 
+//-------------------------------------------------------------------------------------------------
+/** The same piece of texture, drawn back to front: a new Image over the same page, with the run of
+	* its UV rect reversed left to right and everything else carried across.  Nothing is copied out
+	* of the page, so this costs one small object - and the original is left as it was, since
+	* whoever owns it is still drawing from it.  The caller owns what comes back. */
+//-------------------------------------------------------------------------------------------------
+extern Image *newMirroredImage( const Image *source );
+
 // EXTERNALS //////////////////////////////////////////////////////////////////////////////////////
 extern ImageCollection *TheMappedImageCollection;  ///< mapped images
 

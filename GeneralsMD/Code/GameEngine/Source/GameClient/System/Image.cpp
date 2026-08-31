@@ -190,6 +190,36 @@ UnsignedInt Image::clearStatus( UnsignedInt bit )
 
 }  // end clearStatus
 
+//-------------------------------------------------------------------------------------------------
+/** The same piece of texture, drawn back to front.  Only the run of the UV rect is reversed - the
+	* page underneath is untouched and shared - so a mirrored copy costs one small object and the
+	* original goes on being drawn by whoever owns it. */
+//-------------------------------------------------------------------------------------------------
+Image *newMirroredImage( const Image *source )
+{
+	Image *copy = newInstance( Image );
+
+	copy->setName( source->getName() );
+	copy->setFilename( source->getFilename() );
+	copy->setTextureWidth( source->getTextureSize()->x );
+	copy->setTextureHeight( source->getTextureSize()->y );
+
+	ICoord2D size = *source->getImageSize();
+	copy->setImageSize( &size );
+
+	copy->setRawTextureData( (void *)source->getRawTextureData() );
+	copy->setStatus( source->getStatus() );
+
+	Region2D uv = *source->getUV();
+	const Real left = uv.lo.x;
+	uv.lo.x = uv.hi.x;
+	uv.hi.x = left;
+	copy->setUV( &uv );
+
+	return copy;
+
+}  // end newMirroredImage
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////

@@ -828,6 +828,16 @@ public:
 	Color getUpgradeBorderColor( void ){return m_commandButtonBorderUpgradeColor;}
 	void updateBorderColor( Color color) {m_commandBarBorderColor = color;	}
 
+	/** The tray one of the general's power shortcuts stands in, down in the corner - this side's own
+		* copy of it, taken off the bar itself rather than named, so a mod's bar brings its own. */
+	const Image *getSpecialPowerTrayImage( void );
+
+	/** That tray at the size the bar draws it, the hole in it the cameo fills, and the step a row of
+		* them runs at - measured off the loaded bar, so a borrowed tray is the size of the powers'
+		* own at any resolution.  Any out-parameter may be NULL; FALSE when there is no bar. */
+	Bool getSpecialPowerTrayLayout( ICoord2D *traySize, ICoord2D *cameoSize,
+																	ICoord2D *cameoOffset, Int *columnStep );
+
 	/// set the command data into the button
 	void setControlCommand( GameWindow *button, const CommandButton *commandButton );
 

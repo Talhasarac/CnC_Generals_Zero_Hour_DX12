@@ -55,6 +55,7 @@
 #include "Common/Recorder.h"
 #include "Common/RadarShroudCache.h"
 #include "GameClient/Gadget.h"
+#include "GameClient/Image.h"
 #include "GameNetwork/NetworkUtil.h"
 #include "GameNetwork/NetCommandList.h"
 #include "GameNetwork/NetCommandWrapperList.h"
@@ -6884,4 +6885,169 @@ TEST(every_ai_rung_is_named_the_same_way_as_every_other)
 	for (Int a = 0; a < numRungs; ++a)
 		for (Int b = a + 1; b < numRungs; ++b)
 			CHECK( wcscmp( SlotStateName( rungs[a] ).str(), SlotStateName( rungs[b] ).str() ) != 0 );
+}
+/* Six is what the strip shows before the rest of the queue folds into its "+N".  It used to be
+	 sixteen, which at a busy war factory ran the cameos most of the way across the screen and buried
+	 the map under them. */
+TEST(the_production_strip_folds_a_long_queue_into_its_overflow)
+{
+	CHECK_EQ( 6, (Int)InGameUI::PRODUCTION_STRIP_ROW_MAX );
+
+	// while watching, eight rows share the screen at once, so a row there is never the longer one -
+	// and neither cap may outrun the slots the strip has room to remember
+	CHECK( (Int)InGameUI::PRODUCTION_STRIP_WATCH_MAX <= (Int)InGameUI::PRODUCTION_STRIP_ROW_MAX );
+}
+
+/* Every cameo in the strip stands in the tray the general's powers stand in, down in the corner,
+	 and it stands in it at the size that bar draws it - stretched, the tray's rail and inner frame
+	 collapse into a coloured smudge and it stops reading as that bar at all.  So the strip does not
+	 get to pick its own numbers: it borrows that bar's, and these are the ones that make the borrowed
+	 art come out right.  Sliding the cameo out of the box painted for it, or over the rail, is the
+	 way this goes wrong quietly - it still draws, it just looks like a mistake. */
+TEST(a_queue_cameo_sits_in_the_general_power_tray_the_way_that_bar_sits_in_it)
+{
+	// the cameo is inside its tray, both ways, art and all
+	CHECK( (Int)InGameUI::PRODUCTION_STRIP_TRAY_X >= 0 );
+	CHECK( (Int)InGameUI::PRODUCTION_STRIP_TRAY_Y >= 0 );
+	CHECK( (Int)InGameUI::PRODUCTION_STRIP_TRAY_X + (Int)InGameUI::PRODUCTION_STRIP_QUEUE_W
+					<= (Int)InGameUI::PRODUCTION_STRIP_TRAY_W );
+	CHECK( (Int)InGameUI::PRODUCTION_STRIP_TRAY_Y + (Int)InGameUI::PRODUCTION_STRIP_QUEUE_H
+					<= (Int)InGameUI::PRODUCTION_STRIP_TRAY_H );
+
+	//
+	// The overlap is that bar's own: it steps 35 between slots 41 tall, so consecutive trays cover
+	// six of each other and a row of them is one run of metal rather than a line of loose boxes.
+	//
+	CHECK_EQ( (Int)InGameUI::PRODUCTION_STRIP_TRAY_H - (Int)InGameUI::PRODUCTION_STRIP_BAR_STEP,
+						(Int)InGameUI::PRODUCTION_STRIP_TRAY_OVER );
+
+	// and it never eats a whole tray: the step has to stay positive on both axes or the row stacks
+	CHECK( (Int)InGameUI::PRODUCTION_STRIP_TRAY_OVER < (Int)InGameUI::PRODUCTION_STRIP_TRAY_W );
+	CHECK( (Int)InGameUI::PRODUCTION_STRIP_TRAY_OVER < (Int)InGameUI::PRODUCTION_STRIP_TRAY_H );
+
+	//
+	// Six trays at that step, plus the tray the last one still needs the rest of, is what the row
+	// costs across - and that has to fit inside the 800 the whole layout is written in, or the strip
+	// runs off the side of the screen before its overflow count is ever reached.
+	//
+	const Int step = (Int)InGameUI::PRODUCTION_STRIP_TRAY_W - (Int)InGameUI::PRODUCTION_STRIP_TRAY_OVER;
+	const Int rowWidth = ( (Int)InGameUI::PRODUCTION_STRIP_ROW_MAX - 1 ) * step
+												+ (Int)InGameUI::PRODUCTION_STRIP_TRAY_W;
+	CHECK( rowWidth < 800 );
+}
+
+/* Rows of trays stack by the same overlap the trays close up by sideways, so a pile of rows reads
+	 as one sheet of metal.  The general's power bar itself is the check: it steps 35 between 41-tall
+	 slots, and the step has to come out of the tray height as a fraction so it survives a bar the
+	 loader gave a different size to - twice the tray is twice the step, never twice the tray less
+	 the same six pixels. */
+TEST(a_row_of_trays_stacks_on_the_row_above_it_by_that_bars_own_step)
+{
+	CHECK_EQ( (Int)InGameUI::PRODUCTION_STRIP_BAR_STEP,
+						InGameUI::stripRowStep( (Int)InGameUI::PRODUCTION_STRIP_TRAY_H ) );
+
+	// twice the size, twice the step - the overlap is a fraction of the tray, not a constant
+	CHECK_EQ( 2 * (Int)InGameUI::PRODUCTION_STRIP_BAR_STEP,
+						InGameUI::stripRowStep( 2 * (Int)InGameUI::PRODUCTION_STRIP_TRAY_H ) );
+
+	// and a step always shorter than the tray it steps, or the rows separate instead of overlapping
+	CHECK( InGameUI::stripRowStep( (Int)InGameUI::PRODUCTION_STRIP_TRAY_H )
+					< (Int)InGameUI::PRODUCTION_STRIP_TRAY_H );
+	CHECK( InGameUI::stripRowStep( (Int)InGameUI::PRODUCTION_STRIP_TRAY_H ) > 0 );
+
+	//
+	// the superweapon strip stands in the same trays, three rows of six of them, and that pile has
+	// to fit under the corner clock plate rather than run off the bottom of the 800x600 it is
+	// written in
+	//
+	const Int rows = (Int)InGameUI::SUPERWEAPON_STRIP_ROWS;
+	const Int pileHeight = ( rows - 1 ) * InGameUI::stripRowStep( (Int)InGameUI::PRODUCTION_STRIP_TRAY_H )
+													+ (Int)InGameUI::PRODUCTION_STRIP_TRAY_H;
+	CHECK( pileHeight < 600 / 2 );
+
+	const Int step = (Int)InGameUI::PRODUCTION_STRIP_TRAY_W - (Int)InGameUI::PRODUCTION_STRIP_TRAY_OVER;
+	const Int rowWidth = ( (Int)InGameUI::SUPERWEAPON_STRIP_COLS - 1 ) * step
+												+ (Int)InGameUI::PRODUCTION_STRIP_TRAY_W;
+	CHECK( rowWidth < 800 );
+}
+
+/* Buildings going up on the map are not in anybody's queue - they are objects standing on the
+	 ground with a percentage on them - so they get their own row, and it is drawn above the queue:
+	 the strip reads top to bottom as what is being raised and what is being turned out.  Both are
+	 rows of the same array, so the later of them has to be inside it. */
+TEST(the_buildings_going_up_have_their_own_row_above_the_queue)
+{
+	CHECK( (Int)InGameUI::PRODUCTION_ROW_SITES < (Int)InGameUI::PRODUCTION_ROW_QUEUE );
+	CHECK( (Int)InGameUI::PRODUCTION_ROW_SITES >= 0 );
+	CHECK( (Int)InGameUI::PRODUCTION_ROW_QUEUE < (Int)InGameUI::PRODUCTION_STRIP_ROWS );
+}
+
+/* The building you have selected does not get a row of its own: its items lead the queue row, so
+	 the front of the strip is what the thing you are looking at is making and the rest of the base
+	 follows it.  Inside either block the soonest to finish is still first, and a tie never moves -
+	 an item only goes in front of one it beats, so a base full of identical barracks does not
+	 shuffle from frame to frame. */
+TEST(the_selected_buildings_items_lead_the_queue_row)
+{
+	// a selected item passes anything that is not selected, however long it has left
+	CHECK( InGameUI::stripSlotGoesBefore( TRUE, 9000, FALSE, 1 ) );
+	// and nothing that is not selected ever passes one
+	CHECK( !InGameUI::stripSlotGoesBefore( FALSE, 1, TRUE, 9000 ) );
+
+	// inside a block, soonest first
+	CHECK( InGameUI::stripSlotGoesBefore( FALSE, 100, FALSE, 200 ) );
+	CHECK( !InGameUI::stripSlotGoesBefore( FALSE, 200, FALSE, 100 ) );
+	CHECK( InGameUI::stripSlotGoesBefore( TRUE, 100, TRUE, 200 ) );
+	CHECK( !InGameUI::stripSlotGoesBefore( TRUE, 200, TRUE, 100 ) );
+
+	// a tie holds its place - in both blocks
+	CHECK( !InGameUI::stripSlotGoesBefore( FALSE, 100, FALSE, 100 ) );
+	CHECK( !InGameUI::stripSlotGoesBefore( TRUE, 100, TRUE, 100 ) );
+}
+
+/* That bar grows leftward out of the corner, so the heavy rail of its tray is on the right hand
+	 edge of the artwork.  A row running rightward from the left of the screen wants that rail on the
+	 other side, so the strip draws the tray mirrored - and it mirrors it in the UV rect alone, over
+	 the same texture page, rather than shipping a second copy of the art the other way round.  Every
+	 other field has to come across with it or the copy draws the wrong piece of the page at the wrong
+	 size, and the original has to be left alone, because the bar in the corner is still drawing it. */
+TEST(a_mirrored_image_is_the_same_piece_of_texture_the_other_way_round)
+{
+	Image *source = newInstance( Image );
+	source->setName( AsciiString( "SATraySmall" ) );
+	source->setFilename( AsciiString( "SAControlBar512_001.tga" ) );
+	source->setTextureWidth( 512 );
+	source->setTextureHeight( 512 );
+
+	ICoord2D size = { 60, 56 };
+	source->setImageSize( &size );
+
+	Region2D uv;
+	uv.lo.x = 413.0f / 512.0f;
+	uv.lo.y = 1.0f / 512.0f;
+	uv.hi.x = 473.0f / 512.0f;
+	uv.hi.y = 57.0f / 512.0f;
+	source->setUV( &uv );
+
+	Image *mirrored = newMirroredImage( source );
+
+	// the whole point: the horizontal run of the UV rect is reversed
+	CHECK_NEAR( 473.0f / 512.0f, mirrored->getUV()->lo.x, 0.0001f );
+	CHECK_NEAR( 413.0f / 512.0f, mirrored->getUV()->hi.x, 0.0001f );
+
+	// and nothing else about it moves
+	CHECK_NEAR( 1.0f / 512.0f, mirrored->getUV()->lo.y, 0.0001f );
+	CHECK_NEAR( 57.0f / 512.0f, mirrored->getUV()->hi.y, 0.0001f );
+	CHECK_STR( "SAControlBar512_001.tga", mirrored->getFilename().str() );
+	CHECK_EQ( 512, mirrored->getTextureSize()->x );
+	CHECK_EQ( 512, mirrored->getTextureSize()->y );
+	CHECK_EQ( 60, mirrored->getImageWidth() );
+	CHECK_EQ( 56, mirrored->getImageHeight() );
+
+	// the tray the control bar owns is left exactly as it was found
+	CHECK_NEAR( 413.0f / 512.0f, source->getUV()->lo.x, 0.0001f );
+	CHECK_NEAR( 473.0f / 512.0f, source->getUV()->hi.x, 0.0001f );
+
+	mirrored->deleteInstance();
+	source->deleteInstance();
 }

@@ -2659,6 +2659,88 @@ Bool ControlBar::clearSpecialPowerShortcutRow( void )
 }  // end clearSpecialPowerShortcutRow
 
 //-------------------------------------------------------------------------------------------------
+/** The tray a general's power shortcut stands in: the background of one of that bar's slots, taken
+	* off the slot itself.  Each side ships its own bar and its own tray art, so reading it here is
+	* what keeps anything that borrows the look - the production strip does - on the right side's
+	* metal without naming a single image.
+	*
+	* NULL until that bar exists, and it never exists for a side whose template has no shortcuts. */
+//-------------------------------------------------------------------------------------------------
+const Image *ControlBar::getSpecialPowerTrayImage( void )
+{
+	if( m_specialPowerShortcutParent == NULL || m_specialPowerShortcutButtonParents[ 0 ] == NULL )
+		return NULL;
+
+	return m_specialPowerShortcutButtonParents[ 0 ]->winGetEnabledImage( 0 );
+
+}  // end getSpecialPowerTrayImage
+
+//-------------------------------------------------------------------------------------------------
+/** That tray at the size the bar itself draws it, the hole in its artwork the cameo fills, and the
+	* step a row of them runs at.  All of it read back off the loaded bar, which the loader has
+	* already scaled to the running resolution - so nothing here is in 800x600 pixels, and anything
+	* borrowing the look comes out the size of the powers themselves at every resolution.
+	*
+	* Any of the four out-parameters may be NULL.  FALSE when there is no bar to measure. */
+//-------------------------------------------------------------------------------------------------
+Bool ControlBar::getSpecialPowerTrayLayout( ICoord2D *traySize, ICoord2D *cameoSize,
+																						ICoord2D *cameoOffset, Int *columnStep )
+{
+	if( m_specialPowerShortcutParent == NULL || m_specialPowerShortcutButtonParents[ 0 ] == NULL )
+		return FALSE;
+
+	Int slotWidth, slotHeight;
+	m_specialPowerShortcutButtonParents[ 0 ]->winGetSize( &slotWidth, &slotHeight );
+	if( slotWidth <= 0 || slotHeight <= 0 )
+		return FALSE;
+
+	//
+	// where the cameo goes is the hole in the tray artwork, not a guess: SATraySmall is the 60x56
+	// patch at 413,1 of SAControlBar512_001.tga and its transparent middle runs x 4..48, y 9..46.
+	// Those are fractions of the art, so they hold at whatever size the loader gave the tray
+	//
+	const Int ART_WIDTH = 60;
+	const Int ART_HEIGHT = 56;
+	const Int HOLE_X = 4;
+	const Int HOLE_Y = 9;
+	const Int HOLE_WIDTH = 45;
+	const Int HOLE_HEIGHT = 38;
+
+	//
+	// the tray's right edge is the thick one - eleven of the artwork's sixty columns.  A row set
+	// side by side shows that slab between every pair of cameos, so each slot after the rightmost
+	// slides eight (of the tray's authored forty-eight) back under its neighbour, and the rightmost
+	// is drawn last so it covers the slab rather than being covered by it
+	//
+	const Int TRAY_WIDTH = 48;
+	const Int OVERLAP = 8;
+
+	if( traySize )
+	{
+		traySize->x = slotWidth;
+		traySize->y = slotHeight;
+	}
+
+	if( cameoSize )
+	{
+		cameoSize->x = ( slotWidth * HOLE_WIDTH + ART_WIDTH / 2 ) / ART_WIDTH;
+		cameoSize->y = ( slotHeight * HOLE_HEIGHT + ART_HEIGHT / 2 ) / ART_HEIGHT;
+	}
+
+	if( cameoOffset )
+	{
+		cameoOffset->x = ( slotWidth * HOLE_X + ART_WIDTH / 2 ) / ART_WIDTH;
+		cameoOffset->y = ( slotHeight * HOLE_Y + ART_HEIGHT / 2 ) / ART_HEIGHT;
+	}
+
+	if( columnStep )
+		*columnStep = slotWidth - ( slotWidth * OVERLAP ) / TRAY_WIDTH;
+
+	return TRUE;
+
+}  // end getSpecialPowerTrayLayout
+
+//-------------------------------------------------------------------------------------------------
 /** How many of the slots carry a power right now.  populateSpecialPowerShortcut() fills them from
 	* the corner and hides the rest, so the ones in use are always the first n - and n is not
 	* m_currentlyUsedSpecialPowersButtons, which is how many the general's command set holds in all. */
@@ -4279,27 +4361,10 @@ void ControlBar::arrangeSpecialPowerShortcutGrid( void )
 	if( rowStep <= 0 || slotWidth <= 0 || slotHeight <= 0 )
 		return;
 
-	//
-	// where the cameo goes is the hole in the tray artwork, not a guess: SATraySmall is the 60x56
-	// patch at 413,1 of SAControlBar512_001.tga and its transparent middle runs x 4..48, y 9..46.
-	// Those are fractions of the art, so they hold at whatever size the loader gave the tray
-	//
-	const Int ART_WIDTH = 60;
-	const Int ART_HEIGHT = 56;
-	const Int HOLE_X = 4;
-	const Int HOLE_Y = 9;
-	const Int HOLE_WIDTH = 45;
-	const Int HOLE_HEIGHT = 38;
-
-	//
-	// the tray's right edge is the thick one - eleven of the artwork's sixty columns.  A row set
-	// side by side shows that slab between every pair of cameos, so each slot after the rightmost
-	// slides eight (of the tray's authored forty-eight) back under its neighbour, and the rightmost
-	// is drawn last so it covers the slab rather than being covered by it
-	//
-	const Int TRAY_WIDTH = 48;
-	const Int OVERLAP = 8;
-	const Int columnStep = slotWidth - ( slotWidth * OVERLAP ) / TRAY_WIDTH;
+	ICoord2D cameoSize, cameoOffset;
+	Int columnStep;
+	if( getSpecialPowerTrayLayout( NULL, &cameoSize, &cameoOffset, &columnStep ) == FALSE )
+		return;
 
 	const Int columns = MIN( m_currentlyUsedSpecialPowersButtons, (Int)SPECIAL_POWER_SHORTCUT_COLS );
 	const Int widen = ( columns - 1 ) * columnStep;
@@ -4335,10 +4400,8 @@ void ControlBar::arrangeSpecialPowerShortcutGrid( void )
 		// the cameo fills that hole exactly, rounded to the nearest pixel.  The layout put it at
 		// 1,7 39x27, which sat over the frame on the left and left a gap under it
 		//
-		button->winSetSize( ( slotWidth * HOLE_WIDTH + ART_WIDTH / 2 ) / ART_WIDTH,
-											 ( slotHeight * HOLE_HEIGHT + ART_HEIGHT / 2 ) / ART_HEIGHT );
-		button->winSetPosition( ( slotWidth * HOLE_X + ART_WIDTH / 2 ) / ART_WIDTH,
-														( slotHeight * HOLE_Y + ART_HEIGHT / 2 ) / ART_HEIGHT );
+		button->winSetSize( cameoSize.x, cameoSize.y );
+		button->winSetPosition( cameoOffset.x, cameoOffset.y );
 	}
 
 	//

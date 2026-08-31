@@ -586,16 +586,60 @@ public:  // ********************************************************************
 	// One cameo of the global production strip: which producer it belongs to, which entry of that
 	// producer's queue it is, and where it was drawn this frame.
 	//
-	enum { PRODUCTION_STRIP_ROW_MAX = 16 };	///< cameos one row will draw; the rest become a "+N"
+	enum { PRODUCTION_STRIP_ROW_MAX = 6 };	///< cameos one row will draw; the rest become a "+N"
 	enum { PRODUCTION_STRIP_WATCH_MAX = 5 };	///< and while watching, where eight rows share the screen
 	enum { PRODUCTION_STRIP_ROWS = 8 };			///< playing: the global row and the selected producer's row.
 																					///  watching: one row per player, so eight of them
+
+	//
+	// Which row is which while playing.  A lower number is drawn higher up the screen, so the
+	// buildings going up on the map stand above the queue.  The building you have selected does not
+	// get a row of its own - its items lead the queue row instead.  Rows nobody filled are closed up
+	// rather than left as a gap.
+	//
+	enum
+	{
+		PRODUCTION_ROW_SITES		= 0,	///< buildings a dozer or a worker is putting up
+		PRODUCTION_ROW_QUEUE		= 1		///< everything the whole base has queued
+	};
+
+	//
+	// A queue slot is one slot of the general's power bar down in the corner, measurement for
+	// measurement: that bar is where a tray of cameos already lives in this game, so the strip is
+	// built out of the same tray instead of inventing a second look for the same job.  Every number
+	// here is read off GenPowersShortcutBar*.wnd, in the 800x600 the rest of the strip is written in.
+	//
+	enum
+	{
+		PRODUCTION_STRIP_TRAY_W		= 48,	///< the tray, at the size that bar draws it - never stretched
+		PRODUCTION_STRIP_TRAY_H		= 41,
+		PRODUCTION_STRIP_TRAY_X		= 1,	///< where the cameo sits inside it
+		PRODUCTION_STRIP_TRAY_Y		= 7,
+		PRODUCTION_STRIP_QUEUE_W	= 39,	///< and how big it is there
+		PRODUCTION_STRIP_QUEUE_H	= 27,
+		PRODUCTION_STRIP_TRAY_OVER = 6,	///< that bar steps 35 between 41-tall slots: its trays overlap
+																		///  by six, and ours overlap by the same six on both axes
+		PRODUCTION_STRIP_BAR_STEP	= 35	///< the step itself, kept so the overlap can be checked against it
+	};
+
+	///< how far one row of trays stands below the row above it, for a tray of that height
+	static Int stripRowStep( Int trayHeight );
+
+	///< does an item go in front of one already in the row?  the selected building's items are a
+	///< block of their own at the head of it; inside a block, soonest finished first, ties keeping
+	///< the order they were met in so a base of identical barracks does not shuffle frame to frame
+	static Bool stripSlotGoesBefore( Bool leads, Int remaining,
+																	 Bool otherLeads, Int otherRemaining );
 	struct ProductionStripSlot
 	{
 		ObjectID			producer;						///< the building this item is queued on
 		Int						id;									///< a unit's ProductionID, or an upgrade's name key
 																			///  (kept as an Int so this header stays clear of GameLogic)
 		Bool					isUpgrade;					///< which of those two the id means
+		Bool					isStructure;				///< the slot is a building going up on the map, not an item in
+																			///  a queue: 'producer' is that building and there is no id
+		Bool					leads;							///< it belongs to the building you have selected, so it stands at the
+																			///  head of the row whatever the rest of the base is finishing
 		Int						remaining;					///< logic frames until this item pops, waiting time ahead of it included
 		ICoord2D			pos;								///< top left corner of the cameo on screen
 	};
@@ -920,7 +964,8 @@ protected:
 	void updateIncomeEstimate( Player *player );	///< income per minute, shown beside the money
 	void drawProductionStrip( void );			///< the production queue rows above the control bar
 	void drawProductionStripRow( Int row, Int y );	///< one of those rows, at that top edge
-	void updateStripCameoSize( void );		///< cameo box both strips draw into, in the command bar's aspect
+	const Image *productionStripTray( void );	///< the power bar's tray, mirrored, kept until that bar changes side
+	void stripTrayMetrics( ICoord2D *tray, ICoord2D *cameo, ICoord2D *hole, Int *step );	///< that tray's size, its cameo hole, and the column step
 	void drawStripSeconds( Int x, Int y, Int w, Int h, Int seconds, Bool plainSeconds = FALSE );	///< countdown written inside a cameo
 	void addSuperweaponIcon( const Image *image, Int seconds, Int percent, Bool ready, Color color );
 	void drawSuperweaponStrip( void );		///< those icons, top right, soonest at the right hand end
@@ -968,6 +1013,8 @@ protected:
 	Bool												m_productionStripWatching;	///< the rows are every player's, not ours
 	Int													m_productionStripCameoW;		///< cameo size this frame, in the control bar's aspect
 	Int													m_productionStripCameoH;
+	Image *											m_productionStripTray;			///< our mirrored copy of the power bar's tray
+	const Image *								m_productionStripTraySource;	///< the tray it was made from, so a side change remakes it
 	DisplayString *							m_productionStripOverflow;	///< the "+N" that stands for the rest of a row
 	DisplayString *							m_stripSecondsString;				///< the countdown written inside a cameo, either strip's
 
