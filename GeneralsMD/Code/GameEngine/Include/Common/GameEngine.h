@@ -51,6 +51,27 @@
 /** The above in logic frames, at a given game speed: 3 at the retail 30fps, 6 at 60. */
 Int GameEngine_logicCatchupMaxFrames( Int logicFps );
 
+/**	How long the catch-up loop may keep starting new logic ticks before it gives up for this pass.
+
+	A frame count cannot tell a cheap tick from an expensive one, and that is the whole difference
+	between the two situations the loop is in.  Behind because the *renderer* hitched, the ticks are
+	2ms each and paying three of them costs nothing.  Behind because eight Merciless AIs are all
+	fighting at once, the ticks are 25ms each and paying three of them freezes the picture for 75ms
+	on top of the render - which is exactly the 91ms and 113ms frames measured on Twilight Flame.
+
+	So the loop is bounded by a clock as well as by a count: after each tick, another one only
+	starts if the loop has spent less than this. Cheap debt still gets paid in full; expensive debt
+	is left on the accumulator, where the existing cap stops it spiralling and the match honestly
+	runs a touch slow instead of stopping dead. The worst case becomes this plus one tick.
+
+	That is the intent the frame count was already written for - "when the logic frame itself is what
+	overran, paying the debt would just queue more of the same work" - measured in the unit that can
+	actually see it. */
+#define LOGIC_CATCHUP_BUDGET_MS	8.0f
+
+/** Whether the catch-up loop may start another logic tick this pass. */
+Bool GameEngine_mayStartAnotherCatchupTick( Int ticksSoFar, Int maxTicks, Real elapsedMsInLoop );
+
 // forward declarations
 class AudioManager;
 class GameLogic;

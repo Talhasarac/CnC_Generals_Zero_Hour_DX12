@@ -751,6 +751,51 @@ TEST(logic_tick_is_wall_clock_paced_not_render_paced)
 	CHECK( due >= 36 && due <= 38 );		// 630ms of wall clock at 60Hz, and no more
 }
 
+/* The count above cannot tell a cheap logic tick from an expensive one, and that is the whole
+	 difference between the two situations the catch-up loop is ever in. Measured on Twilight Flame
+	 with eight Merciless AI: three 25ms ticks back to back with no picture in between is where the
+	 91ms and 113ms frames came from. So the loop is bounded by a clock as well. */
+extern Bool GameEngine_mayStartAnotherCatchupTick( Int ticksSoFar, Int maxTicks, Real elapsedMsInLoop );
+
+TEST(catchup_stops_paying_debt_when_the_logic_tick_is_what_is_slow)
+{
+	const Int cap30 = GameEngine_logicCatchupMaxFrames( 30 );		// 3
+
+	// Behind because the renderer hitched: the ticks are cheap, so pay the debt in full.
+	CHECK( GameEngine_mayStartAnotherCatchupTick( 1, cap30, 2.0f ) );
+	CHECK( GameEngine_mayStartAnotherCatchupTick( 2, cap30, 4.0f ) );
+
+	// Behind because the simulation is what is slow: one 25ms tick has already spent the budget,
+	// so the next two do not run and the freeze is one tick long instead of three.
+	CHECK( !GameEngine_mayStartAnotherCatchupTick( 1, cap30, 25.0f ) );
+	CHECK( !GameEngine_mayStartAnotherCatchupTick( 2, cap30, 50.0f ) );
+
+	// The frame count still caps it, however cheap the ticks are - the anti-spiral is unchanged.
+	CHECK( !GameEngine_mayStartAnotherCatchupTick( cap30, cap30, 0.0f ) );
+	CHECK( !GameEngine_mayStartAnotherCatchupTick( cap30 + 1, cap30, 0.0f ) );
+
+	// The budget is a strict bound, so exactly-at-budget stops too.
+	CHECK( !GameEngine_mayStartAnotherCatchupTick( 1, cap30, LOGIC_CATCHUP_BUDGET_MS ) );
+	CHECK( GameEngine_mayStartAnotherCatchupTick( 1, cap30, LOGIC_CATCHUP_BUDGET_MS - 0.1f ) );
+
+	/* What it is worth, in the shape the loop actually runs: a pass that owes three ticks, where
+		 each tick costs 25ms. Old rule: three ticks, 75ms of frozen picture. New rule: one. */
+	Real elapsed = 0.0f;
+	Int ticks = 0;
+	do { elapsed += 25.0f; ++ticks; }
+	while( GameEngine_mayStartAnotherCatchupTick( ticks, cap30, elapsed ) );
+	CHECK_EQ( 1, ticks );
+	CHECK_NEAR( 25.0f, elapsed, 0.01f );
+
+	// ...and the same pass with 2ms ticks still pays all three, because it costs 6ms to do so.
+	elapsed = 0.0f;
+	ticks = 0;
+	do { elapsed += 2.0f; ++ticks; }
+	while( GameEngine_mayStartAnotherCatchupTick( ticks, cap30, elapsed ) );
+	CHECK_EQ( cap30, ticks );
+	CHECK_NEAR( 6.0f, elapsed, 0.01f );
+}
+
 /* AnimateWindowManager.cpp: the same argument one layer up. The menu animations
    count fixed steps and were authored against a capped frame rate, so with the
    renderer uncapped they have to be paced off the wall clock too or a whole

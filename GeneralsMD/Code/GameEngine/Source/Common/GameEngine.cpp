@@ -1016,6 +1016,13 @@ Int GameEngine_logicCatchupMaxFrames( Int logicFps )
 	return frames < 1 ? 1 : frames;
 }
 
+Bool GameEngine_mayStartAnotherCatchupTick( Int ticksSoFar, Int maxTicks, Real elapsedMsInLoop )
+{
+	if (ticksSoFar >= maxTicks)
+		return FALSE;
+	return elapsedMsInLoop < LOGIC_CATCHUP_BUDGET_MS;
+}
+
 Bool GameEngine_isLogicFrameDue( Real& accumMs, Real elapsedMs, Int logicFps )
 {
 	if (logicFps <= 0)
@@ -1602,13 +1609,26 @@ void GameEngine::update( void )
 			// frame that is itself over budget cannot pull the loop into a spiral.
 			Int logicTicksThisPass = 0;
 			const Int maxTicksThisPass = GameEngine_logicCatchupMaxFrames(m_maxFPS);
-			do
+			/* Bounded by the clock as well as by the count - see LOGIC_CATCHUP_BUDGET_MS.  Three
+				 25ms ticks back to back with no picture in between is the 113ms freeze; one of them
+				 plus the render is a dropped frame nobody files a bug about. */
+			Int64 tCatchupStart, tCatchupNow;
+			QueryPerformanceCounter( (LARGE_INTEGER *)&tCatchupStart );
+			for( ;; )
 			{
 				TheGameLogic->UPDATE();
 				++logicTicksThisPass;
+
+				if (!mayCatchUp)
+					break;
+				QueryPerformanceCounter( (LARGE_INTEGER *)&tCatchupNow );
+				if (!GameEngine_mayStartAnotherCatchupTick( logicTicksThisPass, maxTicksThisPass,
+																									 engineElapsedMS( tCatchupStart, tCatchupNow ) ))
+					break;
+				// Asked last, because it is the one with a side effect: it spends the debt it reports.
+				if (!GameEngine_isLogicFrameDue(logicAccumMs, 0.0f, m_maxFPS))
+					break;
 			}
-			while (mayCatchUp && logicTicksThisPass < maxTicksThisPass &&
-						 GameEngine_isLogicFrameDue(logicAccumMs, 0.0f, m_maxFPS));
 #ifdef DEBUG_LOGGING
 			QueryPerformanceCounter( (LARGE_INTEGER *)&tLogicEnd );
 			logicMS = engineElapsedMS( tLogicStart, tLogicEnd );
