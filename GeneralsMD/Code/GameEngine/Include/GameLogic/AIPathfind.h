@@ -718,6 +718,18 @@ public:
 	//
 	static void resetProfile( void );							///< start a new frame's tally
 	static const char *getProfileReport( void );	///< "patch 12x/3.1 attack 4x/8.0", empty when idle
+
+	//
+	// The same tallies summed over a whole match, plus the three counts that say whether a
+	// pathing change made things worse rather than merely different: searches that ran the cell
+	// pool dry, requests that came back with no path at all, and unit-frames lost to standing
+	// behind another unit. A headless batch prints these at the end of the run, so a change to
+	// path cost can be argued with numbers instead of with how the paths looked.
+	//
+	static void resetMatchProfile( void );					///< zero the match totals (start of a headless run)
+	static const char *getMatchProfileReport( void );
+	static void bumpNoPath( void );									///< a path request came back empty
+	static void bumpBlockedFrame( Bool stuck );			///< one unit-frame spent blocked by another unit
 	void processPathfindQueue(void); ///< Process some or all of the queued pathfinds.
 	void forceMapRecalculation( );	///< Force pathfind map recomputation. If region is given, only that area is recomputed
 

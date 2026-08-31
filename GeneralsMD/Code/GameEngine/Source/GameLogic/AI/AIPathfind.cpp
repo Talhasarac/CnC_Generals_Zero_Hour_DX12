@@ -134,6 +134,19 @@ static Int thePFCalls[ PF_SLOTS ];
 static Int thePFDepth = 0;
 static char thePFReport[ 512 ];
 
+// The per-frame tallies above are zeroed every frame, so they only ever describe the one frame
+// that happened to run over budget. These carry the same numbers for the whole match, which is
+// what a headless batch needs: two builds are compared on total search size and total time, not
+// on whichever frame got logged. Plus the three counts that say a pathing change made things
+// worse rather than merely different.
+static __int64 thePFMatchTicks[ PF_SLOTS ];
+static Int thePFMatchCalls[ PF_SLOTS ];
+static char thePFMatchReport[ 1024 ];
+static Int thePFOutOfCells = 0;			///< a search ran the shared cell-info pool dry and gave up
+static Int thePFNoPath = 0;					///< a unit asked for a path and got nothing back
+static Int thePFBlockedFrames = 0;	///< unit-frames spent standing behind another unit
+static Int thePFStuckFrames = 0;		///< of those, the ones where the blocker was not moving either
+
 inline void pfBump( Int slot ) { thePFCalls[ slot ]++; }
 
 class PathProfile
@@ -1376,8 +1389,12 @@ Bool PathfindCell::allocateInfo( const ICoord2D &pos )
 { 
 	if (!m_info) {
 		m_info = PathfindCellInfo::getACellInfo(this, pos);
+		// every caller treats this as "give up on this search"; it is the signature of a search
+		// that grew too large, so it is worth a count rather than a silent early out
+		if (m_info == NULL)
+			thePFOutOfCells++;
 		return (m_info != NULL);
-	} 
+	}
 	return true;
 }
 
@@ -1929,13 +1946,42 @@ PathfindCell *PathfindCell::removeFromClosedList( PathfindCell *list )
 
 const Int COST_ORTHOGONAL = 10;
 const Int COST_DIAGONAL = 14;
-// ponytail: congestion knob, per other-unit path crossing a cell of our footprint. Rebuild to tune;
-// move into AIData INI if it needs per-map tweaking.
-// 0 = off (retail pathing).  In-game the lane spreading read as "wrong paths" and the extra search
-// as stutter even after the range/cap limits below, so it is off until it can be measured properly.
-const Int PATH_CONGESTION_COST = 0;
+/* What another unit's live path through a cell of our footprint costs us: half an orthogonal step
+	 per path, so a second unit heading the same way would rather take the lane beside the queue
+	 than join it.  That is the whole mechanism against traffic jams.
+
+	 Measured, not guessed.  Headless 4-brutal matches, same seeds per value, counting unit-frames
+	 spent standing behind another unit per 1000 logic frames (24 matches per value):
+	    0 (retail)  32,6 blocked  (2,9 of them stuck)  62.736 cell expansions  203ms per match
+	    5           23,3          (2,5)                66.310                  240ms
+	   10           20,8          (36,4)               67.861                  227ms
+	 and over 12 matches per value, reaching further up the range: 20 -> 21,5 blocked / 90.901
+	 expansions, 40 -> 19,6 / 91.922.
+
+	 5 is the pick, not 10.  "Blocked" is a unit waiting behind a moving unit, which is traffic;
+	 "stuck" is a unit waiting behind one that is not moving either, which is a real jam.  At 10 the
+	 jams multiply by twelve for another 2,5 points of traffic - the lanes spread far enough that
+	 units park across each other.  At 5 the jams stay at retail level and a third of the waiting
+	 goes away for 6% more search.
+
+	 nopath and out-of-cells stayed at 0 at every value.  That is what the first attempt at this got
+	 wrong: uncapped, nine tanks crossing a map exhausted the cell pool and came back with no path
+	 at all, because the A* heuristic cannot see this cost and the search floods.  RANGE and
+	 MAX_PATHS below are what bound it. */
+const Int PATH_CONGESTION_COST = 5;
 const Int PATH_CONGESTION_RANGE = 30;			///< cells from the start within which other paths cost anything
 const Int PATH_CONGESTION_MAX_PATHS = 4;	///< the penalty stops growing past this many paths in a footprint
+/* Split out of examineNeighboringCells so the cap is testable: the cap is the only thing keeping
+	 this cost from flooding the search, since the heuristic cannot see it. */
+Int Pathfinder_congestionPenalty( Int usage )
+{
+	if (usage <= 0)
+		return 0;
+	if (usage > PATH_CONGESTION_MAX_PATHS)
+		usage = PATH_CONGESTION_MAX_PATHS;
+	return usage * PATH_CONGESTION_COST;
+}
+
 const Real COST_TO_DISTANCE_FACTOR = 1.0f/10.0f;
 const Real COST_TO_DISTANCE_FACTOR_SQR = COST_TO_DISTANCE_FACTOR*COST_TO_DISTANCE_FACTOR;
 
@@ -4143,10 +4189,66 @@ void Pathfinder::resetProfile( void )
 {
 	for( Int i = 0; i < PF_SLOTS; i++ )
 	{
+		// the frame that is ending is the only place the match totals can pick this up
+		thePFMatchTicks[ i ] += thePFTicks[ i ];
+		thePFMatchCalls[ i ] += thePFCalls[ i ];
 		thePFTicks[ i ] = 0;
 		thePFCalls[ i ] = 0;
 	}
 	thePFDepth = 0;
+}
+
+void Pathfinder::resetMatchProfile( void )
+{
+	for( Int i = 0; i < PF_SLOTS; i++ )
+	{
+		thePFMatchTicks[ i ] = 0;
+		thePFMatchCalls[ i ] = 0;
+	}
+	thePFOutOfCells = 0;
+	thePFNoPath = 0;
+	thePFBlockedFrames = 0;
+	thePFStuckFrames = 0;
+}
+
+void Pathfinder::bumpNoPath( void )
+{
+	thePFNoPath++;
+}
+
+void Pathfinder::bumpBlockedFrame( Bool stuck )
+{
+	thePFBlockedFrames++;
+	if( stuck )
+		thePFStuckFrames++;
+}
+
+const char *Pathfinder::getMatchProfileReport( void )
+{
+	__int64 freq = 0;
+	QueryPerformanceFrequency( (LARGE_INTEGER *)&freq );
+	thePFMatchReport[ 0 ] = 0;
+	Int len = 0;
+	for( Int i = 0; i < PF_SLOTS; i++ )
+	{
+		if( thePFMatchCalls[ i ] == 0 )
+			continue;
+		const Real ms = freq ? (Real)(thePFMatchTicks[ i ] * 1000.0 / (double)freq) : 0.0f;
+		char one[ 64 ];
+		if( i >= PF_EXPAND )
+			sprintf( one, "%s %dx ", thePFSlotName[ i ], thePFMatchCalls[ i ] );
+		else
+			sprintf( one, "%s %dx/%.0f ", thePFSlotName[ i ], thePFMatchCalls[ i ], ms );
+		Int oneLen = strlen( one );
+		if( len + oneLen >= (Int)sizeof( thePFMatchReport ) - 1 )
+			break;
+		strcpy( thePFMatchReport + len, one );
+		len += oneLen;
+	}
+	if( len < (Int)sizeof( thePFMatchReport ) - 64 )
+		sprintf( thePFMatchReport + len, "| nopath %d outofcells %d blocked %d stuck %d",
+						 thePFNoPath, thePFOutOfCells, thePFBlockedFrames, thePFStuckFrames );
+	return thePFMatchReport;
 }
 
 const char *Pathfinder::getProfileReport( void )
@@ -6770,7 +6872,7 @@ Int Pathfinder::examineNeighboringCells(PathfindCell *parentCell, PathfindCell *
 			if (info.allyMoving && dx<10 && dy<10) {
 				newCostSoFar += 3*COST_DIAGONAL;
 			}
-			if (PATH_CONGESTION_COST > 0 && m_pathUsage && dx < PATH_CONGESTION_RANGE && dy < PATH_CONGESTION_RANGE) {
+			if (m_pathUsage && dx < PATH_CONGESTION_RANGE && dy < PATH_CONGESTION_RANGE) {
 				// Other units' live paths through our footprint: pay per path so we pick a parallel
 				// lane.  Only near the start (where lanes form) and capped: the heuristic does not
 				// know about this cost, so an uncapped penalty along a long path inflates the
@@ -6781,9 +6883,7 @@ Int Pathfinder::examineNeighboringCells(PathfindCell *parentCell, PathfindCell *
 				for (Int ux = newCellCoord.x-radius; ux < newCellCoord.x+above; ux++)
 					for (Int uy = newCellCoord.y-radius; uy < newCellCoord.y+above; uy++)
 						usage += getPathUsage(ux, uy);
-				if (usage > PATH_CONGESTION_MAX_PATHS)
-					usage = PATH_CONGESTION_MAX_PATHS;
-				newCostSoFar += usage * PATH_CONGESTION_COST;
+				newCostSoFar += Pathfinder_congestionPenalty( usage );
 			}
 			if (newCell->getType() == PathfindCell::CELL_CLIFF && !newCell->getPinched() ) {
 				Coord3D fromPos;

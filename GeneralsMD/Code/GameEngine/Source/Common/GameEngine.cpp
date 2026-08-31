@@ -74,6 +74,7 @@
 
 #include "GameLogic/Armor.h"
 #include "GameLogic/AI.h"
+#include "GameLogic/AIPathfind.h"		// the headless run summary reports the match's pathfinder totals
 #include "GameLogic/CaveSystem.h"
 #include "GameLogic/CrateSystem.h"
 #include "GameLogic/Damage.h"
@@ -1074,6 +1075,8 @@ static void updateHeadlessRun( void )
 		runStartFrame = TheGameLogic->getFrame();
 		for( Int i = 0; i < MAX_PLAYER_COUNT; ++i )
 			peakUnits[ i ] = 0;
+		// the shell map and the load did their own pathing; the run's numbers start here
+		Pathfinder::resetMatchProfile();
 	}
 
 	const UnsignedInt frame = TheGameLogic->getFrame();
@@ -1111,6 +1114,12 @@ static void updateHeadlessRun( void )
 						 why, frame,
 						 frame - runStartFrame, wallMs / 1000.0f, logicFps,
 						 logicFps / (Real)TheGameEngine->getFramesPerSecondLimit()));
+
+	// What the pathfinder did over the whole match, not just the one frame that ran over budget.
+	// A pathing change is argued with these: search count and time say what it cost, `nopath` and
+	// `outofcells` say whether it broke anything, `blocked`/`stuck` say whether it actually
+	// reduced the traffic jams it was supposed to reduce.
+	DEBUG_LOG(("HEADLESS PATHFIND: %s\n", Pathfinder::getMatchProfileReport()));
 
 	for( Int i = 0; i < ThePlayerList->getPlayerCount(); ++i )
 	{

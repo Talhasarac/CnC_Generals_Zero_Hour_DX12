@@ -1765,6 +1765,11 @@ Bool AIUpdateInterface::computePath( PathfindServicesInterface *pathServices, Co
 	}
 	TheAI->pathfinder()->setIgnoreObstacleID( INVALID_ID );
 	TheAI->pathfinder()->setIgnoreUnderConstruction( FALSE );
+	// after both the direct path and the closest-path fallback: nothing came back, so this unit
+	// is not going anywhere this frame.  The count is what says whether a cost change made the
+	// search fail rather than merely route differently.
+	if (theNewPath == NULL)
+		Pathfinder::bumpNoPath();
 	if (theNewPath) {
 		// destroy previous path
 		destroyPath();
@@ -2161,11 +2166,14 @@ UpdateSleepTime AIUpdateInterface::doLocomotor( void )
 
 	chooseGoodLocomotorFromCurrentSet();
 
-	if (m_isBlocked) 
+	if (m_isBlocked)
 	{
 		++m_blockedFrames;
-	} 
-	else 
+		// this is the only place a blocked unit is counted once per frame rather than once per
+		// collision pair, so it is where the traffic-jam number for the headless run comes from
+		Pathfinder::bumpBlockedFrame( m_isBlockedAndStuck );
+	}
+	else
 	{
 		m_blockedFrames = 0;
 	}

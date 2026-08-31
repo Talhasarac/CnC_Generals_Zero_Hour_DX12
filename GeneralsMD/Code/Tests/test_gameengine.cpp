@@ -6093,6 +6093,33 @@ TEST(headless_run_ends_on_a_decision_or_on_the_frame_limit)
 	CHECK_STR( GameEngine_headlessRunResult( 3000, 2000, 3000 ), "decided" );
 }
 
+extern Int Pathfinder_congestionPenalty( Int usage );
+
+TEST(congestion_cost_is_charged_per_path_and_capped)
+{
+	/* Another unit's live path through a cell we would step on costs us, so two units heading the
+		 same way take parallel lanes instead of one queue.  Empty ground stays free - a map with no
+		 traffic on it has to path exactly as it always did. */
+	CHECK_EQ( 0, Pathfinder_congestionPenalty( 0 ) );
+	CHECK_EQ( 0, Pathfinder_congestionPenalty( -1 ) );	// usage is summed over a footprint that can leave the map
+
+	// one path through the footprint costs one unit of the cost, two cost two
+	CHECK_EQ( 5, Pathfinder_congestionPenalty( 1 ) );
+	CHECK_EQ( 10, Pathfinder_congestionPenalty( 2 ) );
+
+	/* and the cap is the point: the heuristic does not know about this cost, so an uncapped
+		 penalty on a crowded cell inflates the search until it floods and the cell pool runs dry.
+		 Four paths and forty pay the same as four. */
+	CHECK_EQ( 20, Pathfinder_congestionPenalty( 4 ) );
+	CHECK_EQ( 20, Pathfinder_congestionPenalty( 5 ) );
+	CHECK_EQ( 20, Pathfinder_congestionPenalty( 255 ) );	// m_pathUsage is a byte: this is its ceiling
+
+	/* The whole penalty has to stay small against the step costs it is added to (10 orthogonal,
+		 14 diagonal): a crowded cell may look worse than an empty one, never worse than a detour
+		 around the map. */
+	CHECK( Pathfinder_congestionPenalty( 255 ) <= 2*10 );
+}
+
 TEST(a_replay_game_is_never_itself_recorded)
 {
 	// what a replay is worth writing: a game a human played in real time

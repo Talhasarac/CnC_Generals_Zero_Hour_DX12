@@ -434,6 +434,7 @@ found and fixed â€” EA's own, not port damage.**
 - Our own rescue for narrow routes searched 140,513 squares in 285ms; it is gone.
 - The coarse route is widened along its whole length, not just at the start.
 - The main search stops after 20,000 squares and hands back a partial route.
+- Units heading the same way take the lane beside the traffic instead of joining the back of it. Ground another unit is already driving over costs a little to plan through, so a column spreads into parallel lanes at the gate it forms at. Over twenty-four full matches the time units spend standing behind each other dropped by a third, and the searches to do it cost 6% more squares - the price is capped, or a crowded route would be worth walking around the map to avoid.
 - Long turns went from 513 to 201, and the worst from 2,976ms to 243ms.
 - The distance guess now prices diagonals and turns, so the search actually steers.
 - The straight-line shortcut only runs from a square closer than anything tried before.
