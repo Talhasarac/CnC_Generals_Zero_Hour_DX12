@@ -80,6 +80,7 @@ HINSTANCE ApplicationHInstance = NULL;  ///< our application instance
 HWND ApplicationHWnd = NULL;  ///< our application window handle
 Bool ApplicationIsWindowed = false;
 Bool ApplicationIsBorderless = false;		///< -borderless: windowed, but with no caption or frame
+static Bool ApplicationIsHeadless = false;	///< -headless: the window is created, but never shown
 Win32Mouse *TheWin32Mouse= NULL;  ///< for the WndProc() only
 DWORD TheMessageTime = 0;	///< For getting the time that a message was posted from Windows.
 
@@ -705,7 +706,9 @@ static Bool initializeAppWindows( HINSTANCE hInstance, Int nCmdShow, Bool runWin
 
    // Create our main window
 	windowStyle =  WS_POPUP|WS_VISIBLE;
-	if (runWindowed && !ApplicationIsBorderless)
+	if (ApplicationIsHeadless)
+		windowStyle = WS_POPUP;		// born hidden, no frame, and stays that way
+	else if (runWindowed && !ApplicationIsBorderless)
 		windowStyle |= WS_DLGFRAME | WS_CAPTION | WS_SYSMENU;
 	else if (runWindowed)
 		windowStyle |= WS_SYSMENU;	// borderless: keep the system menu for alt+F4, drop the frame
@@ -744,17 +747,26 @@ static Bool initializeAppWindows( HINSTANCE hInstance, Int nCmdShow, Bool runWin
 														0L );
 
 
-	if (!runWindowed)
-	{	SetWindowPos(hWnd, HWND_TOPMOST, 0, 0, 0, 0,SWP_NOSIZE |SWP_NOMOVE);
+	//
+	// A headless run has a window because W3D wants a device and a device wants a window, but
+	// nothing is ever presented into it - so it is never raised, never focused and never shown.
+	// Every call below either puts it on screen or takes the focus off whatever the machine was
+	// doing, which is exactly what a batch of unattended matches must not do.
+	//
+	if (!ApplicationIsHeadless)
+	{
+		if (!runWindowed)
+		{	SetWindowPos(hWnd, HWND_TOPMOST, 0, 0, 0, 0,SWP_NOSIZE |SWP_NOMOVE);
+		}
+		else
+			SetWindowPos(hWnd, HWND_TOP, 0, 0, 0, 0,SWP_NOSIZE |SWP_NOMOVE);
+
+		SetFocus(hWnd);
+
+		SetForegroundWindow(hWnd);
+		ShowWindow( hWnd, nCmdShow );
+		UpdateWindow( hWnd );
 	}
-	else 
-		SetWindowPos(hWnd, HWND_TOP, 0, 0, 0, 0,SWP_NOSIZE |SWP_NOMOVE);
-
-	SetFocus(hWnd);
-
-	SetForegroundWindow(hWnd);
-	ShowWindow( hWnd, nCmdShow );
-	UpdateWindow( hWnd );
 
 	// save our application instance and window handle for future use
 	ApplicationHInstance = hInstance;
@@ -960,9 +972,15 @@ Int APIENTRY WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance,
 			}
 			// same again: -headless draws nothing, so it has no business owning the display mode.
 			// The device is created windowed (parseHeadless) and dx8wrapper then shrinks this
-			// window to the headless resolution - it only has to be born windowed.
+			// window to the headless resolution - it only has to be born windowed. And since
+			// nothing is ever drawn into it, it is never shown either: a batch of matches used to
+			// throw a hundred little windows on the desktop and steal the focus off whatever the
+			// machine was really doing.
 			if (stricmp(token,"-headless")==0)
+			{
 				ApplicationIsWindowed=true;
+				ApplicationIsHeadless=true;
+			}
 			token = nextParam(NULL, "\" ");	   
 		}
 
