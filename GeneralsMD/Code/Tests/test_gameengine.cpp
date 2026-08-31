@@ -4616,8 +4616,12 @@ TEST(a_wrapped_command_chunk_cannot_write_outside_its_own_buffer)
 	CHECK_EQ( node->getPercentComplete(), 50 );		// refused, and not counted as received
 	farOffset->detach();
 
-	// a length no packet could have carried
-	NetWrapperCommandMsg *hugeLength = makeWrapperChunk( 1, 2, 8, 4, second, MAX_PACKET_SIZE + 1 );
+	// a length no packet could have carried.  The chunk's own source buffer is that long for real:
+	// setData copies dataLength bytes out of it, so handing it a short array reads off the end here
+	// instead of testing the guard on the other side.
+	UnsignedByte oversized[MAX_PACKET_SIZE + 1];
+	memset( oversized, 0x99, sizeof(oversized) );
+	NetWrapperCommandMsg *hugeLength = makeWrapperChunk( 1, 2, 8, 4, oversized, MAX_PACKET_SIZE + 1 );
 	node->copyChunkData( hugeLength );
 	CHECK( !node->isComplete() );
 	hugeLength->detach();
