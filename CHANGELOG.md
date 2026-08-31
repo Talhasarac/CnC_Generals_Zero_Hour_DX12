@@ -265,6 +265,7 @@ found and fixed â€” EA's own, not port damage.**
 - The progress clock over a picture is steady at any frame rate.
 - A group's upgrade shows its progress, whichever building is paying for it.
 - Click a unit with several factories selected and it takes the shortest queue.
+- A plane stays buildable while any selected airfield still has a free spot. One full airfield used to grey the button out for the whole group, even with three empty runways in the same selection.
 - A general's upgrade spreads across the selected buildings instead of hitting one.
 - A clicked upgrade darkens immediately and uncovers as it progresses.
 - The production strip dims fresh orders the same way.

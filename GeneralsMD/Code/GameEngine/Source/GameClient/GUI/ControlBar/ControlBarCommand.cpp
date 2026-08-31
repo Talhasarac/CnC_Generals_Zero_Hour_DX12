@@ -1092,9 +1092,10 @@ static Int getRappellerCount(Object* obj)
 	* four barracks where the first already has its upgrade and the button greys out, even though
 	* three of them are waiting to buy it - and clicking it would have gone to the first one anyway.
 	*
-	* So: take the best availability any member of the focused group can offer, and hand back the
-	* member that offered it so processCommandUI can send the order there. Outside a multi-selection
-	* this is exactly getCommandAvailability on the one selected object. */
+	* So: take the best availability any member of the selection can offer, and hand back the
+	* member that offered it so processCommandUI can send the order there. The focused type is asked
+	* first, so the member handed back is one the player is looking at whenever it can do the job.
+	* Outside a multi-selection this is exactly getCommandAvailability on the one selected object. */
 //-------------------------------------------------------------------------------------------------
 CommandAvailability ControlBar::getGroupCommandAvailability( const CommandButton *command,
 																														 Object *obj,
@@ -1106,45 +1107,69 @@ CommandAvailability ControlBar::getGroupCommandAvailability( const CommandButton
 
 	CommandAvailability best = getCommandAvailability( command, obj, win );
 
-	if( m_currContext != CB_CONTEXT_MULTI_SELECT || best == COMMAND_AVAILABLE ||
-			m_multiSelectFocus < 0 || m_multiSelectFocus >= m_multiSelectGroupCount )
-		return best;
-
-	const ThingTemplate *focused = m_multiSelectGroupTemplate[ m_multiSelectFocus ];
-	if( focused == NULL )
-		return best;
-
 	//
 	// Hidden means the command does not belong on this bar at all - a different answer in kind
 	// from "this one cannot right now" - so a hidden representative stays hidden. Everything else
-	// is a matter of degree and the most permissive answer in the group wins.
+	// is a matter of degree and the most permissive answer in the selection wins.
 	//
-	if( best == COMMAND_HIDDEN )
+	if( best == COMMAND_AVAILABLE || best == COMMAND_HIDDEN )
 		return best;
 
+	//
+	// only a multi-selection has more than one object to ask. The other contexts that can hold
+	// several selected drawables (an angry mob, whose nexus stands in for its members) send the
+	// order to the representative no matter what, so lighting a button off another member there
+	// would offer a click that goes nowhere.
+	//
+	if( m_currContext != CB_CONTEXT_MULTI_SELECT || TheInGameUI == NULL )
+		return best;
+
+	//
+	// The focused type goes first so the order the button is sent to stays the one the player is
+	// looking at, but the scan does not stop there: four airfields with one of them full is a
+	// selection that can still take a plane, and asking only the focused type - or worse, only the
+	// representative - greyed the button out over the one factory that happened to be full. The
+	// click path (processCommandUI, GUI_COMMAND_UNIT_BUILD) already spreads the batch over every
+	// selected factory that can take it, so the button has to be lit whenever any of them can.
+	//
+	const ThingTemplate *focused = ( m_multiSelectFocus >= 0 && m_multiSelectFocus < m_multiSelectGroupCount )
+																 ? m_multiSelectGroupTemplate[ m_multiSelectFocus ] : NULL;
+
 	const DrawableList *selected = TheInGameUI->getAllSelectedDrawables();
-	for( DrawableListCIt it = selected->begin(); it != selected->end(); ++it )
+	for( Int pass = 0; pass < 2; pass++ )
 	{
-		Drawable *draw = *it;
-		if( draw == NULL || draw->getTemplate() != focused )
-			continue;
-
-		Object *other = draw->getObject();
-		if( other == NULL || other == obj )
-			continue;
-
-		CommandAvailability avail = getCommandAvailability( command, other, win );
-		if( avail == COMMAND_HIDDEN )
-			continue;			// it is on the bar for the group; this member just cannot say
-
-		if( commandAvailabilityRank( avail ) > commandAvailabilityRank( best ) )
+		for( DrawableListCIt it = selected->begin(); it != selected->end(); ++it )
 		{
-			best = avail;
-			if( ableObj )
-				*ableObj = other;
-			if( best == COMMAND_AVAILABLE )
-				break;
+			Drawable *draw = *it;
+			if( draw == NULL )
+				continue;
+
+			// pass 0 is the focused type, pass 1 is everything else
+			const Bool sameType = ( focused == NULL || draw->getTemplate() == focused );
+			if( ( pass == 0 ) != sameType )
+				continue;
+
+			Object *other = draw->getObject();
+			if( other == NULL || other == obj )
+				continue;
+
+			CommandAvailability avail = getCommandAvailability( command, other, win );
+			if( avail == COMMAND_HIDDEN )
+				continue;			// it is on the bar for the selection; this member just cannot say
+
+			if( commandAvailabilityRank( avail ) > commandAvailabilityRank( best ) )
+			{
+				best = avail;
+				if( ableObj )
+					*ableObj = other;
+				if( best == COMMAND_AVAILABLE )
+					return best;
+			}
 		}
+
+		// with no focused type the first pass already walked the whole selection
+		if( focused == NULL )
+			break;
 	}
 
 	return best;

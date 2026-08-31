@@ -917,8 +917,10 @@ public:
 protected:
 	/** The same question asked of a whole multi-selection: a command one of the selected buildings
 		* can carry out is offered, not greyed out because the group's representative happens to have
-		* it already. Returns the best availability over the focused type group, and hands back the
-		* member that earned it so the press can be sent there. Outside a multi-selection it is just
+		* it already - or to be the one airfield of four that is already full. Returns the best
+		* availability over the whole selection (the focused type first, so the member handed back is
+		* the one the player is looking at whenever it can do the job), and hands back the member that
+		* earned it so the press can be sent there. Outside a multi-selection it is just
 		* getCommandAvailability on the one selected object. */
 	CommandAvailability getGroupCommandAvailability( const CommandButton *command, Object *obj, GameWindow *win, Object **ableObj = NULL ) const;
 	void updateContextMultiSelect( void );
