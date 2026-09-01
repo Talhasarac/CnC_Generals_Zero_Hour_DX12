@@ -1131,10 +1131,18 @@ void GameClient::clearHealthBarPickRegions( void )
 	* the cursor - a bar floats above its own unit and so sits over whatever is standing behind it,
 	* and "I clicked the tank at the back and got the one in front" would be worse than the miss it
 	* is fixing.  It is also selection-only: the command translators keep the ray, or right-clicking
-	* bare ground under a bar would order an attack instead of a move. */
+	* bare ground under a bar would order an attack instead of a move.
+	*
+	* And it is off entirely while the player already holds a selection.  With a selection in hand
+	* the next click is aimed at the world, not shopping for a unit, and every bar on screen is then
+	* a trap: a click on bare ground that happens to fall under someone's bar throws the selection
+	* away and hands back the unit standing behind it. */
 // ------------------------------------------------------------------------------------------------
 Drawable *GameClient::pickDrawableByHealthBar( const ICoord2D *screen )
 {
+	if( TheInGameUI->getSelectCount() > 0 )
+		return NULL;
+
 	// the bar is three pixels of art; the click target is the bar plus a finger's width of slack
 	const Int pad = REAL_TO_INT_CEIL( 3.0f * TheUIScale() );
 
