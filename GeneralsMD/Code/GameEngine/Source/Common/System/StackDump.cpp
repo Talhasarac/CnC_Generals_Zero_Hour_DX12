@@ -479,9 +479,19 @@ void DumpExceptionInfo( unsigned int u, EXCEPTION_POINTERS* e_info )
 		}
 	}
 
-	DOUBLE_DEBUG (("\nStack Dump:\n"));
-	StackDumpFromContext(context->Eip, context->Esp, context->Ebp, NULL);
-
+	/*
+	** Registers and the faulting bytes FIRST, before the symbolized stack.
+	**
+	** StackDumpFromContext walks the frame chain and symbolizes it through dbghelp against an 80MB
+	** PDB, which is by far the most fragile thing in this handler - and if it faults, the process
+	** goes away with everything below it unwritten.  That has already happened once here: a crash
+	** on a worker thread left a log that ended at the words "Stack Dump:" and nothing else, so the
+	** faulting address itself was lost and the only evidence left was a module offset in the
+	** Windows event log.
+	**
+	** Eip, Esp, Ebp and the bytes at Eip are enough to find any fault offline against the .map and
+	** the PDB.  They cost nothing and they are what a second crash must not be allowed to eat.
+	*/
 	DOUBLE_DEBUG (("\nDetails:\n"));
 
 	DOUBLE_DEBUG (("Register dump...\n"));
@@ -521,6 +531,14 @@ void DumpExceptionInfo( unsigned int u, EXCEPTION_POINTERS* e_info )
 
 	strcat (scrap, "\n");
 	DOUBLE_DEBUG ( ( (scrap)));
+
+	/*
+	** ...and only now the part that can die trying: the symbolized stack.  Everything above is
+	** already in the log by this point, so a fault in here costs the stack and nothing else.
+	*/
+	DOUBLE_DEBUG (("\nStack Dump:\n"));
+	StackDumpFromContext(context->Eip, context->Esp, context->Ebp, NULL);
+
   DEBUG_LOG(( "********** END EXCEPTION DUMP ****************\n\n" ));
 }																									 
 
