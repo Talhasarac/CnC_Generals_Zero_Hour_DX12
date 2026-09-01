@@ -84,6 +84,22 @@ static S32 AILCALLBACK streamingFileSeek(U32 fileHandle, S32 offset, U32 type);
 static U32 AILCALLBACK streamingFileRead(U32 fileHandle, void *buffer, U32 bytes);
 
 //-------------------------------------------------------------------------------------------------
+/* "Is this sound one of these?", asked of a sound that is already playing or already queued.
+	 EA read the type straight through the info pointer at fifteen places in this file and checked
+	 it for null at two others, which is the same code admitting both that the pointer can be null
+	 and that nobody remembered.  It can: setEventName drops the info because it is not valid for
+	 the new name, the drawable custom-ambient path clears it by hand before deleting what it points
+	 at, and a delayed loop hands the same event back to the request list without one.  When the
+	 sound finishes the read is an access violation at address 0x90, in a stack that is entirely
+	 audio and names nothing that caused it.  A sound with no info is not music and not speech,
+	 which is what every one of those fifteen questions wants to hear. */
+static Bool audioIsType( const AudioEventRTS *event, AudioType type )
+{
+	const AudioEventInfo *info = event ? event->getAudioEventInfo() : NULL;
+	return info != NULL && info->m_soundType == type;
+}
+
+//-------------------------------------------------------------------------------------------------
 MilesAudioManager::MilesAudioManager() :
 	m_providerCount(0),
 	m_selectedProvider(PROVIDER_ERROR),
@@ -530,7 +546,7 @@ void MilesAudioManager::stopAudio( AudioAffect which )
 		for (it = m_playingStreams.begin(); it != m_playingStreams.end(); ++it) {
 			playing = *it;
 			if (playing) {
-				if (playing->m_audioEventRTS->getAudioEventInfo()->m_soundType == AT_Music) {
+				if (audioIsType(playing->m_audioEventRTS, AT_Music)) {
 					if (!BitTest(which, AudioAffect_Music)) {
 						continue;
 					}
@@ -575,7 +591,7 @@ void MilesAudioManager::pauseAudio( AudioAffect which )
 		for (it = m_playingStreams.begin(); it != m_playingStreams.end(); ++it) {
 			playing = *it;
 			if (playing) {
-				if (playing->m_audioEventRTS->getAudioEventInfo()->m_soundType == AT_Music) {
+				if (audioIsType(playing->m_audioEventRTS, AT_Music)) {
 					if (!BitTest(which, AudioAffect_Music)) {
 						continue;
 					}
@@ -636,7 +652,7 @@ void MilesAudioManager::resumeAudio( AudioAffect which )
 		for (it = m_playingStreams.begin(); it != m_playingStreams.end(); ++it) {
 			playing = *it;
 			if (playing) {
-				if (playing->m_audioEventRTS->getAudioEventInfo()->m_soundType == AT_Music) {
+				if (audioIsType(playing->m_audioEventRTS, AT_Music)) {
 					if (!BitTest(which, AudioAffect_Music)) {
 						continue;
 					}
@@ -919,7 +935,7 @@ void MilesAudioManager::stopAudioEvent( AudioHandle handle )
 				continue;
 			}
 
-			if( audio->m_audioEventRTS->getAudioEventInfo()->m_soundType == AT_Music ) 
+			if( audioIsType(audio->m_audioEventRTS, AT_Music) )
 			{
 				if( handle == AHSV_StopTheMusicFade ) 
 				{
@@ -1119,7 +1135,30 @@ void MilesAudioManager::releaseMilesHandles( PlayingAudio *release )
 //-------------------------------------------------------------------------------------------------
 void MilesAudioManager::releasePlayingAudio( PlayingAudio *release )
 {
-	if (release->m_audioEventRTS->getAudioEventInfo()->m_soundType == AT_SoundEffect) {
+	//
+	// A playing event's info can be gone by the time the sound finishes: setEventName drops it
+	// (it is not valid for a new name), the drawable custom-ambient path clears it by hand before
+	// the info it points at is deleted, and a delayed loop hands the same event back to the
+	// request list without one.  EA knew - playAudioEvent and checkForSample both test for it -
+	// and then read m_soundType straight through the pointer here, which is an access violation
+	// at address 0x90 in a stack that is all audio and names nothing that caused it.
+	//
+	// Missing info is not a reason to skip the notification: that is the count of how many sample
+	// channels are in use, and losing one leaks a channel for the rest of the match until the
+	// game runs out and goes quiet.  m_type already says which channel this was, and the two
+	// handle tests below already do the real work - the sound type is only excluding streams,
+	// and a stream holds neither handle.
+	//
+	// Which of the three it was has never been pinned down, and a guard that hides the cause is
+	// worth less than one that names it: say the event, so the next occurrence arrives with the
+	// sound's name attached instead of a register dump.
+	const AudioEventInfo *info = release->m_audioEventRTS ? release->m_audioEventRTS->getAudioEventInfo() : NULL;
+	if (!info)
+	{
+		DEBUG_LOG(("AUDIO: releasing '%s' with no event info - see releasePlayingAudio\n",
+			release->m_audioEventRTS ? release->m_audioEventRTS->getEventName().str() : "(no event)"));
+	}
+	if (!info || info->m_soundType == AT_SoundEffect) {
 		if (release->m_type == PAT_Sample) {
 			if (release->m_sample) {
 				m_sound->notifyOf2DSampleCompletion();
@@ -1262,7 +1301,7 @@ void MilesAudioManager::adjustPlayingVolume( PlayingAudio *audio )
 
 	} else if (audio->m_type == PAT_Stream) {
 		AIL_stream_volume_pan(audio->m_stream, NULL, &pan);
-		if (audio->m_audioEventRTS->getAudioEventInfo()->m_soundType == AT_Music ) {
+		if (audioIsType(audio->m_audioEventRTS, AT_Music)) {
 			AIL_set_stream_volume_pan(audio->m_stream, m_musicVolume * desiredVolume, pan);
 			
 		} else {
@@ -1283,7 +1322,7 @@ void MilesAudioManager::stopAllSpeech( void )
 			continue;
 		}
 
-		if (playing->m_audioEventRTS->getAudioEventInfo()->m_soundType == AT_Streaming) {
+		if (audioIsType(playing->m_audioEventRTS, AT_Streaming)) {
 			releasePlayingAudio(playing);
 			it = m_playingStreams.erase(it);
 		} else {
@@ -1350,7 +1389,7 @@ void MilesAudioManager::nextMusicTrack( void )
 	PlayingAudio *playing;
 	for (it = m_playingStreams.begin(); it != m_playingStreams.end(); ++it) {
 		playing = *it;
-		if (playing && playing->m_audioEventRTS->getAudioEventInfo()->m_soundType == AT_Music) {
+		if (playing && audioIsType(playing->m_audioEventRTS, AT_Music)) {
 			trackName = playing->m_audioEventRTS->getEventName();
 		}
 	}
@@ -1371,7 +1410,7 @@ void MilesAudioManager::prevMusicTrack( void )
 	PlayingAudio *playing;
 	for (it = m_playingStreams.begin(); it != m_playingStreams.end(); ++it) {
 		playing = *it;
-		if (playing && playing->m_audioEventRTS->getAudioEventInfo()->m_soundType == AT_Music) {
+		if (playing && audioIsType(playing->m_audioEventRTS, AT_Music)) {
 			trackName = playing->m_audioEventRTS->getEventName();
 		}
 	}
@@ -1391,7 +1430,7 @@ Bool MilesAudioManager::isMusicPlaying( void ) const
 	PlayingAudio *playing;
 	for (it = m_playingStreams.begin(); it != m_playingStreams.end(); ++it) {
 		playing = *it;
-		if (playing && playing->m_audioEventRTS->getAudioEventInfo()->m_soundType == AT_Music) {
+		if (playing && audioIsType(playing->m_audioEventRTS, AT_Music)) {
 			return TRUE;
 		}
 	}
@@ -1406,7 +1445,7 @@ Bool MilesAudioManager::hasMusicTrackCompleted( const AsciiString& trackName, In
 	PlayingAudio *playing;
 	for (it = m_playingStreams.begin(); it != m_playingStreams.end(); ++it) {
 		playing = *it;
-		if (playing && playing->m_audioEventRTS->getAudioEventInfo()->m_soundType == AT_Music) {
+		if (playing && audioIsType(playing->m_audioEventRTS, AT_Music)) {
 			if (playing->m_audioEventRTS->getEventName() == trackName) {
 				if (INFINITE_LOOP_COUNT - AIL_stream_loop_count(playing->m_stream) >= numberOfTimes) {
 					return TRUE;
@@ -1432,7 +1471,7 @@ AsciiString MilesAudioManager::getMusicTrackName( void ) const
 			continue;
 		}
 
-		if ((*ait)->m_pendingEvent->getAudioEventInfo()->m_soundType == AT_Music) {
+		if (audioIsType((*ait)->m_pendingEvent, AT_Music)) {
 			return (*ait)->m_pendingEvent->getEventName();
 		}
 	}
@@ -1441,7 +1480,7 @@ AsciiString MilesAudioManager::getMusicTrackName( void ) const
 	PlayingAudio *playing;
 	for (it = m_playingStreams.begin(); it != m_playingStreams.end(); ++it) {
 		playing = *it;
-		if (playing && playing->m_audioEventRTS->getAudioEventInfo()->m_soundType == AT_Music) {
+		if (playing && audioIsType(playing->m_audioEventRTS, AT_Music)) {
 			return playing->m_audioEventRTS->getEventName();
 		}
 	}
@@ -1545,7 +1584,7 @@ void MilesAudioManager::notifyOfAudioCompletion( UnsignedInt audioCompleted, Uns
 		return;
 	}
 	
-	if (getDisallowSpeech() && playing->m_audioEventRTS->getAudioEventInfo()->m_soundType == AT_Streaming) {
+	if (getDisallowSpeech() && audioIsType(playing->m_audioEventRTS, AT_Streaming)) {
 		setDisallowSpeech(FALSE);
 	}
 
@@ -1588,7 +1627,7 @@ void MilesAudioManager::notifyOfAudioCompletion( UnsignedInt audioCompleted, Uns
 	}
 
 	if (playing->m_type == PAT_Stream) {
-		if (playing->m_audioEventRTS->getAudioEventInfo()->m_soundType == AT_Music) {
+		if (audioIsType(playing->m_audioEventRTS, AT_Music)) {
 			playStream(playing->m_audioEventRTS, playing->m_stream);
 			
 			return;
@@ -2423,7 +2462,7 @@ Bool MilesAudioManager::has3DSensitiveStreamsPlaying( void ) const
     if ( ! playing )
       continue;
 
-    if ( playing->m_audioEventRTS->getAudioEventInfo()->m_soundType != AT_Music )
+    if ( !audioIsType(playing->m_audioEventRTS, AT_Music) )
     {
       return TRUE;
     }

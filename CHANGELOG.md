@@ -427,6 +427,7 @@ found and fixed â€” EA's own, not port damage.**
 - Calling in a gunship selects it for the player who called it, not for everyone watching the match.
 - A transport told to load into something it cannot enter - or into itself, which happens when it is part of the group you gave the order to - ignores the order instead of flying over and hovering beside it.
 - A pilot ejecting from a wreck no longer plays a promotion sound and animation somewhere out in the map.
+- A sound finishing does not take the game with it. Every sound carries a description of itself, and that description can be gone by the time the sound ends - it is dropped when the sound is renamed, cleared by hand when what it points at is about to be deleted, and absent on a sound that was queued to repeat after a delay. The 2003 code checked for that in two places and then read straight through it in fifteen others, one of which is where every finished sound goes. It crashed mid-match with a stack that is all audio and names nothing that caused it. A sound with no description is now simply not music and not speech, which is what all fifteen questions were asking; the channel it was using is still handed back, because losing one leaks a voice for the rest of the match and enough of them go quiet.
 - Something going wrong now writes a readable crash report.
 
 ## Long orders stopped hitching
