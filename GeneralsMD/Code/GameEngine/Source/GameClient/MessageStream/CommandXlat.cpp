@@ -2431,8 +2431,25 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 		//-----------------------------------------------------------------------------------------
 		case GameMessage::MSG_META_SELECT_MATCHING_UNITS:
 		{
+			//
+			// One press takes every unit of the selected types that is on the screen; pressed twice
+			// it takes them across the whole map.  The same shape the category keys have - one press
+			// for what you can see, a second for everything you own - and it is a shape you can lean
+			// on: the wide selection is a decision, not something that happens to you because the
+			// screen happened to hold nothing new.
+			//
+			enum { SELECT_MATCHING_AGAIN_MS = 500 };		///< real time: the client frame rate is uncapped
+			static UnsignedInt s_lastMatchingMs = 0;
 
-			TheInGameUI->selectUnitsMatchingCurrentSelection();
+			const UnsignedInt now = timeGetTime();
+			const Bool again = ( s_lastMatchingMs != 0
+														&& now - s_lastMatchingMs <= SELECT_MATCHING_AGAIN_MS );
+			s_lastMatchingMs = now;
+
+			if( again )
+				TheInGameUI->selectMatchingAcrossMap();
+			else
+				TheInGameUI->selectUnitsMatchingCurrentSelection();
 
 			disp = DESTROY_MESSAGE;
 			break;

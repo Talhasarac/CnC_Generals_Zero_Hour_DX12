@@ -115,6 +115,7 @@ found and fixed â€” EA's own, not port damage.**
 - Your own right-click orders always win, however much fire is already inbound.
 - A reservation lapses within half a second if the shot never arrives.
 - Ctrl+Q now takes infantry only, not every armed thing you own.
+- Ctrl+D takes every unit of the kinds you have selected that is on the screen, and pressed twice inside half a second takes them across the whole map. One tank selected and two keystrokes is your whole armour, wherever it is standing. It was on Shift+Ctrl+E, which is three fingers for something you do in every fight, and it only ever reached across the map when the screen had nothing left to give - so the wide selection happened to you instead of being asked for.
 
 ## Aircraft, guards, and orders that used to be ignored
 
