@@ -439,8 +439,20 @@ LRESULT CALLBACK WndProc( HWND hWnd, UINT message,
 			//-------------------------------------------------------------------------
 			case WM_SIZE:
 				// When W3D initializes, it resizes the window.  So stop repainting.
-				if (!gInitializing) 
+				if (!gInitializing)
+				{
 					gDoPaint = false;
+					//
+					// That resize is also the moment borderless becomes fullscreen.  The window is born
+					// small and centred, so the splash sits on the desktop the way it always has instead
+					// of a screen of black; W3D then grows it to the back buffer, which is the desktop
+					// resolution.  It grows it with SWP_NOMOVE, keeping the top left corner where the
+					// small window was, which would hang the thing off the bottom right of the screen.
+					// Put it at the origin instead.
+					//
+					if (ApplicationIsBorderless)
+						::SetWindowPos(hWnd, NULL, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+				}
 				break;
 
 			//-------------------------------------------------------------------------
@@ -705,16 +717,27 @@ static Bool initializeAppWindows( HINSTANCE hInstance, Int nCmdShow, Bool runWin
   RegisterClass( &wndClass );
 
    // Create our main window
+	// a headless run has no picture at all, so there is nothing for borderless to mean
+	if (ApplicationIsHeadless)
+		ApplicationIsBorderless = false;
+
 	windowStyle =  WS_POPUP|WS_VISIBLE;
 	if (ApplicationIsHeadless)
 		windowStyle = WS_POPUP;		// born hidden, no frame, and stays that way
-	else if (runWindowed && !ApplicationIsBorderless)
-		windowStyle |= WS_DLGFRAME | WS_CAPTION | WS_SYSMENU;
+	else if (ApplicationIsBorderless)
+		windowStyle |= WS_SYSMENU;	// no caption, no frame; system menu so alt+F4 still closes it
 	else if (runWindowed)
-		windowStyle |= WS_SYSMENU;	// borderless: keep the system menu for alt+F4, drop the frame
+		windowStyle |= WS_DLGFRAME | WS_CAPTION | WS_SYSMENU;
 	else
 		windowStyle |= WS_EX_TOPMOST | WS_SYSMENU;
 
+	//
+	// Borderless is born at the splash's own 800x600, centred, with the desktop still showing round
+	// it, and only becomes fullscreen when W3D resizes it to the back buffer - which parseBorderless
+	// in CommandLine.cpp has already set to the desktop resolution.  WM_SIZE puts it at the origin
+	// when that happens.  Filling the screen with black for the several seconds the game takes to
+	// load buys nothing and hides the desktop for no reason.
+	//
 	RECT rect;
 	rect.left = 0;
 	rect.top = 0;
@@ -962,8 +985,9 @@ Int APIENTRY WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance,
 			//added a preparse step for this flag because it affects window creation style
 			if (stricmp(token,"-win")==0)
 				ApplicationIsWindowed=true;
-			// same reason: -borderless drops the caption and frame, and implies -win. Parsed here
-			// rather than from Options.ini because the window exists long before the engine's
+			// same reason: -borderless is borderless fullscreen - a windowed device with no caption
+			// or frame, covering the display at the desktop resolution - so it implies -win.  Parsed
+			// here rather than from Options.ini because the window exists long before the engine's
 			// preferences do.
 			if (stricmp(token,"-borderless")==0)
 			{

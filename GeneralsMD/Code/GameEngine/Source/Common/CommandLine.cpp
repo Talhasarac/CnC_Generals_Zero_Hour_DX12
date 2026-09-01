@@ -139,6 +139,34 @@ Int parseWin(char *args[], int)
 }
 
 //=============================================================================
+/* -borderless is fullscreen without the display mode change: a windowed device the size of the
+	 desktop, in a window with no caption and no frame, so it covers the screen exactly the way an
+	 exclusive fullscreen device does but alt-tabs instantly, never loses the device on focus change,
+	 and leaves a second monitor usable.  The window style and size are decided in WinMain, which
+	 preparses -borderless off the raw command line long before this parser runs - the window has to
+	 exist before the engine does.  What is left here is the back buffer, which has to match the
+	 window or the picture is a stretched blit and the cursor no longer lands where it is drawn.
+
+	 -xres/-yres after -borderless still win, for a smaller back buffer in a borderless window.
+
+	 Edge scrolling goes back on because retail turns it off for windowed play - the cursor can
+	 legitimately sit on the border while you reach for another window - and a window covering the
+	 whole display has no such border.  Options.ini's EdgeScrollInWindowedMode is read before the
+	 command line, so a player who set it either way is overridden here on purpose. */
+//=============================================================================
+Int parseBorderless(char *args[], int)
+{
+	if (TheWritableGlobalData)
+	{
+		TheWritableGlobalData->m_windowed = true;
+		TheWritableGlobalData->m_xResolution = GetSystemMetrics( SM_CXSCREEN );
+		TheWritableGlobalData->m_yResolution = GetSystemMetrics( SM_CYSCREEN );
+		TheWritableGlobalData->m_edgeScrollInWindowedMode = TRUE;
+	}
+	return 1;
+}
+
+//=============================================================================
 //=============================================================================
 Int parseNoMusic(char *args[], int)
 {
@@ -1417,6 +1445,7 @@ static CommandLineParam params[] =
 {
 	{ "-noshellmap", parseNoShellMap },
 	{ "-win", parseWin },
+	{ "-borderless", parseBorderless },
 	{ "-xres", parseXRes },
 	{ "-yres", parseYRes },
 	{ "-fullscreen", parseNoWin },
