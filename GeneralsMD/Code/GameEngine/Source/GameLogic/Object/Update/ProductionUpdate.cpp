@@ -545,9 +545,21 @@ void ProductionUpdate::cancelAllUnitsOfType( const ThingTemplate *unitType)
 }  // end cancelAllUnitsOfType
 
 //-------------------------------------------------------------------------------------------------
+/** A door stays open while the next unit is still on its way out of the same building.  Shutting
+	* it and hauling it straight back up for the vehicle behind is wasted motion, and worse, there
+	* is no artwork for a door that changes its mind partway - a door pulled back open mid-close
+	* snaps wide in a single frame.  So the queue closes the doors, not the clock. */
+//-------------------------------------------------------------------------------------------------
+Bool Production_shouldCloseDoorNow( UnsignedInt framesWaitingOpen, UnsignedInt doorWaitOpenTime,
+																	 Bool holdOpen, Bool moreUnitsComing )
+{
+	return framesWaitingOpen > doorWaitOpenTime && !holdOpen && !moreUnitsComing;
+}
+
+//-------------------------------------------------------------------------------------------------
 /** Update the door behavior */
 //-------------------------------------------------------------------------------------------------
-void ProductionUpdate::updateDoors()
+void ProductionUpdate::updateDoors( Bool moreUnitsComing )
 {
 	const ProductionUpdateModuleData *d = getProductionUpdateModuleData();
 
@@ -582,7 +594,8 @@ void ProductionUpdate::updateDoors()
 		else if( m_doors[i].m_doorWaitOpenFrame )
 		{
 
-			if( now - m_doors[i].m_doorWaitOpenFrame > d->m_doorWaitOpenTime && !m_doors[i].m_holdOpen )
+			if( Production_shouldCloseDoorNow( now - m_doors[i].m_doorWaitOpenFrame, d->m_doorWaitOpenTime,
+																				 m_doors[i].m_holdOpen, moreUnitsComing ) )
 			{
 
 				// set our frame marker for closing
@@ -620,6 +633,60 @@ void ProductionUpdate::updateDoors()
 }
 
 //-------------------------------------------------------------------------------------------------
+/** Put a door on its way open, whatever state it is in right now.  A closed door starts opening,
+	* an open one is held open, and one that had started to close is popped back to waiting open. */
+//-------------------------------------------------------------------------------------------------
+void ProductionUpdate::beginOpeningDoor( ExitDoorType exitDoor )
+{
+	DoorInfo *door = &m_doors[ exitDoor ];
+	UnsignedInt now = TheGameLogic->getFrame();
+
+	// if the door is closed, open it
+	if( door->m_doorOpenedFrame == 0 && door->m_doorWaitOpenFrame == 0 && door->m_doorClosedFrame == 0 )
+	{
+
+		door->m_doorOpenedFrame = now;
+		m_setFlags.set( theOpeningFlags[exitDoor] );
+		m_flagsDirty = TRUE;
+
+	}  // end if
+	// if the door is waiting-open, keep it there
+	else if( door->m_doorWaitOpenFrame != 0 )
+	{
+
+		door->m_doorWaitOpenFrame = now;
+
+	}  // end else if
+	// if the door is closing, for now, pop it to waiting open
+	else if( door->m_doorClosedFrame != 0 )
+	{
+
+		door->m_doorWaitOpenFrame = now;
+
+		m_clearFlags.set( theOpeningFlags[exitDoor], true );
+		m_clearFlags.set( theClosingFlags[exitDoor], true );
+		m_setFlags.set( theOpeningFlags[exitDoor], false );
+		m_setFlags.set( theClosingFlags[exitDoor], false );
+
+		m_setFlags.set( theWaitingOpenFlags[exitDoor] );
+		m_flagsDirty = TRUE;
+
+	}  // end else
+
+}  // end beginOpeningDoor
+
+//-------------------------------------------------------------------------------------------------
+/** The door animation used to start only once the unit was already finished, so every unit paid
+	* the whole opening time on top of its build time.  Start the door this far from the end of the
+	* build instead, and it finishes opening on the frame the unit is done.  updateDoors() leaves
+	* the opening state one frame *after* the time is up, hence the +1. */
+//-------------------------------------------------------------------------------------------------
+Bool Production_shouldOpenDoorEarly( Int framesRemaining, UnsignedInt doorOpeningTime )
+{
+	return framesRemaining > 0 && framesRemaining <= (Int)doorOpeningTime + 1;
+}
+
+//-------------------------------------------------------------------------------------------------
 //-------------------------------------------------------------------------------------------------
 UpdateSleepTime ProductionUpdate::update( void )
 {
@@ -629,9 +696,10 @@ UpdateSleepTime ProductionUpdate::update( void )
 	UnsignedInt now = TheGameLogic->getFrame();
 	Object *us = getObject();
 
-	// update the door behaviors
+	// update the door behaviors.  a unit still at the head of the queue is a unit still due out
+	// of a door, so the doors stay open for him instead of closing between the two.
 	if( d->m_numDoorAnimations > 0 )
-		updateDoors();
+		updateDoors( production != NULL && production->getProductionType() == PRODUCTION_UNIT );
 
 	//
 	// if we're in the construction complete state ... we need to check frame
@@ -735,6 +803,44 @@ UpdateSleepTime ProductionUpdate::update( void )
 																	INT_TO_REAL( totalProductionFrames ) *
 																	100.0f;
 
+	//
+	// get the door moving before the unit is finished, so that the opening animation runs out
+	// during the tail of the build instead of being charged on top of it
+	//
+	if( production->m_type == PRODUCTION_UNIT &&
+			d->m_numDoorAnimations > 0 &&
+			Production_shouldOpenDoorEarly( totalProductionFrames - production->m_framesUnderConstruction,
+																			d->m_doorOpeningTime ) )
+	{
+		ExitInterface *exitInterface = us->getObjectExitInterface();
+		if( exitInterface )
+		{
+			ExitDoorType exitDoor = production->getExitDoor();
+			if( exitDoor == DOOR_NONE_AVAILABLE )
+				exitDoor = exitInterface->reserveDoorForExit( production->m_objectToProduce, NULL );
+
+			//
+			// hold the reservation until we build, so the door we opened is the door we come out
+			// of; removeFromProductionQueue releases it again if this entry is cancelled first.
+			// anything else (no door needed, none free) is left for the finished-production path
+			// to ask for again, exactly as it always did.
+			//
+			if( exitDoor >= DOOR_1 && exitDoor < DOOR_COUNT_MAX )
+			{
+				production->setExitDoor( exitDoor );
+
+				//
+				// only a shut door is started here.  one already opening needs nothing, and one
+				// still closing is left to finish - there is no animation for reversing a door
+				// partway, so pulling it back open snaps it wide in a single frame.
+				//
+				DoorInfo *door = &m_doors[ exitDoor ];
+				if( door->m_doorOpenedFrame == 0 && door->m_doorWaitOpenFrame == 0 && door->m_doorClosedFrame == 0 )
+					beginOpeningDoor( exitDoor );
+			}
+		}
+	}
+
 	// if we've reached 100% or more we're done, tada!
 	if( production->m_percentComplete >= 100.0f )
 	{
@@ -780,37 +886,7 @@ UpdateSleepTime ProductionUpdate::update( void )
 						if( d->m_numDoorAnimations > 0 && door != NULL )
 						{
 
-							// if the door is closed, open it
-							if( door->m_doorOpenedFrame == 0 && door->m_doorWaitOpenFrame == 0 && door->m_doorClosedFrame == 0 )
-							{
-
-								door->m_doorOpenedFrame = now;
-								m_setFlags.set( theOpeningFlags[exitDoor] );
-								m_flagsDirty = TRUE;
-
-							}  // end if
-							// if the door is waiting-open, keep it there
-							else if( door->m_doorWaitOpenFrame != 0 )
-							{
-
-								door->m_doorWaitOpenFrame = now;
-
-							}  // end else if
-							// if the door is closing, for now, pop it to waiting open
-							else if( door->m_doorClosedFrame != 0 )
-							{
-
-								door->m_doorWaitOpenFrame = now;
-
-								m_clearFlags.set( theOpeningFlags[exitDoor], true );
-								m_clearFlags.set( theClosingFlags[exitDoor], true );
-								m_setFlags.set( theOpeningFlags[exitDoor], false );
-								m_setFlags.set( theClosingFlags[exitDoor], false );
-
-								m_setFlags.set( theWaitingOpenFlags[exitDoor] );
-								m_flagsDirty = TRUE;
-
-							}  // end else
+							beginOpeningDoor( exitDoor );
 
 						}  // end if, has door animation
 

@@ -7508,3 +7508,58 @@ TEST(the_pool_survives_being_started_and_stopped_repeatedly)
 			CHECK_EQ( 1, s_jobVisits[ i ] );
 	}
 }
+
+/* ProductionUpdate.cpp: a producer with a door animation only started opening it once the unit
+	 was already finished, and then held the unit inside until the animation ran out - so every
+	 tank cost its build time plus the whole door opening time.  The door now starts early enough
+	 to finish opening on the frame the unit is done. */
+extern Bool Production_shouldOpenDoorEarly( Int framesRemaining, UnsignedInt doorOpeningTime );
+
+TEST(door_starts_opening_before_the_unit_is_finished)
+{
+	/* a 60 frame door: updateDoors() only leaves the opening state on the frame *after* the time
+		 is up, so the door has to start 61 frames out to be open when the unit lands. */
+	CHECK( Production_shouldOpenDoorEarly( 61, 60 ) );
+	CHECK( Production_shouldOpenDoorEarly( 1, 60 ) );
+
+	/* one frame earlier than that and the door would be sitting open, waiting on the build. */
+	CHECK( !Production_shouldOpenDoorEarly( 62, 60 ) );
+	CHECK( !Production_shouldOpenDoorEarly( 600, 60 ) );
+
+	/* the unit is done: the finished-production path owns the door from here, not this one. */
+	CHECK( !Production_shouldOpenDoorEarly( 0, 60 ) );
+	CHECK( !Production_shouldOpenDoorEarly( -5, 60 ) );
+
+	/* a producer whose door opens instantly still gets it on the last frame, and never before. */
+	CHECK( Production_shouldOpenDoorEarly( 1, 0 ) );
+	CHECK( !Production_shouldOpenDoorEarly( 2, 0 ) );
+}
+
+/* ProductionUpdate.cpp: the door ran on a stopwatch - it shut a fixed time after a unit came out,
+	 whatever was behind him.  A factory working through a queue therefore closed and hauled its
+	 doors straight back up for every vehicle, and there is no artwork for a door that changes its
+	 mind partway, so a door caught mid-close snapped wide in a single frame.  The queue closes the
+	 doors now: they stay open while a unit is still due, and shut when the queue runs out. */
+extern Bool Production_shouldCloseDoorNow( UnsignedInt framesWaitingOpen, UnsignedInt doorWaitOpenTime,
+																					Bool holdOpen, Bool moreUnitsComing );
+
+TEST(a_door_stays_open_while_another_unit_is_still_coming)
+{
+	/* nothing left to build and the door has stood open its full time: shut it. */
+	CHECK( Production_shouldCloseDoorNow( 31, 30, false, false ) );
+
+	/* another vehicle behind this one - the door stays up however long it has been open. */
+	CHECK( !Production_shouldCloseDoorNow( 31, 30, false, true ) );
+	CHECK( !Production_shouldCloseDoorNow( 100000, 30, false, true ) );
+
+	/* the queue emptying is what closes it, so the same door shuts the moment nothing is due. */
+	CHECK( Production_shouldCloseDoorNow( 100000, 30, false, false ) );
+
+	/* it still owes its open time to the man walking out: an empty queue does not slam it. */
+	CHECK( !Production_shouldCloseDoorNow( 30, 30, false, false ) );
+	CHECK( !Production_shouldCloseDoorNow( 0, 30, false, false ) );
+
+	/* somebody holding the door open by hand still wins over both. */
+	CHECK( !Production_shouldCloseDoorNow( 31, 30, true, false ) );
+	CHECK( !Production_shouldCloseDoorNow( 31, 30, true, true ) );
+}

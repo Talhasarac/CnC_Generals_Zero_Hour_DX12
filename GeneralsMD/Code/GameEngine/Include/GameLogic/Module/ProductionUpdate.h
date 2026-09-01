@@ -248,7 +248,8 @@ protected:
 	void addToProductionQueue( ProductionEntry *production );				///< add to *END* of production queue list
 	void removeFromProductionQueue( ProductionEntry *production );	///< remove production from the queue list
 
-	void updateDoors();														///< update the door behavior
+	void updateDoors( Bool moreUnitsComing );				///< update the door behavior
+	void beginOpeningDoor( ExitDoorType exitDoor );	///< start (or hold) a door on its way open
 
 	struct DoorInfo
 	{
