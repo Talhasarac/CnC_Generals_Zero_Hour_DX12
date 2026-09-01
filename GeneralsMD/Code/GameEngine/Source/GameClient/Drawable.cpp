@@ -4165,11 +4165,11 @@ void Drawable::drawHealthBar(const IRegion2D* healthBarRegion)
 
 		//
 		// what color will we use for the health bar based on our ratio, this makes it
-		// slowly go from green to red, (or from blue to cyan if under construction, or disabled)
+		// slowly go from green to red, (or from blue to cyan if disabled)
 		//
 
 		Color color, outlineColor;
-		if( obj->getStatusBits().test( OBJECT_STATUS_UNDER_CONSTRUCTION ) || (obj->isDisabled() && !obj->isDisabledByType(DISABLED_HELD)) )
+		if( obj->isDisabled() && !obj->isDisabledByType(DISABLED_HELD) )
 		{
 			color = GameMakeColor( 0, healthRatio * 255.0f, 255, 255 );//blue to cyan
 			outlineColor = GameMakeColor( 0, healthRatio * 128.0f, 128, 255 );//dark blue to dark cyan
@@ -4186,8 +4186,10 @@ void Drawable::drawHealthBar(const IRegion2D* healthBarRegion)
 			// means the same thing everywhere on screen.
 			//
 			// The outline stays a darkened version of the same colour, so a light player colour
-			// still reads against light terrain. The under-construction / disabled blue above keeps
-			// its own colour: that is a state, not an owner, and it applies to your own buildings.
+			// still reads against light terrain. A building going up fills its bar in the same
+			// colour as it builds - whose site it is answers a glance across the map, and the
+			// seconds written over it (drawConstructPercent) already say it is not finished. The
+			// disabled blue above keeps its own colour: that is a state nothing else signals.
 			//
 			UnsignedByte r, g, b, a;
 			GameGetColorComponents( obj->getControllingPlayer()->getPlayerColor(), &r, &g, &b, &a );
@@ -4254,26 +4256,22 @@ void Drawable::drawHealthBar(const IRegion2D* healthBarRegion)
 		//
 		TheGameClient->addHealthBarPickRegion( this, *healthBarRegion );
 
-		// draw the health box outline
+		// draw the health box outline - white on a selected drawable, so a selection still reads in a
+		// crowd where every unit carries a bar, without reserving a row above the bar for a marker
 		TheDisplay->drawOpenRect( healthBarRegion->lo.x, healthBarRegion->lo.y, healthBoxWidth, healthBoxHeight,
-															healthBoxOutlineSize, outlineColor );
+															healthBoxOutlineSize,
+															isSelected() ? GameMakeColor( 255, 255, 255, 255 ) : outlineColor );
 
 		// draw a filled bar for the health
 		TheDisplay->drawFillRect( healthBarRegion->lo.x + 1, healthBarRegion->lo.y + 1,
 															(healthBoxWidth - 2) * healthRatio, healthBoxHeight - 2,
 															color );
 
-		// selected drawables get a white overline (1px gap above the bar; below collides with the container pips) so they stand out now that all bars are always on
-		// (+1: drawOpenRect covers width+1 columns, drawFillRect only width)
-		if( isSelected() )
-			TheDisplay->drawFillRect( healthBarRegion->lo.x, healthBarRegion->lo.y - 2, healthBoxWidth + 1, 1,
-																GameMakeColor( 255, 255, 255, 255 ) );
-
 		// bars stack upwards from just above the health bar, each clearing the seconds written over
 		// the one below it
 		Int stackY = healthBarRegion->lo.y - 3;
 
-		// own producers show a yellow production-progress bar above the (selection) line, with seconds left at its top-left
+		// own producers show a yellow production-progress bar above the health bar, with seconds left at its top-left
 		ProductionUpdateInterface *pu = showsOwnerDetail( obj ) ? obj->getProductionUpdateInterface() : NULL;
 		const ProductionEntry *pe = pu ? pu->firstProduction() : NULL;
 		if( pe )

@@ -330,10 +330,11 @@ found and fixed â€” EA's own, not port damage.**
 ## Health bars
 
 - A health bar keeps its size against the unit at any resolution. It was a fixed number of pixels wide and three tall, so the bigger the screen the thinner the thread over a tank.
-- Health bars are in the owner's colour instead of green to red.
+- Health bars are in the owner's colour instead of green to red. A building going up fills its bar in that same colour as it rises, so a glance across the map says whose expansion it is - the seconds written over it already say it is not finished. A disabled building keeps the blue.
 - A building's bar sits above its roof rather than inside its art.
 - Every garrisonable building shows how full it is, whoever holds it.
 - A vehicle's load stays private.
+- What you have selected wears a white frame around its bar, so a selection is still readable in a crowd where every unit carries a bar.
 - Lamps, barrels, rocks and bushes no longer wear health bars.
 - Bridges no longer float a health bar over the middle of the river. There was never anything under it: the span is part of the terrain, and the bar belonged to an invisible marker standing in the water.
 - The bar is part of the unit now: click it and you select whoever it belongs to. Zoomed out, an infantryman is a few pixels of helmet under a bar that is far easier to hit, and a unit half behind a building still has its bar in the clear. It only answers clicks that would have missed everything anyway, so it never takes a click away from the unit you were actually pointing at, and right-clicking bare ground under a bar still orders a move.

@@ -2890,6 +2890,8 @@ void GameWindowManager::assignDefaultGadgetLook( GameWindow *gadget,
 	static Color lightGray	= TheWindowManager->winMakeColor( 192, 192, 192, alpha );
 	static Color black			= TheWindowManager->winMakeColor(   0,   0,   0, alpha );
 	static Color white			= TheWindowManager->winMakeColor( 254, 254, 254, alpha );
+	// a cool off-white: a progress bar filled in pure white swallows its own white frame
+	static Color offWhite		= TheWindowManager->winMakeColor( 228, 236, 240, alpha );
 	static Color enabledText					= white;
 	static Color enabledTextBorder		= darkGray;
 	static Color disabledText					= darkGray;
@@ -3481,7 +3483,7 @@ void GameWindowManager::assignDefaultGadgetLook( GameWindow *gadget,
 		GadgetProgressBarSetEnabledImageRight( gadget, winFindImage( "ProgressBarEnabledRightEnd" ) );
 		GadgetProgressBarSetEnabledImageCenter( gadget, winFindImage( "ProgressBarEnabledRepeatingCenter" ) );
 		GadgetProgressBarSetEnabledImageSmallCenter( gadget, winFindImage( "ProgressBarEnabledSmallRepeatingCenter" ) );
-		GadgetProgressBarSetEnabledBarColor( gadget, yellow );
+		GadgetProgressBarSetEnabledBarColor( gadget, offWhite );
 		GadgetProgressBarSetEnabledBarBorderColor( gadget, white );
 		GadgetProgressBarSetEnabledBarImageLeft( gadget, winFindImage( "ProgressBarEnabledBarLeftEnd" ) );
 		GadgetProgressBarSetEnabledBarImageRight( gadget, winFindImage( "ProgressBarEnabledBarRightEnd" ) );
