@@ -97,6 +97,8 @@ public:
 	Bool m_useDrawModuleLOD;
 	Bool m_useHeatEffects;
 	Bool m_useFpsLimit;
+	Bool m_useGroupPaths;			///< false = -nogrouppath: every unit solves its own path, no shared corridor
+	Bool m_useCrossingCost;		///< false = -nocrosstime: the reservation map is not kept and paths ignore when other units will be where
 	Bool m_dumpAssetUsage;
 	Int m_framesPerSecondLimit;
 	Int	m_chipSetType;	///<See W3DShaderManager::ChipsetType for options

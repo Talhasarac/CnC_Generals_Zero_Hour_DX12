@@ -77,6 +77,7 @@ AIGroup::AIGroup( void )
 {
 //	DEBUG_LOG(("***AIGROUP %x is being constructed.\n", this));
 	m_groundPath = NULL;
+	m_groundPathDiameter = 0;
 	m_speed = 0.0f;
 	m_matchSpeeds = TRUE;
 	m_dirty = false;
@@ -520,6 +521,11 @@ void AIGroup::computeIndividualDestination( Coord3D *dest, const Coord3D *groupD
 
 static const Int PATH_DIAMETER_IN_CELLS = 6;
 
+/* A player's selection keeps its shape - a shared wide corridor split into columns for a move, the
+	 centroid offsets for an attack move - up to this many members. Past it the shape is what breaks:
+	 two hundred units strung out along an arc, three hundred with no workable goal cell at all. */
+static const Int MAX_MEMBERS_FOR_GROUP_LANES = 40;
+
 //-------------------------------------------------------------------------------------------------
 // Internal function for moving a group of infantry as a column.
 //
@@ -601,6 +607,7 @@ Bool AIGroup::friend_computeGroundPath( const Coord3D *pos, CommandSourceType cm
 		distSqr = dx*dx+dy*dy;
 	}
 	if (distSqr < sqr(TheAI->getAiData()->m_minDistanceForGroup)) {
+		DEBUG_LOG(("GROUPPATH probe: too close, distSqr %f min %f\n", distSqr, sqr(TheAI->getAiData()->m_minDistanceForGroup)));
 		return false;
 	}
 	if (distSqr>sqr(TheAI->getAiData()->m_distanceRequiresGroup)) {
@@ -635,10 +642,28 @@ Bool AIGroup::friend_computeGroundPath( const Coord3D *pos, CommandSourceType cm
 		}
 		if (isPassable) closeEnough = true;
 	}
-	if (!closeEnough) return false;
-	
-	m_groundPath = TheAI->pathfinder()->findGroundPath(&center, pos, PATH_DIAMETER_IN_CELLS, false);
-	return m_groundPath!=NULL;
+	if (!closeEnough) {
+		DEBUG_LOG(("GROUPPATH probe: not closeEnough, infantry %d vehicles %d\n", numInfantry, numVehicles));
+		return false;
+	}
+
+	// A corridor six cells wide does not exist on every route - a bridge, a ramp or a gap between
+	// two cliffs is narrower than sixty world units, and findGroundPath then returns NULL. Retail
+	// gave up there and let every member solve its own path to the same point, which is exactly the
+	// single file this is trying to avoid: the group is at its most cramped precisely where it most
+	// needs to be told who drives where. So ask for a narrower corridor before giving up, and
+	// remember the width that answered - the columns below are spaced against it, not against six.
+	const Int groupPathDiameters[3] = { PATH_DIAMETER_IN_CELLS, 4, 3 };
+	for (Int w = 0; w < 3; ++w) {
+		m_groundPathDiameter = groupPathDiameters[w];
+		m_groundPath = TheAI->pathfinder()->findGroundPath(&center, pos, m_groundPathDiameter, false);
+		DEBUG_LOG(("GROUPPATH probe: findGroundPath diameter %d -> %s\n", m_groundPathDiameter, m_groundPath?"path":"NULL"));
+		if (m_groundPath) {
+			return true;
+		}
+	}
+	m_groundPathDiameter = 0;
+	return false;
 
 }
 
@@ -1141,6 +1166,51 @@ void AIGroup::friend_moveFormationToPos( const Coord3D *pos, CommandSourceType c
 
 	}
 }
+/**
+ * Is there room for this unit, centred on spot, across its own width along normal?
+ * The corridor is wide enough for the group, but a lane offset is a blind sideways step off the
+ * path the pathfinder actually checked, and a tank is wider than the cell that step lands in.
+ */
+static Bool laneSpotIsClear( Object *unit, const Coord3D *spot, const Coord2D *normal, Real halfWidth )
+{
+	AIUpdateInterface *ai = unit->getAIUpdateInterface();
+	if (ai == NULL) return false;
+	Pathfinder *pathfinder = TheAI->pathfinder();
+	const Bool isCrusher = unit->getCrusherLevel() > 0;
+	const PathfindLayerEnum layer = unit->getLayer();
+	if (!pathfinder->validMovementPosition( isCrusher, layer, ai->getLocomotorSet(), spot )) {
+		return false;
+	}
+	Coord3D edge = *spot;
+	edge.x += halfWidth * normal->x;
+	edge.y += halfWidth * normal->y;
+	if (!pathfinder->validMovementPosition( isCrusher, layer, ai->getLocomotorSet(), &edge )) {
+		return false;
+	}
+	edge = *spot;
+	edge.x -= halfWidth * normal->x;
+	edge.y -= halfWidth * normal->y;
+	return pathfinder->validMovementPosition( isCrusher, layer, ai->getLocomotorSet(), &edge );
+}
+
+/**
+ * Perpendicular distance of pt from the segment from a to b, in 2d.
+ */
+static Real distanceFromSegment( const Coord3D *a, const Coord3D *b, const Coord3D *pt )
+{
+	Real dx = b->x - a->x;
+	Real dy = b->y - a->y;
+	Real lenSqr = dx*dx + dy*dy;
+	if (lenSqr < 1.0f) {
+		dx = pt->x - a->x;
+		dy = pt->y - a->y;
+		return sqrtf(dx*dx + dy*dy);
+	}
+	Real cross = (pt->x - a->x)*dy - (pt->y - a->y)*dx;
+	if (cross < 0) cross = -cross;
+	return cross / sqrtf(lenSqr);
+}
+
 //-------------------------------------------------------------------------------------------------
 // Internal function for moving a group of vehicles as a column.
 //
@@ -1191,11 +1261,12 @@ Bool AIGroup::friend_moveVehicleToPos( const Coord3D *pos, CommandSourceType cmd
 		endNode = NULL;
 	}
 	if (startNode==NULL || endNode==NULL) {
+		DEBUG_LOG(("VEHCOLUMN probe: corridor too short to take a heading from\n"));
 		m_groundPath->deleteInstance();
 		m_groundPath = NULL;
 		return false;
 	}
-	
+
 	Coord2D startVector;
 	startVector.x = startNode->getPosition()->x - startPoint.x;
 	startVector.y = startNode->getPosition()->y - startPoint.y;
@@ -1217,6 +1288,7 @@ Bool AIGroup::friend_moveVehicleToPos( const Coord3D *pos, CommandSourceType cmd
 	endVectorNormal.normalize();
 
 	Int unitsToPath = 0;
+	Real maxUnitRadius = 0.0f;
 	Bool useEndVector = false;
 	// Move.
 	MemoryPoolObjectHolder iterHolder;
@@ -1256,6 +1328,9 @@ Bool AIGroup::friend_moveVehicleToPos( const Coord3D *pos, CommandSourceType cmd
 		// Sort by the dot product of normal.
 		iter->insert((*i), dx*startVectorNormal.x+dy*startVectorNormal.y);
 		unitsToPath++;
+		if ((*i)->getGeometryInfo().getBoundingCircleRadius() > maxUnitRadius) {
+			maxUnitRadius = (*i)->getGeometryInfo().getBoundingCircleRadius();
+		}
 
 		// If units are closer to the end vector than the start vector, use the end vector.
 		Real distToEndSqr;
@@ -1272,8 +1347,10 @@ Bool AIGroup::friend_moveVehicleToPos( const Coord3D *pos, CommandSourceType cmd
 	}
 
 	if (unitsToPath<TheAI->getAiData()->m_minVehiclesForGroup) {
+		DEBUG_LOG(("VEHCOLUMN probe: only %d vehicles, need %d\n", unitsToPath, TheAI->getAiData()->m_minVehiclesForGroup));
 		return false;
 	}
+	DEBUG_LOG(("VEHCOLUMN probe: laying %d vehicles into columns\n", unitsToPath));
 
 	Object *theUnit;
 	if (useEndVector) {
@@ -1404,13 +1481,16 @@ Bool AIGroup::friend_moveVehicleToPos( const Coord3D *pos, CommandSourceType cmd
 
 	curIndex = 0;
 	Int columnFactor[5] = {0,0,0,0,0};
+	// A lane is only a lane if the widest thing in the group fits in it with room to steer. Two
+	// cells was a guess, and it is narrower than a tank; this is measured off the units that were
+	// actually ordered, so a group of tanks spreads wider than a group of humvees.
+	const Real laneSpacing = 2.0f*maxUnitRadius + 0.5f*PATHFIND_CELL_SIZE_F;
 	PathfindLayerEnum layer = TheTerrainLogic->getLayerForDestination(pos);
 	for (theUnit = iter2->first(); theUnit; theUnit = iter2->next())
 	{
 		AIUpdateInterface *ai = theUnit->getAIUpdateInterface();
 		Int tmp = ai->getTmpValue();
 		Int threeColumnDelta = tmp>>16;
-		Int columnDelta = (Short)(tmp & 0xFFFF);
  		Int factor = columnFactor[threeColumnDelta+2];
 		columnFactor[threeColumnDelta+2] = factor+1;
 
@@ -1418,6 +1498,21 @@ Bool AIGroup::friend_moveVehicleToPos( const Coord3D *pos, CommandSourceType cmd
 		PathNode *node = startNode;
 		PathNode *previousNode = m_groundPath->getFirstNode();
 		Coord3D prevPos = *theUnit->getPosition();
+		// Every waypoint kept is a turn taken: the unit stops steering for the horizon and steers for
+		// the next point instead. The corridor hands out one point per path node, and most of them sit
+		// on or near the straight line through their neighbours - a wobble the driver pays for and
+		// nobody asked for. This is the raycast simplification every modern pathfinder ends with: a
+		// point is dropped when the straight line past it is one this unit can actually drive
+		// (isLinePassable, which is the raycast) and it does not pull the route more than a lane
+		// width off the corridor the pathfinder cleared. A cheap distance test comes first so the
+		// common case - a point that barely bends anything - never pays for a line check.
+		const Real straightenTolerance = 0.5f*PATHFIND_CELL_SIZE_F;
+		const Int maxStraightenRun = 16;
+		const LocomotorSurfaceTypeMask surfaces = ai->getLocomotorSet().getValidSurfaces();
+		const PathfindLayerEnum unitLayer = theUnit->getLayer();
+		Coord3D pendingPos;
+		Bool havePending = false;
+		Int straightenRun = 0;
 		while (node) {
 			Coord3D dest = *node->getPosition();
 			PathNode *tmpNode;
@@ -1440,16 +1535,34 @@ Bool AIGroup::friend_moveVehicleToPos( const Coord3D *pos, CommandSourceType cmd
 			cornerVector.x = nextNode->getPosition()->x - previousNode->getPosition()->x;
 			cornerVector.y = nextNode->getPosition()->y - previousNode->getPosition()->y;
 
-			Real offset = PATHFIND_CELL_SIZE_F*1.5f;
-			dest.x += offset * columnDelta * cornerVectorNormal.x;
-			dest.y += offset * columnDelta * cornerVectorNormal.y;
- 			if (factor&1) {
-				dest.x += 0.5f*PATHFIND_CELL_SIZE_F * cornerVectorNormal.x;
-				dest.y += 0.5f*PATHFIND_CELL_SIZE_F * cornerVectorNormal.y;
-			} else {
-				dest.x -= 0.5f*PATHFIND_CELL_SIZE_F * cornerVectorNormal.x;
-				dest.y -= 0.5f*PATHFIND_CELL_SIZE_F * cornerVectorNormal.y;
+			// Retail drove the corridor in two lanes a cell and a half either side of its centre and
+			// nudged alternate units half a cell sideways on top of that, which is narrower than the
+			// units themselves: side by side they overlapped, so a group crossing open ground spent
+			// the trip shoving. Lanes are a whole unit apart plus a little air instead (laneSpacing),
+			// so a lane is somewhere a tank actually fits, and there is no half-cell nudge - two
+			// units sharing a lane drive one line, in file, which is what a lane is for.
+			Real lateral = laneSpacing * threeColumnDelta;
+
+			// The lane is a sideways step off the line the pathfinder checked, so it can land in a
+			// cliff or a building even though the corridor as a whole was passable - and a tank
+			// wedged against terrain is worse than a tank in a queue. Give the step back rather than
+			// take it blindly: full width, then half, then none, which is the corridor centre the
+			// path already proved. Trying half before giving up matters at the pinch points, where
+			// there is room for a nudge but not for a whole lane.
+			const Real halfWidth = theUnit->getGeometryInfo().getBoundingCircleRadius();
+			Coord3D laneDest = dest;
+			for (Int shrink = 0; shrink < 3; ++shrink) {
+				Real tryLateral = lateral;
+				if (shrink == 1) tryLateral = lateral * 0.5f;
+				if (shrink == 2) tryLateral = 0.0f;
+				laneDest = dest;
+				laneDest.x += tryLateral * cornerVectorNormal.x;
+				laneDest.y += tryLateral * cornerVectorNormal.y;
+				if (tryLateral == 0.0f || laneSpotIsClear( theUnit, &laneDest, &cornerVectorNormal, halfWidth )) {
+					break;
+				}
 			}
+			dest = laneDest;
 
 			Coord2D curVector;
 			curVector.x = dest.x-prevPos.x;
@@ -1457,8 +1570,24 @@ Bool AIGroup::friend_moveVehicleToPos( const Coord3D *pos, CommandSourceType cmd
 			clampToMap(&dest, controllingPlayerType);
 			// Make sure that this dest is going in the same direction as the vector.
 			if (cornerVector.x*curVector.x + cornerVector.y*curVector.y > 0) {
-				path.push_back( dest );
-				prevPos = dest;
+				if (!havePending) {
+					pendingPos = dest;
+					havePending = true;
+					straightenRun = 0;
+				} else if (straightenRun < maxStraightenRun &&
+									 (distanceFromSegment( &prevPos, &dest, &pendingPos ) < straightenTolerance ||
+										(distanceFromSegment( &prevPos, &dest, &pendingPos ) < laneSpacing &&
+										 TheAI->pathfinder()->isLinePassable( theUnit, surfaces, unitLayer,
+																													prevPos, dest, false, true )))) {
+					// prevPos -> dest is drivable without the point in between; drop it and hold the turn.
+					pendingPos = dest;
+					straightenRun++;
+				} else {
+					path.push_back( pendingPos );
+					prevPos = pendingPos;
+					pendingPos = dest;
+					straightenRun = 0;
+				}
 			}
 
 			node=node->getNextOptimized();
@@ -1471,6 +1600,10 @@ Bool AIGroup::friend_moveVehicleToPos( const Coord3D *pos, CommandSourceType cmd
 				}
 			}
 		}
+		if (havePending) {
+			// the last corridor point is never dropped - it is what aims the unit at the goal.
+			path.push_back( pendingPos );
+		}
 
 		Coord3D dest = *pos;
 		if (threeColumnDelta<-3) threeColumnDelta=-3;
@@ -1479,11 +1612,16 @@ Bool AIGroup::friend_moveVehicleToPos( const Coord3D *pos, CommandSourceType cmd
 		if (unitsToPath<5) {
 			offset = PATHFIND_CELL_SIZE_F*1.5f;
 		}
+		// Same rule as the lanes: a cell and a half is less than a tank, so four tanks arriving on
+		// that spacing arrive on top of each other and finish the trip pushing.
+		if (offset < laneSpacing) {
+			offset = laneSpacing;
+		}
 		dest.x += offset * threeColumnDelta * endVectorNormal.x;
 		dest.y += offset * threeColumnDelta * endVectorNormal.y;
 		if (factor&1) {
-			dest.x += PATHFIND_CELL_SIZE_F * endVectorNormal.x;
-			dest.y += PATHFIND_CELL_SIZE_F * endVectorNormal.y;
+			dest.x += 0.5f*laneSpacing * endVectorNormal.x;
+			dest.y += 0.5f*laneSpacing * endVectorNormal.y;
 		}
 #if 0
 		LocomotorPriority movePriority = LOCO_MOVES_MIDDLE;
@@ -1592,13 +1730,25 @@ void AIGroup::groupMoveToPosition( const Coord3D *p_posIn, Bool addWaypoint, Com
 	// holding a shape. Explicit formations - the ones the player asked for by name - still keep
 	// theirs, and the AI still moves its teams the old way.
 	//
-	const Bool gatherOnPoint = ( cmdSource == CMD_FROM_PLAYER && !isFormation );
+	// That was too wide a net. Only a selection far larger than anyone drags a box around fails to
+	// fit its shape, and paying for it at every size cost the one thing the group path is for: a
+	// dozen tanks sent across a map all solve the same A* and drive down the single cheapest line
+	// nose to tail, because the congestion cost can only push a lane a cell or two aside. Below the
+	// cap they get the retail answer instead - one corridor wide enough for the group
+	// (PATH_DIAMETER_IN_CELLS), split into columns, so the group crosses a gap abreast and some of
+	// it takes the wider way round.
+	//
+	const Bool gatherOnPoint = ( cmdSource == CMD_FROM_PLAYER && !isFormation &&
+															 m_memberListSize > MAX_MEMBERS_FOR_GROUP_LANES );
 
 	if (!addWaypoint && !isFormation && !gatherOnPoint) {
 		friend_computeGroundPath(pos, cmdSource);
 		didInfantry = friend_moveInfantryToPos(pos, cmdSource);
 		didVehicles = friend_moveVehicleToPos(pos, cmdSource);
 	}
+	DEBUG_LOG(("GROUPMOVE probe: members %d src %d gatherOnPoint %d formation %d waypoint %d corridor %d infantry %d vehicles %d\n",
+		m_memberListSize, (Int)cmdSource, gatherOnPoint?1:0, isFormation?1:0, addWaypoint?1:0,
+		m_groundPath!=NULL?1:0, didInfantry?1:0, didVehicles?1:0));
 	if (m_dirty)
 		recompute();
 
@@ -2369,10 +2519,11 @@ void AIGroup::groupAttackMoveToPosition( const Coord3D *pos, Int maxShotsToFire,
 		// As with a plain move (see groupMoveToPosition): a player's attack move sends everyone to
 		// the point and lets each unit take the nearest free cell to it, rather than holding the
 		// selection's shape on the way in - which a large group could only do by spreading along
-		// an arc.
+		// an arc. And, as there, only a selection past the cap actually has that problem: under it
+		// the shape is what keeps the group off one another's path on the way in.
 		//
 		Coord3D dest;
-		if (cmdSource == CMD_FROM_PLAYER)
+		if (cmdSource == CMD_FROM_PLAYER && m_memberListSize > MAX_MEMBERS_FOR_GROUP_LANES)
 			dest = goalPos;
 		else
 			computeIndividualDestination( &dest, &goalPos, theUnit, &center, FALSE );

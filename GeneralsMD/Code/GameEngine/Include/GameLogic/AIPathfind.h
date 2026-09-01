@@ -31,6 +31,8 @@
 #ifndef _PATHFIND_H_
 #define _PATHFIND_H_												 
 
+#include <vector>
+
 #include "Common/GameType.h"
 #include "Common/GameMemory.h"
 #include "Common/Snapshot.h"
@@ -40,6 +42,7 @@
 
 class Bridge;
 class Object;
+class Path;
 class Weapon;
 class PathfindZoneManager;
 
@@ -195,6 +198,40 @@ struct ClosestPointOnPathInfo
 	PathfindLayerEnum		layer;
 };
 
+//----------------------------------------------------------------------------------------------------------
+
+/**
+ * One live path's claim on one pathfind cell: the logic frame its owner expects to be standing
+ * there, and which way it is going when it arrives.
+ *
+ * The congestion map (Pathfinder::m_pathUsage) has no clock in it, so a cell somebody will drive
+ * over in ten seconds costs exactly as much as one they are sitting in now.  That is the right
+ * answer for "is this ground spoken for" and the wrong one for "will we be on it at the same
+ * moment" - which is the whole difference between a shared road, where units queue nose to tail
+ * and everyone gets through, and a crossing, where two columns arrive from different directions
+ * and stop each other dead.
+ *
+ * The heading is why a reservation stores more than a time.  Units following each other down one
+ * road are in the same cells at nearly the same moments and must not be charged for it; the
+ * expensive case is two of them wanting a cell at the same moment while going different ways.
+ */
+struct PathReservation
+{
+	const Path*					m_owner;						///< the path that claimed this cell (identity only)
+	ICoord2D						m_cell;
+	UnsignedInt					m_frame;						///< logic frame the owner expects to reach m_cell
+	Real								m_headingX;					///< normalized direction of travel on arrival
+	Real								m_headingY;
+	Int									m_nextInBucket;			///< next reservation in this hash bucket, -1 = end of chain
+};
+
+/// The crossing penalty, split out of examineNeighboringCells so the cap is testable.
+extern Int Pathfinder_crossingPenalty( Int conflicts );
+
+/// Do these two claims on one cell clash - same moment, and not going the same way?
+extern Bool Pathfinder_reservationsClash( UnsignedInt frameA, Real headingAX, Real headingAY,
+																					UnsignedInt frameB, Real headingBX, Real headingBY );
+
 /**
  * This class encapsulates a "path" returned by the Pathfinder.
  */
@@ -285,6 +322,13 @@ protected:
 	PathfindCell *m_cell;															///< Cell this info belongs to currently.
 
 	UnsignedShort m_totalCost, m_costSoFar;	///< cost estimates for A* search
+
+	/* Distance travelled to reach this cell, in the same units as m_costSoFar but with none of the
+		 penalties in it.  The penalties are money, not ground: a detour taken to dodge someone must
+		 not also make the search believe it arrives eight cells later than it does, and the crossing
+		 cost below turns this number into an arrival frame.  Only the main ground search maintains
+		 it; every other search leaves it at zero and charges no crossing cost. */
+	UnsignedShort m_travelSoFar;
 
 	/// have to include cell's coordinates, since cells are often accessed via pointer only
 	ICoord2D m_pos;
@@ -394,9 +438,11 @@ public:
 	inline Bool getClosed(void) const {return m_info->m_closed;}
 	inline UnsignedInt getCostSoFar(void) const {return m_info->m_costSoFar;}
 	inline UnsignedInt getTotalCost(void) const {return m_info->m_totalCost;}
+	inline UnsignedInt getTravelSoFar(void) const {return m_info->m_travelSoFar;}
 
 	inline void setCostSoFar(UnsignedInt cost) { if( m_info ) m_info->m_costSoFar = cost;}
 	inline void setTotalCost(UnsignedInt cost) { if( m_info ) m_info->m_totalCost = cost;}
+	inline void setTravelSoFar(UnsignedInt travel) { if( m_info ) m_info->m_travelSoFar = travel;}
 
 	void setParentCell(PathfindCell* parent);
 	void clearParentCell(void);
@@ -773,10 +819,17 @@ public:
 
 	/// Congestion map: how many live unit paths run through each cell.  A* charges extra per path, so
 	/// units ordered along the same route spread into parallel lanes instead of stacking on one line.
-	void registerPathUsage( const Path *path );
+	void registerPathUsage( const Path *path, const Object *obj );
 	void unregisterPathUsage( const Path *path );
 	void releasePathUsageBefore( const Path *path, const PathNode *node );	///< unit has passed everything before node
 	void adjustPathUsage( const PathNode *from, const PathNode *to, Int delta );	///< [from, to) raw nodes, +1/-1
+
+	/// Reservation map: *when* each live path expects to be in each cell, and going which way.  A*
+	/// charges extra where somebody else wants the same cell at the same moment on a different
+	/// heading, which is a crossing; two units queued along one road never pay it.
+	void reservePathTiming( const Path *path, const Object *obj );	///< stamp arrival frames for the whole path
+	void releaseReservations( const Path *path, const PathNode *from, const PathNode *to );	///< [from, to) raw nodes
+	Int countCrossingReservations( Int x, Int y, UnsignedInt frame, Real headingX, Real headingY ) const;
 
 	void setIgnoreObstacleID( ObjectID objID );					///< if non-zero, the pathfinder will ignore the given obstacle
 	void setIgnoreUnderConstruction( Bool ignore );			///< if true, half-built structures are not obstacles to this search
@@ -947,6 +1000,20 @@ private:
 	PathfindCell **m_map;		///< Pathfinding map indexes - contains matrix indexing into the map.
 	UnsignedByte *m_pathUsage;	///< Congestion map, (hi.x+1)*(hi.y+1), indexed [x*(hi.y+1)+y]
 	Int getPathUsage( Int x, Int y ) const;
+
+	//
+	// Reservation map.  A dense per-cell array would be a second whole-map allocation to hold a few
+	// thousand live claims, so the claims live in a pool and are found through a fixed hash of the
+	// cell coordinate.  The A* only ever probes it for a cell the congestion map already says a live
+	// path runs through - the two maps stamp exactly the same cells - so the hash is walked on the
+	// handful of cells where a crossing is even possible and nowhere else.
+	//
+	enum {PATH_RESERVATION_BUCKETS = 2048};				///< power of two: the hash is masked, not divided
+	std::vector<PathReservation> m_reservations;	///< pool; a free entry is linked into m_firstFreeReservation
+	Int m_firstFreeReservation;										///< head of the free list, -1 = grow the pool
+	Int m_reservationBuckets[PATH_RESERVATION_BUCKETS];	///< cell hash -> first reservation, -1 = empty
+	static Int reservationBucketOf( Int x, Int y );
+	void resetReservations( void );								///< drop every claim: the map underneath them is gone
 	IRegion2D m_extent;														///< Grid extent limits
 	IRegion2D m_logicalExtent;										///< Logical grid extent limits
 

@@ -51,6 +51,8 @@
 #include "GameNetwork/CrcAgreement.h"
 #include "GameLogic/GameLogic.h"
 #include "Common/EarlyCommandLine.h"
+#include "Common/CommandLine.h"
+#include "Common/GlobalData.h"
 #include "GameNetwork/NetworkUtil.h"
 #include "Common/Recorder.h"
 #include "Common/RadarShroudCache.h"
@@ -6230,31 +6232,84 @@ TEST(headless_run_ends_on_a_decision_or_on_the_frame_limit)
 	CHECK_STR( GameEngine_headlessRunResult( 3000, 2000, 3000 ), "decided" );
 }
 
-extern Int Pathfinder_congestionPenalty( Int usage );
+extern Int Pathfinder_congestionPenalty( Int usage, Int costPerPath );
 
 TEST(congestion_cost_is_charged_per_path_and_capped)
 {
 	/* Another unit's live path through a cell we would step on costs us, so two units heading the
 		 same way take parallel lanes instead of one queue.  Empty ground stays free - a map with no
 		 traffic on it has to path exactly as it always did. */
-	CHECK_EQ( 0, Pathfinder_congestionPenalty( 0 ) );
-	CHECK_EQ( 0, Pathfinder_congestionPenalty( -1 ) );	// usage is summed over a footprint that can leave the map
+	CHECK_EQ( 0, Pathfinder_congestionPenalty( 0, 5 ) );
+	CHECK_EQ( 0, Pathfinder_congestionPenalty( -1, 5 ) );	// usage is summed over a footprint that can leave the map
 
 	// one path through the footprint costs one unit of the cost, two cost two
-	CHECK_EQ( 5, Pathfinder_congestionPenalty( 1 ) );
-	CHECK_EQ( 10, Pathfinder_congestionPenalty( 2 ) );
+	CHECK_EQ( 5, Pathfinder_congestionPenalty( 1, 5 ) );
+	CHECK_EQ( 10, Pathfinder_congestionPenalty( 2, 5 ) );
 
 	/* and the cap is the point: the heuristic does not know about this cost, so an uncapped
 		 penalty on a crowded cell inflates the search until it floods and the cell pool runs dry.
 		 Four paths and forty pay the same as four. */
-	CHECK_EQ( 20, Pathfinder_congestionPenalty( 4 ) );
-	CHECK_EQ( 20, Pathfinder_congestionPenalty( 5 ) );
-	CHECK_EQ( 20, Pathfinder_congestionPenalty( 255 ) );	// m_pathUsage is a byte: this is its ceiling
+	CHECK_EQ( 20, Pathfinder_congestionPenalty( 4, 5 ) );
+	CHECK_EQ( 20, Pathfinder_congestionPenalty( 5, 5 ) );
+	CHECK_EQ( 20, Pathfinder_congestionPenalty( 255, 5 ) );	// m_pathUsage is a byte: this is its ceiling
 
 	/* The whole penalty has to stay small against the step costs it is added to (10 orthogonal,
 		 14 diagonal): a crowded cell may look worse than an empty one, never worse than a detour
 		 around the map. */
-	CHECK( Pathfinder_congestionPenalty( 255 ) <= 2*10 );
+	CHECK( Pathfinder_congestionPenalty( 255, 5 ) <= 2*10 );
+
+	/* The cost per path is a parameter because the cap has to move with it: whatever it is set to,
+		 the ceiling stays four of them, which is the bound on how far a unit will go around. */
+	CHECK_EQ( 20, Pathfinder_congestionPenalty( 1, 20 ) );
+	CHECK_EQ( 80, Pathfinder_congestionPenalty( 4, 20 ) );
+	CHECK_EQ( 80, Pathfinder_congestionPenalty( 255, 20 ) );
+	CHECK( Pathfinder_congestionPenalty( 255, 20 ) <= 8*10 );
+}
+
+extern Int Pathfinder_crossingPenalty( Int conflicts );
+
+TEST(crossing_cost_is_charged_per_conflict_and_capped)
+{
+	/* The congestion map says somebody's path runs through this cell; the reservation map says
+		 *when* they will be in it.  A cell two units want at the same moment, going different ways,
+		 is a crossing, and it costs - a cell two units want minutes apart costs nothing. */
+	CHECK_EQ( 0, Pathfinder_crossingPenalty( 0 ) );
+	CHECK_EQ( 0, Pathfinder_crossingPenalty( -1 ) );
+
+	// 60 per crossing: six orthogonal steps, i.e. worth going around a short way and no further
+	CHECK_EQ( 60, Pathfinder_crossingPenalty( 1 ) );
+	CHECK_EQ( 120, Pathfinder_crossingPenalty( 2 ) );
+
+	/* Capped at three for the same reason the congestion cost is capped: the heuristic cannot see
+		 this cost, so an uncapped one on a busy junction floods the search.  A junction thirty units
+		 want at once is a junction, not a reason to walk around the map. */
+	CHECK_EQ( 180, Pathfinder_crossingPenalty( 3 ) );
+	CHECK_EQ( 180, Pathfinder_crossingPenalty( 4 ) );
+	CHECK_EQ( 180, Pathfinder_crossingPenalty( 1000 ) );
+}
+
+extern Bool Pathfinder_reservationsClash( UnsignedInt frameA, Real headingAX, Real headingAY,
+																				 UnsignedInt frameB, Real headingBX, Real headingBY );
+
+TEST(two_claims_on_a_cell_clash_only_at_the_same_moment_and_across_each_other)
+{
+	// head-on, same frame: the crossing this whole cost exists for
+	CHECK( Pathfinder_reservationsClash( 100, 1.0f, 0.0f, 100, -1.0f, 0.0f ) );
+	// at right angles, eleven frames apart - still inside the twelve-frame window
+	CHECK( Pathfinder_reservationsClash( 100, 1.0f, 0.0f, 111, 0.0f, 1.0f ) );
+
+	/* The window is how long a tank owns a ten-unit cell.  Twelve frames apart is not the same
+		 moment, in either order - and the frames are unsigned, so the older-first case must not
+		 subtract its way into a huge positive number. */
+	CHECK( !Pathfinder_reservationsClash( 100, 1.0f, 0.0f, 112, 0.0f, 1.0f ) );
+	CHECK( !Pathfinder_reservationsClash( 112, 0.0f, 1.0f, 100, 1.0f, 0.0f ) );
+	CHECK( !Pathfinder_reservationsClash( 0, 1.0f, 0.0f, 5000, -1.0f, 0.0f ) );
+
+	/* Traffic going your way is a queue, not a crossing.  Charging it prices hundreds of following
+		 pairs per order and buys nothing: the unit behind you is where you are about to not be. */
+	CHECK( !Pathfinder_reservationsClash( 100, 1.0f, 0.0f, 100, 1.0f, 0.0f ) );
+	CHECK( !Pathfinder_reservationsClash( 100, 1.0f, 0.0f, 100, 0.707107f, 0.707107f ) );	// 45 deg
+	CHECK( Pathfinder_reservationsClash( 100, 1.0f, 0.0f, 100, 0.0f, 1.0f ) );							// 90 deg
 }
 
 TEST(a_replay_game_is_never_itself_recorded)
@@ -7562,4 +7617,42 @@ TEST(a_door_stays_open_while_another_unit_is_still_coming)
 	/* somebody holding the door open by hand still wins over both. */
 	CHECK( !Production_shouldCloseDoorNow( 31, 30, true, false ) );
 	CHECK( !Production_shouldCloseDoorNow( 31, 30, true, true ) );
+}
+
+TEST(borderless_asks_for_a_windowed_device_the_size_of_the_desktop)
+{
+	/* -borderless is borderless fullscreen.  Half of it is the window itself, which WinMain creates
+		 before the engine exists and which nothing here can reach; the other half is the back buffer,
+		 and that half is this table's.  Getting it wrong is not cosmetic: a back buffer that does not
+		 match the window is presented as a stretched blit, and the cursor stops landing where it is
+		 drawn. */
+	GlobalData *saved = TheWritableGlobalData;
+	GlobalData *scratch = NEW GlobalData;
+	TheWritableGlobalData = scratch;
+
+	scratch->m_windowed = FALSE;
+	scratch->m_xResolution = 640;
+	scratch->m_yResolution = 480;
+	scratch->m_edgeScrollInWindowedMode = FALSE;
+
+	char *argv[] = { "generals.exe", "-borderless" };
+	parseCommandLine( 2, argv );
+
+	CHECK( scratch->m_windowed );
+	CHECK_EQ( scratch->m_xResolution, GetSystemMetrics( SM_CXSCREEN ) );
+	CHECK_EQ( scratch->m_yResolution, GetSystemMetrics( SM_CYSCREEN ) );
+
+	/* and edge scrolling comes back on: retail refuses it in a window because the cursor can
+		 legitimately sit on the border, and a window covering the display has no such border. */
+	CHECK( scratch->m_edgeScrollInWindowedMode );
+
+	/* -xres/-yres after it still win - that is how a smaller back buffer in a borderless window is
+		 asked for, and it is the same rule -headless follows. */
+	char *argv2[] = { "generals.exe", "-borderless", "-xres", "1280", "-yres", "720" };
+	parseCommandLine( 6, argv2 );
+	CHECK_EQ( scratch->m_xResolution, 1280 );
+	CHECK_EQ( scratch->m_yResolution, 720 );
+
+	TheWritableGlobalData = saved;
+	delete scratch;
 }
