@@ -1324,6 +1324,11 @@ void InGameUI::init( void )
 		}
 	}
 
+	// the message list is overlay text in the top-left corner of the battlefield, not panel text -
+	// take it down a notch, same as the superweapon countdown above. (line spacing follows the
+	// font height in postDraw(), so the whole stack shrinks with it.)
+	m_messagePointSize = max( 8, (m_messagePointSize * 4) / 5 );
+
 	/**@ todo we used to put in the hint spy translator, but it's difficult
 	to order the translators when the code is not centralized so it has
 	been moved to where all the other translators are attached in game client */
