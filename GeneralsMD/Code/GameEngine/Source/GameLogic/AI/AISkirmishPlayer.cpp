@@ -738,12 +738,16 @@ void AISkirmishPlayer::buildAIBaseDefenseStructure(const AsciiString &thingName,
 		Real s = Sin(angle);
 		Real c = Cos(angle);
 
-	  DEBUG_LOG(("buildAIBaseDefenseStructure -- Angle is %f sin %f, cos %f \n", 180*angle/PI, s, c));
-		DEBUG_LOG(("buildAIBaseDefenseStructure -- Offset is %f  %f, Final Position is %f, %f \n", 
-			offset.x, offset.y, 
-			offset.x*c - offset.y*s,
-			offset.y*c + offset.x*s
-			));	
+		/* Two DEBUG_LOG lines used to sit here, printing the angle and the candidate position for
+			 every position this loop tries, and DebugLog fflushes every line. Removed as noise - they
+			 are sin and cos of a placement angle, which nobody reads, and RELEASE_DEBUG_LOGGING is on
+			 by default so they were doing synchronous writes in a shipping build.
+
+			 They are NOT what makes this action expensive, which is worth writing down because it
+			 looked like they might be: removing them changed nothing measurable. The action costs
+			 10-13ms in one logic frame, and the old logging shows why - it never printed more than
+			 ten candidates for one call, so the cost is roughly a millisecond per candidate, inside
+			 isLocationLegalToBuild. */
 		Coord3D buildPos = m_baseCenter;
 		buildPos.x += offset.x*c - offset.y*s;
 		buildPos.y += offset.y*c + offset.x*s;
