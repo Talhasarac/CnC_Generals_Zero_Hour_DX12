@@ -544,6 +544,11 @@ target_include_directories(test_wwmath PRIVATE ${WW}/WWLib ${WW}/WWSaveLoad ${WW
 
 add_lib_test(test_wwlib wwlib wwmath wwsaveload wwdebug)
 target_include_directories(test_wwlib PRIVATE ${WW}/WWLib ${WW}/WWMath ${WW}/WWSaveLoad ${WW}/Wwutil)
+# generals.exe is linked /LARGEADDRESSAWARE, and that flag changes what
+# GlobalMemoryStatus saturates its 32-bit fields to (0xFFFFFFFF, not 0x7FFFFFFF).
+# cpudetect_memory_fits_in_the_signed_int_its_callers_use only means anything in a
+# binary that sees the same value the game does.
+target_link_options(test_wwlib PRIVATE /LARGEADDRESSAWARE)
 
 add_lib_test(test_wwsaveload wwsaveload wwlib wwmath wwdebug)
 target_include_directories(test_wwsaveload PRIVATE ${WW}/WWSaveLoad ${WW}/WWLib ${WW}/WWMath ${WW}/WWDebug ${WW}/Wwutil)

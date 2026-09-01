@@ -1280,6 +1280,27 @@ TEST(cpudetect_reports_something_sane)
 	CHECK(CPUDetectClass::Get_Processor_String()[0] != 0);
 }
 
+TEST(cpudetect_memory_fits_in_the_signed_int_its_callers_use)
+{
+	/* Init_Memory used to take GlobalMemoryStatus' 32-bit fields straight.  That call saturates,
+	   and /LARGEADDRESSAWARE changes what it saturates to - 0xFFFFFFFF instead of 0x7FFFFFFF - so
+	   the number arrived as -1 in W3DShaderManager::testMinimumRequirements' Int *numRAM.
+	   GameLODManager::init then read a machine with 32GB as a machine below 256MB, and turned off
+	   the shell map, the trees and full-size textures.  This binary is linked
+	   /LARGEADDRESSAWARE for the same reason generals.exe is, so it sees what the game sees. */
+	unsigned totalPhys = CPUDetectClass::Get_Total_Physical_Memory();
+	CHECK(totalPhys > 0);
+	CHECK((int)totalPhys > 0);
+	CHECK((int)CPUDetectClass::Get_Available_Physical_Memory() >= 0);
+	CHECK((int)CPUDetectClass::Get_Total_Page_File_Size() > 0);
+	CHECK((int)CPUDetectClass::Get_Available_Page_File_Size() >= 0);
+
+	/* The arithmetic GameLODManager::init does with it: >= PROFILE_ERROR_LIMIT, 0.94, means "has
+	   at least 256MB", and its result is m_memPassed. */
+	float ratio = (float)((int)totalPhys) / (float)(256 * 1024 * 1024);
+	CHECK(ratio >= 0.94f);
+}
+
 TEST(cpudetect_logs_are_printable)
 {
 	/* Regression for the os_info bug: Get_OS_Info used to leave the struct

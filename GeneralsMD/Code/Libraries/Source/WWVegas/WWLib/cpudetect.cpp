@@ -897,19 +897,47 @@ void CPUDetectClass::Init_Processor_Features()
 	}
 }
 
+#ifdef WIN32
+/*
+	Clamp a 64-bit byte count into the 32-bit field the callers read, at the *signed* limit.  Every
+	consumer of these numbers in this tree hands them to something that holds an Int:
+	W3DShaderManager::testMinimumRequirements writes Get_Total_Physical_Memory() into an
+	Int *numRAM.  Saturating at 0x7FFFFFFF is what plain GlobalMemoryStatus already did, so the
+	value a caller sees on a 32GB machine does not change.
+*/
+static unsigned clamp_to_signed_max(DWORDLONG bytes)
+{
+	const DWORDLONG limit = 0x7FFFFFFFui64;
+	return (unsigned)(bytes > limit ? limit : bytes);
+}
+#endif
+
 void CPUDetectClass::Init_Memory()
 {
 #ifdef WIN32
 
-	MEMORYSTATUS mem;
-   GlobalMemoryStatus(&mem);
+	/*
+		GlobalMemoryStatus saturates whatever does not fit in its 32-bit fields, and *what* it
+		saturates to depends on the exe header: a plain 32-bit process gets 0x7FFFFFFF, one linked
+		/LARGEADDRESSAWARE gets 0xFFFFFFFF.  Read back into an Int that is -1, and the machine with
+		the most RAM becomes the one that fails the memory test: GameLODManager::init divides the
+		number by 256MB to set m_memPassed, so a negative value turns off the shell map, turns off
+		trees and forces low-resolution textures on the best hardware in the room.  Measured on this
+		machine, same source, one exe each way: 0x7FFFFFFF without the flag, 0xFFFFFFFF with it.
 
-   TotalPhysicalMemory     = mem.dwTotalPhys;
-   AvailablePhysicalMemory = mem.dwAvailPhys;
-   TotalPageMemory         = mem.dwTotalPageFile;
-   AvailablePageMemory     = mem.dwAvailPageFile;
-   TotalVirtualMemory      = mem.dwTotalVirtual;
-   AvailableVirtualMemory  = mem.dwAvailVirtual;
+		GlobalMemoryStatusEx reports the real 64-bit counts, so do the saturation here where the
+		width the callers can hold is known.
+	*/
+	MEMORYSTATUSEX mem;
+	mem.dwLength = sizeof(mem);
+	GlobalMemoryStatusEx(&mem);
+
+	TotalPhysicalMemory     = clamp_to_signed_max(mem.ullTotalPhys);
+	AvailablePhysicalMemory = clamp_to_signed_max(mem.ullAvailPhys);
+	TotalPageMemory         = clamp_to_signed_max(mem.ullTotalPageFile);
+	AvailablePageMemory     = clamp_to_signed_max(mem.ullAvailPageFile);
+	TotalVirtualMemory      = clamp_to_signed_max(mem.ullTotalVirtual);
+	AvailableVirtualMemory  = clamp_to_signed_max(mem.ullAvailVirtual);
 #elif defined(_UNIX)
 #warning FIX Init_Memory()
 #endif
