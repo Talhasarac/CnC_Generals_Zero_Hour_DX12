@@ -178,6 +178,66 @@ static const Int SCOUT_CHECK_RATE = 2 * LOGICFRAMES_PER_SECOND;
 	* this is a check, not a re-path. */
 static const Int CAPTURE_CHECK_RATE = 5 * LOGICFRAMES_PER_SECOND;
 
+#ifdef DEBUG_LOGGING
+/** Milliseconds between two performance counter readings.  Used by the per-job AI profile below and
+	* by the sub-timers inside processBaseBuilding, which is why it lives up here. */
+static Real aiPlayerElapsedMS( const Int64 &from, const Int64 &to )
+{
+	static Int64 freq = 0;
+	if( freq == 0 )
+		QueryPerformanceFrequency( (LARGE_INTEGER *)&freq );
+	if( freq == 0 )
+		return 0.0f;
+	return (Real)( (double)(to - from) * 1000.0 / (double)freq );
+}
+
+/* Sub-timers inside the "base" job, which is the one that got expensive once the expansion convoy
+	 was out of the way.  They nest inside it, so they keep their own start variable rather than
+	 sharing the per-job one, and the report prints them as a breakdown of base rather than beside
+	 it.  Reached through AIPlayer statics because AISkirmishPlayer overrides processBaseBuilding and
+	 the version that actually runs in a skirmish lives in the other file. */
+static const char *theAIBaseSubName[ AIPlayer::BASE_SUB_COUNT ] =
+	{ "hole", "dozerfix", "safe", "finddozer", "canmake", "build" };
+static Real theAIBaseSubMS[ AIPlayer::BASE_SUB_COUNT ];
+static Int theAIBaseSubCalls[ AIPlayer::BASE_SUB_COUNT ];
+static Int64 theAIBaseSubStart;
+#endif
+
+/*static*/ void AIPlayer::profileBaseSubBegin( void )
+{
+#ifdef DEBUG_LOGGING
+	QueryPerformanceCounter( (LARGE_INTEGER *)&theAIBaseSubStart );
+#endif
+}
+
+/*static*/ void AIPlayer::profileBaseSubEnd( Int slot )
+{
+#ifdef DEBUG_LOGGING
+	if( slot < 0 || slot >= BASE_SUB_COUNT )
+		return;
+	Int64 now;
+	QueryPerformanceCounter( (LARGE_INTEGER *)&now );
+	theAIBaseSubMS[ slot ] += aiPlayerElapsedMS( theAIBaseSubStart, now );
+	++theAIBaseSubCalls[ slot ];
+#endif
+}
+
+/*static*/ void AIPlayer::profileBaseSubCount( Int slot )
+{
+#ifdef DEBUG_LOGGING
+	if( slot >= 0 && slot < BASE_SUB_COUNT )
+		++theAIBaseSubCalls[ slot ];
+#endif
+}
+
+#ifdef DEBUG_LOGGING
+#define AI_BASE_SUB_BEGIN()		AIPlayer::profileBaseSubBegin()
+#define AI_BASE_SUB_END(slot)	AIPlayer::profileBaseSubEnd(slot)
+#else
+#define AI_BASE_SUB_BEGIN()
+#define AI_BASE_SUB_END(slot)
+#endif
+
 // ------------------------------------------------------------------------------------------------
 // ------------------------------------------------------------------------------------------------
 AIPlayer::AIPlayer( Player *p ) :
@@ -728,6 +788,25 @@ Object *AIPlayer::buildStructureWithDozer(const ThingTemplate *bldgPlan, BuildLi
 	if (money->countMoney()<bldgPlan->calcCostToBuild(m_player)) {
 		return NULL;
 	}
+
+	/* One building placement per logic frame, across every computer player.
+		 Placing a building is the expensive half of base building: when the chosen spot is taken,
+		 isLocationLegalToBuild is called over a ring of candidate positions reaching 120 pathfind
+		 cells for a skirmish AI, and finding a spot out at the edge of that costs 10ms - measured.
+		 One of those is a frame nobody notices; the slow frames in an eight-player match were two
+		 landing together, because a completed building shortcuts the timer that was meant to keep
+		 the players apart.
+
+		 The loser waits exactly one frame - a thirtieth of a second on a building that takes half a
+		 minute to put up. The order is the player list order, so every machine defers the same
+		 player on the same frame and a replay still matches. */
+	static UnsignedInt s_lastPlacementFrame = 0;
+	const UnsignedInt nowFrame = TheGameLogic->getFrame();
+	if (s_lastPlacementFrame == nowFrame && nowFrame != 0) {
+		m_buildDelay = 1;		// try again next frame; doBaseBuilding leaves any value >= 1 alone
+		return NULL;
+	}
+	s_lastPlacementFrame = nowFrame;
 	// construct the building
 	Coord3D pos = *info->getLocation();
 	pos.z += TheTerrainLogic->getGroundHeight(pos.x, pos.y);
@@ -750,10 +829,11 @@ Object *AIPlayer::buildStructureWithDozer(const ThingTemplate *bldgPlan, BuildLi
 																								 BuildAssistant::TERRAIN_RESTRICTIONS |
 																								 BuildAssistant::NO_OBJECT_OVERLAP,
 																								 dozer, m_player ) != LBC_OK ) {
-			// Warn. 
+			// Warn.
 			AsciiString bldgName = bldgPlan->getName();
 			bldgName.concat(" - Dozer unable to place.  Attempting to adjust position.");
 			TheScriptEngine->AppendDebugMessage(bldgName, false);
+
 			// try to fix.
 			Real posOffset;
 			Bool valid = false;
@@ -936,8 +1016,9 @@ void AIPlayer::processBaseBuilding( void )
 					info->setObjectID(INVALID_ID);
 					info->setObjectTimestamp(TheGameLogic->getFrame()+1);
 					// Scan for a GLA hole.	KINDOF_REBUILD_HOLE
+					AI_BASE_SUB_BEGIN();
 					Object *obj;
-					for( obj = TheGameLogic->getFirstObject(); obj; obj = obj->getNextObject() ) { 
+					for( obj = TheGameLogic->getFirstObject(); obj; obj = obj->getNextObject() ) {
 						if (!obj->isKindOf(KINDOF_REBUILD_HOLE)) continue;
 						RebuildHoleBehaviorInterface *rhbi = RebuildHoleBehavior::getRebuildHoleBehaviorInterfaceFromObject( obj );
 						if( rhbi ) {
@@ -948,11 +1029,13 @@ void AIPlayer::processBaseBuilding( void )
 							}
 						}
  					}
+					AI_BASE_SUB_END( BASE_SUB_HOLE );
 				}	else {
 					if (bldg->getControllingPlayer() == m_player) {
 						// Check for built or dozer missing.
-						if( bldg->getStatusBits().test( OBJECT_STATUS_UNDER_CONSTRUCTION ) ) 
+						if( bldg->getStatusBits().test( OBJECT_STATUS_UNDER_CONSTRUCTION ) )
 						{
+							AI_BASE_SUB_BEGIN();
 							// make sure dozer is working on him.
 							ObjectID builder = bldg->getBuilderID();
 							Object* myDozer = TheGameLogic->findObjectByID(builder);
@@ -960,6 +1043,7 @@ void AIPlayer::processBaseBuilding( void )
 								DEBUG_LOG(("AI's Dozer got killed.  Find another dozer.\n"));
  								myDozer = findDozer(bldg->getPosition());
 								if (myDozer==NULL || myDozer->getAI()==NULL) {
+									AI_BASE_SUB_END( BASE_SUB_DOZERFIX );
 									continue;
 								}
 								myDozer->getAI()->aiResumeConstruction(bldg, CMD_FROM_AI);
@@ -967,6 +1051,7 @@ void AIPlayer::processBaseBuilding( void )
 								// make sure he is building.
 								myDozer->getAI()->aiResumeConstruction(bldg, CMD_FROM_AI);
 							}
+							AI_BASE_SUB_END( BASE_SUB_DOZERFIX );
 						}
 					} else {
 						// oops, got captured.
@@ -996,7 +1081,9 @@ void AIPlayer::processBaseBuilding( void )
 
 #ifdef USE_DOZER
 					// dozer-construct the building
+					AI_BASE_SUB_BEGIN();
 					bldg = buildStructureWithDozer(bldgPlan, info);
+					AI_BASE_SUB_END( BASE_SUB_BUILD );
 					// store the object with the build order
 					if (bldg)
 					{
@@ -3618,16 +3705,6 @@ static Int theAIWorstPlayer = -1;
 static Int theAIPlayersUpdated = 0;
 static Int64 theAIPhaseStart;
 
-static Real aiPlayerElapsedMS( const Int64 &from, const Int64 &to )
-{
-	static Int64 freq = 0;
-	if( freq == 0 )
-		QueryPerformanceFrequency( (LARGE_INTEGER *)&freq );
-	if( freq == 0 )
-		return 0.0f;
-	return (Real)( (double)(to - from) * 1000.0 / (double)freq );
-}
-
 static void aiPhaseBegin( void )
 {
 	QueryPerformanceCounter( (LARGE_INTEGER *)&theAIPhaseStart );
@@ -3640,6 +3717,7 @@ static void aiPhaseEnd( Int phase )
 	theAIPhaseMS[ phase ] += aiPlayerElapsedMS( theAIPhaseStart, now );
 }
 
+
 #define AI_PHASE( phase, call )	do { aiPhaseBegin(); call; aiPhaseEnd( phase ); } while(0)
 
 /*static*/ void AIPlayer::resetFrameProfile( void )
@@ -3649,6 +3727,11 @@ static void aiPhaseEnd( Int phase )
 	theAIWorstPlayerMS = 0.0f;
 	theAIWorstPlayer = -1;
 	theAIPlayersUpdated = 0;
+	for( Int s = 0; s < BASE_SUB_COUNT; ++s )
+	{
+		theAIBaseSubMS[ s ] = 0.0f;
+		theAIBaseSubCalls[ s ] = 0;
+	}
 }
 
 /*static*/ const char *AIPlayer::getProfileReport( void )
@@ -3658,6 +3741,10 @@ static void aiPhaseEnd( Int phase )
 											theAIPlayersUpdated, theAIWorstPlayer, theAIWorstPlayerMS );
 	for( Int phase = 0; phase < AIP_PHASE_COUNT; ++phase )
 		used += sprintf( report + used, " %s %.1f", theAIPhaseName[ phase ], theAIPhaseMS[ phase ] );
+	used += sprintf( report + used, " || base:" );
+	for( Int s = 0; s < BASE_SUB_COUNT; ++s )
+		used += sprintf( report + used, " %s %.1f/%dx",
+										 theAIBaseSubName[ s ], theAIBaseSubMS[ s ], theAIBaseSubCalls[ s ] );
 	return report;
 }
 #else

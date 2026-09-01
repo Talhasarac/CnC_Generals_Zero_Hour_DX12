@@ -133,8 +133,9 @@ void AISkirmishPlayer::processBaseBuilding( void )
 					info->setObjectID(INVALID_ID);
 					info->setObjectTimestamp(TheGameLogic->getFrame()+1);
 					// Scan for a GLA hole.	KINDOF_REBUILD_HOLE
+					AIPlayer::profileBaseSubBegin();
 					Object *obj;
-					for( obj = TheGameLogic->getFirstObject(); obj; obj = obj->getNextObject() ) { 
+					for( obj = TheGameLogic->getFirstObject(); obj; obj = obj->getNextObject() ) {
 						if (!obj->isKindOf(KINDOF_REBUILD_HOLE)) continue;
 						RebuildHoleBehaviorInterface *rhbi = RebuildHoleBehavior::getRebuildHoleBehaviorInterfaceFromObject( obj );
 						if( rhbi ) {
@@ -145,6 +146,7 @@ void AISkirmishPlayer::processBaseBuilding( void )
 							}
 						}
  					}
+					AIPlayer::profileBaseSubEnd( AIPlayer::BASE_SUB_HOLE );
 				}	else {
 					if (bldg->getControllingPlayer() == m_player) {
 						// Check for built or dozer missing.
@@ -198,7 +200,10 @@ void AISkirmishPlayer::processBaseBuilding( void )
 				continue; // already built.
 			}
 			// Make sure it is safe to build here.
-			if (!isLocationSafe(info->getLocation(), curPlan)) {
+			AIPlayer::profileBaseSubBegin();
+			const Bool locationSafe = isLocationSafe(info->getLocation(), curPlan);
+			AIPlayer::profileBaseSubEnd( AIPlayer::BASE_SUB_SAFE );
+			if (!locationSafe) {
 				continue;
 			}
 			if (info->isPriorityBuild()) {
@@ -220,7 +225,9 @@ void AISkirmishPlayer::processBaseBuilding( void )
 			if (!info->isAutomaticBuild()) {
 				continue; // marked to not build automatically.
 			}
+			AIPlayer::profileBaseSubBegin();
 			Object *dozer = findDozer(info->getLocation());
+			AIPlayer::profileBaseSubEnd( AIPlayer::BASE_SUB_FINDDOZER );
 			if (dozer==NULL) {
 				if (isUnderPowered) {
 					queueDozer();
@@ -231,7 +238,10 @@ void AISkirmishPlayer::processBaseBuilding( void )
 			// this point - and canMakeUnit(dozer, NULL) is CANMAKE_NO_PREREQ, so every
 			// AutomaticallyBuild entry hit the continue below and the AI only ever built what its
 			// scripts marked priority (plus the forced power plant).
-			if (TheBuildAssistant->canMakeUnit(dozer, curPlan)!=CANMAKE_OK) {
+			AIPlayer::profileBaseSubBegin();
+			const CanMakeType canMake = TheBuildAssistant->canMakeUnit(dozer, curPlan);
+			AIPlayer::profileBaseSubEnd( AIPlayer::BASE_SUB_CANMAKE );
+			if (canMake!=CANMAKE_OK) {
 				if (info->isBuildable()) {
 					AsciiString bldgName = info->getTemplateName();
 					bldgName.concat(" - Dozer unable to build - money or technology missing.");
@@ -258,7 +268,9 @@ void AISkirmishPlayer::processBaseBuilding( void )
 		if (bldgPlan && bldgInfo) {
 #ifdef USE_DOZER
 			// dozer-construct the building
+			AIPlayer::profileBaseSubBegin();
 			bldg = buildStructureWithDozer(bldgPlan, bldgInfo);
+			AIPlayer::profileBaseSubEnd( AIPlayer::BASE_SUB_BUILD );
 			// store the object with the build order
 			if (bldg)
 			{

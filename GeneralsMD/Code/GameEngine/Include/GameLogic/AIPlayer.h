@@ -173,6 +173,24 @@ public:
 	static void resetFrameProfile( void );
 	static const char *getProfileReport( void );
 
+	/** Base building is the expensive job once the expansion convoy is out of the way, and it is a
+		* loop over the build list that calls several searches per entry. These name which one.
+		* AISkirmishPlayer overrides processBaseBuilding, so both copies are instrumented and the
+		* timers have to be reachable from either file. */
+	enum BaseSubPhase
+	{
+		BASE_SUB_HOLE = 0,		///< scanning every object in the game for a GLA rebuild hole
+		BASE_SUB_DOZERFIX,		///< a building under construction whose dozer went missing
+		BASE_SUB_SAFE,				///< isLocationSafe for one build list entry
+		BASE_SUB_FINDDOZER,		///< findDozer for one build list entry
+		BASE_SUB_CANMAKE,			///< canMakeUnit for one build list entry
+		BASE_SUB_BUILD,				///< actually placing the one building this pass will start
+		BASE_SUB_COUNT
+	};
+	static void profileBaseSubBegin( void );
+	static void profileBaseSubEnd( Int slot );
+	static void profileBaseSubCount( Int slot );
+
 public: // AIPlayer interface, may be overridden by AISkirmishPlayer.  jba.
 
 	virtual void update();											///< simulates the behavior of a player
