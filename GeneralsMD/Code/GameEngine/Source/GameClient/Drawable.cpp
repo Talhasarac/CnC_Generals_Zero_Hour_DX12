@@ -4256,11 +4256,18 @@ void Drawable::drawHealthBar(const IRegion2D* healthBarRegion)
 		//
 		TheGameClient->addHealthBarPickRegion( this, *healthBarRegion );
 
-		// draw the health box outline - white on a selected drawable, so a selection still reads in a
-		// crowd where every unit carries a bar, without reserving a row above the bar for a marker
+		// draw the health box outline
 		TheDisplay->drawOpenRect( healthBarRegion->lo.x, healthBarRegion->lo.y, healthBoxWidth, healthBoxHeight,
-															healthBoxOutlineSize,
-															isSelected() ? GameMakeColor( 255, 255, 255, 255 ) : outlineColor );
+															healthBoxOutlineSize, outlineColor );
+
+		// a selected drawable wears a white frame one pixel outside its bar, so a selection still
+		// reads in a crowd where every unit carries a bar, without reserving a row above the bar for
+		// a marker. It sits outside rather than replacing the outline, so the bar keeps its owner
+		// colour all the way round.
+		if( isSelected() )
+			TheDisplay->drawOpenRect( healthBarRegion->lo.x - 1, healthBarRegion->lo.y - 1,
+																healthBoxWidth + 2, healthBoxHeight + 2,
+																healthBoxOutlineSize, GameMakeColor( 255, 255, 255, 255 ) );
 
 		// draw a filled bar for the health
 		TheDisplay->drawFillRect( healthBarRegion->lo.x + 1, healthBarRegion->lo.y + 1,

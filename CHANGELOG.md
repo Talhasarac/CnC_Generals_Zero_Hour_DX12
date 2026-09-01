@@ -334,7 +334,7 @@ found and fixed â€” EA's own, not port damage.**
 - A building's bar sits above its roof rather than inside its art.
 - Every garrisonable building shows how full it is, whoever holds it.
 - A vehicle's load stays private.
-- What you have selected wears a white frame around its bar, so a selection is still readable in a crowd where every unit carries a bar.
+- What you have selected wears a white frame just outside its bar, so a selection is still readable in a crowd where every unit carries a bar - and the bar itself keeps its owner colour all the way round.
 - Lamps, barrels, rocks and bushes no longer wear health bars.
 - Bridges no longer float a health bar over the middle of the river. There was never anything under it: the span is part of the terrain, and the bar belonged to an invisible marker standing in the water.
 - The bar is part of the unit now: click it and you select whoever it belongs to. Zoomed out, an infantryman is a few pixels of helmet under a bar that is far easier to hit, and a unit half behind a building still has its bar in the clear. It only answers clicks that would have missed everything anyway, so it never takes a click away from the unit you were actually pointing at, and right-clicking bare ground under a bar still orders a move.
