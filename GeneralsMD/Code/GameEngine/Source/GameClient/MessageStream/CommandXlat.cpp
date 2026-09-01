@@ -2692,13 +2692,8 @@ GameMessageDisposition CommandTranslator::translateGameMessage(const GameMessage
 		case GameMessage::MSG_META_COMMAND_SLOT13:
 		case GameMessage::MSG_META_COMMAND_SLOT14:
 		{
-			// Grid mode only.  Off, these keys stay unbound so the retail '&' letter hot keys
-			// keep the command bar to themselves.
-			if( TheGlobalData->m_useGridHotKeys )
-			{
-				TheControlBar->pressCommandButton( t - GameMessage::MSG_META_COMMAND_SLOT01 );
-				disp = DESTROY_MESSAGE;
-			}
+			TheControlBar->pressCommandButton( t - GameMessage::MSG_META_COMMAND_SLOT01 );
+			disp = DESTROY_MESSAGE;
 			break;
 		}		// end command bar grid slots
 

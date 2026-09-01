@@ -494,7 +494,8 @@ GameMessageDisposition MetaEventTranslator::translateGameMessage(const GameMessa
 
 		//
 		// a half-typed structure chord (Q or W pressed on a builder) takes the next plain key:
-		// Q A W S E D R F pick the cell, anything else drops the chord and goes on as usual
+		// the group's own eight cell keys pick a cell, anything else drops the chord and goes
+		// on as usual
 		//
 		if( t == GameMessage::MSG_RAW_KEY_DOWN && ( newModState & ( CTRL | ALT ) ) == 0 &&
 				!( keyState & KEY_STATE_AUTOREPEAT ) &&

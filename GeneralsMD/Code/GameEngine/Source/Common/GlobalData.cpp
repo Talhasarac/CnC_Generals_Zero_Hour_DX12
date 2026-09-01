@@ -186,7 +186,6 @@ GlobalData* GlobalData::m_theOriginal = NULL;
 	{ "CameraYaw",									INI::parseReal,				NULL,			offsetof( GlobalData, m_cameraYaw ) },
 	{ "CameraHeight",								INI::parseReal,				NULL,			offsetof( GlobalData, m_cameraHeight ) },
 	{ "MaxCameraHeight",						INI::parseReal,				NULL,			offsetof( GlobalData, m_maxCameraHeight ) },
-	{ "UseGridHotKeys",						INI::parseBool,				NULL,			offsetof( GlobalData, m_useGridHotKeys ) },
 	{ "EdgeScrollInWindowedMode",	INI::parseBool,				NULL,			offsetof( GlobalData, m_edgeScrollInWindowedMode ) },
 	{ "SnapBuildPlacementTo45",		INI::parseBool,				NULL,			offsetof( GlobalData, m_snapBuildPlacementTo45 ) },
 	{ "SnapCameraRotateTo45",			INI::parseBool,				NULL,			offsetof( GlobalData, m_snapCameraRotateTo45 ) },
@@ -1028,7 +1027,6 @@ GlobalData::GlobalData()
 	m_scrollAmountCutoff = 10.0f;
 	m_cameraAdjustSpeed = 0.1f;
 	m_enforceMaxCameraHeight = TRUE;
-	m_useGridHotKeys = FALSE;
 
 	//
 	// The fork's own conveniences default ON. They were opt-in at first, which in practice meant

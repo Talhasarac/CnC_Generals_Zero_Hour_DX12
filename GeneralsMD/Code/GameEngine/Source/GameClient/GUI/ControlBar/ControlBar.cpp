@@ -143,6 +143,30 @@ static void commandButtonTooltip(GameWindow *window,
 }
 
 //-------------------------------------------------------------------------------------------------
+/** The key command bar slot 'slot' answers to right now, MK_NONE when none does.  Read live out of
+	the meta map, which is where CommandMap.ini puts the grid: a second copy of those letters here
+	is a copy that goes stale, and one did - the chord's second keys stayed Q A W S E D R F long
+	after the bottom row of the grid had moved to Z X C V B N M, so half the cells answered to a
+	letter that was not written on them and the letter that was fell straight through to the button
+	underneath.  Rebinding a slot in Options > Keyboard now moves its chord with it. */
+//-------------------------------------------------------------------------------------------------
+static MappableKeyType getGridHotKey( Int slot )
+{
+	if( TheMetaMap == NULL || slot < 0 || slot >= MAX_COMMANDS_PER_SET )
+		return MK_NONE;
+
+	const GameMessage::Type wanted =
+		(GameMessage::Type)( GameMessage::MSG_META_COMMAND_SLOT01 + slot );
+
+	for( const MetaMapRec *rec = TheMetaMap->getFirstMetaMapRec(); rec; rec = rec->m_next )
+		if( rec->m_meta == wanted && rec->m_modState == 0 )
+			return rec->m_key;
+
+	return MK_NONE;
+
+}  // end getGridHotKey
+
+//-------------------------------------------------------------------------------------------------
 /** Press a command bar button by slot index.  Mirrors HotKeyManager::executeHotKey: a hidden
 	slot does nothing at all, an enabled one gets the same GBM_SELECTED the mouse would send,
 	and a disabled one just makes the rejection noise. */
@@ -156,16 +180,22 @@ void ControlBar::pressCommandButton( Int index )
 	// a builder's structures are reached by a two-key chord so the whole set can stay on
 	// screen: Q arms the structures in columns 1-4 (slots 0-7), W the ones in columns 5-7
 	// (slots 8-13), and the next grid key picks the cell inside that group by its own
-	// position - Q-Q, Q-A, ... W-Q (= T's cell), W-A (= G's cell) ...
+	// position - Q-Q, Q-Z, ... W-Q (= T's cell), W-Z (= B's cell) ...  A structure has no other
+	// way in: its own letter on its own is the second half of a chord nobody started.
 	//
 	Bool hasStructures = FALSE;
-	for( Int i = 0; i < MAX_COMMANDS_PER_SET && !hasStructures; i++ )
+	Bool indexIsStructure = FALSE;
+	for( Int i = 0; i < MAX_COMMANDS_PER_SET; i++ )
 	{
 		GameWindow *w = m_commandWindows[ i ];
 		if( w == NULL || BitTest( w->winGetStatus(), WIN_STATUS_HIDDEN ) )
 			continue;
 		const CommandButton *c = (const CommandButton *)GadgetButtonGetData( w );
-		hasStructures = ( c && c->getCommandType() == GUI_COMMAND_DOZER_CONSTRUCT );
+		if( c == NULL || c->getCommandType() != GUI_COMMAND_DOZER_CONSTRUCT )
+			continue;
+		hasStructures = TRUE;
+		if( i == index )
+			indexIsStructure = TRUE;
 	}
 	if( hasStructures )
 	{
@@ -180,6 +210,16 @@ void ControlBar::pressCommandButton( Int index )
 				markUIDirty();		// the group that is armed greys the other one out
 				return;
 			}
+
+			//
+			// Every structure is two keys, and only two.  The key painted on a cell is the *second*
+			// of its pair, so on its own it used to fall through to whatever sits in the slot that
+			// key names - which for a builder is another structure.  So the same building could be
+			// put up either by the chord written on it or by one bare letter nobody wrote anywhere,
+			// and a key pressed after a Q that had already been dropped built something.
+			//
+			if( indexIsStructure )
+				return;
 		}
 		else
 		{
@@ -216,15 +256,10 @@ void ControlBar::pressCommandButton( Int index )
 }  // end pressCommandButton
 
 //-------------------------------------------------------------------------------------------------
-/** The second key of a structure chord is a fixed physical cell - Q A W S E D R F for local
-	slots 0..7 (column-major, like the command bar) - whatever the grid rows are bound to, so
-	A/S stay free for attack move and stop outside a chord.  MetaEventTranslator hands the
-	raw key here while a chord is armed. */
+/** The second key of a structure chord is the cell's own position inside the group, so it is
+	whatever the grid has bound to slots 0..7 - Q Z W X E C R V on the shipped map, which is what is
+	painted on the cells.  MetaEventTranslator hands the raw key here while a chord is armed. */
 //-------------------------------------------------------------------------------------------------
-static const MappableKeyType s_chordKeys[ ControlBar::CHORD_GROUP_SIZE ] =
-	{ MK_Q, MK_A, MK_W, MK_S, MK_E, MK_D, MK_R, MK_F };
-static const WideChar s_chordKeyLabels[ ControlBar::CHORD_GROUP_SIZE + 1 ] = L"QAWSEDRF";
-
 Bool ControlBar::handleChordKey( Int mappableKey )
 {
 	if( m_chordGroup < 0 )
@@ -232,7 +267,9 @@ Bool ControlBar::handleChordKey( Int mappableKey )
 
 	for( Int i = 0; i < CHORD_GROUP_SIZE; i++ )
 	{
-		if( s_chordKeys[ i ] == mappableKey )
+		const MappableKeyType key = getGridHotKey( i );
+
+		if( key != MK_NONE && (Int)key == mappableKey )
 		{
 			pressCommandButton( i );	// resolves the chord: i + group * CHORD_GROUP_SIZE
 			return TRUE;
@@ -3430,47 +3467,38 @@ void ControlBar::setControlCommand( GameWindow *button, const CommandButton *com
 
 	setCommandBarBorder(button, commandButton->getCommandButtonMappedBorderType());
 	
-	// The '&' letter buried in each localized button label and the grid keys are two rival
-	// input schemes for the same buttons: the letter fires on KEY_UP out of HotKeyTranslator,
-	// the grid keys on KEY_DOWN out of MetaEventTranslator, so leaving both live makes one
-	// keystroke do two things.  Grid mode therefore never registers the letters.
-	if (TheHotKeyManager && !TheGlobalData->m_useGridHotKeys)
+	//
+	// The '&' letter buried in each localized button label and the grid keys are two rival input
+	// schemes for the same buttons: the letter fires on KEY_UP out of HotKeyTranslator, the grid
+	// keys on KEY_DOWN out of MetaEventTranslator, so leaving both live makes one keystroke do two
+	// things.  The grid is the scheme, and the letters are not registered at all.
+	//
+	// paint the grid letter in the button's top left corner.  Only the real command bar
+	// slots get one - the communicator, options and science buttons are not on the grid.
+	for( Int slot = 0; slot < MAX_COMMANDS_PER_SET; slot++ )
 	{
-		AsciiString hotKey =	TheHotKeyManager->searchHotKey(commandButton->getTextLabel());
-		if(hotKey.isNotEmpty())
-			TheHotKeyManager->addHotKey(button, hotKey);
-	}
+		if( m_commandWindows[ slot ] != button )
+			continue;
 
-	if( TheGlobalData->m_useGridHotKeys )
-	{
-		// paint the grid letter in the button's top left corner.  Only the real command bar
-		// slots get one - the communicator, options and science buttons are not on the grid.
-		for( Int slot = 0; slot < MAX_COMMANDS_PER_SET; slot++ )
+		UnicodeString label = getGridHotKeyLabel( slot );
+
+		// structures are reached by a chord: Q or W picks the group (columns 1-4 or 5-7), then
+		// the key of the cell's own position inside that group - paint both, "QQ", "QZ", "WQ" ...
+		if( commandButton->getCommandType() == GUI_COMMAND_DOZER_CONSTRUCT && !label.isEmpty() )
 		{
-			if( m_commandWindows[ slot ] != button )
-				continue;
-
-			UnicodeString label = getGridHotKeyLabel( slot );
-
-			// structures are reached by a chord: Q or W picks the group (columns 1-4 or 5-7),
-			// then the cell's fixed second key (Q A W S E D R F) - paint both letters, "QW", "WA", ...
-			if( commandButton->getCommandType() == GUI_COMMAND_DOZER_CONSTRUCT && !label.isEmpty() )
-			{
-				Int base = ( slot < CHORD_GROUP_SIZE ) ? 0 : CHORD_GROUP_SIZE;
-				UnicodeString chord = getGridHotKeyLabel( base == 0 ? CHORD_SLOT_Q : CHORD_SLOT_W );
-				WideChar second[ 2 ] = { s_chordKeyLabels[ slot - base ], 0 };
-				chord.concat( second );
-				label = chord;
-			}
-
-			if( label.isEmpty() )
-				button->winClearStatus( WIN_STATUS_SHORTCUT_BUTTON );
-			else
-				button->winSetStatus( WIN_STATUS_SHORTCUT_BUTTON );
-
-			GadgetButtonSetText( button, label );
-			break;
+			Int base = ( slot < CHORD_GROUP_SIZE ) ? 0 : CHORD_GROUP_SIZE;
+			UnicodeString chord = getGridHotKeyLabel( base == 0 ? CHORD_SLOT_Q : CHORD_SLOT_W );
+			chord.concat( getGridHotKeyLabel( slot - base ) );
+			label = chord;
 		}
+
+		if( label.isEmpty() )
+			button->winClearStatus( WIN_STATUS_SHORTCUT_BUTTON );
+		else
+			button->winSetStatus( WIN_STATUS_SHORTCUT_BUTTON );
+
+		GadgetButtonSetText( button, label );
+		break;
 	}
 	//
 	// the stop button does not live on the grid: MSG_META_STOP presses it whether or not grid hot

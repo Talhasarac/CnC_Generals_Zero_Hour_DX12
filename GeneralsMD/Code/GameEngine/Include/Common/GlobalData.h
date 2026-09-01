@@ -331,7 +331,6 @@ public:
 	Real m_scrollAmountCutoff;				///< Scroll speed to not adjust camera height
 	Real m_cameraAdjustSpeed;					///< Rate at which we adjust camera height
 	Bool m_enforceMaxCameraHeight;		///< Enfoce max camera height while scrolling?
-	Bool m_useGridHotKeys;				///< command bar keys come from the slot grid, not the '&' letter in each button's label
 	Bool m_edgeScrollInWindowedMode;	///< allow screen-edge scrolling while running in a window
 	Bool m_snapBuildPlacementTo45;		///< quantize the drag-to-rotate build placement angle to 45 degrees
 	Bool m_snapCameraRotateTo45;		///< quantize the camera heading to 45 degrees when a middle-drag rotate ends

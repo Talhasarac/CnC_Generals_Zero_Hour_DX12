@@ -714,18 +714,6 @@ Int OptionPreferences::getParticleCap(void)
 	 mismatch check that refuses to start a LAN game between machines whose data differs.  The
 	 ceiling is fixed for everyone at ZOOM_OUT_LIMIT_FACTOR times the GameData.ini value. */
 
-Bool OptionPreferences::getUseGridHotKeys(void)
-{
-	// Not written by the options menu - a power-user Options.ini key.  With it on, the
-	// command bar is driven by the COMMAND_SLOT01..14 keys from CommandMap.ini instead of
-	// the '&' letter buried in each button's localized label.
-	OptionPreferences::const_iterator it = find("UseGridHotKeys");
-	if (it == end())
-		return TheGlobalData->m_useGridHotKeys;
-
-	return stricmp(it->second.str(), "yes") == 0;
-}
-
 Bool OptionPreferences::getEdgeScrollInWindowedMode(void)
 {
 	// Another power-user Options.ini key.  Retail refuses to edge-scroll in a window because the

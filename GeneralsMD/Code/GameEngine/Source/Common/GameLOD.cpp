@@ -362,8 +362,6 @@ void GameLODManager::init(void)
 	// Camera zoom-out is deliberately not settable here: how much of the battlefield you can see
 	// is a competitive advantage, so it stays at the GameData.ini value for everyone.
 
-	// Grid command-bar keys are an input scheme, not a detail level either.
-	TheWritableGlobalData->m_useGridHotKeys = optionPref.getUseGridHotKeys();
 	TheWritableGlobalData->m_edgeScrollInWindowedMode = optionPref.getEdgeScrollInWindowedMode();
 	TheWritableGlobalData->m_snapBuildPlacementTo45 = optionPref.getSnapBuildPlacementTo45();
 	TheWritableGlobalData->m_snapCameraRotateTo45 = optionPref.getSnapCameraRotateTo45();

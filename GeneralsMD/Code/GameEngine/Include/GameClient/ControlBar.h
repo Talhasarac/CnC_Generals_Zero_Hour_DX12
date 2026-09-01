@@ -742,13 +742,14 @@ public:
 		(slots 8..), then the next grid key picks the cell within the group by its own position */
 	enum { CHORD_SLOT_Q = 0, CHORD_SLOT_W = 2, CHORD_GROUP_SIZE = 8 };
 
-	/** a raw key while a chord is armed: one of the fixed second keys (Q A W S E D R F)
-		resolves the chord and returns TRUE (the key is eaten), anything else drops it */
+	/** a raw key while a chord is armed: the key of one of the group's own cells (the grid's
+		slots 0..7 - Q Z W X E C R V as shipped) resolves the chord and returns TRUE (the key is
+		eaten), anything else drops it */
 	Bool handleChordKey( Int mappableKey );
 	Bool isChordArmed( void ) const { return m_chordGroup >= 0; }
 
-	/** forget a half-typed chord.  An armed chord swallows the next A S D F - attack move, stop -
-		and turns it into a structure to place, so anything that says the player has moved on
+	/** forget a half-typed chord.  An armed chord swallows the next grid key and turns it into
+		a structure to place, so anything that says the player has moved on
 		(a click, a new selection, a key that is not part of the chord, or simply time passing)
 		must drop it. */
 	void dropChord( void );
