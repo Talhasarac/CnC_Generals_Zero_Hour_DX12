@@ -316,6 +316,7 @@ found and fixed â€” EA's own, not port damage.**
 - A building you point at blocked ground slides to the nearest spot it fits, and lands there.
 - The pointer keeps its build cursor while you place, even passing over your own buildings.
 - GLA defences get a range ring while you site them.
+- Two buildings can no longer be put down on the same spot online. A build order travels to the other players before anything appears on the ground, and every click made while it was in flight was answered by a map that still showed the square as empty - so a shift-held row on a bad connection came out as buildings standing inside each other. The ghost now knows about the orders you have already spent, and turns red over them or slides to the square beside; and the order itself is checked again where it lands, on every machine, after the first building is standing. A second one aimed at the same ground is refused there and costs you nothing.
 - A click clears a half-typed building shortcut.
 - The two-key building shortcut survives the command bar's redraw now.
 - Escape cancels what you were doing before it opens the menu.

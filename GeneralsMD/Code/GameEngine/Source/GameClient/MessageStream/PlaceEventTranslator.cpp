@@ -343,6 +343,10 @@ GameMessageDisposition PlaceEventTranslator::translateGameMessage(const GameMess
 				lbc = TheBuildAssistant->isLocationLegalToBuild( &world, build, angle, placeOptions,
 																												 builderObj, NULL );
 
+				// plus the ground your own last click already spent - see recordPendingPlacement
+				if( lbc == LBC_OK && TheInGameUI->overlapsPendingPlacement( &world, build, angle ) )
+					lbc = LBC_OBJECTS_IN_THE_WAY;
+
 				//
 				// NudgeBuildPlacement: blocked where they clicked, so build at the nearest spot that
 				// is not - the same search the ghost was already showing them (InGameUI::update ->
@@ -407,6 +411,14 @@ GameMessageDisposition PlaceEventTranslator::translateGameMessage(const GameMess
 						placeMsg->appendLocationArgument( worldEnd );
 
 					}  // end if
+
+					//
+					// The order is on its way; the structure will not be on the ground for another
+					// few frames, and on a network game that is however long the link takes.  Hold on
+					// to the spot so the next click in a shift-held run does not put a second
+					// structure on top of this one.
+					//
+					TheInGameUI->recordPendingPlacement( build, &world, angle );
 
 					pickAndPlayUnitVoiceResponse( TheInGameUI->getAllSelectedDrawables(), placeMsg->getType() );
 

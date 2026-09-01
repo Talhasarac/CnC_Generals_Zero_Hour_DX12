@@ -494,6 +494,34 @@ public:  // ********************************************************************
 	/** What the ghost asks of a spot before it goes green.  One place, because the nudge search has
 		* to ask exactly the same question or it would offer a spot the ghost then paints red. */
 	static UnsignedInt placementCheckOptions( void );
+
+	//
+	// Structures ordered but not standing yet.  A build order is a message: it crosses the network
+	// and only becomes an object on the ground several frames later, and until it does the spot it
+	// was ordered on is empty ground to every check that decides whether the next click is legal.
+	// Holding shift on a laggy link put two structures on the same square that way, and the ghost
+	// stayed green over a building that was already paid for.  So the client remembers its own
+	// orders for a couple of seconds and treats them as standing.
+	//
+	// It is a client-side courtesy, not the rule: the rule is re-asked on the logic side, where the
+	// first structure really does exist by the time the second order arrives.
+	//
+	enum { PENDING_PLACEMENTS = 8 };						///< orders in flight at once; the oldest is overwritten
+	enum { PENDING_PLACEMENT_FRAMES = 60 };			///< logic frames one is remembered for - two seconds,
+																							///  comfortably longer than any network delay
+
+	/// the ground a structure of this template put down here would stand on
+	static void placementFootprint( const ThingTemplate *what, const Coord3D *world, Real angle,
+																	Region2D *footprint );
+	/// do two of those share any ground?  edge to edge is not sharing - structures are built flush
+	static Bool footprintsOverlap( const Region2D *a, const Region2D *b );
+
+	/// remember a structure just ordered here, so the next click can see it
+	void recordPendingPlacement( const ThingTemplate *what, const Coord3D *world, Real angle );
+	/// drop the lot - a new game is not the old one's orders
+	void forgetPendingPlacements( void );
+	/// would a structure here land on one of those?
+	Bool overlapsPendingPlacement( const Coord3D *world, const ThingTemplate *what, Real angle ) const;
 	enum { PLACEMENT_NUDGE_PATHFINDS = 12 };						///< unreachable candidates tolerated before the search gives up
 
 	/** The offsets that search tries: every cell of a square this many rings across, ordered by
@@ -943,6 +971,16 @@ protected:
 	const ThingTemplate *				m_placeAngleType;												///< the structure that heading was chosen for; another type starts square again
 	Bool												m_placementLegal;												///< last legality verdict for the spot under the structure being placed
 	Coord3D											m_placementNudge;												///< how far the last legality check had to slide the structure to make it fit
+
+	/// a structure ordered here, and the logic frame it was ordered on - see recordPendingPlacement
+	struct PendingPlacement
+	{
+		Region2D		footprint;
+		UnsignedInt	frame;				///< 0 for a slot nothing has been written to yet
+	};
+	PendingPlacement						m_pendingPlacement[ PENDING_PLACEMENTS ];
+	Int													m_pendingPlacementAt;										///< where the next order is written, round the ring
+
 	Int													m_selectCount;													///< Number of objects currently "selected"
 	Int													m_maxSelectCount;												///< Max number of objects to select
 	UnsignedInt									m_frameSelectionChanged;								///< Frame when the selection last changed.

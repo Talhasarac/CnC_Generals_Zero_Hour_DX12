@@ -7715,3 +7715,46 @@ TEST(borderless_asks_for_a_windowed_device_the_size_of_the_desktop)
 	TheWritableGlobalData = saved;
 	delete scratch;
 }
+
+/* A build order is a message, and the structure it orders does not exist until the logic runs it -
+	 on a network game, however long the link takes.  Until then the client remembers the ground it
+	 spent, so a shift-held run of clicks does not put two structures on the same square.  What it
+	 remembers is the footprint, and two footprints that merely touch are two structures built flush
+	 against each other, which is most of a base wall. */
+TEST(two_structures_ordered_onto_the_same_ground_are_one_too_many)
+{
+	Region2D a, b;
+
+	a.lo.x = 0.0f;   a.lo.y = 0.0f;   a.hi.x = 40.0f;  a.hi.y = 40.0f;
+
+	// itself, obviously
+	CHECK( InGameUI::footprintsOverlap( &a, &a ) );
+
+	// a corner inside it counts, from either side
+	b.lo.x = 39.0f;  b.lo.y = 39.0f;  b.hi.x = 79.0f;  b.hi.y = 79.0f;
+	CHECK( InGameUI::footprintsOverlap( &a, &b ) );
+	CHECK( InGameUI::footprintsOverlap( &b, &a ) );
+
+	// flush against it does not - a row of buildings on the build grid is not an overlap
+	b.lo.x = 40.0f;  b.lo.y = 0.0f;   b.hi.x = 80.0f;  b.hi.y = 40.0f;
+	CHECK( !InGameUI::footprintsOverlap( &a, &b ) );
+	CHECK( !InGameUI::footprintsOverlap( &b, &a ) );
+
+	// nor does clear of it, on either axis alone
+	b.lo.x = 10.0f;  b.lo.y = 41.0f;  b.hi.x = 30.0f;  b.hi.y = 60.0f;
+	CHECK( !InGameUI::footprintsOverlap( &a, &b ) );
+	b.lo.x = 41.0f;  b.lo.y = 10.0f;  b.hi.x = 60.0f;  b.hi.y = 30.0f;
+	CHECK( !InGameUI::footprintsOverlap( &a, &b ) );
+
+	// one wholly inside another - a small structure ordered into a big one's middle
+	b.lo.x = 10.0f;  b.lo.y = 10.0f;  b.hi.x = 20.0f;  b.hi.y = 20.0f;
+	CHECK( InGameUI::footprintsOverlap( &a, &b ) );
+	CHECK( InGameUI::footprintsOverlap( &b, &a ) );
+
+	//
+	// and the window it is remembered for has to outlast a bad link: a network game runs the order
+	// a handful of frames after the click, and two seconds of logic frames is a long link
+	//
+	CHECK( (Int)InGameUI::PENDING_PLACEMENT_FRAMES >= 30 );
+	CHECK( (Int)InGameUI::PENDING_PLACEMENTS >= 2 );
+}

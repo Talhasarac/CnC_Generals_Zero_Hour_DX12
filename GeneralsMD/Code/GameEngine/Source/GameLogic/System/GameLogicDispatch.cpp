@@ -1637,6 +1637,24 @@ void GameLogic::logicMessageDispatcher( GameMessage *msg, void *userData )
 			if( TheBuildAssistant->canMakeUnit( constructorObject, place ) != CANMAKE_OK )
 				break;
 
+			//
+			// And re-check the ground, which nobody was checking here at all.  The client asks
+			// before it sends, and the answer it gets is several frames old by the time the order
+			// arrives - on a network game, as old as the link is slow.  So two structures ordered
+			// onto the same spot in that window both found it empty and both went up, one inside
+			// the other; holding shift on a bad connection did it every time.  Asked here, the
+			// first one is already standing when the second order lands.
+			//
+			// Only the ground: no pathfind and no shroud, because those two answer differently a
+			// third of a second apart and refusing an order for that would be a new bug.  The line
+			// build checks every tile after the first for itself (buildTiledLocations).
+			//
+			if( TheBuildAssistant->isLocationLegalToBuild( &loc, place, angle,
+																										BuildAssistant::TERRAIN_RESTRICTIONS |
+																										BuildAssistant::NO_OBJECT_OVERLAP,
+																										constructorObject, NULL ) != LBC_OK )
+				break;
+
 			if( msg->getType() == GameMessage::MSG_DOZER_CONSTRUCT )
 			{
 

@@ -1119,6 +1119,7 @@ InGameUI::InGameUI()
 
 	m_placementRangeRingUp = FALSE;
 	m_placementRingRadius = 0.0f;
+	forgetPendingPlacements();
 	m_hudDisplayString = NULL;
 	m_incomeDisplayString = NULL;
 	m_lastIncomeDisplayed = -1;
@@ -1762,6 +1763,14 @@ void InGameUI::handleBuildPlacements( void )
 																											 checkOptions, builderObject, NULL );
 
 			//
+			// and the ground an order of your own has already been placed on but has not landed on
+			// yet - see recordPendingPlacement.  Without this the ghost is green over a structure
+			// that is already paid for, which is what a shift-held run of clicks sees on a laggy link.
+			//
+			if( lbc == LBC_OK && overlapsPendingPlacement( &spot, m_pendingPlaceType, angle ) )
+				lbc = LBC_OBJECTS_IN_THE_WAY;
+
+			//
 			// Blocked: look for the nearest spot that is not, and move the ghost there - the click
 			// does the same search (see PlaceEventTranslator), so what you see is where it lands.
 			// Shroud is left alone on purpose: unscouted ground is not a placement mistake to fix,
@@ -2336,6 +2345,7 @@ void InGameUI::reset( void )
 	placeBuildAvailable( NULL, NULL );
 	m_placeAngleOffset = 0.0f;
 	m_placeAngleType = NULL;
+	forgetPendingPlacements();
 
 	// free any message resources allocated
 	freeMessageResources();
@@ -3737,6 +3747,97 @@ UnsignedInt InGameUI::placementCheckOptions( void )
 }  // end placementCheckOptions
 
 //-------------------------------------------------------------------------------------------------
+/** The ground a structure of this template would stand on, put down here at this heading.  The
+	* geometry's own bounds, which for a box at any angle is the rectangle around the turned box:
+	* two of those sharing ground is close enough to "on top of each other" for the client to refuse
+	* a second click, and the logic side asks the real question afterwards anyway. */
+//-------------------------------------------------------------------------------------------------
+void InGameUI::placementFootprint( const ThingTemplate *what, const Coord3D *world, Real angle,
+																	 Region2D *footprint )
+{
+	what->getTemplateGeometryInfo().get2DBounds( *world, angle, *footprint );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Do two footprints share any ground?  Touching edge to edge does not count: structures are built
+	* flush against each other on the build grid all game, and a row of them is not an overlap. */
+//-------------------------------------------------------------------------------------------------
+Bool InGameUI::footprintsOverlap( const Region2D *a, const Region2D *b )
+{
+	return a->lo.x < b->hi.x && b->lo.x < a->hi.x &&
+				 a->lo.y < b->hi.y && b->lo.y < a->hi.y;
+
+}  // end footprintsOverlap
+
+//-------------------------------------------------------------------------------------------------
+/** Remember a structure just ordered, so the click after it knows the ground is spoken for.  Round
+	* a ring: the oldest of the eight goes, which is the one most likely to be standing by now. */
+//-------------------------------------------------------------------------------------------------
+void InGameUI::recordPendingPlacement( const ThingTemplate *what, const Coord3D *world, Real angle )
+{
+	if( what == NULL || world == NULL || TheGameLogic == NULL )
+		return;
+
+	PendingPlacement *pending = &m_pendingPlacement[ m_pendingPlacementAt ];
+	m_pendingPlacementAt = ( m_pendingPlacementAt + 1 ) % PENDING_PLACEMENTS;
+
+	placementFootprint( what, world, angle, &pending->footprint );
+	pending->frame = TheGameLogic->getFrame();
+
+	//
+	// frame zero is a real frame and zero is how an empty slot is spelt, so an order placed on it
+	// is remembered from frame one.  It costs one frame of one order in the first thirtieth of a
+	// second of a match, when nothing is built yet.
+	//
+	if( pending->frame == 0 )
+		pending->frame = 1;
+
+}  // end recordPendingPlacement
+
+//-------------------------------------------------------------------------------------------------
+/** Would a structure put down here land on one already ordered?  Orders older than
+	* PENDING_PLACEMENT_FRAMES are ignored rather than cleared: by then the structure is either
+	* standing, where the ordinary check sees it, or the logic refused the order and the ground is
+	* free again. */
+//-------------------------------------------------------------------------------------------------
+Bool InGameUI::overlapsPendingPlacement( const Coord3D *world, const ThingTemplate *what,
+																				 Real angle ) const
+{
+	if( what == NULL || world == NULL || TheGameLogic == NULL )
+		return FALSE;
+
+	Region2D mine;
+	placementFootprint( what, world, angle, &mine );
+
+	const UnsignedInt now = TheGameLogic->getFrame();
+
+	for( Int i = 0; i < PENDING_PLACEMENTS; i++ )
+	{
+		const PendingPlacement *pending = &m_pendingPlacement[ i ];
+
+		if( pending->frame == 0 || now < pending->frame ||
+				now - pending->frame > PENDING_PLACEMENT_FRAMES )
+			continue;
+
+		if( footprintsOverlap( &mine, &pending->footprint ) )
+			return TRUE;
+	}
+
+	return FALSE;
+
+}  // end overlapsPendingPlacement
+
+//-------------------------------------------------------------------------------------------------
+void InGameUI::forgetPendingPlacements( void )
+{
+	for( Int i = 0; i < PENDING_PLACEMENTS; i++ )
+		m_pendingPlacement[ i ].frame = 0;
+
+	m_pendingPlacementAt = 0;
+
+}  // end forgetPendingPlacements
+
+//-------------------------------------------------------------------------------------------------
 /** NudgeBuildPlacement (Options.ini): the spot under the cursor is blocked - a rock, a neighbour's
 	* bib, ground too steep by a hair - so find the nearest one that is not and put the structure
 	* there instead of turning it red and leaving the player to hunt for the legal pixel by hand.
@@ -3783,6 +3884,10 @@ Bool InGameUI::nudgePlacementToLegal( Coord3D *world, const ThingTemplate *what,
 		// is there room at all?  cheap, and it throws out all but a handful of the candidates
 		if( TheBuildAssistant->isLocationLegalToBuild( &test, what, angle, groundOptions,
 																									 builderObject, NULL ) != LBC_OK )
+			continue;
+
+		// room a structure you have already ordered is on its way to is not room
+		if( overlapsPendingPlacement( &test, what, angle ) )
 			continue;
 
 		// there is - can the builder actually walk to it?
