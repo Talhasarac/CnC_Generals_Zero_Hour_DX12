@@ -7164,16 +7164,26 @@ TEST(every_ai_rung_is_named_the_same_way_as_every_other)
 		for (Int b = a + 1; b < numRungs; ++b)
 			CHECK( wcscmp( SlotStateName( rungs[a] ).str(), SlotStateName( rungs[b] ).str() ) != 0 );
 }
-/* Six is what the strip shows before the rest of the queue folds into its "+N".  It used to be
-	 sixteen, which at a busy war factory ran the cameos most of the way across the screen and buried
-	 the map under them. */
+/* Five is what a column of the strip shows before the rest of the queue folds into the "+N" that
+	 closes it as a sixth cell.  It used to be sixteen across the bottom of the screen, which at a
+	 busy war factory ran the cameos most of the way over the map. */
 TEST(the_production_strip_folds_a_long_queue_into_its_overflow)
 {
-	CHECK_EQ( 6, (Int)InGameUI::PRODUCTION_STRIP_ROW_MAX );
+	CHECK_EQ( 5, (Int)InGameUI::PRODUCTION_STRIP_ROW_MAX );
 
-	// while watching, eight rows share the screen at once, so a row there is never the longer one -
-	// and neither cap may outrun the slots the strip has room to remember
+	// while watching, eight columns share the screen at once, so a column there is never the taller
+	// one - and neither cap may outrun the slots the strip has room to remember
 	CHECK( (Int)InGameUI::PRODUCTION_STRIP_WATCH_MAX <= (Int)InGameUI::PRODUCTION_STRIP_ROW_MAX );
+
+	//
+	// The column, its overflow cell included, has to stand inside the 600 the layout is written in
+	// with room to spare for the control bar it stands on: it grows upward out of the corner, and a
+	// cell drawn past the top of the screen is a cell nobody can read.
+	//
+	const Int cells = (Int)InGameUI::PRODUCTION_STRIP_ROW_MAX + 1;
+	const Int height = ( cells - 1 ) * InGameUI::stripRowStep( (Int)InGameUI::PRODUCTION_STRIP_TRAY_H )
+											+ (Int)InGameUI::PRODUCTION_STRIP_TRAY_H;
+	CHECK( height < 600 / 2 );
 }
 
 /* Every cameo in the strip stands in the tray the general's powers stand in, down in the corner,

@@ -614,18 +614,19 @@ public:  // ********************************************************************
 	// One cameo of the global production strip: which producer it belongs to, which entry of that
 	// producer's queue it is, and where it was drawn this frame.
 	//
-	enum { PRODUCTION_STRIP_ROW_MAX = 6 };	///< cameos one row will draw; the rest become a "+N"
-	enum { PRODUCTION_STRIP_WATCH_MAX = 3 };	///< and while watching, where eight rows share the screen
-																					///  and a row is a whole player: three cameos and a "+N",
-																					///  since a run of the same unit is one of them now
-	enum { PRODUCTION_STRIP_ROWS = 8 };			///< playing: the global row and the selected producer's row.
-																					///  watching: one row per player, so eight of them
+	enum { PRODUCTION_STRIP_ROW_MAX = 5 };	///< cameos one column will draw, stacked upward; whatever
+																					///  is left over closes it as a sixth cell wearing a "+N"
+	enum { PRODUCTION_STRIP_WATCH_MAX = 3 };	///< and while watching, where eight columns share the
+																					///  screen and a column is a whole player: three cameos and
+																					///  a "+N", since a run of the same unit is one of them now
+	enum { PRODUCTION_STRIP_ROWS = 8 };			///< playing: the global column and the selected producer's.
+																					///  watching: one column per player, so eight of them
 
 	//
-	// Which row is which while playing.  A lower number is drawn higher up the screen, so the
-	// buildings going up on the map stand above the queue.  The building you have selected does not
-	// get a row of its own - its items lead the queue row instead.  Rows nobody filled are closed up
-	// rather than left as a gap.
+	// Which row is which while playing.  A lower number stands further from the left edge, so the
+	// queue is the column on the edge and the buildings going up on the map stand beside it.  The
+	// building you have selected does not get a column of its own - its items lead the queue column
+	// instead.  Rows nobody filled are closed up rather than left as a gap.
 	//
 	enum
 	{
@@ -1009,7 +1010,8 @@ protected:
 	void drawIncomeRate( void );					///< income per minute, drawn beside the money window
 	void updateIncomeEstimate( Player *player );	///< income per minute, shown beside the money
 	void drawProductionStrip( void );			///< the production queue rows above the control bar
-	void drawProductionStripRow( Int row, Int y );	///< one of those rows, at that top edge
+	///< one of those columns, its left edge at 'left' and its bottom cell's top edge at 'bottomY'
+	void drawProductionStripColumn( Int row, Int left, Int bottomY );
 	const Image *productionStripTray( void );	///< the bar's tray, mirrored, kept until the bar changes side
 	void stripTrayMetrics( ICoord2D *tray, ICoord2D *cameo, ICoord2D *hole, Int *step );	///< that tray's size, its cameo hole, and the column step
 	void drawStripSeconds( Int which, Int x, Int y, Int w, Int h, Int seconds, Bool plainSeconds = FALSE );	///< countdown written inside a cameo
