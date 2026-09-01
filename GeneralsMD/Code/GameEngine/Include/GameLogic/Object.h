@@ -177,6 +177,9 @@ extern Real Object_shroudClearingRange( Real ownRange, Bool underConstruction, R
 ///< does this object go away without any death of its own - no explosion, no collapse, no rubble?
 extern Bool Object_deathIsSilent( Bool underConstruction, Real constructionPercent );
 
+///< is there anything standing here for a weapon to shoot at, or is it still only a plan?
+extern Bool Object_isAttackableStructure( Bool underConstruction, Real constructionPercent );
+
 class Object : public Thing, public Snapshot
 {
 

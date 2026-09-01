@@ -430,9 +430,7 @@ void W3DGadgetPushButtonDraw( GameWindow *window, WinInstanceData *instData )
 
 	}  // end if
 
-	// draw the button text
-	if( instData->getTextLength() )
-		drawButtonText( window, instData );
+	// the button text is drawn after the clock overlay, further down
 
 	// if we have a video buffer, draw the video buffer
 	if ( instData->m_videoBuffer )
@@ -461,7 +459,7 @@ void W3DGadgetPushButtonDraw( GameWindow *window, WinInstanceData *instData )
 			}
 			// the clock is not consumed by drawing it - see GadgetButtonDrawClock
 		}
-		
+
 		if( pData->drawBorder && pData->colorBorder != GAME_COLOR_UNDEFINED )
 		{
 			TheDisplay->drawOpenRect(origin.x -1, origin.y - 1, size.x + 2, size.y + 2,1 , pData->colorBorder);
@@ -479,6 +477,11 @@ void W3DGadgetPushButtonDraw( GameWindow *window, WinInstanceData *instData )
 		if( pData->barPercent >= 0 )
 			drawButtonBar( window, pData->barPercent, pData->barColor );
 	}
+
+	// the text goes on last: the cooldown clock sweeps across the whole button and used to
+	// bury the shortcut key letter under it
+	if( instData->getTextLength() )
+		drawButtonText( window, instData );
 
 }  // end W3DGadgetPushButtonDraw
 
@@ -605,9 +608,7 @@ void W3DGadgetPushButtonImageDrawOne( GameWindow *window,
 		TheDisplay->drawImage( image, start.x, start.y, end.x, end.y, colorMultiplier, drawMode );
 	}  // end if
 
-	// draw the button text
-	if( instData->getTextLength() )
-		drawButtonText( window, instData );
+	// the button text is drawn at the very end, after the clock and the state overlays
 
 	// get window position
 	window->winGetScreenPosition( &start.x, &start.y );
@@ -701,6 +702,12 @@ void W3DGadgetPushButtonImageDrawOne( GameWindow *window,
 			}
 		}
 	}
+
+	// the text goes on last: the cooldown clock and the state overlays both sweep across the
+	// whole button and used to bury the shortcut key letter under them
+	if( instData->getTextLength() )
+		drawButtonText( window, instData );
+
 }  // end W3DGadgetPushButtonImageDraw
 
 
@@ -874,10 +881,8 @@ void W3DGadgetPushButtonImageDrawThree(GameWindow *window, WinInstanceData *inst
 		end.y = start.y + size.y;
 		TheWindowManager->winDrawImage(rightImage, start.x, start.y, end.x, end.y);
 	}
-	
-	// draw the button text
-	if( instData->getTextLength() )
-		drawButtonText( window, instData );
+
+	// the button text is drawn at the very end, after the clock overlay
 
 	// get window position
 	window->winGetScreenPosition( &start.x, &start.y );
@@ -929,4 +934,9 @@ void W3DGadgetPushButtonImageDrawThree(GameWindow *window, WinInstanceData *inst
 		if( pData->barPercent >= 0 )
 			drawButtonBar( window, pData->barPercent, pData->barColor );
 	}
+
+	// the text goes on last: the cooldown clock sweeps across the whole button and used to
+	// bury the shortcut key letter under it
+	if( instData->getTextLength() )
+		drawButtonText( window, instData );
 }

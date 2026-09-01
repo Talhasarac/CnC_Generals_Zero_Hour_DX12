@@ -5334,6 +5334,17 @@ Bool Object_deathIsSilent( Bool underConstruction, Real constructionPercent )
 	return Object_isAwaitingBuilder( underConstruction, constructionPercent );
 }
 
+//-------------------------------------------------------------------------------------------------
+/** And nothing standing is nothing to shoot at either.  A plan clears no shroud and is drawn only
+	* for the player who placed it, so an enemy cannot see it - a unit that stopped and opened fire
+	* on one was reporting where a base was going up to a player who had no way of knowing.  The
+	* first percent of work ends this and the structure is a target like any other from there. */
+//-------------------------------------------------------------------------------------------------
+Bool Object_isAttackableStructure( Bool underConstruction, Real constructionPercent )
+{
+	return !Object_isAwaitingBuilder( underConstruction, constructionPercent );
+}
+
 Real Object::getShroudClearingRange() const
 {
 	Real shroudClearingRange = Object_shroudClearingRange( m_shroudClearingRange,

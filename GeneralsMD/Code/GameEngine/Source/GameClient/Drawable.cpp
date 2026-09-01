@@ -4278,7 +4278,7 @@ void Drawable::drawHealthBar(const IRegion2D* healthBarRegion)
 		// the one below it
 		Int stackY = healthBarRegion->lo.y - 3;
 
-		// own producers show a yellow production-progress bar above the health bar, with seconds left at its top-left
+		// own producers show a white production-progress bar above the health bar, with seconds left at its top-left
 		ProductionUpdateInterface *pu = showsOwnerDetail( obj ) ? obj->getProductionUpdateInterface() : NULL;
 		const ProductionEntry *pe = pu ? pu->firstProduction() : NULL;
 		if( pe )
@@ -4291,10 +4291,10 @@ void Drawable::drawHealthBar(const IRegion2D* healthBarRegion)
 			else if( pct < 0.0f )
 				pct = 0.0f;
 			TheDisplay->drawOpenRect( healthBarRegion->lo.x, prodY, healthBoxWidth, healthBoxHeight,
-																healthBoxOutlineSize, GameMakeColor( 128, 128, 0, 255 ) );
+																healthBoxOutlineSize, GameMakeColor( 255, 255, 255, 255 ) );
 			TheDisplay->drawFillRect( healthBarRegion->lo.x + 1, prodY + 1,
 																(healthBoxWidth - 2) * pct * 0.01f, healthBoxHeight - 2,
-																GameMakeColor( 255, 255, 0, 255 ) );
+																GameMakeColor( 255, 255, 255, 255 ) );
 
 			Player *player = obj->getControllingPlayer();
 			Int totalFrames = pe->getProductionType() == PRODUCTION_UNIT
@@ -4362,7 +4362,7 @@ void Drawable::drawHealthBar(const IRegion2D* healthBarRegion)
 
 		//
 		// A superweapon charging, or a building on a timed payout (the supply drop zone), gets the
-		// same yellow bar the production queue uses - stacked above it rather than on top of it,
+		// same white bar the production queue uses - stacked above it rather than on top of it,
 		// which is what a Chinese nuclear silo researching an upgrade while its missile charges used
 		// to draw: two bars and two countdowns in the same row of pixels. Only powers that carry a public timer count -
 		// that is the flag the superweapon list in the corner goes by.
@@ -4485,10 +4485,10 @@ void Drawable::drawHealthBar(const IRegion2D* healthBarRegion)
 			{
 				Int chargeY = stackY - healthBoxHeight;
 				TheDisplay->drawOpenRect( healthBarRegion->lo.x, chargeY, healthBoxWidth, healthBoxHeight,
-																	healthBoxOutlineSize, GameMakeColor( 128, 128, 0, 255 ) );
+																	healthBoxOutlineSize, GameMakeColor( 255, 255, 255, 255 ) );
 				TheDisplay->drawFillRect( healthBarRegion->lo.x + 1, chargeY + 1,
 																	(healthBoxWidth - 2) * chargePct * 0.01f, healthBoxHeight - 2,
-																	GameMakeColor( 255, 255, 0, 255 ) );
+																	GameMakeColor( 255, 255, 255, 255 ) );
 
 				//
 				// ... and how long that is, the same way a production bar says it. A bar filling up
@@ -4521,7 +4521,7 @@ void Drawable::drawHealthBar(const IRegion2D* healthBarRegion)
 					Int textW, textH;
 					chargeTimeString->getSize( &textW, &textH );
 					chargeTimeString->draw( healthBarRegion->lo.x, chargeY - textH,
-																	GameMakeColor( 255, 255, 0, 255 ), GameMakeColor( 0, 0, 0, 255 ) );
+																	GameMakeColor( 255, 255, 255, 255 ), GameMakeColor( 0, 0, 0, 255 ) );
 				}
 			}
 		}

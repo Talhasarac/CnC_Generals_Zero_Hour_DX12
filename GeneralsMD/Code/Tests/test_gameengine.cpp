@@ -5569,6 +5569,24 @@ TEST(a_structure_waiting_for_its_builder_is_drawn_as_a_silhouette)
 	CHECK( Drawable_effectiveOpacity( 1.0f, 1.0f, TRUE ) != 1.0f );
 }
 
+/** A plan is not a target.  It clears no shroud and is drawn only for the player who placed it, so
+	 an enemy has no way of seeing it - and a unit that stopped and shot at one told that enemy
+	 exactly where a base was going up.  WeaponSet::getAbleToAttackSpecificObject rejects a victim
+	 this says nothing is standing on. */
+TEST(a_structure_waiting_for_its_builder_cannot_be_shot_at)
+{
+	CHECK( Object_isAttackableStructure( TRUE, 0.0f ) == FALSE );
+
+	// the builder arrives and it is a building like any other
+	CHECK( Object_isAttackableStructure( TRUE, 0.1f ) == TRUE );
+	CHECK( Object_isAttackableStructure( TRUE, 99.9f ) == TRUE );
+
+	// and everything that is not a structure going up is a target: a finished building carries
+	// CONSTRUCTION_COMPLETE, a unit is simply not under construction
+	CHECK( Object_isAttackableStructure( FALSE, CONSTRUCTION_COMPLETE ) == TRUE );
+	CHECK( Object_isAttackableStructure( FALSE, 0.0f ) == TRUE );
+}
+
 /** The first percent of work is what ends the plan, so the moment the builder arrives and starts
 	 the structure turns solid and stays solid for the rest of its life.  A finished building carries
 	 CONSTRUCTION_COMPLETE (-1) and must not be mistaken for one sitting at zero. */

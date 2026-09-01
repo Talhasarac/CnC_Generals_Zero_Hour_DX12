@@ -1014,7 +1014,7 @@ protected:
 	void drawProductionStripColumn( Int row, Int left, Int bottomY );
 	const Image *productionStripTray( void );	///< the bar's tray, mirrored, kept until the bar changes side
 	void stripTrayMetrics( ICoord2D *tray, ICoord2D *cameo, ICoord2D *hole, Int *step );	///< that tray's size, its cameo hole, and the column step
-	void drawStripSeconds( Int which, Int x, Int y, Int w, Int h, Int seconds, Bool plainSeconds = FALSE );	///< countdown written inside a cameo
+	void drawStripSeconds( Int which, Int x, Int y, Int w, Int h, Int seconds );	///< countdown written inside a cameo
 	void drawStripQuantity( Int which, Int x, Int y, Int w, Int quantity );	///< the "xN" in a cameo's top right corner
 	void addSuperweaponIcon( const Image *image, Int seconds, Int percent, Bool ready, Color color );
 	void drawSuperweaponStrip( void );		///< those icons, top right, soonest at the right hand end

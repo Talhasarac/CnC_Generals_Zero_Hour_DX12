@@ -753,7 +753,7 @@ public:
 		(a click, a new selection, a key that is not part of the chord, or simply time passing)
 		must drop it. */
 	void dropChord( void );
-	enum { CHORD_TIMEOUT_MS = 2000 };			///< real time, not frames: the client frame rate is uncapped
+	enum { CHORD_TIMEOUT_MS = 4000 };			///< real time, not frames: the client frame rate is uncapped
 
 	/// is the drawable the currently selected drawable for the context sensitive UI?
 	Bool isDrivingContextUI( Drawable *draw ) const { return draw == m_currentSelectedDrawable; }

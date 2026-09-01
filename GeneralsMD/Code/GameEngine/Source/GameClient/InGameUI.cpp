@@ -134,24 +134,17 @@ static Int stripPixels( Int nominal )
 }
 
 //-------------------------------------------------------------------------------------------------
-/** A countdown short enough to be written inside a cameo: bare seconds while there are fewer than
-	* sixty of them, m:ss once there are more.  A tank takes seconds and a superweapon charges for
-	* minutes, and both are written into the same little box.
-	*
-	* 'plainSeconds' keeps the bare count however big it gets.  A superweapon is read as "how long
-	* until I can fire it", and against that question 3:20 is a number you have to convert before
-	* you can compare it with anything else on the screen - every other countdown the HUD writes is
-	* in seconds. */
+/** A countdown written inside a cameo, always in bare seconds with the unit on it: "45s", "200s".
+	* A tank takes seconds and a superweapon charges for minutes, and both are read against every
+	* other countdown on the screen, all of which are in seconds - m:ss was a number you had to
+	* convert first. The trailing s is what stops a lone "45" reading as a count of something. */
 //-------------------------------------------------------------------------------------------------
-static void formatStripSeconds( UnicodeString *text, Int seconds, Bool plainSeconds = FALSE )
+static void formatStripSeconds( UnicodeString *text, Int seconds )
 {
 	if( seconds < 0 )
 		seconds = 0;
 
-	if( seconds < 60 || plainSeconds )
-		text->format( L"%d", seconds );
-	else
-		text->format( L"%d:%2.2d", seconds / 60, seconds % 60 );
+	text->format( L"%ds", seconds );
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -6390,9 +6383,10 @@ Int InGameUI::stripRowStep( Int trayHeight )
 //-------------------------------------------------------------------------------------------------
 /** Write a countdown inside a cameo.  The radial sweep says how much of the whole is left, which
 	* is a shape rather than a number: it answers "nearly" and never "eleven seconds".  Both strips
-	* put the number in the middle of the box, over the sweep. */
+	* put the number in the bottom left corner of the box, over the sweep - the middle is where the
+	* picture is, and a number sitting on it hid the one thing the cameo is there to show. */
 //-------------------------------------------------------------------------------------------------
-void InGameUI::drawStripSeconds( Int which, Int x, Int y, Int w, Int h, Int seconds, Bool plainSeconds )
+void InGameUI::drawStripSeconds( Int which, Int x, Int y, Int w, Int h, Int seconds )
 {
 	// its own string, kept between frames - see m_stripSecondsString
 	DisplayString *&secondsString = m_stripSecondsString[ which ];
@@ -6406,18 +6400,21 @@ void InGameUI::drawStripSeconds( Int which, Int x, Int y, Int w, Int h, Int seco
 	}
 
 	UnicodeString text;
-	formatStripSeconds( &text, seconds, plainSeconds );
+	formatStripSeconds( &text, seconds );
 	secondsString->setText( text );
 
 	Int textWidth = 0, textHeight = 0;
 	secondsString->getSize( &textWidth, &textHeight );
 
-	const Int textX = x + ( w - textWidth ) / 2;
-	const Int textY = y + ( h - textHeight ) / 2;
+	const Int textX = x + 1;
+	const Int textY = y + h - textHeight - 1;
 
-	// no plate under it: the cameo is already under the sweep's scrim, and a second black box
-	// inside a sixteen pixel box was most of the cameo - the number read as a label stuck over
-	// the picture instead of a countdown running on it.  The drop shadow carries it.
+	// a plate under it: down in the corner the number sits on whatever the picture happens to be
+	// there, and a pale cameo swallowed the drop shadow along with the digits
+	if( textWidth > 0 && textHeight > 0 )
+		TheDisplay->drawFillRect( textX - 1, textY, textWidth + 2, textHeight,
+															GameMakeColor( 0, 0, 0, 160 ) );
+
 	secondsString->draw( textX, textY, GameMakeColor( 245, 245, 245, 255 ),
 											 GameMakeColor( 0, 0, 0, 255 ) );
 }
@@ -6635,7 +6632,7 @@ void InGameUI::drawSuperweaponStrip( void )
 
 			if( !slot->ready )
 				drawStripSeconds( PRODUCTION_STRIP_ROWS * PRODUCTION_STRIP_ROW_MAX + first + secondsSlot,
-													x, y, cameoW, cameoH, slot->seconds, TRUE );
+													x, y, cameoW, cameoH, slot->seconds );
 		}
 
 		// the border is whose weapon it is - the colour the timer was registered with

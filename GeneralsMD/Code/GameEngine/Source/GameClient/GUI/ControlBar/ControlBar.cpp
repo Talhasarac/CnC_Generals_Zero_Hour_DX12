@@ -4969,9 +4969,14 @@ void ControlBar::populateSpecialPowerShortcut( Player *player)
 	const CommandSet *commandSet;
 	Int i;
 
-	// the bar is being rebuilt, so a row picked against the old one means nothing
-	clearSpecialPowerShortcutRow();
-	if(!player || !player->getPlayerTemplate() 
+	//
+	// An armed row survives this. markUIDirty() runs the bar through here again for anything that
+	// touches the interface at all - a promotion, a unit finishing, a structure captured, a stealth
+	// unit blinking - and dozens of those happen a minute, so clearing the row here meant the second
+	// key of the chord almost never found one. What actually invalidates a row is the bar going away
+	// or coming back with fewer powers than the row names, and update() drops it for both.
+	//
+	if(!player || !player->getPlayerTemplate()
 			|| !player->isLocalPlayer() || m_currentlyUsedSpecialPowersButtons == 0
 			|| m_specialPowerShortcutButtons == NULL || m_specialPowerShortcutButtonParents == NULL)
 		return;

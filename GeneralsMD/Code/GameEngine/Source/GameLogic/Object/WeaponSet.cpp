@@ -480,6 +480,17 @@ CanAttackResult WeaponSet::getAbleToAttackSpecificObject( AbleToAttackType attac
 	if (victim->isKindOf(KINDOF_UNATTACKABLE))
 		return ATTACKRESULT_NOT_POSSIBLE;
 
+	//
+	// A planned structure standing at zero percent with its builder still walking over is nothing
+	// anyone can shoot. It clears no shroud and it is drawn only for its own player, so an enemy
+	// cannot see it at all - and something invisible to one side that its units still stop and
+	// shoot at is a free scouting report on where a base is going up. It stops being a plan the
+	// moment the builder puts the first percent in, and from there it is a building like any other.
+	//
+	if (!Object_isAttackableStructure(victim->testStatus(OBJECT_STATUS_UNDER_CONSTRUCTION),
+																		victim->getConstructionPercent()))
+		return ATTACKRESULT_NOT_POSSIBLE;
+
 	// this object is not currently auto-acquireable
 	if (victim->testStatus(OBJECT_STATUS_NO_ATTACK_FROM_AI) && commandSource == CMD_FROM_AI)
 		return ATTACKRESULT_NOT_POSSIBLE;
