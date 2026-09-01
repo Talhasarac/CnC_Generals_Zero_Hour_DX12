@@ -146,6 +146,7 @@ static Int thePFOutOfCells = 0;			///< a search ran the shared cell-info pool dr
 static Int thePFNoPath = 0;					///< a unit asked for a path and got nothing back
 static Int thePFBlockedFrames = 0;	///< unit-frames spent standing behind another unit
 static Int thePFStuckFrames = 0;		///< of those, the ones where the blocker was not moving either
+static Int thePFQueueDetours = 0;		///< units that gave up on a queue and repathed round it
 
 inline void pfBump( Int slot ) { thePFCalls[ slot ]++; }
 
@@ -1973,6 +1974,48 @@ const Int COST_DIAGONAL = 14;
 const Int PATH_CONGESTION_COST = 5;
 const Int PATH_CONGESTION_RANGE = 30;			///< cells from the start within which other paths cost anything
 const Int PATH_CONGESTION_MAX_PATHS = 4;	///< the penalty stops growing past this many paths in a footprint
+
+/* The cost above is about where other units are *going*.  This one is about where they are
+	 standing right now, and it is only paid by a unit that has already given up on the queue it is
+	 in (AIUpdateInterface::isQueuedBehindUnits).  Every other search keeps the retail flat cost.
+
+	 A cell holding another unit costs 3*COST_DIAGONAL = 42 in retail, which is four cells of ground.
+	 That is enough to prefer the lane beside a single parked tank and nowhere near enough to walk
+	 round a column of six: driving through them is 42 a cell, but the way round is a hundred cells
+	 of open ground the search has to be paid to take.  For the one search that gets it, occupied
+	 ground costs 162 instead, which buys about sixteen cells of detour per unit in the way - a tank
+	 pulls out of the line, drives right round the ones standing in it and comes back in front.
+
+	 Bounded to the cells near the start for the reason the congestion comment gives: the A*
+	 heuristic cannot see this cost, so an unbounded version of it floods the search.  The window
+	 has to hold the whole queue, though, or the unit plans around the tank in front of it and
+	 rejoins the same line two cells later: sixteen cells is a hundred and sixty world units, which
+	 is a column of five tanks plus the room to swing round it.
+
+	 These two numbers are where the sweep stopped, and it is worth saying what is on the other side
+	 of them, because "swing wider" sounds free and is not.  Four ways to widen it, same 24 seeds,
+	 blocked unit-frames per 1000 logic frames and cell expansions per match - retail, with none of
+	 this, is 34,2:
+	    50 over 10 cells (this)      28,8    56.784
+	    cost 50 -> 120               28,4    56.783
+	    range 10 -> 16               28,6    56.763
+	    a cell of clearance around
+	      the traffic, not just the
+	      cells it stands on         33,6    56.661
+	    threshold 40 -> 25 frames    40,6    64.383
+
+	 One cell of difference in 56.784 is the same routes to within rounding, twice over: the cost
+	 saturates the way the crossing cost saturates at 60, because past the point where going round
+	 is cheaper than going through, paying more does not move the line further out - the route is
+	 already the widest the ground offers.  The range is inert for the same reason.
+
+	 The two that do change something both make it worse, and in the same way the congestion cost
+	 does at 10: spread them harder and they park across each other.  A cell of clearance sends the
+	 detour wide enough to meet the next lane's traffic, and firing sooner pulls units out of lines
+	 that were about to clear - that one is worse than doing nothing at all.  A unit that leaves a
+	 queue has to leave it late and by the shortest way round, or it is not saving anyone time. */
+const Int PATH_QUEUE_COST = 5*COST_ORTHOGONAL;
+const Int PATH_QUEUE_RANGE = 10;					///< cells from the start within which standing units cost extra
 
 /* Split out of examineNeighboringCells so the cap is testable: the cap is the only thing keeping
 	 this cost from flooding the search, since the heuristic cannot see it. */
@@ -4266,6 +4309,7 @@ void Pathfinder::resetMatchProfile( void )
 	thePFNoPath = 0;
 	thePFBlockedFrames = 0;
 	thePFStuckFrames = 0;
+	thePFQueueDetours = 0;
 }
 
 void Pathfinder::bumpNoPath( void )
@@ -4278,6 +4322,11 @@ void Pathfinder::bumpBlockedFrame( Bool stuck )
 	thePFBlockedFrames++;
 	if( stuck )
 		thePFStuckFrames++;
+}
+
+void Pathfinder::bumpQueueDetour( void )
+{
+	thePFQueueDetours++;
 }
 
 const char *Pathfinder::getMatchProfileReport( void )
@@ -4303,8 +4352,8 @@ const char *Pathfinder::getMatchProfileReport( void )
 		len += oneLen;
 	}
 	if( len < (Int)sizeof( thePFMatchReport ) - 64 )
-		sprintf( thePFMatchReport + len, "| nopath %d outofcells %d blocked %d stuck %d",
-						 thePFNoPath, thePFOutOfCells, thePFBlockedFrames, thePFStuckFrames );
+		sprintf( thePFMatchReport + len, "| nopath %d outofcells %d blocked %d stuck %d queuedetour %d",
+						 thePFNoPath, thePFOutOfCells, thePFBlockedFrames, thePFStuckFrames, thePFQueueDetours );
 	return thePFMatchReport;
 }
 
@@ -6894,7 +6943,12 @@ Int Pathfinder::examineNeighboringCells(PathfindCell *parentCell, PathfindCell *
 		// world units per frame, for turning a distance travelled into the frame we get there.
 		// Zero switches the crossing cost off for this search: without a speed there is no clock.
 		Real crossingSpeed = 0.0f;
+		// nonzero only for a unit that has decided to leave the queue it is standing in; see
+		// PATH_QUEUE_COST
+		Int queueCost = 0;
 		if (obj && obj->getAIUpdateInterface()) {
+			if (obj->getAIUpdateInterface()->isQueuedBehindUnits())
+				queueCost = PATH_QUEUE_COST;
 			canPathThroughUnits = obj->getAIUpdateInterface()->canPathThroughUnits();
 			// Our own current path must not repel us while we repath (the caller only destroys it
 			// once the new one is built).  O(1) after the first neighbour expansion of a search.
@@ -7082,6 +7136,12 @@ Int Pathfinder::examineNeighboringCells(PathfindCell *parentCell, PathfindCell *
 			newCostSoFar = newCell->costSoFar( parentCell );
 			if (info.allyMoving && dx<10 && dy<10) {
 				newCostSoFar += 3*COST_DIAGONAL;
+			}
+			// leaving the queue: the ground the units in front of us are standing on is worth
+			// going round, for this search only
+			if (queueCost && dx<PATH_QUEUE_RANGE && dy<PATH_QUEUE_RANGE
+					&& (info.allyMoving || info.allyFixedCount>0)) {
+				newCostSoFar += queueCost;
 			}
 			if (m_pathUsage && dx < PATH_CONGESTION_RANGE && dy < PATH_CONGESTION_RANGE) {
 				// Other units' live paths through our footprint: pay per path so we pick a parallel

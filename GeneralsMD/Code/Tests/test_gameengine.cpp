@@ -6266,6 +6266,65 @@ TEST(congestion_cost_is_charged_per_path_and_capped)
 	CHECK( Pathfinder_congestionPenalty( 255, 20 ) <= 8*10 );
 }
 
+extern Int AIUpdate_queueFrameStep( Int queueFrames, Bool blocked );
+extern Bool AIUpdate_isQueued( Int queueFrames );
+
+TEST(a_queue_is_blocked_frames_that_decay_rather_than_reset)
+{
+	/* The counter this replaces was zeroed by a single frame without a collision, and a unit at
+		 the back of a column does not collide every frame - it creeps up, touches, backs its speed
+		 off, drifts apart and touches again - so it never reached the two seconds that force a
+		 repath and the column just stood there.  This one decays. */
+
+	/* Blocked every frame it climbs, and crosses the threshold inside a second or so.  The exact
+		 frame is a tuning constant and this test does not pin it: it pins that the threshold is
+		 reached at all, that it takes long enough not to fire on a passing nudge, and that it comes
+		 in under the two-second rule it exists to get in front of. */
+	Int q = 0;
+	Int framesToFire = 0;
+	while( !AIUpdate_isQueued( q ) && framesToFire < 1000 )
+	{
+		q = AIUpdate_queueFrameStep( q, true );
+		framesToFire++;
+	}
+	CHECK( AIUpdate_isQueued( q ) );
+	CHECK( framesToFire > 10 );		// a shove in traffic is not a queue
+	CHECK( framesToFire < 60 );		// 2*LOGICFRAMES_PER_SECOND: the rule this gets in front of
+
+	// and it stops climbing, so a unit wedged for a minute carries no credit into open ground
+	for( Int i = 0; i < 1000; i++ )
+		q = AIUpdate_queueFrameStep( q, true );
+	CHECK_EQ( 80, q );
+
+	// clear ground walks it back down to nothing, and no further
+	for( Int i = 0; i < 1000; i++ )
+		q = AIUpdate_queueFrameStep( q, false );
+	CHECK_EQ( 0, q );
+	CHECK( !AIUpdate_isQueued( q ) );
+
+	/* The case that matters: touching two frames in three still gets there, where the old
+		 reset-on-clear counter never left 1.  Three frames a cycle, net +1. */
+	q = 0;
+	for( Int cycle = 0; cycle < 40; cycle++ )
+	{
+		q = AIUpdate_queueFrameStep( q, true );
+		q = AIUpdate_queueFrameStep( q, true );
+		q = AIUpdate_queueFrameStep( q, false );
+	}
+	CHECK( AIUpdate_isQueued( q ) );
+
+	// but a unit that is merely nudged now and then - one frame in three - never fires
+	q = 0;
+	for( Int cycle = 0; cycle < 1000; cycle++ )
+	{
+		q = AIUpdate_queueFrameStep( q, true );
+		q = AIUpdate_queueFrameStep( q, false );
+		q = AIUpdate_queueFrameStep( q, false );
+	}
+	CHECK( !AIUpdate_isQueued( q ) );
+	CHECK_EQ( 0, q );
+}
+
 extern Int Pathfinder_crossingPenalty( Int conflicts );
 
 TEST(crossing_cost_is_charged_per_conflict_and_capped)

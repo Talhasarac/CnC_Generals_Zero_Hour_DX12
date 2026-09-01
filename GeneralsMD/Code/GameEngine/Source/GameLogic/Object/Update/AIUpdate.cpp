@@ -73,6 +73,41 @@
 
 #define SLEEPY_AI
 
+//
+// Leaving a queue.  A unit standing behind another one collides, backs its speed off, drifts
+// apart, and collides again a few frames later, so m_blockedFrames - which a single clean frame
+// zeroes - rarely reaches the two seconds that force a repath.  The column therefore sits.
+// m_queueFrames counts the same collisions but decays by one per clear frame instead of resetting,
+// so a unit touching more often than it clears climbs; one that is genuinely moving falls to zero.
+// Past the threshold the unit repaths once, and that search prices the traffic beside it (see
+// PATH_QUEUE_COST in AIPathfind.cpp) so the route it gets back leaves the line instead of
+// rejoining it.
+//
+// The threshold is under the two-second rule on purpose: a unit that is being reliably crushed
+// against a blocker every frame still hits the old rule first, and this only catches the
+// intermittent case the old rule misses.  The ceiling stops a unit wedged for a minute from
+// carrying a minute of credit into open ground.
+//
+enum
+{
+	QUEUE_FRAMES_THRESHOLD = 40,	///< about 1.3 seconds of mostly-blocked frames
+	QUEUE_FRAMES_CEILING = 80
+};
+
+/* Split out so the climb-and-decay can be checked on its own: it is the whole of the "am I in a
+	 line" decision, and a version that gets it wrong either never fires or fires on open ground. */
+Int AIUpdate_queueFrameStep( Int queueFrames, Bool blocked )
+{
+	if (blocked)
+		return queueFrames < QUEUE_FRAMES_CEILING ? queueFrames + 1 : QUEUE_FRAMES_CEILING;
+	return queueFrames > 0 ? queueFrames - 1 : 0;
+}
+
+Bool AIUpdate_isQueued( Int queueFrames )
+{
+	return queueFrames >= QUEUE_FRAMES_THRESHOLD;
+}
+
 #ifdef _INTERNAL
 // for occasional debugging...
 //#pragma optimize("", off)
@@ -240,6 +275,7 @@ AIUpdateInterface::AIUpdateInterface( Thing *thing, const ModuleData* moduleData
 	m_pathfindGoalCell.x = m_pathfindGoalCell.y = -1;
 	m_pathfindCurCell.x = m_pathfindCurCell.y = -1;
 	m_blockedFrames = 0;
+	m_queueFrames = 0;
 	m_curMaxBlockedSpeed = 0;
 	m_bumpSpeedLimit = FAST_AS_POSSIBLE;
 	m_ignoreCollisionsUntil = 0;
@@ -1443,7 +1479,34 @@ Bool AIUpdateInterface::needToRotate(void)
 
 
 //-------------------------------------------------------------------------------------------------
-/* Returns TRUE if the physics collide should apply the force.  Normally not.  
+/* Returns TRUE if this unit has spent long enough standing behind other units to call it a queue
+	 rather than a moment of traffic.  See QUEUE_FRAMES_THRESHOLD at the top of this file. */
+Bool AIUpdateInterface::isQueuedBehindUnits(void) const
+{
+	return AIUpdate_isQueued( m_queueFrames );
+}
+
+//-------------------------------------------------------------------------------------------------
+/* Called at the end of every path computation.  The search that just ran is the detour, so the
+	 credit is spent and the unit counts again from zero to decide whether it worked - without this
+	 a queued unit asks for a new path on every frame for as long as it is queued.  It is also where
+	 the headless run's "queuedetour" count comes from: how often a unit gave up on the line it was
+	 standing in, which is the number that says whether a change to the threshold did anything. */
+void AIUpdateInterface::spendQueueCredit(void)
+{
+	if (isQueuedBehindUnits())
+	{
+		Pathfinder::bumpQueueDetour();
+		// the headless counter only prints at the end of an unattended run, and this behaviour is
+		// something you watch happen in a real game - so say it in the log too, once per detour
+		DEBUG_LOG(("QUEUE DETOUR: frame %d, '%s' %d leaving a queue\n", TheGameLogic->getFrame(),
+			getObject()->getTemplate()->getName().str(), getObject()->getID()));
+	}
+	m_queueFrames = 0;
+}
+
+//-------------------------------------------------------------------------------------------------
+/* Returns TRUE if the physics collide should apply the force.  Normally not.
 Also determines whether objects are blocked, and if so, if they are stuck.  jba.*/
 Bool AIUpdateInterface::processCollision(PhysicsBehavior *physics, Object *other)
 {
@@ -1683,6 +1746,7 @@ Bool AIUpdateInterface::computeQuickPath( const Coord3D *destination )
 	m_pathTimestamp = TheGameLogic->getFrame();
 
 	m_blockedFrames = 0;
+	spendQueueCredit();
 	m_isBlockedAndStuck = FALSE;
 	return TRUE;
 }
@@ -1693,7 +1757,6 @@ Bool AIUpdateInterface::computeQuickPath( const Coord3D *destination )
  */
 Bool AIUpdateInterface::computePath( PathfindServicesInterface *pathServices, Coord3D *destination )
 {
-
 	if (!m_isBlockedAndStuck)	{
 		destroyPath();
 	}
@@ -1804,6 +1867,7 @@ Bool AIUpdateInterface::computePath( PathfindServicesInterface *pathServices, Co
 	m_pathTimestamp = TheGameLogic->getFrame();
 
 	m_blockedFrames = 0;
+	spendQueueCredit();
 	m_isBlockedAndStuck = FALSE;
 	if (m_path)
 		return TRUE;
@@ -1823,10 +1887,11 @@ Bool AIUpdateInterface::computeAttackPath( PathfindServicesInterface *pathServic
 	{
 		// jba intense debug
 		//CRCDEBUG_LOG(("Info - RePathing very quickly %d, %d.\n", m_pathTimestamp, TheGameLogic->getFrame()));
-		if (m_path && m_isBlockedAndStuck) 
+		if (m_path && m_isBlockedAndStuck)
 		{
 			setIgnoreCollisionTime(2*LOGICFRAMES_PER_SECOND);
 			m_blockedFrames = 0;
+			spendQueueCredit();
 			m_isBlocked = FALSE;
 			m_isBlockedAndStuck = FALSE;
 			return TRUE;
@@ -2039,6 +2104,7 @@ Bool AIUpdateInterface::computeAttackPath( PathfindServicesInterface *pathServic
 	m_pathTimestamp = TheGameLogic->getFrame();
 
 	m_blockedFrames = 0;
+	spendQueueCredit();
 	m_isBlockedAndStuck = FALSE;
 	//CRCDEBUG_LOG(("AIUpdateInterface::computeAttackPath() done\n"));
 	if (m_path)
@@ -2166,6 +2232,7 @@ UpdateSleepTime AIUpdateInterface::doLocomotor( void )
 
 	chooseGoodLocomotorFromCurrentSet();
 
+	m_queueFrames = AIUpdate_queueFrameStep( m_queueFrames, m_isBlocked );
 	if (m_isBlocked)
 	{
 		++m_blockedFrames;

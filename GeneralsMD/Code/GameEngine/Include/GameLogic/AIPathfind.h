@@ -776,6 +776,7 @@ public:
 	static const char *getMatchProfileReport( void );
 	static void bumpNoPath( void );									///< a path request came back empty
 	static void bumpBlockedFrame( Bool stuck );			///< one unit-frame spent blocked by another unit
+	static void bumpQueueDetour( void );						///< a unit gave up on its queue and repathed round it
 	void processPathfindQueue(void); ///< Process some or all of the queued pathfinds.
 	void forceMapRecalculation( );	///< Force pathfind map recomputation. If region is given, only that area is recomputed
 

@@ -1819,7 +1819,14 @@ StateReturnType AIInternalMoveToState::update()
 		forceRecompute = true;
 	}
 	Bool blocked=false;
-	if (ai->isBlockedAndStuck() || ai->getNumFramesBlocked()>2*LOGICFRAMES_PER_SECOND) {
+	// isQueuedBehindUnits is the intermittent case the two-second rule misses: a unit shuffling
+	// along at the back of a column touches the one in front every few frames, never for two
+	// seconds together, and used to stay in the line for as long as the line existed.  Throttled
+	// to once a second because not every state answers a forced recompute by actually computing
+	// one - the ones that decline (tightening, pursuing) would otherwise be asked every frame.
+	Bool queued = ai->isQueuedBehindUnits()
+			&& TheGameLogic->getFrame() - m_blockedRepathTimestamp > LOGICFRAMES_PER_SECOND;
+	if (ai->isBlockedAndStuck() || ai->getNumFramesBlocked()>2*LOGICFRAMES_PER_SECOND || queued) {
 		forceRecompute = true;
 		blocked = true;
 		m_blockedRepathTimestamp = TheGameLogic->getFrame();
@@ -2420,11 +2427,22 @@ Bool AIAttackApproachTargetState::computePath()
 
 	AIUpdateInterface *ai = getMachineOwner()->getAI();
 
-	if (ai->isBlockedAndStuck()) 
+	if (ai->isBlockedAndStuck())
 	{
 		forceRepath = true;
 		// Intense logging. jba
 		//CRCDEBUG_LOG(("AIAttackApproachTargetState::computePath - stuck, recomputing for object %d\n", getMachineOwner()->getID()));
+	}
+	//
+	// This state is where a group of tanks piles up nose to tail, and it is the one state that
+	// could not get itself out.  The base move state asks for a repath after two seconds of being
+	// blocked; this override ignored that, and the "victim has not moved, so do not re-path" bail
+	// below then held every tank behind the ones in front for as long as the target stood still.
+	// A unit that has given up on its queue repaths whatever the victim is doing.
+	//
+	if (ai->isQueuedBehindUnits())
+	{
+		forceRepath = true;
 	}
 	if (m_waitingForPath) return true;
 

@@ -478,6 +478,16 @@ public:
 	Bool isQuickPathAvailable( const Coord3D *destination ) const;  ///< does a path (using quick pathfind) exist between us and the destination
 	Int getNumFramesBlocked(void) const {return m_blockedFrames;}
 	Bool isBlockedAndStuck(void) const {return m_isBlockedAndStuck;}
+	//
+	// m_blockedFrames is zeroed by a single frame without a collision, and a unit queued behind
+	// another one does not collide every frame - it creeps, touches, backs off its speed and
+	// touches again - so the counter almost never reaches the two seconds that force a repath,
+	// and the queue stands there.  m_queueFrames counts the same collisions and decays instead
+	// of resetting, so a unit that touches more often than it clears climbs to the threshold.
+	// That is what says "I am in a line, not in traffic".
+	//
+	Bool isQueuedBehindUnits(void) const;
+	void spendQueueCredit(void);					///< a path was computed; the detour has had its chance
 	Bool canComputeQuickPath(void); ///< Returns true if we can quickly comput a path.  Usually missiles & the like that just move straight to the destination.
 	Bool computeQuickPath(const Coord3D *destination); ///< Computes a quick path to the destination.
 
@@ -730,6 +740,7 @@ private:
 	ICoord2D		m_pathfindGoalCell;					///< Cell we are moving towards.
 	ICoord2D		m_pathfindCurCell;					///< Cell we are currently occupying.
 	Int					m_blockedFrames;						///< Number of frames we've been blocked.
+	Int					m_queueFrames;							///< blocked frames, decayed rather than reset - see isQueuedBehindUnits
 	Real				m_curMaxBlockedSpeed;				///< Max speed we can have and not run into blocking things.
 	Real				m_bumpSpeedLimit;						///< Max speed after bumping a unit.
 	UnsignedInt	m_ignoreCollisionsUntil;		///< Timer to cheat if we get stuck.
