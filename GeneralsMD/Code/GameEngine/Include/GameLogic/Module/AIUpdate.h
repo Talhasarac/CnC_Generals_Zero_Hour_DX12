@@ -487,6 +487,7 @@ public:
 	// That is what says "I am in a line, not in traffic".
 	//
 	Bool isQueuedBehindUnits(void) const;
+	Int getNumFramesQueued(void) const {return m_queueFrames;}
 	void spendQueueCredit(void);					///< a path was computed; the detour has had its chance
 	Bool canComputeQuickPath(void); ///< Returns true if we can quickly comput a path.  Usually missiles & the like that just move straight to the destination.
 	Bool computeQuickPath(const Coord3D *destination); ///< Computes a quick path to the destination.

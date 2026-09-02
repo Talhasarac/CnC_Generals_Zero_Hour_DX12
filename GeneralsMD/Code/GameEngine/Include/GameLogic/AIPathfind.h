@@ -777,6 +777,9 @@ public:
 	static void bumpNoPath( void );									///< a path request came back empty
 	static void bumpBlockedFrame( Bool stuck );			///< one unit-frame spent blocked by another unit
 	static void bumpQueueDetour( void );						///< a unit gave up on its queue and repathed round it
+
+	void noteJam( const ICoord2D& cell );						///< one blocked unit-frame, stamped where it happened
+	void decayJamMap( void );												///< age the whole map; call once per logic frame
 	void processPathfindQueue(void); ///< Process some or all of the queued pathfinds.
 	void forceMapRecalculation( );	///< Force pathfind map recomputation. If region is given, only that area is recomputed
 
@@ -1001,6 +1004,11 @@ private:
 	PathfindCell **m_map;		///< Pathfinding map indexes - contains matrix indexing into the map.
 	UnsignedByte *m_pathUsage;	///< Congestion map, (hi.x+1)*(hi.y+1), indexed [x*(hi.y+1)+y]
 	Int getPathUsage( Int x, Int y ) const;
+
+	UnsignedByte *m_jamMap;			///< Jam map, same shape and indexing: where units are actually stuck
+	Int m_jamCells;							///< non-zero cells in it, so an unjammed match never sweeps the map
+	UnsignedInt m_jamDecayFrame;	///< logic frame the last decay ran on
+	Int getJam( Int x, Int y ) const;
 
 	//
 	// Reservation map.  A dense per-cell array would be a second whole-map allocation to hold a few

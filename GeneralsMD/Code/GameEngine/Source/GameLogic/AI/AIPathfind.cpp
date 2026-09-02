@@ -2017,6 +2017,42 @@ const Int PATH_CONGESTION_MAX_PATHS = 4;	///< the penalty stops growing past thi
 const Int PATH_QUEUE_COST = 5*COST_ORTHOGONAL;
 const Int PATH_QUEUE_RANGE = 10;					///< cells from the start within which standing units cost extra
 
+/* Both costs above describe a moment.  The congestion map says somebody's path runs through a cell,
+	 the queue cost says somebody is standing in it right now, and neither remembers anything: a
+	 doorway that has been solid for two seconds is priced exactly like one a tank has just rolled
+	 into.  A unit repathing out of a queue therefore keeps choosing the doorway its own column is
+	 wedged in, because at the instant the search runs the cells past the jam are empty.
+
+	 The jam map is the memory.  Every blocked unit stamps the cell it is standing in, once a frame,
+	 and the whole map loses one everywhere every JAM_DECAY_FRAMES - so a cell holds roughly the
+	 blocked unit-frames spent in it over the last JAM_MAX*JAM_DECAY_FRAMES frames, which is 80
+	 frames, a bit under three seconds.  Integer and quantised on the frame number, because a
+	 real-valued decay read by the search is a desync waiting for a machine with a different FPU.
+
+	 JAM_FLOOR is the "three or more" gate: one unit pausing for a frame is traffic and stamps 1 or
+	 2, and only ground that several units have been stuck on, or one has been stuck on for a while,
+	 gets past 3 and costs anything.  Like every other cost here it is capped, for the reason the
+	 congestion comment gives at length - the A* heuristic cannot see it, so an uncapped version
+	 floods the search. */
+const Int PATH_JAM_COST = 3*COST_ORTHOGONAL;	///< per blocked unit-frame above the floor
+const Int PATH_JAM_FLOOR = 3;							///< stamps below this are traffic, not a jam
+const Int PATH_JAM_MAX = 10;							///< the stamp saturates here
+const Int PATH_JAM_DECAY_FRAMES = 8;			///< every cell loses one stamp this often
+const Int PATH_JAM_MAX_CHARGED = 4;				///< the penalty stops growing past this much over the floor
+
+/* Split out for the same reason as the congestion penalty: the floor and the cap are the whole of
+	 the design, and a version without either is a search that floods or a cost that fires on
+	 ordinary traffic. */
+Int Pathfinder_jamPenalty( Int jam )
+{
+	Int over = jam - PATH_JAM_FLOOR;
+	if (over <= 0)
+		return 0;
+	if (over > PATH_JAM_MAX_CHARGED)
+		over = PATH_JAM_MAX_CHARGED;
+	return over * PATH_JAM_COST;
+}
+
 /* Split out of examineNeighboringCells so the cap is testable: the cap is the only thing keeping
 	 this cost from flooding the search, since the heuristic cannot see it. */
 Int Pathfinder_congestionPenalty( Int usage, Int costPerPath )
@@ -4272,7 +4308,7 @@ void PathfindLayer::classifyWallMapCell( Int i, Int j , PathfindCell *cell, Obje
 
 //----------------------- Pathfinder ---------------------------------------
 
-Pathfinder::Pathfinder( void ) :m_map(NULL), m_pathUsage(NULL)
+Pathfinder::Pathfinder( void ) :m_map(NULL), m_pathUsage(NULL), m_jamMap(NULL)
 {
 	debugPath = NULL;
 	PathfindCellInfo::allocateCellInfos();
@@ -4401,6 +4437,12 @@ void Pathfinder::reset( void )
 		delete [] m_pathUsage;
 		m_pathUsage = NULL;
 	}
+	if (m_jamMap) {
+		delete [] m_jamMap;
+		m_jamMap = NULL;
+	}
+	m_jamCells = 0;
+	m_jamDecayFrame = 0;
 	resetReservations();
 
 	Int i;
@@ -5133,6 +5175,10 @@ void Pathfinder::newMap( void )
 		}
 		m_pathUsage = MSGNEW("PathfindMapCells") UnsignedByte[(bounds.hi.x+1)*(bounds.hi.y+1)];
 		memset(m_pathUsage, 0, (bounds.hi.x+1)*(bounds.hi.y+1));
+		m_jamMap = MSGNEW("PathfindMapCells") UnsignedByte[(bounds.hi.x+1)*(bounds.hi.y+1)];
+		memset(m_jamMap, 0, (bounds.hi.x+1)*(bounds.hi.y+1));
+		m_jamCells = 0;
+		m_jamDecayFrame = 0;
 		for (i=0; i<LAYER_LAST; i++) {
 			if (!m_layers[i].isUnused()) {
 				m_layers[i].allocateCells(&m_extent);
@@ -5832,6 +5878,53 @@ void Pathfinder::releasePathUsageBefore( const Path *path, const PathNode *node 
 	adjustPathUsage(path->getUsageHead(), node, -1);
 	releaseReservations(path, path->getUsageHead(), node);
 	path->setUsageHead(node);
+}
+
+//-------------------------------------------------------------------------------------------------
+// Jam map.  Same cells again, holding what actually happened rather than what somebody planned.
+Int Pathfinder::getJam( Int x, Int y ) const
+{
+	if (!m_jamMap || x < m_extent.lo.x || x > m_extent.hi.x || y < m_extent.lo.y || y > m_extent.hi.y)
+		return 0;
+	return m_jamMap[x*(m_extent.hi.y+1)+y];
+}
+
+/* One blocked unit, one frame, one cell.  Called from doLocomotor, which is the only place a unit
+	 is counted once per frame instead of once per collision pair - a cell where two units keep
+	 bumping each other must not stamp twice as fast as a cell where one is wedged against a wall. */
+void Pathfinder::noteJam( const ICoord2D& cell )
+{
+	if (!m_jamMap) return;
+	if (cell.x < m_extent.lo.x || cell.x > m_extent.hi.x ||
+			cell.y < m_extent.lo.y || cell.y > m_extent.hi.y) return;
+	UnsignedByte &jam = m_jamMap[cell.x*(m_extent.hi.y+1)+cell.y];
+	if (jam == 0)
+		m_jamCells++;
+	if (jam < PATH_JAM_MAX)
+		jam++;
+}
+
+/* The decay, once every PATH_JAM_DECAY_FRAMES, off the logic frame number so that every machine
+	 does it on the same frame.  A whole-map sweep is a quarter of a megabyte on a big map, which is
+	 why m_jamCells is kept: a match with nothing jammed anywhere - which is most of a match - does
+	 not touch the map at all. */
+void Pathfinder::decayJamMap( void )
+{
+	if (!m_jamMap || m_jamCells == 0) return;
+	UnsignedInt now = TheGameLogic->getFrame();
+	if (now - m_jamDecayFrame < (UnsignedInt)PATH_JAM_DECAY_FRAMES) return;
+	m_jamDecayFrame = now;
+
+	const Int cells = (m_extent.hi.x+1)*(m_extent.hi.y+1);
+	Int nonZero = 0;
+	for (Int i = 0; i < cells; i++)
+	{
+		if (m_jamMap[i] == 0)
+			continue;
+		if (--m_jamMap[i] > 0)
+			nonZero++;
+	}
+	m_jamCells = nonZero;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -7105,7 +7198,13 @@ Int Pathfinder::examineNeighboringCells(PathfindCell *parentCell, PathfindCell *
 			info.layer = parentCell->getLayer();
 			info.centerInCell = centerInCell;
 			info.radius = radius;
-			info.considerTransient = false;
+			/* The two guards below were written to switch this off outside a small box around the
+				 start, which only means something if it is on inside that box.  EA initialised it to
+				 false, so both branches assigned the same value, the guards were dead and the main A*
+				 has never been able to see a moving unit at all: a queued tank repathed with the queue
+				 invisible and got the line it was already standing in handed back.  Only the cells
+				 next to the start, and only for a unit that does not drive through people. */
+			info.considerTransient = !canPathThroughUnits;
 			info.acceptableSurfaces = locomotorSet.getValidSurfaces();
 			Int dx = newCellCoord.x-startCellNdx.x;
 			Int dy = newCellCoord.y-startCellNdx.y;
@@ -7142,6 +7241,14 @@ Int Pathfinder::examineNeighboringCells(PathfindCell *parentCell, PathfindCell *
 			if (queueCost && dx<PATH_QUEUE_RANGE && dy<PATH_QUEUE_RANGE
 					&& (info.allyMoving || info.allyFixedCount>0)) {
 				newCostSoFar += queueCost;
+			}
+			// ...and the ground they have been stuck on for the last couple of seconds, which is not
+			// the same ground: a doorway empties for a frame every time the jam shuffles, and the
+			// search that runs in that frame is the one that routes another unit into it.  Only the
+			// unit leaving a queue pays this, for the same reason it is the only one paying the cost
+			// above - every other search keeps retail's routes.
+			if (queueCost && m_jamMap && dx<PATH_QUEUE_RANGE && dy<PATH_QUEUE_RANGE) {
+				newCostSoFar += Pathfinder_jamPenalty( getJam(newCellCoord.x, newCellCoord.y) );
 			}
 			if (m_pathUsage && dx < PATH_CONGESTION_RANGE && dy < PATH_CONGESTION_RANGE) {
 				// Other units' live paths through our footprint: pay per path so we pick a parallel
@@ -11328,11 +11435,12 @@ Path *Pathfinder::getMoveAwayFromPath(Object* obj, Object *otherObj,
 	ICoord2D startCellNdx;
 	Coord3D startPos = *obj->getPosition();
 	if (!centerInCell) {
+		// same EA typo as in patchPath: the second increment is the y half-cell
 		startPos.x += PATHFIND_CELL_SIZE_F*0.5f;
-		startPos.x += PATHFIND_CELL_SIZE_F*0.5f;
+		startPos.y += PATHFIND_CELL_SIZE_F*0.5f;
 	}
 	worldToCell(&startPos, &startCellNdx);
-	PathfindCell *parentCell = getClippedCell( obj->getLayer(), obj->getPosition() ); 
+	PathfindCell *parentCell = getClippedCell( obj->getLayer(), obj->getPosition() );
 	if (parentCell == NULL)
 		return false;
 	if (!obj->getAIUpdateInterface()) {
@@ -11504,8 +11612,10 @@ Path *Pathfinder::patchPath( const Object *obj, const LocomotorSet& locomotorSet
 	ICoord2D startCellNdx;
 	Coord3D startPos = *obj->getPosition();
 	if (!centerInCell) {
+		// EA incremented x twice; the second one is the y half-cell, and without it the start cell
+		// of every even-footprint unit is one cell off along one axis only
 		startPos.x += PATHFIND_CELL_SIZE_F*0.5f;
-		startPos.x += PATHFIND_CELL_SIZE_F*0.5f;
+		startPos.y += PATHFIND_CELL_SIZE_F*0.5f;
 	}
 	worldToCell(&startPos, &startCellNdx);
 	//worldToCell(obj->getPosition(), &startCellNdx);
@@ -11545,6 +11655,24 @@ Path *Pathfinder::patchPath( const Object *obj, const LocomotorSet& locomotorSet
 	}
 #endif
 
+	/* How far from the start a moving unit still counts as being in the way.  EA's fixed two cells
+		 is the distance a tank covers in well under the second that passes between deciding to leave
+		 a queue and getting the new path, so by the time the path came back the unit it was supposed
+		 to route around had left the window and the patch went straight back into the line.  Scale it
+		 with the footprint and with how far this unit travels while it waits, and cap it: past six
+		 cells the search is being told to avoid ground that will be empty by the time it gets there. */
+	Int transientWindow = 2 + radius;
+	{
+		const Locomotor *loco = obj->getAIUpdateInterface()->getCurLocomotor();
+		if (loco) {
+			Real speed = loco->getMaxSpeedForCondition(obj->getBodyModule()->getDamageState());
+			transientWindow += REAL_TO_INT(speed * LOGICFRAMES_PER_SECOND / PATHFIND_CELL_SIZE_F);
+		}
+		const Int TRANSIENT_WINDOW_MAX = 6;
+		if (transientWindow > TRANSIENT_WINDOW_MAX)
+			transientWindow = TRANSIENT_WINDOW_MAX;
+	}
+
 	PathNode *startNode;
 	Coord3D goalPos = *originalPath->getLastNode()->getPosition();
 	Real goalDeltaSqr = sqr(goalPos.x-currentPosition.x) + sqr(goalPos.y - currentPosition.y);
@@ -11568,8 +11696,8 @@ Path *Pathfinder::patchPath( const Object *obj, const LocomotorSet& locomotorSet
 #endif
 		Int dx = cellCoord.x-startCellNdx.x;
 		Int dy = cellCoord.y-startCellNdx.y;
-		if (dx<-2 || dx>2) info.considerTransient = false;
-		if (dy<-2 || dy>2) info.considerTransient = false;
+		if (dx<-transientWindow || dx>transientWindow) info.considerTransient = false;
+		if (dy<-transientWindow || dy>transientWindow) info.considerTransient = false;
 		if (!checkForMovement(obj, info)) {
 			break;
 		}

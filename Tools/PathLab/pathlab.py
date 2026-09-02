@@ -87,6 +87,25 @@ PATH_CROSSING_WINDOW: int = 12              # frames either side of an arrival t
 PATH_CROSSING_MAX: int = 3                  # cap, same reason the congestion cost has one
 SAME_WAY: float = 0.6                       # headings this aligned are a queue, not a crossing
 
+# Both maps above describe a plan.  The congestion map says somebody's route runs through a cell and
+# the reservation map says when, and neither remembers anything that has already happened: a doorway
+# four tanks have been wedged in for two seconds is priced exactly like empty ground, because the
+# units in it have stopped and stopped units have no route left to claim.  A unit repathing out of
+# the back of that queue therefore picks the same doorway, every time, at the instant its search
+# runs.
+#
+# The jam map is the memory.  A blocked unit stamps the cell it is standing in, once a frame; the
+# whole map loses one everywhere every JAM_DECAY_FRAMES, so a cell carries roughly the blocked
+# unit-frames spent in it over the last JAM_MAX*JAM_DECAY_FRAMES frames.  AIPathfind.cpp's m_jamMap,
+# at its constants and with its two gates: only a repath reads it, and only within JAM_RANGE cells
+# of where that repath starts.  A search that is not leaving a jam keeps the plain shortest route.
+PATH_JAM_COST: int = 3 * COST_ORTHOGONAL    # three cells of detour per stamp over the floor
+PATH_JAM_FLOOR: int = 3                     # one unit pausing stamps 1 or 2: that is traffic
+PATH_JAM_MAX: int = 10                      # the stamp saturates here
+PATH_JAM_DECAY_FRAMES: int = 8              # every cell loses one this often
+PATH_JAM_MAX_CHARGED: int = 4               # cap over the floor, same reason the others have one
+PATH_JAM_RANGE: int = 10                    # cells from the start the penalty is read within
+
 # Two points closer than this are the same point: a zero-length segment has no direction to take.
 EPSILON: float = 1e-3
 # Larger than any route this grid can produce, so it reads as "not reached yet" in the A* tables.
@@ -124,6 +143,22 @@ PARK_RETRY_LIMIT: int = 3
 # (turn in radians, fraction of full speed) tried in order: straight, crawl, then wider swerves
 SWERVE_ATTEMPTS: tuple[tuple[float, float], ...] = (
     (0.0, 1.0), (0.0, 0.4), (0.6, 0.8), (-0.6, 0.8), (1.2, 0.6), (-1.2, 0.6))
+
+# Lane changing.  The engine's only answer to being blocked is to go slower, and a swerve that
+# lasts one frame is not an overtake - the unit re-aims at its waypoint next frame and files back
+# in behind the same tank.  A lane is a sideways shift of the goal that is held long enough to get
+# past somebody, and it is only taken when there is a lane to take: the probe below is the
+# sandbox's isLinePassable, drawn like every other check this file makes.
+LANE_CHANGE: bool = False                   # --lanes
+LANE_CHANGE_AFTER_FRAMES: int = 15          # blocked this long before looking for a way round
+LANE_CHANGE_OFFSETS: tuple[float, ...] = (1.0, -1.0, 2.0, -2.0)     # footprints, nearest side first
+LANE_CHANGE_LOOKAHEAD: float = 6.0          # footprints of clear line a lane has to have
+LANE_CHANGE_REACH: float = 2.5              # radii within which somebody counts as "in front"
+LANE_CHANGE_AHEAD: float = 0.5              # how far off our nose he may be and still be in the way
+LANE_CHANGE_SAME_WAY: float = 0.5           # headings this aligned are traffic, not a head-on
+LANE_HOLD_FRAMES: int = 45                  # hold a lane this long, or it flickers every frame
+LANE_CHANGE_STALLED_ONLY: bool = True       # overtake a queue that is stopped, not one that flows
+LANE_RAYS_KEPT: int = 24                    # how many lane probes stay drawable per unit
 
 # Ordering
 LANES_MAX: int = 3
@@ -339,6 +374,51 @@ def count_path_overlap(units: Sequence["Unit"]) -> int:
     return sum(claimants - 1 for claimants in claims.values() if claimants > 1)
 
 
+class JamMap:
+    """Where units actually got stuck, as opposed to where they said they would drive.
+       Pathfinder::noteJam / decayJamMap, on a dict because the sandbox has no map array.
+
+       The decay runs off the frame number rather than a call count, which is what makes it
+       identical on two machines in the engine and reproducible between two sweep rows here."""
+
+    def __init__(self) -> None:
+        self.jam: dict[Cell, int] = {}
+        self.decayed_at: int = 0
+        self.peak: int = 0              # most cells jammed at once, which no engine counter reports
+
+    def note(self, cell: Cell) -> None:
+        stamp = self.jam.get(cell, 0)
+        if stamp < PATH_JAM_MAX:
+            self.jam[cell] = stamp + 1
+        self.peak = max(self.peak, len(self.jam))
+
+    def at(self, cell: Cell) -> int:
+        return self.jam.get(cell, 0)
+
+    def decay(self, frame: int) -> None:
+        """A match with nothing jammed anywhere - which is most of a match - touches nothing."""
+        if not self.jam or frame - self.decayed_at < PATH_JAM_DECAY_FRAMES:
+            return
+        self.decayed_at = frame
+        self.jam = {cell: stamp - 1 for cell, stamp in self.jam.items() if stamp > 1}
+
+    @property
+    def blocking_cells(self) -> int:
+        """Cells jammed hard enough to cost a repath anything, which is the number that matters -
+           a map full of stamps of 1 is a map with no jam on it."""
+        return sum(1 for stamp in self.jam.values() if stamp > PATH_JAM_FLOOR)
+
+
+def price_jam(jam: int) -> int:
+    """The floor is the whole design: below it a cell is traffic and costs nothing, above it the
+       cost is capped, because the A* heuristic cannot see this penalty and an uncapped one turns
+       the search into a flood."""
+    over = jam - PATH_JAM_FLOOR
+    if over <= 0:
+        return 0
+    return min(over, PATH_JAM_MAX_CHARGED) * PATH_JAM_COST
+
+
 class Reservation(NamedTuple):
     """One unit's claim on one cell: when it expects to be there, and which way it is going."""
     arrival: float
@@ -453,6 +533,8 @@ class PathPricing:
     owner: int | None = None
     reservations: ReservationMap | None = None
     start_frame: float = 0.0
+    # not None only for a search leaving a jam: an ordinary order keeps the plain shortest route
+    jam: JamMap | None = None
 
 
 NO_PRICING = PathPricing()
@@ -467,8 +549,10 @@ class TrafficModel:
        a bare `True, False` at every call site instead."""
     usage: UsageMap
     reservations: ReservationMap
+    jam: JamMap = field(default_factory=JamMap)
     is_congestion_charged: bool = True
     is_crossing_charged: bool = True
+    is_jam_charged: bool = True
 
     @property
     def congestion_range(self) -> int:
@@ -487,6 +571,14 @@ class TrafficModel:
         """What one unit's own search pays: everyone else's ground, and everyone else's moment."""
         return PathPricing(usage=self.usage, congestion_range=self.congestion_range, owner=owner,
                            reservations=self.priced_reservations, start_frame=now)
+
+    def repath_pricing(self, owner: int, now: float) -> PathPricing:
+        """The same, plus the jam map - and this is the only search that reads it.  A unit only
+           repaths here because it stopped making progress, which is the sandbox's whole notion of
+           leaving a queue; the engine gates the same cost on isQueuedBehindUnits."""
+        pricing = self.pricing_for(owner, now)
+        pricing.jam = self.jam if self.is_jam_charged else None
+        return pricing
 
     def corridor_pricing(self, now: float) -> PathPricing:
         """The group corridor is one search for the whole group, so it pays no congestion - its own
@@ -555,6 +647,10 @@ def astar(grid: Grid, start: Cell, goal: Cell, *, clearance: int = 0,
                         and abs(neighbour[1] - start[1]) < pricing.congestion_range):
                     new_cost += price_congestion(
                         pricing.usage.count_paths_on(neighbour, pricing.owner))
+            if pricing.jam is not None:
+                if (abs(neighbour[0] - start[0]) < PATH_JAM_RANGE
+                        and abs(neighbour[1] - start[1]) < PATH_JAM_RANGE):
+                    new_cost += price_jam(pricing.jam.at(neighbour))
             if pricing.reservations is not None and grid.has_room(*neighbour):
                 when = pricing.start_frame + frames_for_cost(new_travel)
                 heading = (dx / STEP_LEN[step_cost], dy / STEP_LEN[step_cost])
@@ -612,7 +708,14 @@ class Unit:
     index: int = 0
     is_selected: bool = False
     blocked_frames: int = 0                 # had to slow, swerve or stop for another unit
+    blocked_run: int = 0                    # consecutive such frames, which is what a lane needs
+    lane_dx: float = 0.0                    # sideways shift of the goal while overtaking ...
+    lane_dy: float = 0.0
+    lane_frames: int = 0                    # ... and how much longer it is held
+    lane_changes: int = 0
     stuck_run: int = 0                      # consecutive frames going nowhere -> repath
+    jam_priced: int = 0                     # repaths that had jammed ground in front of them at all
+    jam_detours: int = 0                    # ... and of those, the ones that came out avoiding it
     last_dist: float | None = None          # distance to the current waypoint, to notice inching
     repaths: int = 0
     goal: Point | None = None               # where this unit was actually sent, after the spread
@@ -658,6 +761,92 @@ def resolve_overlaps(units: Sequence[Unit], grid: Grid) -> None:
                 second.y += uy
 
 
+def blocker_ahead(units: Sequence[Unit], mover: Unit, hx: float, hy: float) -> Unit | None:
+    """Whoever we are stuck behind: the nearest unit within a couple of radii, in front of the
+       nose rather than beside it.  This is the sandbox's blockedBy."""
+    found: Unit | None = None
+    reach = LANE_CHANGE_REACH * (mover.radius * 2.0)
+    for other in units:
+        if other is mover:
+            continue
+        ox, oy = other.x - mover.x, other.y - mover.y
+        distance = math.hypot(ox, oy)
+        if distance < EPSILON or distance > reach:
+            continue
+        if (ox * hx + oy * hy) / distance < LANE_CHANGE_AHEAD:
+            continue
+        found, reach = other, distance
+    return found
+
+
+def unit_heading(unit: Unit) -> Heading | None:
+    """Where a unit is going this frame, which for a lane change is more useful than where it is."""
+    if unit.has_arrived:
+        return None
+    tx, ty = unit.path[unit.index]
+    dx, dy = tx - unit.x, ty - unit.y
+    distance = math.hypot(dx, dy)
+    if distance < EPSILON:
+        return None
+    return dx / distance, dy / distance
+
+
+def pick_lane(grid: Grid, units: Sequence[Unit], mover: Unit,
+              hx: float, hy: float) -> Point | None:
+    """Sideways, not slower.  Try one footprint out on each side, then two, and take the first that
+       has a clear line three footprints ahead and nobody already sitting in it.  Returns the shift
+       to add to the goal, or None when there is no lane - a doorway, a cliff, a full road - and the
+       unit has to fall back on following the man in front."""
+    footprint = mover.radius * 2.0
+    ahead = LANE_CHANGE_LOOKAHEAD * footprint
+    for offset in LANE_CHANGE_OFFSETS:
+        side = offset * footprint
+        px, py = -hy * side, hx * side
+        tip = (mover.x + px + hx * ahead, mover.y + py + hy * ahead)
+        entry = (mover.x + px + hx * footprint, mover.y + py + hy * footprint)
+        is_clear = (grid.line_passable(mover.x, mover.y, tip[0], tip[1], radius=mover.radius)
+                    and not is_occupied(units, mover, entry[0], entry[1]))
+        # drawn like the planner's own checks, but a run makes thousands of these and only the
+        # last few are worth looking at
+        mover.rays.append((mover.x, mover.y, tip[0], tip[1], is_clear))
+        if len(mover.rays) > LANE_RAYS_KEPT:
+            del mover.rays[:-LANE_RAYS_KEPT]
+        if is_clear:
+            return px, py
+    return None
+
+
+def update_lane(grid: Grid, units: Sequence[Unit], mover: Unit, hx: float, hy: float) -> None:
+    """One unit's lane, one frame.  A lane is dropped the moment the road ahead clears, which is
+       the sandbox's version of patching back onto the path when blockedBy goes false."""
+    ahead = blocker_ahead(units, mover, hx, hy)
+    if mover.lane_frames > 0:
+        mover.lane_frames -= 1
+        if ahead is None:
+            mover.lane_frames = 0
+        if mover.lane_frames == 0:
+            mover.lane_dx = mover.lane_dy = 0.0
+        return
+    if mover.blocked_run < LANE_CHANGE_AFTER_FRAMES or ahead is None:
+        return
+    # somebody coming the other way is a collision, and going round him is how two columns swap
+    # sides and jam worse; this reflex is for traffic that is going where we are going, slower
+    other_heading = unit_heading(ahead)
+    if other_heading is None or other_heading[0] * hx + other_heading[1] * hy < LANE_CHANGE_SAME_WAY:
+        return
+    # a queue that is moving is a queue doing its job; leaving it costs distance and gains nothing.
+    # Only a stalled one is worth going round, which is also the case the player complains about
+    if LANE_CHANGE_STALLED_ONLY and ahead.blocked_run <= 0:
+        return
+    lane = pick_lane(grid, units, mover, hx, hy)
+    if lane is None:
+        return
+    mover.lane_dx, mover.lane_dy = lane
+    mover.lane_frames = LANE_HOLD_FRAMES
+    mover.lane_changes += 1
+    mover.blocked_run = 0
+
+
 def yield_for(units: Sequence[Unit], grid: Grid, mover: Unit, hx: float, hy: float) -> None:
     """A unit that has arrived is parked, not welded down: when someone still driving cannot get
        past it, it steps aside.  The engine does this too, and without it a tank that has finished
@@ -678,6 +867,7 @@ def yield_for(units: Sequence[Unit], grid: Grid, mover: Unit, hx: float, hy: flo
 
 
 def step_units(units: Sequence[Unit], grid: Grid, *, traffic: TrafficModel, now: float) -> None:
+    traffic.jam.decay(int(now))
     for unit in units:
         if unit.has_arrived:
             continue
@@ -701,11 +891,18 @@ def step_units(units: Sequence[Unit], grid: Grid, *, traffic: TrafficModel, now:
                 traffic.usage.release_before(unit.id, done)
             traffic.reservations.release_before(unit.id, now)
             continue
+        # sideways first: a unit that has been stuck behind slower traffic for a few frames looks
+        # for a lane beside it, and only files in behind him when there is no lane to take
+        ax, ay = dx, dy
+        if LANE_CHANGE:
+            update_lane(grid, units, unit, dx / distance, dy / distance)
+            if unit.lane_frames > 0:
+                ax, ay = dx + unit.lane_dx, dy + unit.lane_dy
         # slow down behind whoever is in front, and only sidestep if that is not enough
         has_moved = False
         for angle, speed in SWERVE_ATTEMPTS:
             cos_angle, sin_angle = math.cos(angle), math.sin(angle)
-            rx, ry = dx * cos_angle - dy * sin_angle, dx * sin_angle + dy * cos_angle
+            rx, ry = ax * cos_angle - ay * sin_angle, ax * sin_angle + ay * cos_angle
             turned_length = math.hypot(rx, ry)
             nx = unit.x + rx / turned_length * UNIT_SPEED * speed
             ny = unit.y + ry / turned_length * UNIT_SPEED * speed
@@ -715,10 +912,16 @@ def step_units(units: Sequence[Unit], grid: Grid, *, traffic: TrafficModel, now:
                 unit.stuck_run = 0 if is_closing else unit.stuck_run + 1
                 if angle or speed < 1.0:
                     unit.blocked_frames += 1
+                    unit.blocked_run += 1
+                    traffic.jam.note(cell_of(unit.x, unit.y))
+                else:
+                    unit.blocked_run = 0
                 break
         if not has_moved:
             unit.blocked_frames += 1
+            unit.blocked_run += 1
             unit.stuck_run += 1
+            traffic.jam.note(cell_of(unit.x, unit.y))
             yield_for(units, grid, unit, dx / distance, dy / distance)
     resolve_overlaps(units, grid)
 
@@ -748,12 +951,27 @@ def repath_stuck(grid: Grid, units: Sequence[Unit], *, traffic: TrafficModel, no
             unit.index = len(unit.path)
             unit.stuck_run = 0
             continue
-        cells, _ = astar(grid, cell_of(unit.x, unit.y), cell_of(*unit.goal),
-                         pricing=traffic.pricing_for(unit.id, now))
+        start_cell = cell_of(unit.x, unit.y)
+        # what the jam map is charging this search, recorded before the search so the route can be
+        # checked against it: the ground within reach that somebody is stuck on right now
+        hot = {cell for cell, stamp in traffic.jam.jam.items()
+               if stamp > PATH_JAM_FLOOR
+               and abs(cell[0] - start_cell[0]) < PATH_JAM_RANGE
+               and abs(cell[1] - start_cell[1]) < PATH_JAM_RANGE}
+        cells, _ = astar(grid, start_cell, cell_of(*unit.goal),
+                         pricing=traffic.repath_pricing(unit.id, now))
         unit.stuck_run = 0
         unit.repaths += 1
         if not cells:
             continue
+        # the exit condition, counted, as a funnel: repaths that had jammed ground in front of them
+        # at all, and then the ones whose new route does not drive over any of it.  The two numbers
+        # answer different questions - the first says whether the cost ever fires, the second
+        # whether it changes anything when it does.
+        if hot:
+            unit.jam_priced += 1
+            if not hot.intersection(cells):
+                unit.jam_detours += 1
         points = [world_of(*cell) for cell in cells[1:]] or [unit.goal]
         points[-1] = unit.goal
         points, unit.rays = simplify_raycast(grid, unit.pos, points, radius=unit.radius,
@@ -1018,6 +1236,10 @@ class Measurement:
     stuck: int = 0
     expansions: float = 0.0
     repaths: float = 0.0
+    lanes: float = 0.0
+    jam_peak: float = 0.0       # most cells jammed at once, whether or not the cost is charged
+    jam_priced: float = 0.0     # repaths with jammed ground in front of them ...
+    jam_detours: float = 0.0    # ... and the ones that came back avoiding it
 
     def average_over(self, seeds: int, unit_count: int) -> None:
         """`stuck` is a count of units and stays whole; everything else is per seed, and the path
@@ -1031,18 +1253,23 @@ class Measurement:
         self.crossings /= divisor
         self.expansions /= divisor
         self.repaths /= divisor
+        self.lanes /= divisor
+        self.jam_peak /= divisor
+        self.jam_priced /= divisor
+        self.jam_detours /= divisor
 
 
 def measure(map_kind: str, unit_count: int, seeds: int, mode: str, *,
             is_congestion_charged: bool, is_crossing_charged: bool,
-            scenario: str) -> Measurement:
+            scenario: str, is_jam_charged: bool = True) -> Measurement:
     """The scenario's orders, played out, averaged over `seeds` maps."""
     total = Measurement()
     for seed in range(seeds):
         grid = make_map(map_kind, seed=seed)
         traffic = TrafficModel(UsageMap(), ReservationMap(),
                                is_congestion_charged=is_congestion_charged,
-                               is_crossing_charged=is_crossing_charged)
+                               is_crossing_charged=is_crossing_charged,
+                               is_jam_charged=is_jam_charged)
         units, orders = build_scenario(grid, unit_count, scenario)
         stats = OrderStats()
         planner = order_corridor if mode == "corridor" else order_individual
@@ -1067,19 +1294,26 @@ def measure(map_kind: str, unit_count: int, seeds: int, mode: str, *,
         total.stuck += sum(1 for unit in units if not unit.has_arrived)
         total.expansions += stats.expansions
         total.repaths += sum(unit.repaths for unit in units)
+        total.lanes += sum(unit.lane_changes for unit in units)
+        total.jam_peak += traffic.jam.peak
+        total.jam_priced += sum(unit.jam_priced for unit in units)
+        total.jam_detours += sum(unit.jam_detours for unit in units)
     total.average_over(seeds, unit_count)
     return total
 
 
 def print_table_head() -> None:
-    print(f"{'mode':<9} {'cost/cap/x':<11} {'waypts':>8} {'length':>8} {'frames':>8} "
-          f"{'blocked':>9} {'overlap':>8} {'cross':>6} {'stuck':>7} {'cells':>8}")
+    print(f"{'mode':<9} {'lane':<5} {'jam':<4} {'cost/cap/x':<11} {'waypts':>8} {'length':>8} "
+          f"{'frames':>8} {'blocked':>9} {'overlap':>8} {'cross':>6} {'stuck':>7} {'cells':>8} "
+          f"{'lanes':>6} {'jamcell':>8} {'priced':>7} {'round':>6}")
 
 
-def print_row(mode: str, label: str, result: Measurement) -> None:
-    print(f"{mode:<9} {label:<11} {result.waypoints:>8.1f} {result.length:>8.0f} "
+def print_row(mode: str, lane: str, jam: str, label: str, result: Measurement) -> None:
+    print(f"{mode:<9} {lane:<5} {jam:<4} {label:<11} {result.waypoints:>8.1f} {result.length:>8.0f} "
           f"{result.frames:>8.0f} {result.blocked:>9.0f} {result.overlap:>8.0f} "
-          f"{result.crossings:>6.0f} {result.stuck:>7d} {result.expansions:>8.0f}")
+          f"{result.crossings:>6.0f} {result.stuck:>7d} {result.expansions:>8.0f} "
+          f"{result.lanes:>6.0f} {result.jam_peak:>8.0f} {result.jam_priced:>7.1f} "
+          f"{result.jam_detours:>6.1f}")
 
 
 @contextmanager
@@ -1098,6 +1332,19 @@ def tuning(*, congestion_cost: int, congestion_cap: int, crossing_cost: int,
     finally:
         (PATH_CONGESTION_COST, PATH_CONGESTION_MAX_PATHS, PATH_CROSSING_COST,
          PATH_CROSSING_WINDOW) = before
+
+
+@contextmanager
+def lane_changing(is_on: bool):
+    """Same idea as tuning(): the reflex is read inside the step loop, so a row turns it on for the
+       length of its own measurement and hands it back."""
+    global LANE_CHANGE
+    before = LANE_CHANGE
+    LANE_CHANGE = is_on
+    try:
+        yield
+    finally:
+        LANE_CHANGE = before
 
 
 class SweepPoint(NamedTuple):
@@ -1127,21 +1374,31 @@ def run_headless(args: argparse.Namespace, sweep: Sequence[SweepPoint]) -> None:
     print(f"map {args.map}  scenario {args.scenario}  units {args.units}  "
           f"seeds {args.headless}  window {args.window} frames")
     print_table_head()
+    lane_settings = (False, True) if args.lanes == "both" else (args.lanes == "on",)
+    jam_settings = (False, True) if args.jam == "both" else (args.jam == "on",)
     for mode in MODES:
-        with tuning(congestion_cost=args.cost, congestion_cap=args.cap, crossing_cost=args.cross,
-                    crossing_window=args.window):
-            print_row(mode, "off",
-                      measure(args.map, args.units, args.headless, mode,
-                              is_congestion_charged=False, is_crossing_charged=False,
-                              scenario=args.scenario))
-        for point in sweep:
-            with tuning(congestion_cost=point.cost, congestion_cap=point.cap,
-                        crossing_cost=point.crossing or args.cross, crossing_window=args.window):
-                print_row(mode, f"{point.cost}/{point.cap}/{point.crossing}",
-                          measure(args.map, args.units, args.headless, mode,
-                                  is_congestion_charged=True,
-                                  is_crossing_charged=point.crossing > 0,
-                                  scenario=args.scenario))
+        for is_lane_changing in lane_settings:
+            lane = "on" if is_lane_changing else "off"
+            for is_jam_charged in jam_settings:
+                jam = "on" if is_jam_charged else "off"
+                with lane_changing(is_lane_changing):
+                    with tuning(congestion_cost=args.cost, congestion_cap=args.cap,
+                                crossing_cost=args.cross, crossing_window=args.window):
+                        print_row(mode, lane, jam, "off",
+                                  measure(args.map, args.units, args.headless, mode,
+                                          is_congestion_charged=False, is_crossing_charged=False,
+                                          is_jam_charged=is_jam_charged, scenario=args.scenario))
+                    for point in sweep:
+                        with tuning(congestion_cost=point.cost, congestion_cap=point.cap,
+                                    crossing_cost=point.crossing or args.cross,
+                                    crossing_window=args.window):
+                            print_row(mode, lane, jam,
+                                      f"{point.cost}/{point.cap}/{point.crossing}",
+                                      measure(args.map, args.units, args.headless, mode,
+                                              is_congestion_charged=True,
+                                              is_crossing_charged=point.crossing > 0,
+                                              is_jam_charged=is_jam_charged,
+                                              scenario=args.scenario))
 
 
 class Simulation:
@@ -1211,6 +1468,7 @@ RAY_BAD: Colour = (220, 90, 90)
 HEAT: Colour = (200, 120, 60)
 HEAT_FLOOR: Colour = (50, 28, 24)                   # an unused cell is still darker than the walls
 HEAT_GAIN: tuple[float, float, float] = (0.8, 0.7, 0.5)     # warm, so a busy cell reads as orange
+JAM_COL: Colour = (150, 60, 150)    # where units are stuck, not where they plan to drive: not orange
 HUD_TEXT: Colour = (200, 205, 215)
 
 
@@ -1233,6 +1491,7 @@ class Renderer:
         self.font = pygame.font.SysFont("consolas", HUD_FONT_SIZE)
         self.ray_detail = RayDetail.SELECTED
         self.show_heat = False
+        self.show_jam = True        # on by default: it is empty until something actually jams
 
     def close(self) -> None:
         pygame.quit()
@@ -1249,6 +1508,8 @@ class Renderer:
         self._draw_terrain(sim.grid)
         if self.show_heat:
             self._draw_heat(sim)
+        if self.show_jam:
+            self._draw_jam(sim)
         self._draw_crossings(sim)
         self._draw_corridor(sim.stats)
         if self.ray_detail is not RayDetail.OFF:
@@ -1274,6 +1535,18 @@ class Renderer:
                       int(HEAT_FLOOR[1] + HEAT[1] * level * HEAT_GAIN[1]),
                       int(HEAT_FLOOR[2] + HEAT[2] * level * HEAT_GAIN[2]))
             pygame.draw.rect(self.screen, colour, self._cell_rect(cx, cy))
+
+    def _draw_jam(self, sim: Simulation) -> None:
+        """Ground units are stuck on, drawn only once a cell is over the floor - a map speckled
+           with stamps of 1 is a map with no jam on it and outlining every one of them says
+           nothing.  This is the cost a repath is paying, made visible."""
+        for (cx, cy), stamp in sim.traffic.jam.jam.items():
+            if stamp <= PATH_JAM_FLOOR or not sim.grid.in_bounds(cx, cy):
+                continue
+            level = min(stamp - PATH_JAM_FLOOR, PATH_JAM_MAX_CHARGED) / PATH_JAM_MAX_CHARGED
+            pygame.draw.rect(self.screen, (int(JAM_COL[0] * level), int(JAM_COL[1] * level),
+                                           int(JAM_COL[2] * level)),
+                             self._cell_rect(cx, cy))
 
     def _draw_crossings(self, sim: Simulation) -> None:
         # where two units still plan to be at the same moment - what the crossing cost buys out
@@ -1327,16 +1600,19 @@ class Renderer:
         moving = sum(1 for unit in sim.units if not unit.has_arrived)
         congestion = str(PATH_CONGESTION_COST) if sim.traffic.is_congestion_charged else "off"
         crossing = str(PATH_CROSSING_COST) if sim.traffic.is_crossing_charged else "off"
+        jam = str(PATH_JAM_COST) if sim.traffic.is_jam_charged else "off"
         heat = "on" if self.show_heat else "off"
         lines = [
             f"mode {sim.mode:<9} congestion {congestion:<3} crossing {crossing:<3} "
-            f"rays {self.ray_detail.name.lower():<8} heat {heat:<3}   "
-            f"[1][2] [c][t][r][p] [n]map [tab]replan",
+            f"jam {jam:<3} rays {self.ray_detail.name.lower():<8} heat {heat:<3}   "
+            f"[1][2] [c][t][j][k][r][p] [n]map [tab]replan",
             f"corridor width {sim.stats.diameter} cells   searches {sim.stats.searches}   "
             f"cell expansions {sim.stats.expansions}   "
             f"avg waypoints/unit {sim.stats.avg_waypoints:.1f}",
             f"units {len(sim.units)}  still moving {moving}  blocked unit-frames {blocked}  "
             f"repaths {sum(unit.repaths for unit in sim.units)}  "
+            f"jammed cells {sim.traffic.jam.blocking_cells} "
+            f"(routed round {sum(unit.jam_detours for unit in sim.units)})  "
             f"crossings {count_planned_crossings(sim.traffic.reservations)} now {sim.frames}  "
             f"{'; '.join(sim.stats.notes[:HUD_NOTES_SHOWN])}",
         ]
@@ -1394,6 +1670,10 @@ class Lab:
             self.view.ray_detail = RayDetail((self.view.ray_detail + 1) % len(RayDetail))
         elif key == pygame.K_p:
             self.view.show_heat = not self.view.show_heat
+        elif key == pygame.K_j:
+            self.sim.traffic.is_jam_charged = not self.sim.traffic.is_jam_charged
+        elif key == pygame.K_k:
+            self.view.show_jam = not self.view.show_jam
         elif key == pygame.K_SPACE:
             self.is_paused = not self.is_paused
         elif key == pygame.K_n:
@@ -1446,13 +1726,18 @@ def main() -> None:
                         help="frames either side of an arrival that still count as the same moment")
     parser.add_argument("--sweep", default="5/4/0,20/4/0,20/4/60,20/4/120",
                         help="headless only: cost/cap/crossing triples to compare (crossing 0 = off)")
+    parser.add_argument("--lanes", choices=("off", "on", "both"), default="off",
+                        help="overtake instead of queueing; 'both' measures it against itself")
+    parser.add_argument("--jam", choices=("off", "on", "both"), default="on",
+                        help="charge a repath for ground somebody is stuck on; 'both' compares")
     args = parser.parse_args()
     sweep = parse_sweep(args.sweep)
     if args.headless:
         run_headless(args, sweep)
         return
-    with tuning(congestion_cost=args.cost, congestion_cap=args.cap, crossing_cost=args.cross,
-                crossing_window=args.window), Lab(args) as lab:
+    with lane_changing(args.lanes != "off"), \
+            tuning(congestion_cost=args.cost, congestion_cap=args.cap, crossing_cost=args.cross,
+                   crossing_window=args.window), Lab(args) as lab:
         lab.run()
 
 

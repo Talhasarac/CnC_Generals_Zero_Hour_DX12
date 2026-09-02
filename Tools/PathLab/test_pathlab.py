@@ -13,10 +13,12 @@ import unittest
 import pathlab
 from pathlab import (CELL, COST_DIAGONAL, COST_ORTHOGONAL, PATH_CONGESTION_COST,
                      PATH_CONGESTION_MAX_PATHS, PATH_CROSSING_COST, PATH_CROSSING_MAX,
-                     Grid, OrderStats, ReservationMap, TrafficModel, UsageMap,
+                     PATH_JAM_COST, PATH_JAM_DECAY_FRAMES, PATH_JAM_FLOOR, PATH_JAM_MAX,
+                     PATH_JAM_MAX_CHARGED, PATH_JAM_RANGE,
+                     Grid, JamMap, OrderStats, ReservationMap, TrafficModel, UsageMap,
                      astar, build_scenario, cell_of, compute_centroid, count_planned_crossings,
                      find_crossing_cells, make_map, order_corridor, order_individual, parse_sweep,
-                     price_congestion, price_crossing, simplify_raycast, spawn_block,
+                     price_congestion, price_crossing, price_jam, simplify_raycast, spawn_block,
                      track_reservations, tuning, world_of)
 
 
@@ -112,6 +114,73 @@ class PricingTests(unittest.TestCase):
         priced, _ = astar(grid, (2, 10), (18, 10), pricing=pricing)
         self.assertIn((10, 10), plain)
         self.assertFalse(set(priced) & set(claimed))
+
+    def test_jam_costs_nothing_until_it_has_lasted(self):
+        """The floor is the whole design: a unit pausing for a frame stamps 1 or 2 and that is
+           traffic.  Only ground several units have been stuck on gets past the floor."""
+        self.assertEqual(price_jam(0), 0)
+        self.assertEqual(price_jam(PATH_JAM_FLOOR), 0)
+        self.assertEqual(price_jam(PATH_JAM_FLOOR + 1), PATH_JAM_COST)
+        self.assertEqual(price_jam(PATH_JAM_FLOOR + PATH_JAM_MAX_CHARGED + 9),
+                         PATH_JAM_MAX_CHARGED * PATH_JAM_COST)
+
+    def test_a_jammed_doorway_is_worth_going_round_and_a_busy_one_is_not(self):
+        """The same map twice: stamps below the floor leave the straight line alone, and stamps
+           above it move the route off it.  Without both halves this cost fires on traffic."""
+        grid = corridor_grid()
+        door = (10, 10)
+        jam = JamMap()
+        for _ in range(PATH_JAM_FLOOR):
+            jam.note(door)
+        pricing = pathlab.PathPricing(jam=jam)
+        # a wall with one gap: there is no way round, so the route runs through it either way
+        self.assertIn(door, astar(grid, (2, 10), (18, 10), pricing=pricing)[0])
+
+        # now on open ground, where there is somewhere else to go
+        grid = open_grid()
+        jam = JamMap()
+        for _ in range(PATH_JAM_FLOOR):
+            jam.note(door)
+        plain = astar(grid, (2, 10), (18, 10), pricing=pathlab.PathPricing(jam=jam))[0]
+        self.assertIn(door, plain)          # still traffic: at the floor, nothing is charged
+        for _ in range(PATH_JAM_MAX):
+            jam.note(door)
+        priced = astar(grid, (2, 10), (18, 10), pricing=pathlab.PathPricing(jam=jam))[0]
+        self.assertNotIn(door, priced)
+
+    def test_the_jam_penalty_is_only_read_near_the_start(self):
+        """The engine charges it within PATH_QUEUE_RANGE of where the repath began, because it is
+           the unit leaving the jam that pays, not every search that crosses the map later."""
+        grid = open_grid(60)
+        far = (2 + PATH_JAM_RANGE + 4, 10)
+        jam = JamMap()
+        for _ in range(PATH_JAM_MAX):
+            jam.note(far)
+        route = astar(grid, (2, 10), (50, 10), pricing=pathlab.PathPricing(jam=jam))[0]
+        self.assertIn(far, route)           # out of range: not priced, so not avoided
+
+    def test_the_jam_map_forgets_on_the_frame_number(self):
+        """The decay runs off the frame it is given rather than a call count, which is what makes
+           it the same on two machines - and what makes two sweep rows comparable here."""
+        jam = JamMap()
+        cell = (4, 4)
+        for _ in range(PATH_JAM_MAX + 5):
+            jam.note(cell)
+        self.assertEqual(jam.at(cell), PATH_JAM_MAX)        # the stamp saturates
+
+        jam.decay(1)                                        # too soon: nothing moves
+        jam.decay(PATH_JAM_DECAY_FRAMES - 1)
+        self.assertEqual(jam.at(cell), PATH_JAM_MAX)
+
+        jam.decay(PATH_JAM_DECAY_FRAMES)
+        self.assertEqual(jam.at(cell), PATH_JAM_MAX - 1)
+
+        # and it empties rather than keeping zeroes about, so a quiet map costs nothing to carry
+        for frame in range(PATH_JAM_DECAY_FRAMES, PATH_JAM_DECAY_FRAMES * (PATH_JAM_MAX + 2),
+                           PATH_JAM_DECAY_FRAMES):
+            jam.decay(frame)
+        self.assertEqual(jam.jam, {})
+        self.assertEqual(jam.at(cell), 0)
 
     def test_tuning_hands_the_constants_back(self):
         before = (pathlab.PATH_CONGESTION_COST, pathlab.PATH_CONGESTION_MAX_PATHS,
