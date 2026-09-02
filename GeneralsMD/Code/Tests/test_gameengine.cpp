@@ -53,10 +53,14 @@
 #include "Common/EarlyCommandLine.h"
 #include "Common/CommandLine.h"
 #include "Common/GlobalData.h"
+#include "Common/EarlyOptions.h"
+#include "Common/OptionsCatalog.h"
+#include "Common/UserPreferences.h"
 #include "GameNetwork/NetworkUtil.h"
 #include "Common/Recorder.h"
 #include "Common/RadarShroudCache.h"
 #include "GameClient/Gadget.h"
+#include "GameClient/GadgetTabControl.h"
 #include "GameClient/Image.h"
 #include "GameNetwork/NetworkUtil.h"
 #include "GameNetwork/NetCommandList.h"
@@ -5666,6 +5670,78 @@ TEST(an_owned_structure_always_wears_a_health_bar)
 	CHECK( Drawable_structureShowsHealthBar( FALSE, FALSE, TRUE, FALSE ) == TRUE );
 }
 
+/** Always and never are the two ends and answer without looking at the object at all. */
+TEST(health_bar_always_and_never_ignore_everything_else)
+{
+	for( Int selected = 0; selected <= 1; ++selected )
+		for( Int moused = 0; moused <= 1; ++moused )
+			for( Int damaged = 0; damaged <= 1; ++damaged )
+			{
+				CHECK( Drawable_healthBarModeShows( HEALTH_BAR_ALWAYS, selected, moused, damaged ) == TRUE );
+				CHECK( Drawable_healthBarModeShows( HEALTH_BAR_NEVER, selected, moused, damaged ) == FALSE );
+			}
+}
+
+/** Retail's rule: the bar answers a question you asked about one unit, so it appears when you
+	 select it or point at it and at no other time. */
+TEST(health_bar_selection_mode_is_what_retail_did)
+{
+	CHECK( Drawable_healthBarModeShows( HEALTH_BAR_SELECTION, FALSE, FALSE, FALSE ) == FALSE );
+	CHECK( Drawable_healthBarModeShows( HEALTH_BAR_SELECTION, TRUE, FALSE, FALSE ) == TRUE );
+	CHECK( Drawable_healthBarModeShows( HEALTH_BAR_SELECTION, FALSE, TRUE, FALSE ) == TRUE );
+
+	// damage is not what selection mode is asking about - a hurt tank nobody is pointing at stays bare
+	CHECK( Drawable_healthBarModeShows( HEALTH_BAR_SELECTION, FALSE, FALSE, TRUE ) == FALSE );
+}
+
+/** Smart is selection plus every damaged thing.  A bar over a unit at full health says only what
+	 the absence of a bar would have said, and a base full of those is what makes always-on tiring;
+	 a bar over something that has been hit is the reason to have them at all. */
+TEST(health_bar_smart_mode_marks_the_hurt)
+{
+	CHECK( Drawable_healthBarModeShows( HEALTH_BAR_SMART, FALSE, FALSE, TRUE ) == TRUE );
+	CHECK( Drawable_healthBarModeShows( HEALTH_BAR_SMART, FALSE, FALSE, FALSE ) == FALSE );
+
+	// and the selection stays readable whether or not it has been shot at
+	CHECK( Drawable_healthBarModeShows( HEALTH_BAR_SMART, TRUE, FALSE, FALSE ) == TRUE );
+	CHECK( Drawable_healthBarModeShows( HEALTH_BAR_SMART, FALSE, TRUE, FALSE ) == TRUE );
+}
+
+/** The setting is stored, clamped and read back like every other catalog row, and its default is
+	 what this fork has always done - nobody's game changes until they change it. */
+TEST(health_bar_mode_round_trips_through_options_ini)
+{
+	const OptionDef *def = findOptionDef( "HealthBars" );
+	CHECK( def != NULL );
+	CHECK_EQ( (Int)def->kind, (Int)OPTION_ENUM );
+	CHECK_EQ( (Int)def->apply, (Int)APPLY_LIVE );
+	CHECK_EQ( def->lo, 0 );
+	CHECK_EQ( def->hi, HEALTH_BAR_MODE_COUNT - 1 );
+
+	GlobalData *saved = TheWritableGlobalData;
+	TheWritableGlobalData = NEW GlobalData;
+
+	CHECK_EQ( TheGlobalData->m_healthBarMode, (Int)HEALTH_BAR_ALWAYS );
+
+	TheWritableGlobalData->m_healthBarMode = HEALTH_BAR_SMART;
+
+	UserPreferences pref;
+	saveOptionsToPreferences( pref );
+	CHECK_STR( pref[ AsciiString( "HealthBars" ) ].str(), "1" );
+
+	TheWritableGlobalData->m_healthBarMode = HEALTH_BAR_NEVER;
+	loadOptionsFromPreferences( pref );
+	CHECK_EQ( TheGlobalData->m_healthBarMode, (Int)HEALTH_BAR_SMART );
+
+	// a hand-edited file cannot ask for a mode that does not exist
+	pref[ AsciiString( "HealthBars" ) ] = AsciiString( "99" );
+	loadOptionsFromPreferences( pref );
+	CHECK_EQ( TheGlobalData->m_healthBarMode, (Int)HEALTH_BAR_MODE_COUNT - 1 );
+
+	delete TheWritableGlobalData;
+	TheWritableGlobalData = saved;
+}
+
 /** The bar is a 2D overlay drawn after the scene, so the pick ray knows nothing about it and a
 	 click that lands on one used to hit bare ground.  Every bar is on in this fork, which makes it
 	 the one part of a unit that is never behind a building - and at full zoom out a rifleman is a
@@ -6341,6 +6417,174 @@ TEST(a_queue_is_blocked_frames_that_decay_rather_than_reset)
 	}
 	CHECK( !AIUpdate_isQueued( q ) );
 	CHECK_EQ( 0, q );
+}
+
+extern Real AIUpdate_followSpeed( Real leaderSpeed, Real gap, Real desiredGap );
+extern Real AIUpdate_smoothBlockedSpeed( Real current, Real target, Real cap );
+
+TEST(a_follower_keeps_a_gap_instead_of_matching_speed_exactly)
+{
+	/* The rule this replaces gave the follower the leader's speed scaled by how much of the
+		 leader's front it was facing, and knew nothing about the distance between them.  Two units
+		 nose to tail therefore ran at the same speed for ever: the gap that was there when they
+		 first touched is the gap they keep, including a gap of zero.  Then one touch of the brakes
+		 at the front stopped the whole column, because a follower at zero distance has no slack to
+		 spend.  A gap law spends distance instead of stopping. */
+
+	const Real desired = 5.0f;
+
+	// sitting at the right distance: copy the leader and nothing else
+	CHECK_NEAR( 10.0f, AIUpdate_followSpeed( 10.0f, desired, desired ), 0.001f );
+
+	// too close closes the throttle, and further in closes it further
+	CHECK( AIUpdate_followSpeed( 10.0f, 2.0f, desired ) < 10.0f );
+	CHECK( AIUpdate_followSpeed( 10.0f, 0.0f, desired )
+			 < AIUpdate_followSpeed( 10.0f, 2.0f, desired ) );
+
+	// too far opens it, which is what closes a gap that opened up mid-column
+	CHECK( AIUpdate_followSpeed( 10.0f, 10.0f, desired ) > 10.0f );
+
+	/* Never negative.  The caller uses this as a speed ceiling and a locomotor handed a negative
+		 ceiling drives backwards. */
+	CHECK_NEAR( 0.0f, AIUpdate_followSpeed( 0.0f, 0.0f, 100.0f ), 0.001f );
+	CHECK( AIUpdate_followSpeed( 0.0f, -50.0f, 100.0f ) >= 0.0f );
+
+	/* The property that makes it a queue rather than a concertina: start a follower stopped and
+		 nose to tail behind a leader running at a steady speed, and it accelerates to the leader's
+		 speed as the gap opens, without overshooting into a collision.  Integrate the loop. */
+	Real gap = 0.0f;
+	Real speed = 0.0f;
+	const Real leader = 6.0f;
+	for( Int i = 0; i < 200; i++ )
+	{
+		speed = AIUpdate_followSpeed( leader, gap, desired );
+		gap += (leader - speed);					// per frame: the leader pulls away by the speed difference
+	}
+	CHECK_NEAR( leader, speed, 0.05f );		// caught up to the leader's speed
+	CHECK_NEAR( desired, gap, 0.5f );			// at the distance it was asked to keep
+}
+
+TEST(the_blocked_speed_limit_relaxes_as_fast_as_it_tightens)
+{
+	/* The limit this replaces was a ratchet: 0.95 per blocked frame down off a 20% floor, 1.05 per
+		 clear frame up.  Twenty blocked frames put a unit at 36% of its speed and forty at 13%, and
+		 climbing back out of 13% cost about 33 clear frames - two thirds of a second of open ground
+		 spent crawling for a jam that was over.  That asymmetry is the stop-and-go the player sees.
+		 A first order filter has the same smoothing and no memory of how long the jam lasted. */
+
+	const Real full = 10.0f;
+
+	// it moves toward the target rather than to it, so a one frame touch is not a one frame stop
+	Real limit = AIUpdate_smoothBlockedSpeed( full, 0.0f, full );
+	CHECK( limit < full );
+	CHECK( limit > 0.0f );
+
+	// falling to a ceiling and rising back from it take the same number of frames
+	Real down = full;
+	Int framesDown = 0;
+	while( down > 0.5f * full && framesDown < 1000 )
+	{
+		down = AIUpdate_smoothBlockedSpeed( down, 0.0f, full );
+		framesDown++;
+	}
+	Real up = 0.0f;
+	Int framesUp = 0;
+	while( up < 0.5f * full && framesUp < 1000 )
+	{
+		up = AIUpdate_smoothBlockedSpeed( up, full, full );
+		framesUp++;
+	}
+	CHECK_EQ( framesDown, framesUp );
+	CHECK( framesUp < 10 );		// and recovery is frames, not the ratchet's thirty odd
+
+	/* No memory: a unit blocked for one second and a unit blocked for ten come out of it at the
+		 same speed, because the filter's state is where it is now, not how it got there. */
+	Real brief = full, forever = full;
+	for( Int i = 0; i < 30; i++ )
+		brief = AIUpdate_smoothBlockedSpeed( brief, 0.0f, full );
+	for( Int i = 0; i < 300; i++ )
+		forever = AIUpdate_smoothBlockedSpeed( forever, 0.0f, full );
+	for( Int i = 0; i < 30; i++ )
+	{
+		brief = AIUpdate_smoothBlockedSpeed( brief, full, full );
+		forever = AIUpdate_smoothBlockedSpeed( forever, full, full );
+	}
+	CHECK_NEAR( brief, forever, 0.01f );
+
+	/* The cap is the speed the unit actually wants this frame, and the filter must never hand back
+		 more than that - the caller assigns the result straight into the locomotor. */
+	CHECK( AIUpdate_smoothBlockedSpeed( 100.0f, 100.0f, full ) <= full );
+	CHECK( AIUpdate_smoothBlockedSpeed( full, 100.0f, full ) <= full );
+
+	// a negative ceiling from a head-on blocker clamps to a stop, not to reverse
+	CHECK( AIUpdate_smoothBlockedSpeed( full, -50.0f, full ) >= 0.0f );
+}
+
+extern Bool AIState_looksLikeMoving( Real speedNow, Real maxSpeed );
+
+TEST(the_drive_animation_asks_the_speed_and_not_the_frame_count)
+{
+	/* EA cleared MODELCONDITION_MOVING after a quarter second of blocked frames, which is a count of
+		 frames standing in for a speed.  The case it gets wrong is the one that matters: a tank easing
+		 round a jam is blocked most frames and still covering ground, and it was drawn parked and
+		 sliding.  This is the whole of P5, and no batch can measure it - a headless run draws nothing
+		 - so the threshold is checked here or nowhere.
+
+		 A headless run cannot see the difference; a player can see nothing else. */
+	const Real top = 30.0f;
+
+	// what the frame count got wrong: moving properly, blocked most frames, drawn parked
+	CHECK( AIState_looksLikeMoving( top, top ) );
+	CHECK( AIState_looksLikeMoving( top / 3.0f, top ) );
+	CHECK( AIState_looksLikeMoving( top * 0.5f, top ) );
+
+	// and what it got right, which the speed test has to keep getting right
+	CHECK( !AIState_looksLikeMoving( 0.0f, top ) );
+	CHECK( !AIState_looksLikeMoving( top * 0.05f, top ) );
+
+	// the threshold itself: a tenth, exclusive, so exactly a tenth is still parked
+	CHECK( !AIState_looksLikeMoving( top * 0.1f, top ) );
+	CHECK( AIState_looksLikeMoving( top * 0.1f + 0.01f, top ) );
+
+	/* No locomotor to ask means no top speed, and then the question is only whether the thing is
+		 moving at all - which is what the code did before the threshold went in.  Something being
+		 shoved has no drive of its own to animate away from. */
+	CHECK( !AIState_looksLikeMoving( 0.0f, 0.0f ) );
+	CHECK( AIState_looksLikeMoving( 0.5f, 0.0f ) );
+
+	// the threshold scales with the unit, so a slow one is not held to a fast one's crawl
+	const Real slow = 3.0f;
+	CHECK( AIState_looksLikeMoving( slow * 0.5f, slow ) );
+	CHECK( !AIState_looksLikeMoving( slow * 0.5f, top ) );
+}
+
+extern Int Pathfinder_jamPenalty( Int jam );
+
+TEST(a_jam_costs_only_after_it_has_lasted)
+{
+	/* The congestion and queue costs both describe the instant the search runs, and a jam is not an
+		 instant - a wedged doorway empties for a frame every time it shuffles, and the search that
+		 happens to run in that frame routes another unit straight into it.  The jam map remembers.
+		 The floor is what keeps it from firing on ordinary traffic, and the cap is what keeps a cost
+		 the A* heuristic cannot see from flooding the search. */
+	CHECK_EQ( 0, Pathfinder_jamPenalty( 0 ) );
+	CHECK_EQ( 0, Pathfinder_jamPenalty( -1 ) );
+
+	// one unit pausing for a frame or two is traffic and costs nothing at all
+	CHECK_EQ( 0, Pathfinder_jamPenalty( 1 ) );
+	CHECK_EQ( 0, Pathfinder_jamPenalty( 3 ) );
+
+	// past the floor it climbs per blocked unit-frame, and a step is worth three cells of ground
+	// (a cell of ground is COST_ORTHOGONAL, 10, which lives in AIPathfind.cpp and not in a header)
+	CHECK_EQ( 30, Pathfinder_jamPenalty( 4 ) );
+	CHECK_EQ( 60, Pathfinder_jamPenalty( 5 ) );
+
+	/* And it stops.  The stamp saturates at 10, so without a cap the worst ground on the map would
+		 cost 21 cells of detour and the search would rather cross the map than pass a doorway. */
+	const Int most = Pathfinder_jamPenalty( 7 );
+	CHECK_EQ( most, Pathfinder_jamPenalty( 10 ) );
+	CHECK_EQ( most, Pathfinder_jamPenalty( 255 ) );
+	CHECK( most <= 120 );
 }
 
 extern Int Pathfinder_crossingPenalty( Int conflicts );
@@ -7199,8 +7443,7 @@ TEST(the_production_strip_folds_a_long_queue_into_its_overflow)
 	// cell drawn past the top of the screen is a cell nobody can read.
 	//
 	const Int cells = (Int)InGameUI::PRODUCTION_STRIP_ROW_MAX + 1;
-	const Int height = ( cells - 1 ) * InGameUI::stripRowStep( (Int)InGameUI::PRODUCTION_STRIP_TRAY_H )
-											+ (Int)InGameUI::PRODUCTION_STRIP_TRAY_H;
+	const Int height = cells * (Int)InGameUI::PRODUCTION_STRIP_TRAY_H;
 	CHECK( height < 600 / 2 );
 }
 
@@ -7305,34 +7548,43 @@ TEST(the_strip_tray_geometry_is_a_fraction_of_whatever_size_the_bar_was_loaded_a
 	CHECK_EQ( step, stepOnly );
 }
 
-/* Rows of trays stack by the same overlap the trays close up by sideways, so a pile of rows reads
-	 as one sheet of metal.  The general's power bar itself is the check: it steps 35 between 41-tall
-	 slots, and the step has to come out of the tray height as a fraction so it survives a bar the
-	 loader gave a different size to - twice the tray is twice the step, never twice the tray less
-	 the same six pixels. */
-TEST(a_row_of_trays_stacks_on_the_row_above_it_by_that_bars_own_step)
+/* Sideways the trays close up, by the six the general's power bar closes its own by.  Stacked they
+	 do not: a row stands a whole tray above the row under it.  The overlap that reads as one sheet
+	 of metal along a row cuts six pixels off the top of every picture in a column, and a cameo with
+	 another tray's rail lying across it is the thing this was changed to stop. */
+TEST(a_stacked_tray_does_not_lie_over_the_one_below_it)
 {
-	CHECK_EQ( (Int)InGameUI::PRODUCTION_STRIP_BAR_STEP,
-						InGameUI::stripRowStep( (Int)InGameUI::PRODUCTION_STRIP_TRAY_H ) );
+	// sideways: that bar's step, six short of the tray
+	CHECK_EQ( (Int)InGameUI::PRODUCTION_STRIP_TRAY_H - (Int)InGameUI::PRODUCTION_STRIP_BAR_STEP,
+						(Int)InGameUI::PRODUCTION_STRIP_TRAY_OVER );
+	CHECK( (Int)InGameUI::PRODUCTION_STRIP_TRAY_OVER > 0 );
 
-	// twice the size, twice the step - the overlap is a fraction of the tray, not a constant
-	CHECK_EQ( 2 * (Int)InGameUI::PRODUCTION_STRIP_BAR_STEP,
-						InGameUI::stripRowStep( 2 * (Int)InGameUI::PRODUCTION_STRIP_TRAY_H ) );
-
-	// and a step always shorter than the tray it steps, or the rows separate instead of overlapping
-	CHECK( InGameUI::stripRowStep( (Int)InGameUI::PRODUCTION_STRIP_TRAY_H )
-					< (Int)InGameUI::PRODUCTION_STRIP_TRAY_H );
-	CHECK( InGameUI::stripRowStep( (Int)InGameUI::PRODUCTION_STRIP_TRAY_H ) > 0 );
+	// upward: nothing is taken off, so a cell has to clear the whole picture that stands in it
+	CHECK( (Int)InGameUI::PRODUCTION_STRIP_TRAY_Y + (Int)InGameUI::PRODUCTION_STRIP_QUEUE_H
+					<= (Int)InGameUI::PRODUCTION_STRIP_TRAY_H );
 
 	//
 	// the superweapon strip stands in the same trays, three rows of six of them, and that pile has
 	// to fit under the corner clock plate rather than run off the bottom of the 800x600 it is
-	// written in
+	// written in - at the full tray now, which is the taller pile of the two
 	//
 	const Int rows = (Int)InGameUI::SUPERWEAPON_STRIP_ROWS;
-	const Int pileHeight = ( rows - 1 ) * InGameUI::stripRowStep( (Int)InGameUI::PRODUCTION_STRIP_TRAY_H )
-													+ (Int)InGameUI::PRODUCTION_STRIP_TRAY_H;
+	const Int pileHeight = rows * (Int)InGameUI::PRODUCTION_STRIP_TRAY_H;
 	CHECK( pileHeight < 600 / 2 );
+
+	//
+	// Watching, the vertical is the players: a row each, a whole tray apart, piled up off the bottom
+	// of the screen.  Eight of them have to leave the top of a 600 tall screen alone, and a row -
+	// the few soonest plus the tray the "+N" closes it with - has to stay well inside 800 across,
+	// since it is drawn over the battlefield rather than over a bar.
+	//
+	const Int watchPile = (Int)InGameUI::PRODUCTION_STRIP_ROWS * (Int)InGameUI::PRODUCTION_STRIP_TRAY_H;
+	CHECK( watchPile < 2 * 600 / 3 );
+
+	const Int watchStep = (Int)InGameUI::PRODUCTION_STRIP_TRAY_W - (Int)InGameUI::PRODUCTION_STRIP_TRAY_OVER;
+	const Int watchWidth = (Int)InGameUI::PRODUCTION_STRIP_WATCH_MAX * watchStep
+													+ (Int)InGameUI::PRODUCTION_STRIP_TRAY_W;
+	CHECK( watchWidth < 800 / 2 );
 
 	const Int step = (Int)InGameUI::PRODUCTION_STRIP_TRAY_W - (Int)InGameUI::PRODUCTION_STRIP_TRAY_OVER;
 	const Int rowWidth = ( (Int)InGameUI::SUPERWEAPON_STRIP_COLS - 1 ) * step
@@ -7341,14 +7593,18 @@ TEST(a_row_of_trays_stacks_on_the_row_above_it_by_that_bars_own_step)
 }
 
 /* Buildings going up on the map are not in anybody's queue - they are objects standing on the
-	 ground with a percentage on them - so they get their own row, and it is drawn above the queue:
-	 the strip reads top to bottom as what is being raised and what is being turned out.  Both are
-	 rows of the same array, so the later of them has to be inside it. */
-TEST(the_buildings_going_up_have_their_own_row_above_the_queue)
+	 ground with a percentage on them - but they land in the same column as the queued items, sorted
+	 against them on the one thing the two kinds share: how long each still has.  The comparison the
+	 column is built with is therefore blind to which kind a slot is, and there is one row while
+	 playing, at the front of the array. */
+TEST(the_buildings_going_up_stand_in_the_queue_column)
 {
-	CHECK( (Int)InGameUI::PRODUCTION_ROW_SITES < (Int)InGameUI::PRODUCTION_ROW_QUEUE );
-	CHECK( (Int)InGameUI::PRODUCTION_ROW_SITES >= 0 );
+	CHECK_EQ( 0, (Int)InGameUI::PRODUCTION_ROW_QUEUE );
 	CHECK( (Int)InGameUI::PRODUCTION_ROW_QUEUE < (Int)InGameUI::PRODUCTION_STRIP_ROWS );
+
+	// a site three seconds out goes in front of a tank ten seconds out, and not the other way round
+	CHECK( InGameUI::stripSlotGoesBefore( FALSE, 90, FALSE, 300 ) );
+	CHECK( !InGameUI::stripSlotGoesBefore( FALSE, 300, FALSE, 90 ) );
 }
 
 /* The building you have selected does not get a row of its own: its items lead the queue row, so
@@ -7908,4 +8164,372 @@ TEST(two_structures_ordered_onto_the_same_ground_are_one_too_many)
 	//
 	CHECK( (Int)InGameUI::PENDING_PLACEMENT_FRAMES >= 30 );
 	CHECK( (Int)InGameUI::PENDING_PLACEMENTS >= 2 );
+}
+
+TEST(option_catalog_rows_are_well_formed)
+{
+	/* The catalog is a table, so the mistakes it invites are table mistakes: two rows claiming the
+		 same Options.ini key, a row whose bounds are the wrong way round, a row that forgot half of
+		 its accessor pair.  None of those is a compile error and all three fail silently at runtime -
+		 the duplicate key means whichever row is written second wins and the first setting appears to
+		 forget itself every time the player presses Accept. */
+	for( Int i = 0; i < TheOptionCatalogCount; ++i )
+	{
+		const OptionDef& def = TheOptionCatalog[ i ];
+
+		CHECK( def.iniKey != NULL && def.iniKey[ 0 ] != '\0' );
+		CHECK( def.get != NULL );
+		CHECK( def.set != NULL );
+		CHECK( def.hi >= def.lo );
+
+		if( def.kind == OPTION_BOOL )
+		{
+			CHECK_EQ( def.lo, 0 );
+			CHECK_EQ( def.hi, 1 );
+		}
+
+		/* A widget name is a NAMEKEY the menu looks up, and a lookup that misses returns NULL rather
+			 than complaining, so a typo here is a control that never fills in.  A row with no control
+			 at all spells that as NULL or as the empty string, and findOptionWidget takes either. */
+		if( def.widgetName != NULL && def.widgetName[ 0 ] != '\0' )
+			CHECK( strncmp( def.widgetName, "OptionsMenu.wnd:", 16 ) == 0 );
+
+		for( Int j = 0; j < i; ++j )
+			CHECK_NE( stricmp( TheOptionCatalog[ j ].iniKey, def.iniKey ), 0 );
+	}
+
+	/* the table is terminated as well as counted, so a walk may use either */
+	CHECK( TheOptionCatalog[ TheOptionCatalogCount ].iniKey == NULL );
+}
+
+TEST(gameplay_conveniences_are_forced_on_and_left_the_catalog)
+{
+	/* The Gameplay page is one control now, health bars, and the eight settings that used to share
+		 it are decided here instead of by the player.  Two halves have to agree or the removal is a
+		 feature switched off by accident: the row must be gone from the catalog, so nothing loads a
+		 stale "no" out of an Options.ini written before this change, and the constructor must say
+		 TRUE, because with the row gone the constructor is the only thing left that says anything. */
+	static const char *const forced[] =
+	{
+		"GridBuildPlacement", "NudgeBuildPlacement", "SnapBuildPlacementTo45",
+		"ShowPlacementRangeRing", "WorkersReturnToSupply", "DetailedBuildTooltips",
+		"ShowHudOverlay", "ArchiveReplays", NULL
+	};
+	for( Int i = 0; forced[ i ] != NULL; ++i )
+		CHECK( findOptionDef( forced[ i ] ) == NULL );
+
+	GlobalData *saved = TheWritableGlobalData;
+	GlobalData *scratch = NEW GlobalData;
+	TheWritableGlobalData = scratch;
+
+	CHECK( scratch->m_gridBuildPlacement );
+	CHECK( scratch->m_nudgeBuildPlacement );
+	CHECK( scratch->m_snapBuildPlacementTo45 );
+	CHECK( scratch->m_showPlacementRangeRing );
+	CHECK( scratch->m_workersReturnToSupply );
+	CHECK( scratch->m_detailedBuildTooltips );
+	CHECK( scratch->m_showHudOverlay );
+	CHECK( scratch->m_archiveReplays );
+
+	/* HealthBars is what is left, and it is still a menu row. */
+	const OptionDef *bars = findOptionDef( "HealthBars" );
+	CHECK( bars != NULL );
+	CHECK( bars->widgetName != NULL && bars->widgetName[ 0 ] != '\0' );
+
+	/* The four camera and mouse habits went the other way: no control, but the row stays, so an
+		 Options.ini that names one still wins over the default. */
+	static const char *const hidden[] =
+	{
+		"MiddleMousePans", "ZoomToCursor", "EdgeScrollInWindowedMode", "SnapCameraRotateTo45", NULL
+	};
+	for( Int i = 0; hidden[ i ] != NULL; ++i )
+	{
+		const OptionDef *def = findOptionDef( hidden[ i ] );
+		CHECK( def != NULL );
+		CHECK( def->widgetName == NULL || def->widgetName[ 0 ] == '\0' );
+	}
+
+	TheWritableGlobalData = saved;
+	delete scratch;
+}
+
+TEST(option_catalog_round_trips_every_key_through_options_ini)
+{
+	/* Every row has to survive the trip out to Options.ini and back, at both ends of its range.
+		 Before the catalog only the way in existed - the fourteen fork settings were parsed at startup
+		 and nothing ever wrote them - so the writing half has never been exercised by anything.  A row
+		 that writes one spelling and reads another loses the setting on the next start, and does it
+		 without a word. */
+	GlobalData *saved = TheWritableGlobalData;
+	GlobalData *scratch = NEW GlobalData;
+	TheWritableGlobalData = scratch;
+
+	UserPreferences pref;
+
+	for( Int i = 0; i < TheOptionCatalogCount; ++i )
+	{
+		const OptionDef& def = TheOptionCatalog[ i ];
+
+		def.set( def.lo );
+		saveOptionsToPreferences( pref );
+		def.set( def.hi );	// scribble over it, so a load that does nothing cannot pass
+		loadOptionsFromPreferences( pref );
+		CHECK_EQ( def.get(), def.lo );
+
+		def.set( def.hi );
+		saveOptionsToPreferences( pref );
+		def.set( def.lo );
+		loadOptionsFromPreferences( pref );
+		CHECK_EQ( def.get(), def.hi );
+	}
+
+	TheWritableGlobalData = saved;
+	delete scratch;
+}
+
+TEST(option_catalog_writes_bools_as_yes_and_no)
+{
+	/* UserPreferences::setBool writes "1" and "0"; every option key this fork ever added is read by
+		 testing the string against "yes".  A catalog that reached for setBool would write a file it
+		 could not read back, and the setting would come back off on the next start. */
+	GlobalData *saved = TheWritableGlobalData;
+	GlobalData *scratch = NEW GlobalData;
+	TheWritableGlobalData = scratch;
+
+	UserPreferences pref;
+	const OptionDef *zoom = findOptionDef( "ZoomToCursor" );
+	CHECK( zoom != NULL );
+
+	zoom->set( 1 );
+	saveOptionsToPreferences( pref );
+	CHECK_STR( pref[ AsciiString( "ZoomToCursor" ) ].str(), "yes" );
+
+	zoom->set( 0 );
+	saveOptionsToPreferences( pref );
+	CHECK_STR( pref[ AsciiString( "ZoomToCursor" ) ].str(), "no" );
+
+	/* Reading is deliberately more forgiving than writing.  The getters this replaces accepted the
+		 single string "yes", so a file hand-edited to "true" read as off - which looks like the
+		 setting not working rather than like the file being spelled wrong. */
+	pref[ AsciiString( "ZoomToCursor" ) ] = AsciiString( "true" );
+	loadOptionsFromPreferences( pref );
+	CHECK_EQ( zoom->get(), 1 );
+
+	zoom->set( 0 );
+	pref[ AsciiString( "ZoomToCursor" ) ] = AsciiString( "1" );
+	loadOptionsFromPreferences( pref );
+	CHECK_EQ( zoom->get(), 1 );
+
+	pref[ AsciiString( "ZoomToCursor" ) ] = AsciiString( "no" );
+	loadOptionsFromPreferences( pref );
+	CHECK_EQ( zoom->get(), 0 );
+
+	TheWritableGlobalData = saved;
+	delete scratch;
+}
+
+TEST(option_catalog_clamps_and_leaves_an_absent_key_alone)
+{
+	GlobalData *saved = TheWritableGlobalData;
+	GlobalData *scratch = NEW GlobalData;
+	TheWritableGlobalData = scratch;
+
+	UserPreferences pref;
+	const OptionDef *bloom = findOptionDef( "Bloom" );
+	CHECK( bloom != NULL );
+
+	pref[ AsciiString( "Bloom" ) ] = AsciiString( "500" );
+	loadOptionsFromPreferences( pref );
+	CHECK_EQ( bloom->get(), 100 );
+
+	pref[ AsciiString( "Bloom" ) ] = AsciiString( "-5" );
+	loadOptionsFromPreferences( pref );
+	CHECK_EQ( bloom->get(), 0 );
+
+	/* An Options.ini written before a setting existed carries no key for it, and that has to leave
+		 the GameData.ini default standing.  Treating a missing key as zero would reset every new
+		 setting to off for everyone who already has a preferences file, which is everyone. */
+	pref.clear();
+	bloom->set( 42 );
+	loadOptionsFromPreferences( pref );
+	CHECK_EQ( bloom->get(), 42 );
+
+	TheWritableGlobalData = saved;
+	delete scratch;
+}
+
+TEST(msaa_levels_map_to_the_counts_a_device_offers)
+{
+	CHECK_EQ( (Int)msaaSamplesForLevel( 0 ), 0 );
+	CHECK_EQ( (Int)msaaSamplesForLevel( 1 ), 2 );
+	CHECK_EQ( (Int)msaaSamplesForLevel( 2 ), 4 );
+	CHECK_EQ( (Int)msaaSamplesForLevel( 3 ), 8 );
+	CHECK_EQ( (Int)msaaSamplesForLevel( 4 ), 16 );
+
+	// out of range is off, not a read past the table
+	CHECK_EQ( (Int)msaaSamplesForLevel( -1 ), 0 );
+	CHECK_EQ( (Int)msaaSamplesForLevel( OPTION_MSAA_LEVEL_COUNT ), 0 );
+
+	for( Int level = 0; level < OPTION_MSAA_LEVEL_COUNT; ++level )
+		CHECK_EQ( msaaLevelForSamples( msaaSamplesForLevel( level ) ), level );
+
+	// "-msaa 1" is not multisampling, and a count between two levels rounds down rather than up:
+	// asking for 6 and being given 8 costs bandwidth nobody asked for
+	CHECK_EQ( msaaLevelForSamples( 0 ), 0 );
+	CHECK_EQ( msaaLevelForSamples( 1 ), 0 );
+	CHECK_EQ( msaaLevelForSamples( 6 ), 2 );
+	CHECK_EQ( msaaLevelForSamples( 64 ), OPTION_MSAA_LEVEL_COUNT - 1 );
+}
+
+TEST(window_mode_derives_the_boolean_the_device_layer_reads)
+{
+	GlobalData *saved = TheWritableGlobalData;
+	GlobalData *scratch = NEW GlobalData;
+	TheWritableGlobalData = scratch;
+
+	scratch->m_xResolution = 800;
+	scratch->m_yResolution = 600;
+	scratch->m_edgeScrollInWindowedMode = FALSE;
+
+	scratch->m_windowMode = WINDOW_MODE_FULLSCREEN;
+	applyWindowMode();
+	CHECK_EQ( (Int)TheGlobalData->m_windowed, 0 );
+	CHECK_EQ( TheGlobalData->m_xResolution, 800 );
+
+	scratch->m_windowMode = WINDOW_MODE_WINDOWED;
+	applyWindowMode();
+	CHECK_EQ( (Int)TheGlobalData->m_windowed, 1 );
+	// an ordinary window keeps the resolution the player chose
+	CHECK_EQ( TheGlobalData->m_xResolution, 800 );
+	CHECK_EQ( (Int)TheGlobalData->m_edgeScrollInWindowedMode, 0 );
+
+	/* Borderless is the one mode that decides the resolution for itself: a window covering the
+		 display with a back buffer of any other size is a stretched blit, and the cursor then stops
+		 landing where it is drawn. */
+	scratch->m_windowMode = WINDOW_MODE_BORDERLESS;
+	applyWindowMode();
+	CHECK_EQ( (Int)TheGlobalData->m_windowed, 1 );
+	CHECK_EQ( TheGlobalData->m_xResolution, (Int)::GetSystemMetrics( SM_CXSCREEN ) );
+	CHECK_EQ( TheGlobalData->m_yResolution, (Int)::GetSystemMetrics( SM_CYSCREEN ) );
+	CHECK_EQ( (Int)TheGlobalData->m_edgeScrollInWindowedMode, 1 );
+
+	TheWritableGlobalData = saved;
+	delete scratch;
+}
+
+TEST(window_mode_survives_a_round_trip_through_options_ini)
+{
+	GlobalData *saved = TheWritableGlobalData;
+	GlobalData *scratch = NEW GlobalData;
+	TheWritableGlobalData = scratch;
+
+	UserPreferences pref;
+	const OptionDef *mode = findOptionDef( "WindowMode" );
+	CHECK( mode != NULL );
+	CHECK_EQ( (Int)mode->kind, (Int)OPTION_ENUM );
+	CHECK_EQ( (Int)mode->apply, (Int)APPLY_RESTART );
+	CHECK_EQ( mode->hi, (Int)WINDOW_MODE_COUNT - 1 );
+
+	mode->set( WINDOW_MODE_BORDERLESS );
+	saveOptionsToPreferences( pref );
+	// written as the plain number WinMain's early reader parses, not as a word
+	CHECK_STR( pref[ AsciiString( "WindowMode" ) ].str(), "1" );
+
+	mode->set( WINDOW_MODE_FULLSCREEN );
+	loadOptionsFromPreferences( pref );
+	CHECK_EQ( mode->get(), (Int)WINDOW_MODE_BORDERLESS );
+
+	// a hand-edited nonsense value cannot produce a mode the window code has no case for
+	pref[ AsciiString( "WindowMode" ) ] = AsciiString( "99" );
+	loadOptionsFromPreferences( pref );
+	CHECK_EQ( mode->get(), (Int)WINDOW_MODE_COUNT - 1 );
+
+	TheWritableGlobalData = saved;
+	delete scratch;
+}
+
+TEST(early_options_reads_the_same_file_userpreferences_writes)
+{
+	/* WinMain reads Options.ini itself, before the engine exists, because the window style is fixed
+		 by CreateWindow.  That reader shares no code with UserPreferences, so what it has to agree on
+		 is the format - and this feeds it exactly what UserPreferences::write produces. */
+	UserPreferences pref;
+	pref[ AsciiString( "WindowMode" ) ] = AsciiString( "1" );
+	pref[ AsciiString( "MSAA" ) ] = AsciiString( "2" );
+	pref[ AsciiString( "WindowModeExtra" ) ] = AsciiString( "7" );
+
+	FILE *fp = ::tmpfile();
+	CHECK( fp != NULL );
+	for( UserPreferences::const_iterator it = pref.begin(); it != pref.end(); ++it )
+		::fprintf( fp, "%s = %s\n", it->first.str(), it->second.str() );
+
+	char value[64];
+
+	::rewind( fp );
+	CHECK( findEarlyOptionValueIn( fp, "WindowMode", value, sizeof( value ) ) );
+	CHECK_STR( value, "1" );
+
+	::rewind( fp );
+	CHECK( findEarlyOptionValueIn( fp, "MSAA", value, sizeof( value ) ) );
+	CHECK_STR( value, "2" );
+
+	// a key that is not there leaves the caller on its default
+	::rewind( fp );
+	CHECK( !findEarlyOptionValueIn( fp, "Bloom", value, sizeof( value ) ) );
+
+	::fclose( fp );
+
+	/* The prefix trap: WindowModeExtra starts with WindowMode, and a reader that only compared the
+		 first n characters would hand WinMain a 7 and open a window in a mode that does not exist. */
+	fp = ::tmpfile();
+	CHECK( fp != NULL );
+	::fprintf( fp, "WindowModeExtra = 7\n" );
+	::rewind( fp );
+	CHECK( !findEarlyOptionValueIn( fp, "WindowMode", value, sizeof( value ) ) );
+	::fclose( fp );
+
+	// leading and trailing whitespace, and a duplicated key, which only a hand-edited file has
+	fp = ::tmpfile();
+	CHECK( fp != NULL );
+	::fprintf( fp, "\tWindowMode\t=\t2\t\r\nWindowMode = 1\n" );
+	::rewind( fp );
+	CHECK( findEarlyOptionValueIn( fp, "WindowMode", value, sizeof( value ) ) );
+	CHECK_STR( value, "1" );	// last one wins, the way the engine's own loader resolves it
+	::fclose( fp );
+}
+
+/** The tab strip's hit test.  Nothing in the shipped game uses the tab control, so its arithmetic
+	 has never run against a real click; the settings screen is the first layout to use it. */
+TEST(a_click_on_the_tab_strip_names_the_tab_under_it)
+{
+	// three 100-wide tabs: the boundaries are where a tab starts, not where the last one ended
+	CHECK_EQ( GadgetTabControl_tabAtOffset( 0, 100, 3 ), 0 );
+	CHECK_EQ( GadgetTabControl_tabAtOffset( 99, 100, 3 ), 0 );
+	CHECK_EQ( GadgetTabControl_tabAtOffset( 100, 100, 3 ), 1 );
+	CHECK_EQ( GadgetTabControl_tabAtOffset( 299, 100, 3 ), 2 );
+}
+
+/** The caller tests the click against the strip with >= and <=, so the pixel column one past the
+	 last tab is inside the strip and divided out to tabCount - one off the end of subPaneDisabled,
+	 which is read before anything checks it. */
+TEST(the_pixel_past_the_last_tab_is_no_tab_at_all)
+{
+	CHECK_EQ( GadgetTabControl_tabAtOffset( 300, 100, 3 ), -1 );
+	CHECK_EQ( GadgetTabControl_tabAtOffset( 100000, 100, 3 ), -1 );
+
+	// and a click that somehow arrives left of the strip is not tab zero by wrapping
+	CHECK_EQ( GadgetTabControl_tabAtOffset( -1, 100, 3 ), -1 );
+}
+
+/** A .wnd that never set the tab size divided by it.  A .wnd that declares more tabs than the array
+	 holds indexed past it.  Both are data, and data is what a mod hands the engine. */
+TEST(a_tab_control_with_no_size_or_too_many_tabs_answers_nothing)
+{
+	CHECK_EQ( GadgetTabControl_tabAtOffset( 40, 0, 3 ), -1 );
+	CHECK_EQ( GadgetTabControl_tabAtOffset( 40, -100, 3 ), -1 );
+	CHECK_EQ( GadgetTabControl_tabAtOffset( 40, 100, 0 ), -1 );
+
+	// twenty declared tabs, eight panes: the ninth onwards cannot be clicked
+	CHECK_EQ( GadgetTabControl_tabAtOffset( 100 * (NUM_TAB_PANES - 1), 100, 20 ), NUM_TAB_PANES - 1 );
+	CHECK_EQ( GadgetTabControl_tabAtOffset( 100 * NUM_TAB_PANES, 100, 20 ), -1 );
 }

@@ -41,6 +41,7 @@
 #include "Common/STLTypedefs.h"
 #include "Common/GameCommon.h"
 #include "Common/Money.h"
+#include "Common/WindowMode.h"
 
 // FORWARD DECLARATIONS ///////////////////////////////////////////////////////////////////////////
 struct FieldParse;
@@ -54,6 +55,22 @@ enum AIDebugOptions;
 // PUBLIC /////////////////////////////////////////////////////////////////////////////////////////
 
 const Int MAX_GLOBAL_LIGHTS	= 3;
+
+//-------------------------------------------------------------------------------------------------
+/** When a unit wears a health bar.
+	*
+	* Retail drew one only for the selected unit and the one under the cursor.  This fork made them
+	* permanent, which reads a battle at a glance and turns a peaceful base into a wall of green.
+	* Both are defensible, so both are here, with the useful middle in between. */
+enum HealthBarModeType
+{
+	HEALTH_BAR_ALWAYS			= 0,	///< every unit, all the time
+	HEALTH_BAR_SMART			= 1,	///< anything hurt, plus the selection and whatever is under the cursor
+	HEALTH_BAR_SELECTION	= 2,	///< the selection and whatever is under the cursor, the way retail did it
+	HEALTH_BAR_NEVER			= 3,	///< none, ever
+
+	HEALTH_BAR_MODE_COUNT	= 4,
+};
 
 //-------------------------------------------------------------------------------------------------
 /** Global data container class
@@ -103,6 +120,9 @@ public:
 	Int m_framesPerSecondLimit;
 	Int	m_chipSetType;	///<See W3DShaderManager::ChipsetType for options
 	Bool m_windowed;
+	Int m_windowMode;					///< WindowModeType: fullscreen, borderless or windowed.  m_windowed
+														///< is derived from it and is what the device layer reads.
+	Int m_msaaLevel;					///< multisampling, as an index into the levels the options menu offers
 	Int m_xResolution;
 	Int m_yResolution;
 	Int m_maxShellScreens;  ///< this many shells layouts can be loaded at once
@@ -261,6 +281,7 @@ public:
 	Bool m_debugSupplyCenterPlacement; ///< Dumps to log everywhere it thinks about placing a supply center
 	Bool m_debugAIObstacles;			///< Used to display AI obstacle debug information
 	Bool m_showObjectHealth;			///< debug display object health
+	Int m_healthBarMode;					///< HealthBarModeType: which units wear a bar at all
 	Bool m_scriptDebug;						///< Should we attempt to load the script debugger window (.DLL)
 	Bool m_particleEdit;					///< Should we attempt to load the particle editor (.DLL)
 	Bool m_displayDebug;					///< Used to display display debug info
@@ -355,6 +376,7 @@ public:
 	Int m_autoSkirmishAIStateOdd;		///< -aidiff2 <name>: rung for the odd-numbered slots (0 = same as -aidiff)
 	Int m_maxGameFrames;						///< -maxframes <n>: quit after n logic frames however the match is going (0 = no limit)
 	Int m_autoCameraSeconds;				///< -autocamera <n>: every n seconds, move the camera to wherever the fighting is (0 = off)
+	Int m_traceMoveID;							///< -tracemove [id]: log one movement line a frame for this object (0 = off, -1 = the first unit that gets blocked)
 	AsciiString m_netGameHosts;				///< -netgame <ip>[,<ip>...]: the slot list of a LAN game started from the command line (empty = off)
 	Int m_netGameLocalSlot;						///< -netslot <n>: which of those addresses this copy of the game is
 
@@ -579,5 +601,12 @@ private:
 extern GlobalData* TheWritableGlobalData;
 
 #define TheGlobalData ((const GlobalData*)TheWritableGlobalData)
+
+/** Derive m_windowed - and, for borderless, the resolution and edge scrolling - from m_windowMode.
+	*
+	* Anything that writes m_windowMode calls this afterwards: the preferences pass, and every command
+	* line switch that picks a mode.  Keeping the derivation in one place is what stops -borderless and
+	* a borderless Options.ini from disagreeing about what borderless entails. */
+extern void applyWindowMode( void );
 
 #endif

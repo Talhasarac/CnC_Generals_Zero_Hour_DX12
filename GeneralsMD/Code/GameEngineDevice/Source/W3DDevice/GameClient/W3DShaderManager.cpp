@@ -3072,6 +3072,20 @@ void W3DShaderManager::startRenderToTexture(void)
 		rttComplain( "SetRenderTarget(texture) failed" );
 		return;
 	}
+	if (depthSurface != m_oldDepthSurface)
+	{
+		//The frame's WW3D::Begin_Render cleared the back buffer's depth, not this one - it is a
+		//second surface that only exists while multisampling, and its contents are undefined
+		//until somebody writes them.  Left alone it reads as "everything is already nearer than
+		//you", every triangle fails the depth test and the texture comes back holding nothing:
+		//a black world under a live UI, which is what bloom looked like with MSAA on.
+		D3DSURFACE_DESC depthDesc;
+		depthSurface->GetDesc(&depthDesc);
+		DWORD clearFlags = D3DCLEAR_ZBUFFER;
+		if (depthDesc.Format == D3DFMT_D24S8 || depthDesc.Format == D3DFMT_D24X4S4 || depthDesc.Format == D3DFMT_D15S1)
+			clearFlags |= D3DCLEAR_STENCIL;
+		DX8Wrapper::_Get_D3D_Device8()->Clear(0, NULL, clearFlags, 0, 1.0f, 0);
+	}
 	m_renderingToTexture = true;
 	if (TheGlobalData->m_showSoftWaterEdge)
 	{	//Soft water edges use frame buffer destination alpha so we must clear it to a known value.

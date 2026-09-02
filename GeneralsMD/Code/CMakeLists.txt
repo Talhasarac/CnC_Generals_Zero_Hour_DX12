@@ -522,7 +522,15 @@ add_custom_command(TARGET generals POST_BUILD
   # these land in Run/Art/Textures where the W3D file system looks first.
   COMMAND ${CMAKE_COMMAND} -E copy_directory
           ${CMAKE_CURRENT_SOURCE_DIR}/Data/Art/Textures
-          ${CMAKE_CURRENT_SOURCE_DIR}/../Run/Art/Textures)
+          ${CMAKE_CURRENT_SOURCE_DIR}/../Run/Art/Textures
+  # The fork's window layouts, generated from the shipped ones by Tools/*.py and
+  # tracked here.  They live outside Data/ in the archive (Window/Menus/...), and
+  # a loose file wins over WindowZH.big.  Layouts are not in the multiplayer INI
+  # checksum, so an out of date copy costs a wrong looking screen, not a refused
+  # join.
+  COMMAND ${CMAKE_COMMAND} -E copy_directory
+          ${CMAKE_CURRENT_SOURCE_DIR}/Data/Window
+          ${CMAKE_CURRENT_SOURCE_DIR}/../Run/Window)
 add_dependencies(generals d3d8to9)
 
 # ===========================================================================
@@ -625,6 +633,13 @@ if(Python3_Interpreter_FOUND)
   # synthetic one and checks the block parser did not eat an End or duplicate a key.
   add_test(NAME vfx_tune_selfcheck
            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/Tools/vfx_tune.py selfcheck)
+  # The options screen is three tracked files that have to agree: TheOptionCatalog names a widget,
+  # Data/Window/Menus/OptionsMenu.wnd has to carry it, and Data/Patch.str has to carry its label,
+  # its tooltip and every combo box entry.  Nothing at build time notices a typo in any of them -
+  # the control is just never filled in, or the screen draws the key name - so it is checked here.
+  add_test(NAME optionsmenu_selfcheck
+           COMMAND ${Python3_EXECUTABLE}
+                   ${CMAKE_CURRENT_SOURCE_DIR}/Tools/optionsmenu_layout.py selfcheck)
 endif()
 
 if(RELEASE_DEBUG_LOGGING)

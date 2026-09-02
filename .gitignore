@@ -17,3 +17,7 @@ CLAUDE.md
 
 # graphify knowledge-graph output + extraction cache (derived, ~230 MB)
 **/graphify-out/
+
+# Layouts pulled out of WindowZH.big to feed Tools/optionsmenu_layout.py. That is game data and
+# does not belong in the repo; re-extract it with Tools/bigfile.py when a layout has to be redone.
+**/Tools/wnd/

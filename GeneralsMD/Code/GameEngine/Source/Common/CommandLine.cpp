@@ -29,6 +29,7 @@
 #include "Common/CommandLine.h"
 #include "Common/CRCDebug.h"
 #include "Common/LocalFileSystem.h"
+#include "Common/OptionsCatalog.h"
 #include "Common/Version.h"
 #include "GameClient/TerrainVisual.h" // for TERRAIN_LOD_MIN definition
 #include "GameClient/GameText.h"
@@ -133,7 +134,8 @@ Int parseWin(char *args[], int)
 {
 	if (TheWritableGlobalData)
 	{
-		TheWritableGlobalData->m_windowed = true;
+		TheWritableGlobalData->m_windowMode = WINDOW_MODE_WINDOWED;
+		applyWindowMode();
 	}
 	return 1;
 }
@@ -145,7 +147,9 @@ Int parseWin(char *args[], int)
 	 and leaves a second monitor usable.  The window style and size are decided in WinMain, which
 	 preparses -borderless off the raw command line long before this parser runs - the window has to
 	 exist before the engine does.  What is left here is the back buffer, which has to match the
-	 window or the picture is a stretched blit and the cursor no longer lands where it is drawn.
+	 window or the picture is a stretched blit and the cursor no longer lands where it is drawn, and
+	 applyWindowMode is what sizes it - the same code an Options.ini that says Borderless goes
+	 through, so the switch and the setting cannot drift apart.
 
 	 -xres/-yres after -borderless still win, for a smaller back buffer in a borderless window.
 
@@ -158,10 +162,8 @@ Int parseBorderless(char *args[], int)
 {
 	if (TheWritableGlobalData)
 	{
-		TheWritableGlobalData->m_windowed = true;
-		TheWritableGlobalData->m_xResolution = GetSystemMetrics( SM_CXSCREEN );
-		TheWritableGlobalData->m_yResolution = GetSystemMetrics( SM_CYSCREEN );
-		TheWritableGlobalData->m_edgeScrollInWindowedMode = TRUE;
+		TheWritableGlobalData->m_windowMode = WINDOW_MODE_BORDERLESS;
+		applyWindowMode();
 	}
 	return 1;
 }
@@ -397,7 +399,8 @@ Int parseNoWin(char *args[], int)
 {
 	if (TheWritableGlobalData)
 	{
-		TheWritableGlobalData->m_windowed = false;
+		TheWritableGlobalData->m_windowMode = WINDOW_MODE_FULLSCREEN;
+		applyWindowMode();
 	}
 	return 1;
 }
@@ -698,7 +701,8 @@ Int parseParticleEdit(char *args[], int)
 	{
 		TheWritableGlobalData->m_particleEdit = TRUE;
 		TheWritableGlobalData->m_winCursors = TRUE;
-		TheWritableGlobalData->m_windowed = TRUE;
+		TheWritableGlobalData->m_windowMode = WINDOW_MODE_WINDOWED;
+		applyWindowMode();
 	}
 	return 1;
 }
@@ -1266,7 +1270,10 @@ Int parseHeadless(char *args[], int num)
 	if (TheWritableGlobalData)
 	{
 		TheWritableGlobalData->m_headless = TRUE;
-		TheWritableGlobalData->m_windowed = TRUE;
+		// windowed, and plainly so: a borderless Options.ini would otherwise hand a batch run the
+		// whole display to draw a picture nobody is looking at
+		TheWritableGlobalData->m_windowMode = WINDOW_MODE_WINDOWED;
+		applyWindowMode();
 		TheWritableGlobalData->m_xResolution = HEADLESS_RESOLUTION;
 		TheWritableGlobalData->m_yResolution = HEADLESS_RESOLUTION;
 		TheWritableGlobalData->m_audioOn = FALSE;
@@ -1297,6 +1304,27 @@ Int parseMaxGameFrames(char *args[], int num)
 	 * terrain window scrolling, shroud updates, models and textures loading the first time they come
 	 * on screen - is invisible to a run that stares at one spot, which is exactly the blind spot a
 	 * stutter likes to live in.  Default 5 seconds if no number is given. */
+/* -msaa [N]: multisampled back buffer.  Bare means 4x, a number means N (2..16), and anything the
+	 device will not give is degraded on its own inside DX8Wrapper.  It is stored as the same index
+	 the options menu writes to Options.ini, so the switch and the setting are one value; the switch
+	 wins because the command line is parsed after the preferences file. */
+Int parseMSAA(char *args[], int num)
+{
+	if (TheWritableGlobalData)
+	{
+		unsigned samples = 4;	// a bare -msaa means 4x
+		Int consumed = 1;
+		if (num > 1 && args[1] && args[1][0] >= '0' && args[1][0] <= '9')
+		{
+			samples = (unsigned)atoi(args[1]);
+			consumed = 2;
+		}
+		TheWritableGlobalData->m_msaaLevel = msaaLevelForSamples(samples);
+		return consumed;
+	}
+	return 1;
+}
+
 Int parseAutoCamera(char *args[], int num)
 {
 	if (TheWritableGlobalData)
@@ -1312,6 +1340,34 @@ Int parseAutoCamera(char *args[], int num)
 		if (seconds < 1)
 			seconds = 1;
 		TheWritableGlobalData->m_autoCameraSeconds = seconds;
+		return consumed;
+	}
+	return 1;
+}
+
+/* -tracemove [id]: one line a frame, for one unit, naming every value that can zero its speed.
+	 *
+	 * A jam is an argument between four numbers - the speed the unit wants, the ceiling a collision
+	 * put on it, the decaying bump limit and the frames it has spent blocked - and none of them can
+	 * be seen from outside the object.  The aggregate counters say a run had 40000 blocked frames;
+	 * they cannot say which line of code stopped the tank.  With no id the trace attaches itself to
+	 * the first unit that gets blocked and follows that one for the rest of the run, which is what
+	 * you want when the jam is somewhere in a batch and nobody knows any object's id in advance. */
+Int parseTraceMove(char *args[], int num)
+{
+	if (TheWritableGlobalData)
+	{
+		Int id = -1; // no number: follow the first unit that gets blocked
+		Int consumed = 1;
+		// The value is optional, so only take the next word if it is actually a number.
+		if (num > 1 && args[1] && args[1][0] >= '0' && args[1][0] <= '9')
+		{
+			id = atoi(args[1]);
+			consumed = 2;
+		}
+		if (id == 0)
+			id = -1; // 0 is not a valid object id, and it is how the feature is switched off
+		TheWritableGlobalData->m_traceMoveID = id;
 		return consumed;
 	}
 	return 1;
@@ -1557,7 +1613,9 @@ static CommandLineParam params[] =
 	{ "-observer", parseObserver },
 	{ "-headless", parseHeadless },
 	{ "-maxframes", parseMaxGameFrames },
+	{ "-msaa", parseMSAA },
 	{ "-autocamera", parseAutoCamera },
+	{ "-tracemove", parseTraceMove },
 	{ "-replay", parseReplay },
 	{ "-netgame", parseNetGame },
 	{ "-netslot", parseNetSlot },

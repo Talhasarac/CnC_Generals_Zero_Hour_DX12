@@ -82,6 +82,20 @@
 ///////////////////////////////////////////////////////////////////////////////
 void HideListBox(GameWindow * window);
 
+// bringComboToFront ==========================================================
+/** An open drop-down list grows downwards over whatever the .wnd file put
+	* underneath it, and children are drawn last-in-list-first, so a label
+	* declared before the combo box paints on top of the open list.  Move the
+	* combo box, and every ancestor up to but not including the parentless top
+	* level window (whose order is the window manager's modal business), to the
+	* front of its own parent's child list. */
+//=============================================================================
+static void bringComboToFront(GameWindow *window)
+{
+	for( GameWindow *onTop = window; onTop && onTop->winGetParent(); onTop = onTop->winGetParent() )
+		onTop->winBringToTop();
+}
+
 // GadgetComboBoxInput =========================================================
 /** Handle input for Combo box */
 //=============================================================================
@@ -167,6 +181,7 @@ WindowMsgHandledType GadgetComboBoxInput( GameWindow *window, UnsignedInt msg,
 					// If the Listbox isn't showing, Show it.
 					if(listBox->winIsHidden())
 					{
+						bringComboToFront(window);
 						listBox->winHide(FALSE);
 						window->winGetSize(&winSize.x, &winSize.y);
 						WinInstanceData *listInstData = listBox->winGetInstanceData();
@@ -651,6 +666,7 @@ WindowMsgHandledType GadgetComboBoxSystem( GameWindow *window, UnsignedInt msg,
 					// If the Listbox isn't showing, Show it.
 					if(listBox->winIsHidden())
 					{
+						bringComboToFront(window);
 						listBox->winHide(FALSE);
 						window->winGetSize(&winSize.x, &winSize.y);
 						WinInstanceData *listInstData = listBox->winGetInstanceData();

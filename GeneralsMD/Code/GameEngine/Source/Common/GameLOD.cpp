@@ -362,22 +362,9 @@ void GameLODManager::init(void)
 	// Camera zoom-out is deliberately not settable here: how much of the battlefield you can see
 	// is a competitive advantage, so it stays at the GameData.ini value for everyone.
 
-	TheWritableGlobalData->m_edgeScrollInWindowedMode = optionPref.getEdgeScrollInWindowedMode();
-	TheWritableGlobalData->m_snapBuildPlacementTo45 = optionPref.getSnapBuildPlacementTo45();
-	TheWritableGlobalData->m_snapCameraRotateTo45 = optionPref.getSnapCameraRotateTo45();
-	TheWritableGlobalData->m_gridBuildPlacement = optionPref.getGridBuildPlacement();
-	TheWritableGlobalData->m_nudgeBuildPlacement = optionPref.getNudgeBuildPlacement();
-	TheWritableGlobalData->m_middleMousePans = optionPref.getMiddleMousePans();
-	TheWritableGlobalData->m_zoomToCursor = optionPref.getZoomToCursor();
-	TheWritableGlobalData->m_showHudOverlay = optionPref.getShowHudOverlay();
-	TheWritableGlobalData->m_showPlacementRangeRing = optionPref.getShowPlacementRangeRing();
-	TheWritableGlobalData->m_workersReturnToSupply = optionPref.getWorkersReturnToSupply();
-	TheWritableGlobalData->m_detailedBuildTooltips = optionPref.getDetailedBuildTooltips();
-	TheWritableGlobalData->m_archiveReplays = optionPref.getArchiveReplays();
-
-	// Bloom is a look, not a detail level - it is honored at every preset, like the zoom ceiling.
-	TheWritableGlobalData->m_bloomIntensity = optionPref.getBloomIntensity();
-	TheWritableGlobalData->m_bloomThreshold = optionPref.getBloomThreshold();
+	// TheOptionCatalog is not read here.  It is read in GlobalData::parseGameDataDefinition, which
+	// runs while TheWritableGlobalData is being constructed and therefore before parseCommandLine;
+	// this function runs after it, and anything it wrote would overrule the command line.
 
 	setStaticLODLevel(userSetDetail);
 }

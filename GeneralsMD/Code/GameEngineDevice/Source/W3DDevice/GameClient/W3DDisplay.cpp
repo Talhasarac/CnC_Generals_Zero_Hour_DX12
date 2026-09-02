@@ -43,6 +43,8 @@ static void drawFramerateBar(void);
 #include "Common/ThingFactory.h"
 #include "Common/GameEngine.h"
 #include "Common/GlobalData.h"
+#include "Common/OptionsCatalog.h"
+#include "dx8wrapper.h"
 #include "Common/PerfTimer.h"
 #include "Common/FileSystem.h"
 #include "Common/LocalFileSystem.h"
@@ -760,7 +762,12 @@ void W3DDisplay::init( void )
 	setHeight( TheGlobalData->m_yResolution );
 	setBitDepth( W3D_DISPLAY_DEFAULT_BIT_DEPTH );
 
-	if( WW3D::Set_Render_Device( 0, 
+	// Multisampling has to be known before the device exists, and WW3D2 cannot read GlobalData, so
+	// the sample count is handed to it here.  msaaSamplesForLevel turns the stored index into 0, 2,
+	// 4, 8 or 16; the device degrades an unsupported one on its own.
+	DX8Wrapper::Set_Requested_MultiSample_Level( msaaSamplesForLevel( TheGlobalData->m_msaaLevel ) );
+
+	if( WW3D::Set_Render_Device( 0,
 															 getWidth(), 
 															 getHeight(), 
 															 getBitDepth(), 

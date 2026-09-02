@@ -65,6 +65,7 @@ enum
 #include "GameClient/GameWindow.h"
 
 // FORWARD REFERENCES /////////////////////////////////////////////////////////
+extern Int GadgetTabControl_tabAtOffset( Int distanceIn, Int tabSize, Int tabCount );///< which tab a click that far along the strip hit, -1 for none
 extern void GadgetTabControlComputeTabRegion( GameWindow *tabControl );///< Recalc the tab positions based on userData
 extern void GadgetTabControlCreateSubPanes( GameWindow *tabControl);///< Create (destroy old) Windows attached to userData as Panes
 extern void GadgetTabControlComputeSubPaneSize( GameWindow *tabControl, Int *width, Int *height, Int *x, Int *y );///<Helper to calc subPanes' dependent size

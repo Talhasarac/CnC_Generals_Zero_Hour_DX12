@@ -1368,6 +1368,8 @@ const char *GameEngine_headlessRunResult( UnsignedInt frame, UnsignedInt victory
 	return NULL;
 }
 
+extern void AIUpdate_resetMoveTrace( void );	///< -tracemove: forget the unit the last match followed
+
 /** -----------------------------------------------------------------------------------------------
  * -headless: decide whether the unattended run is finished, and if it is, write down how it went
  * and quit.  Two ways to finish: the match is decided, or -maxframes ran out.
@@ -1393,6 +1395,8 @@ static void updateHeadlessRun( void )
 			peakUnits[ i ] = 0;
 		// the shell map and the load did their own pathing; the run's numbers start here
 		Pathfinder::resetMatchProfile();
+		// and -tracemove with no id picks its unit out of the match, not out of the shell map
+		AIUpdate_resetMoveTrace();
 	}
 
 	const UnsignedInt frame = TheGameLogic->getFrame();
@@ -1436,6 +1440,18 @@ static void updateHeadlessRun( void )
 						 why, frame,
 						 frame - runStartFrame, wallMs / 1000.0f, logicFps,
 						 logicFps / (Real)TheGameEngine->getFramesPerSecondLimit()));
+
+	/* The state of every object in the world, in one number, at the frame the run stopped.  Every
+		 movement change in PATHFINDING-PLAN.md edits GameLogic, and a change that plays beautifully
+		 and desyncs multiplayer is a change that has to be found before it ships, not after somebody
+		 fails to join.  Record a fixed-seed match, play its replay back, compare this line: same
+		 frame and same CRC means the replay took the same path through the logic, which is the same
+		 property a second machine in a network game needs.  One walk of the object list, once, at
+		 the end of a run nobody is watching.
+
+		 It is deliberately the recalculated CRC and not the cached one - the cached value is only
+		 refreshed on frames a network game asks for it, and a skirmish never asks. */
+	DEBUG_LOG(("HEADLESS CRC: 0x%08X at frame %d\n", TheGameLogic->getCRC( CRC_RECALC ), frame));
 
 	// What the pathfinder did over the whole match, not just the one frame that ran over budget.
 	// A pathing change is argued with these: search count and time say what it cost, `nopath` and

@@ -619,19 +619,18 @@ public:  // ********************************************************************
 	enum { PRODUCTION_STRIP_WATCH_MAX = 3 };	///< and while watching, where eight columns share the
 																					///  screen and a column is a whole player: three cameos and
 																					///  a "+N", since a run of the same unit is one of them now
-	enum { PRODUCTION_STRIP_ROWS = 8 };			///< playing: the global column and the selected producer's.
+	enum { PRODUCTION_STRIP_ROWS = 8 };			///< playing: one column, the whole base's.
 																					///  watching: one column per player, so eight of them
 
 	//
-	// Which row is which while playing.  A lower number stands further from the left edge, so the
-	// queue is the column on the edge and the buildings going up on the map stand beside it.  The
-	// building you have selected does not get a column of its own - its items lead the queue column
-	// instead.  Rows nobody filled are closed up rather than left as a gap.
+	// Playing, everything the base has coming is one column: what a factory is turning out and what
+	// a dozer is raising stand in the same run of cells, soonest first, because the question is when
+	// the next thing lands and not which of the two kinds it is.  The building you have selected does
+	// not get a column of its own either - its items lead this one.
 	//
 	enum
 	{
-		PRODUCTION_ROW_SITES		= 0,	///< buildings a dozer or a worker is putting up
-		PRODUCTION_ROW_QUEUE		= 1		///< everything the whole base has queued
+		PRODUCTION_ROW_QUEUE		= 0		///< queues and building sites together
 	};
 
 	//
@@ -648,13 +647,12 @@ public:  // ********************************************************************
 		PRODUCTION_STRIP_TRAY_Y		= 7,
 		PRODUCTION_STRIP_QUEUE_W	= 39,	///< and how big it is there
 		PRODUCTION_STRIP_QUEUE_H	= 27,
-		PRODUCTION_STRIP_TRAY_OVER = 6,	///< that bar steps 35 between 41-tall slots: its trays overlap
-																		///  by six, and ours overlap by the same six on both axes
+		PRODUCTION_STRIP_TRAY_OVER = 6,	///< that bar steps 35 between 41-tall slots: its trays overlap by
+																		///  six sideways, and so do ours.  Stacked, they do not: the
+																		///  trays sit one on top of the next at their full height, so no
+																		///  cameo has another tray's rail lying over its top edge
 		PRODUCTION_STRIP_BAR_STEP	= 35	///< the step itself, kept so the overlap can be checked against it
 	};
-
-	///< how far one row of trays stands below the row above it, for a tray of that height
-	static Int stripRowStep( Int trayHeight );
 
 	///< does an item go in front of one already in the row?  the selected building's items are a
 	///< block of their own at the head of it; inside a block, soonest finished first, ties keeping
@@ -1010,7 +1008,8 @@ protected:
 	void drawIncomeRate( void );					///< income per minute, drawn beside the money window
 	void updateIncomeEstimate( Player *player );	///< income per minute, shown beside the money
 	void drawProductionStrip( void );			///< the production queue rows above the control bar
-	///< one of those columns, its left edge at 'left' and its bottom cell's top edge at 'bottomY'
+	///< one run of cells - a column while playing, a player's row while watching - with its left
+	///< edge at 'left' and its first cell's top edge at 'bottomY'
 	void drawProductionStripColumn( Int row, Int left, Int bottomY );
 	const Image *productionStripTray( void );	///< the bar's tray, mirrored, kept until the bar changes side
 	void stripTrayMetrics( ICoord2D *tray, ICoord2D *cameo, ICoord2D *hole, Int *step );	///< that tray's size, its cameo hole, and the column step
@@ -1050,10 +1049,10 @@ protected:
 	Int													m_hudIncomePerMin;			///< most recent income estimate, cash per minute, -1 until the window is warm
 
 	//
-	// The global production strip: every unit the local player has queued anywhere, one cameo
-	// each, soonest to finish first, left aligned above the control bar. drawProductionStrip()
-	// lays it out and records where each cameo landed; handleProductionStripClick() reads those
-	// back.
+	// The global production strip: everything the local player has coming - queued in any factory,
+	// or going up on the ground - one cameo each, soonest to finish first, in a column standing on
+	// the corner above the control bar. drawProductionStrip() lays it out and records where each
+	// cameo landed; handleProductionStripClick() reads those back.
 	//
 	ProductionStripSlot					m_productionStrip[ PRODUCTION_STRIP_ROWS ][ PRODUCTION_STRIP_ROW_MAX ];
 	Int													m_productionStripCount[ PRODUCTION_STRIP_ROWS ];	///< cameos drawn per row

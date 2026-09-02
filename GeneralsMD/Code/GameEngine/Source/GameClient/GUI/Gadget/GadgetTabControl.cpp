@@ -68,6 +68,32 @@
 
 // PUBLIC FUNCTIONS ///////////////////////////////////////////////////////////
 
+// GadgetTabControl_tabAtOffset ==============================================
+/** Which tab a click that far along the strip landed on, or -1 for none.
+	*
+	* The caller has already established that the click is inside the strip, and the strip is only as
+	* wide as the tabs, so this looks like it cannot miss.  It can, twice.  A click on the strip's
+	* very last pixel column is inside by the >= / <= test and divides out to tabCount, one past the
+	* end of subPaneDisabled.  And a tab control whose .wnd left the tab size at zero divides by it.
+	* Neither is reachable from the shipped screens, because nothing in the shipped game uses this
+	* gadget at all; both are reachable the moment somebody's layout does. */
+//=============================================================================
+Int GadgetTabControl_tabAtOffset( Int distanceIn, Int tabSize, Int tabCount )
+{
+	if( tabSize <= 0 || tabCount <= 0 || distanceIn < 0 )
+		return -1;
+
+	// a .wnd is data, so tabCount is whatever the file says; the array it indexes is not
+	if( tabCount > NUM_TAB_PANES )
+		tabCount = NUM_TAB_PANES;
+
+	const Int tab = distanceIn / tabSize;
+	if( tab >= tabCount )
+		return -1;
+
+	return tab;
+}
+
 // GadgetTabControlInput =====================================================
 /** Handle input for TabControl */
 //=============================================================================
@@ -111,8 +137,10 @@ WindowMsgHandledType GadgetTabControlInput( GameWindow *tabControl, UnsignedInt 
 				distanceIn = mouseX - tabsLeft;
 				tabSize = tabData->tabWidth;
 			}
-			Int tabPressed = distanceIn / tabSize;
-			if( ! tabData->subPaneDisabled[tabPressed]  &&  (tabPressed != tabData->activeTab) )
+			const Int tabPressed = GadgetTabControl_tabAtOffset( distanceIn, tabSize, tabData->tabCount );
+			if( tabPressed >= 0
+					&& !tabData->subPaneDisabled[tabPressed]
+					&& (tabPressed != tabData->activeTab) )
 				GadgetTabControlShowSubPane( tabControl, tabPressed );
 		}
 
@@ -284,14 +312,21 @@ void GadgetTabControlShowSubPane( GameWindow *tabControl, Int whichPane)
 		if( tabData->subPanes[paneIndex] != NULL )
 			tabData->subPanes[paneIndex]->winHide( true );
 	}
-	if( tabData->subPanes[whichPane] )
+	if( whichPane >= 0 && whichPane < NUM_TAB_PANES && tabData->subPanes[whichPane] )
 		tabData->activeTab = whichPane;
 	else
 		tabData->activeTab = 0;
 
 	tabData->activeTab = min( tabData->activeTab, tabData->tabCount - 1 );
 
-	tabData->subPanes[tabData->activeTab]->winHide( false );
+	// tabCount is read out of the .wnd and the panes are counted from the children, so a layout that
+	// declares more tabs than it has panes lands here on a null.  Falling back to pane zero shows the
+	// first tab instead, which is what a screen with one page too many should look like.
+	if( tabData->activeTab < 0 || tabData->subPanes[tabData->activeTab] == NULL )
+		tabData->activeTab = 0;
+
+	if( tabData->subPanes[tabData->activeTab] )
+		tabData->subPanes[tabData->activeTab]->winHide( false );
 }
 
 void GadgetTabControlCreateSubPanes( GameWindow *tabControl )///< Create User Windows attached to userData as Panes
@@ -355,7 +390,10 @@ void GadgetTabControlFixupSubPaneList( GameWindow *tabControl )
 			child = child->winGetNext();
 		}
 
-		while( child )
+		// stop at the end of the array, not at the end of the child list: the children are whatever the
+		// .wnd put inside this control, and one more than eight of them wrote over everything that
+		// follows subPanes - subPaneDisabled, paneBorder, activeTab and the four tab limits
+		while( child && childIndex < NUM_TAB_PANES )
 		{
 			tabData->subPanes[childIndex] = child;
 			childIndex++;

@@ -38,6 +38,7 @@
 #include "Common/GameEngine.h"
 #include "Common/UserPreferences.h"
 #include "Common/GameLOD.h"
+#include "Common/OptionsCatalog.h"
 #include "Common/Registry.h"
 #include "Common/Version.h"
 
@@ -218,6 +219,60 @@ extern void DoResolutionDialog();
 
 static Bool ignoreSelected = FALSE;
 WindowLayout *OptionsLayout = NULL;
+
+//-------------------------------------------------------------------------------------------------
+// The pages, and the buttons that show them.
+//
+// EA's screen was one panel with every control on it, and it was already out of room when it
+// shipped - the language filter, the keyboard button and the four camera check boxes are all still
+// in the layout, parked off the right edge with HIDDEN set because there was nowhere to put them.
+// The layout now sorts the same controls into five pages; this is the two arrays that name them
+// and the one function that decides which one you are looking at.
+//-------------------------------------------------------------------------------------------------
+enum { OPTIONS_PAGE_COUNT = 5 };
+
+static const char *TheOptionsPageNames[ OPTIONS_PAGE_COUNT ] =
+{
+	"OptionsMenu.wnd:PageDisplay",
+	"OptionsMenu.wnd:PageAudio",
+	"OptionsMenu.wnd:PageControls",
+	"OptionsMenu.wnd:PageGameplay",
+	"OptionsMenu.wnd:PageNetwork",
+};
+
+static const char *TheOptionsTabNames[ OPTIONS_PAGE_COUNT ] =
+{
+	"OptionsMenu.wnd:TabDisplay",
+	"OptionsMenu.wnd:TabAudio",
+	"OptionsMenu.wnd:TabControls",
+	"OptionsMenu.wnd:TabGameplay",
+	"OptionsMenu.wnd:TabNetwork",
+};
+
+static GameWindow *		optionsPage[ OPTIONS_PAGE_COUNT ]	= { NULL, NULL, NULL, NULL, NULL };
+static GameWindow *		optionsTab[ OPTIONS_PAGE_COUNT ]	= { NULL, NULL, NULL, NULL, NULL };
+static NameKeyType		optionsTabID[ OPTIONS_PAGE_COUNT ] =
+{
+	NAMEKEY_INVALID, NAMEKEY_INVALID, NAMEKEY_INVALID, NAMEKEY_INVALID, NAMEKEY_INVALID
+};
+
+//-------------------------------------------------------------------------------------------------
+/** Show one page and hide the other four.
+	*
+	* The page you are on is the disabled button, which is the one piece of tab feedback available
+	* without drawing new artwork: a pressed-looking tab would need a second image per button, and
+	* the buttons are cloned from one that already exists. */
+//-------------------------------------------------------------------------------------------------
+static void showOptionsPage( Int which )
+{
+	for( Int i = 0; i < OPTIONS_PAGE_COUNT; ++i )
+	{
+		if( optionsPage[ i ] )
+			optionsPage[ i ]->winHide( i != which );
+		if( optionsTab[ i ] )
+			optionsTab[ i ]->winEnable( i != which );
+	}
+}
 
 enum Detail
 {
@@ -714,155 +769,10 @@ Int OptionPreferences::getParticleCap(void)
 	 mismatch check that refuses to start a LAN game between machines whose data differs.  The
 	 ceiling is fixed for everyone at ZOOM_OUT_LIMIT_FACTOR times the GameData.ini value. */
 
-Bool OptionPreferences::getEdgeScrollInWindowedMode(void)
-{
-	// Another power-user Options.ini key.  Retail refuses to edge-scroll in a window because the
-	// cursor can legitimately sit on the border while you reach for something else; on a second
-	// monitor (or borderless) that is exactly the behaviour you want back.
-	OptionPreferences::const_iterator it = find("EdgeScrollInWindowedMode");
-	if (it == end())
-		return TheGlobalData->m_edgeScrollInWindowedMode;
-
-	return stricmp(it->second.str(), "yes") == 0;
-}
-
-Bool OptionPreferences::getSnapBuildPlacementTo45(void)
-{
-	// Power-user Options.ini key.  Drag-to-rotate placement is free-angle in retail; with this on
-	// it clicks to the eight 45 degree headings, which is what you want for walls and for lining
-	// defenses up with a base.
-	OptionPreferences::const_iterator it = find("SnapBuildPlacementTo45");
-	if (it == end())
-		return TheGlobalData->m_snapBuildPlacementTo45;
-
-	return stricmp(it->second.str(), "yes") == 0;
-}
-
-Bool OptionPreferences::getSnapCameraRotateTo45(void)
-{
-	OptionPreferences::const_iterator it = find("SnapCameraRotateTo45");
-	if (it == end())
-		return TheGlobalData->m_snapCameraRotateTo45;
-
-	return stricmp(it->second.str(), "yes") == 0;
-}
-
-Bool OptionPreferences::getGridBuildPlacement(void)
-{
-	// Experimental Options.ini key.  Retail places a structure wherever the cursor happens to be,
-	// to the pixel; with this on the footprint lands on the pathfinder's own 10-unit build grid, so
-	// two buildings put down by eye end up sharing an edge instead of leaving a stripe of ground
-	// too narrow to walk through.
-	OptionPreferences::const_iterator it = find("GridBuildPlacement");
-	if (it == end())
-		return TheGlobalData->m_gridBuildPlacement;
-
-	return stricmp(it->second.str(), "yes") == 0;
-}
-
-Bool OptionPreferences::getNudgeBuildPlacement(void)
-{
-	// Options.ini key.  A structure whose spot is blocked slides to the nearest one it does fit
-	// instead of just going red under the cursor, so a base can be laid out by pointing roughly at
-	// where each building goes.  Off restores the retail "find the legal pixel yourself" placement.
-	OptionPreferences::const_iterator it = find("NudgeBuildPlacement");
-	if (it == end())
-		return TheGlobalData->m_nudgeBuildPlacement;
-
-	return stricmp(it->second.str(), "yes") == 0;
-}
-
-Bool OptionPreferences::getMiddleMousePans(void)
-{
-	OptionPreferences::const_iterator it = find("MiddleMousePans");
-	if (it == end())
-		return TheGlobalData->m_middleMousePans;
-
-	return stricmp(it->second.str(), "yes") == 0;
-}
-
-Bool OptionPreferences::getZoomToCursor(void)
-{
-	OptionPreferences::const_iterator it = find("ZoomToCursor");
-	if (it == end())
-		return TheGlobalData->m_zoomToCursor;
-
-	return stricmp(it->second.str(), "yes") == 0;
-}
-
-Bool OptionPreferences::getShowHudOverlay(void)
-{
-	OptionPreferences::const_iterator it = find("ShowHudOverlay");
-	if (it == end())
-		return TheGlobalData->m_showHudOverlay;
-
-	return stricmp(it->second.str(), "yes") == 0;
-}
-
-Bool OptionPreferences::getShowPlacementRangeRing(void)
-{
-	OptionPreferences::const_iterator it = find("ShowPlacementRangeRing");
-	if (it == end())
-		return TheGlobalData->m_showPlacementRangeRing;
-
-	return stricmp(it->second.str(), "yes") == 0;
-}
-
-Bool OptionPreferences::getWorkersReturnToSupply(void)
-{
-	OptionPreferences::const_iterator it = find("WorkersReturnToSupply");
-	if (it == end())
-		return TheGlobalData->m_workersReturnToSupply;
-
-	return stricmp(it->second.str(), "yes") == 0;
-}
-
-Bool OptionPreferences::getDetailedBuildTooltips(void)
-{
-	OptionPreferences::const_iterator it = find("DetailedBuildTooltips");
-	if (it == end())
-		return TheGlobalData->m_detailedBuildTooltips;
-
-	return stricmp(it->second.str(), "yes") == 0;
-}
-
-Bool OptionPreferences::getArchiveReplays(void)
-{
-	OptionPreferences::const_iterator it = find("ArchiveReplays");
-	if (it == end())
-		return TheGlobalData->m_archiveReplays;
-
-	return stricmp(it->second.str(), "yes") == 0;
-}
-
-Int OptionPreferences::getBloomIntensity(void)
-{
-	// Not written by the options menu - a power-user Options.ini key.  Percent, 0 = off, which is
-	// what the GameData.ini default is: the game's artwork has no HDR range in it, so how much
-	// glow looks right is a matter of taste rather than something to pick on the player's behalf.
-	OptionPreferences::const_iterator it = find("Bloom");
-	if (it == end())
-		return TheGlobalData->m_bloomIntensity;
-
-	const Int intensity = atoi(it->second.str());
-	if (intensity < 0) return 0;
-	if (intensity > 100) return 100;
-	return intensity;
-}
-
-Int OptionPreferences::getBloomThreshold(void)
-{
-	// Percent: the brightness below which nothing blooms at all.  Lower it and more of the picture
-	// joins in; raise it and only the genuinely blinding things glow.
-	OptionPreferences::const_iterator it = find("BloomThreshold");
-	if (it == end())
-		return TheGlobalData->m_bloomThreshold;
-
-	const Int threshold = atoi(it->second.str());
-	if (threshold < 0) return 0;
-	if (threshold > 100) return 100;
-	return threshold;
-}
+/* The fourteen getters that used to sit here - EdgeScrollInWindowedMode through BloomThreshold -
+	 were fourteen copies of the same six lines, and the copy is what made adding a setting cost ten
+	 edits.  They are rows in TheOptionCatalog now (Common/OptionsCatalog.cpp), which also gives them
+	 the half they never had: the menu can write them back. */
 
 Int OptionPreferences::getTextureReduction(void)
 {
@@ -1092,10 +1002,119 @@ static void setDefaults( void )
 	}
 }
 
+//-------------------------------------------------------------------------------------------------
+/** The control this catalog row is shown by, or NULL while the row has no control yet. */
+//-------------------------------------------------------------------------------------------------
+static GameWindow *findOptionWidget( const OptionDef& def )
+{
+	if( def.widgetName == NULL || def.widgetName[ 0 ] == 0 )
+		return NULL;
+
+	return TheWindowManager->winGetWindowFromId(
+		NULL, TheNameKeyGenerator->nameToKey( AsciiString( def.widgetName ) ) );
+}
+
+//-------------------------------------------------------------------------------------------------
+/** GlobalData -> the controls, for every catalog row that has one.
+	*
+	* This is the pass EA wrote by hand once per setting, in three places each.  A combo box builds
+	* its entries here too: an OPTION_ENUM's labelKey with the value appended is the CSF key, so
+	* HealthBars with hi = 3 reads GUI:HealthBars0 through GUI:HealthBars3 and a fifth mode is a
+	* bigger hi and one more string. */
+//-------------------------------------------------------------------------------------------------
+static void fillCatalogWidgets( void )
+{
+	const Color entryColor = GameMakeColor( 255, 255, 255, 255 );
+
+	for( Int i = 0; i < TheOptionCatalogCount; ++i )
+	{
+		const OptionDef& def = TheOptionCatalog[ i ];
+		GameWindow *widget = findOptionWidget( def );
+		if( widget == NULL )
+			continue;
+
+		const Int value = clampOptionValue( def, def.get() );
+
+		switch( def.kind )
+		{
+			case OPTION_BOOL:
+				GadgetCheckBoxSetChecked( widget, value != 0 );
+				break;
+
+			case OPTION_ENUM:
+			{
+				GadgetComboBoxReset( widget );
+				for( Int entry = def.lo; entry <= def.hi; ++entry )
+				{
+					AsciiString key;
+					key.format( "%s%d", def.labelKey, entry );
+					GadgetComboBoxAddEntry( widget, TheGameText->fetch( key ), entryColor );
+				}
+				GadgetComboBoxSetSelectedPos( widget, value - def.lo );
+				break;
+			}
+
+			case OPTION_INT:
+				GadgetSliderSetPosition( widget, value );
+				break;
+		}
+	}
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The controls -> GlobalData, for every catalog row that has one.
+	*
+	* Runs before saveOptionsToPreferences, which writes GlobalData out; a row with no control keeps
+	* whatever was loaded and is written back unchanged. */
+//-------------------------------------------------------------------------------------------------
+static void readCatalogWidgets( void )
+{
+	for( Int i = 0; i < TheOptionCatalogCount; ++i )
+	{
+		const OptionDef& def = TheOptionCatalog[ i ];
+		GameWindow *widget = findOptionWidget( def );
+		if( widget == NULL )
+			continue;
+
+		switch( def.kind )
+		{
+			case OPTION_BOOL:
+				def.set( GadgetCheckBoxIsChecked( widget ) ? 1 : 0 );
+				break;
+
+			case OPTION_ENUM:
+			{
+				Int selected = -1;
+				GadgetComboBoxGetSelectedPos( widget, &selected );
+				// -1 is a combo box with nothing picked, which is not a value to write anywhere
+				if( selected >= 0 )
+					def.set( clampOptionValue( def, def.lo + selected ) );
+				break;
+			}
+
+			case OPTION_INT:
+				def.set( clampOptionValue( def, GadgetSliderGetPosition( widget ) ) );
+				break;
+		}
+	}
+}
+
 static void saveOptions( void )
 {
 	Int index;
 	Int val;
+
+	//-------------------------------------------------------------------------------------------------
+	// The catalog's controls, read back into GlobalData before the pass below writes GlobalData out.
+	readCatalogWidgets();
+
+	//-------------------------------------------------------------------------------------------------
+	// Everything in TheOptionCatalog, written back from GlobalData in one pass.  A catalog setting
+	// with a widget has put its value into GlobalData by the time Accept runs; one without a widget
+	// writes back what it loaded, which normalizes the spelling and the range of a hand-edited key
+	// without changing what it means.
+	saveOptionsToPreferences( *pref );
+
 	//-------------------------------------------------------------------------------------------------
 //	// provider type
 //	Bool isChecked = GadgetCheckBoxIsChecked(checkAudioHardware);
@@ -1462,6 +1481,9 @@ static void DestroyOptionsLayout() {
 static void showAdvancedOptions()
 {
 	WinAdvancedDisplay->winHide(FALSE);
+	// The pages stay visible underneath, so this window is only on top for as long as nothing else
+	// has been raised since the layout loaded - and opening a drop-down raises the page holding it.
+	WinAdvancedDisplay->winBringToTop();
 }
 
 static void acceptAdvancedOptions()
@@ -1951,6 +1973,19 @@ void OptionsMenuInit( WindowLayout *layout, void *userData )
 	// set the gamma slider
  	GadgetSliderSetPosition( sliderGamma, REAL_TO_INT(pref->getGammaValue()) );
 
+	//-------------------------------------------------------------------------------------------------
+	// the pages, their buttons, and everything the catalog puts on them
+	for( Int page = 0; page < OPTIONS_PAGE_COUNT; ++page )
+	{
+		optionsPage[ page ] = TheWindowManager->winGetWindowFromId(
+			NULL, TheNameKeyGenerator->nameToKey( AsciiString( TheOptionsPageNames[ page ] ) ) );
+		optionsTabID[ page ] = TheNameKeyGenerator->nameToKey( AsciiString( TheOptionsTabNames[ page ] ) );
+		optionsTab[ page ] = TheWindowManager->winGetWindowFromId( NULL, optionsTabID[ page ] );
+	}
+
+	fillCatalogWidgets();
+	showOptionsPage( 0 );
+
 	// show menu
 	layout->hide( FALSE );
 
@@ -2149,6 +2184,13 @@ WindowMsgHandledType OptionsMenuSystem( GameWindow *window, UnsignedInt msg,
 				break;
 			GameWindow *control = (GameWindow *)mData1;
 			Int controlID = control->winGetWindowId();
+
+			for( Int page = 0; page < OPTIONS_PAGE_COUNT; ++page )
+				if( controlID == optionsTabID[ page ] )
+				{
+					showOptionsPage( page );
+					return MSG_HANDLED;
+				}
 
 			if( controlID == buttonBack )
 			{

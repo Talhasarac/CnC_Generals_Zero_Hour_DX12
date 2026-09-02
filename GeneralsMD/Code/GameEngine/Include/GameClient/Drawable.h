@@ -82,6 +82,10 @@ extern Real Drawable_effectiveOpacity( Real explicitOpacity, Real stealthOpacity
 extern Bool Drawable_structureShowsHealthBar( Bool isBridge, Bool isUnowned, Bool isGarrisonable,
 																							Bool isCapturable );
 
+///< whether the health bar setting lets this object show one right now
+extern Bool Drawable_healthBarModeShows( Int healthBarMode, Bool isSelected, Bool isMousedOver,
+																				 Bool isDamaged );
+
 //-----------------------------------------------------------------------------
 //@TODO -- The drawable icon system needs to be implemented in a proper manner -- KM
 //				 Fact 1: Every drawable in the world shouldn't have to have a pointer 

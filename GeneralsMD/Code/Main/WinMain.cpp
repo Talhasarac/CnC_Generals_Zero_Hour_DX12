@@ -49,6 +49,7 @@
 #include "Common/GameSounds.h"
 #include "Common/Debug.h"
 #include "Common/EarlyCommandLine.h"
+#include "Common/EarlyOptions.h"
 #include "Common/GameMemory.h"
 #include "Common/SafeDisc/CdaPfn.h"
 #include "Common/StackDump.h"
@@ -971,6 +972,17 @@ Int APIENTRY WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance,
 		::SetCurrentDirectory(buffer);
 
 
+		// The window style is settled by CreateWindow below, which happens before the engine and
+		// therefore before anything has read a preferences file, so the saved window mode is read
+		// straight out of Options.ini here.  The command line is parsed after this and overrides it,
+		// which is the same order the engine uses for every other setting.
+		{
+			const int savedMode = getEarlyOptionInt( "WindowMode", WINDOW_MODE_FULLSCREEN,
+																							 0, WINDOW_MODE_COUNT - 1 );
+			ApplicationIsBorderless = (savedMode == WINDOW_MODE_BORDERLESS);
+			ApplicationIsWindowed = (savedMode != WINDOW_MODE_FULLSCREEN);
+		}
+
 		/*
 		** Convert WinMain arguments to simple main argc and argv
 		*/
@@ -984,7 +996,15 @@ Int APIENTRY WinMain( HINSTANCE hInstance, HINSTANCE hPrevInstance,
 			argv[argc++] = strtrim(token);
 			//added a preparse step for this flag because it affects window creation style
 			if (stricmp(token,"-win")==0)
+			{
 				ApplicationIsWindowed=true;
+				ApplicationIsBorderless=false;	// an explicit -win beats a borderless Options.ini
+			}
+			if (stricmp(token,"-fullscreen")==0)
+			{
+				ApplicationIsWindowed=false;
+				ApplicationIsBorderless=false;
+			}
 			// same reason: -borderless is borderless fullscreen - a windowed device with no caption
 			// or frame, covering the display at the desktop resolution - so it implies -win.  Parsed
 			// here rather than from Options.ini because the window exists long before the engine's

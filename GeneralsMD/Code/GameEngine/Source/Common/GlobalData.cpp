@@ -43,6 +43,7 @@
 #include "Common/FileSystem.h"
 #include "Common/GameAudio.h"
 #include "Common/INI.h"
+#include "Common/OptionsCatalog.h"
 #include "Common/registry.h"
 #include "Common/UserPreferences.h"
 #include "Common/Version.h"
@@ -357,6 +358,7 @@ GlobalData* GlobalData::m_theOriginal = NULL;
 	{ "ShowClientPhysics",				INI::parseBool,				NULL,			offsetof( GlobalData, m_showClientPhysics ) },
 	{ "ShowTerrainNormals",				INI::parseBool,				NULL,			offsetof( GlobalData, m_showTerrainNormals ) },
 	{ "ShowObjectHealth",						INI::parseBool,				NULL,			offsetof( GlobalData, m_showObjectHealth ) },
+	{ "HealthBars",									INI::parseInt,				NULL,			offsetof( GlobalData, m_healthBarMode ) },
 
 	{ "ParticleScale",										INI::parseReal,					NULL,	 offsetof( GlobalData, m_particleScale ) },
 	{ "AutoFireParticleSmallPrefix",			INI::parseAsciiString,  NULL,  offsetof( GlobalData, m_autoFireParticleSmallPrefix ) },
@@ -632,6 +634,8 @@ GlobalData::GlobalData()
 	m_framesPerSecondLimit = 0;
 	m_chipSetType = 0;
 	m_windowed = 0;
+	m_windowMode = WINDOW_MODE_FULLSCREEN;
+	m_msaaLevel = 0;
 	m_xResolution = 800;
 	m_yResolution = 600;
 	m_maxShellScreens = 0;
@@ -675,6 +679,7 @@ GlobalData::GlobalData()
 	m_headless = FALSE;
 	m_maxGameFrames = 0; // run until the match ends
 	m_autoCameraSeconds = 0; // the camera stays where it was put
+	m_traceMoveID = 0; // no movement trace
 	m_netGameHosts.clear(); // no network game from the command line
 	m_netGameLocalSlot = 0;
 	m_horizontalScrollSpeedFactor = 1.0;
@@ -856,6 +861,8 @@ GlobalData::GlobalData()
 	m_showClientPhysics = TRUE;
 	m_showTerrainNormals = FALSE;
 	m_showObjectHealth = FALSE;
+	// what this fork has always done, so nobody's game changes until they say so
+	m_healthBarMode = HEALTH_BAR_ALWAYS;
 
 	m_particleEdit = FALSE;
 
@@ -1031,22 +1038,27 @@ GlobalData::GlobalData()
 	//
 	// The fork's own conveniences default ON. They were opt-in at first, which in practice meant
 	// nobody saw them: an Options.ini that predates them simply has no such key, so every one of
-	// them stayed off and the features looked like they had never been added. Each can still be
-	// turned off by name in Options.ini.
+	// them stayed off and the features looked like they had never been added.
+	//
+	// The first four are still catalog rows, so Options.ini can still turn them off by name even
+	// though the menu no longer shows them. The rest are not: they left TheOptionCatalog with the
+	// controls that used to set them, and what is written here is what every game gets. GameData.ini
+	// remains the way to change one, because the field table above still names it.
 	//
 	m_edgeScrollInWindowedMode = TRUE;
-	m_snapBuildPlacementTo45 = TRUE;
 	m_snapCameraRotateTo45 = TRUE;
-	m_gridBuildPlacement = TRUE;
-	m_nudgeBuildPlacement = TRUE;
 	// middle-drag stays a rotate by default (it snaps to 45 degrees on release); pan is opt-in
 	m_middleMousePans = FALSE;
 	m_zoomToCursor = TRUE;
+
+	m_snapBuildPlacementTo45 = TRUE;
+	m_gridBuildPlacement = TRUE;
+	m_nudgeBuildPlacement = TRUE;
 	m_showHudOverlay = TRUE;
 	m_showPlacementRangeRing = TRUE;
 	m_workersReturnToSupply = TRUE;
 	m_detailedBuildTooltips = TRUE;
-	m_archiveReplays = FALSE;
+	m_archiveReplays = TRUE;
 
 	// Bloom is the one that does NOT default on: it changes how the game looks rather than what it
 	// can do, and the artwork was painted in 2003 for a screen with no glow at all.  "Bloom = 60"
@@ -1292,6 +1304,11 @@ void GlobalData::parseGameDataDefinition( INI* ini )
 	// parse the ini weapon definition
 	ini->initFromINI( TheWritableGlobalData, s_GlobalDataFieldParseTable );
 
+	// GameData.ini knows only the old boolean.  Seed the three-way mode from it, so a data file that
+	// asks for a window still gets one, and let Options.ini and then the command line refine it.
+	TheWritableGlobalData->m_windowMode = TheWritableGlobalData->m_windowed
+			? WINDOW_MODE_WINDOWED : WINDOW_MODE_FULLSCREEN;
+
 
 	// override INI values with user preferences
 	OptionPreferences optionPref;
@@ -1326,5 +1343,36 @@ void GlobalData::parseGameDataDefinition( INI* ini )
 
 	TheWritableGlobalData->m_xResolution = xres;
 	TheWritableGlobalData->m_yResolution = yres;
+
+	// Everything in TheOptionCatalog, in one pass, and last: a row is allowed to overwrite what the
+	// hand-written block above just read.  This is also why the catalog is read here and not in
+	// GameLODManager::setOptionPreferences, where it started - this function runs while
+	// TheWritableGlobalData is being constructed, which is before parseCommandLine, so the command
+	// line still wins over the preferences file.  setOptionPreferences runs after it and would not.
+	loadOptionsFromPreferences( optionPref );
+
+	applyWindowMode();
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Work out what m_windowMode means for the rest of the engine. */
+//-------------------------------------------------------------------------------------------------
+void applyWindowMode( void )
+{
+	const Int mode = TheWritableGlobalData->m_windowMode;
+
+	// Both windowed modes ask the device for a windowed swap chain; what separates them is the style
+	// WinMain gave the window, which was decided before any of this ran.
+	TheWritableGlobalData->m_windowed = (mode != WINDOW_MODE_FULLSCREEN);
+
+	if( mode == WINDOW_MODE_BORDERLESS )
+	{
+		TheWritableGlobalData->m_xResolution = ::GetSystemMetrics( SM_CXSCREEN );
+		TheWritableGlobalData->m_yResolution = ::GetSystemMetrics( SM_CYSCREEN );
+
+		// there is no desktop left around a borderless window to park the cursor on, so scrolling at
+		// the edge is the only way the mouse moves the camera
+		TheWritableGlobalData->m_edgeScrollInWindowedMode = TRUE;
+	}
 }
 

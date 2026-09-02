@@ -490,7 +490,10 @@ public:
 	static void					Set_Render_Target (IDirect3DSurface8* render_target, IDirect3DSurface8* dpeth_buffer);
 
 	static void					Set_Render_Target (IDirect3DSwapChain8 *swap_chain);
-	// Samples per pixel in use, 0 if not multisampling ("-msaa N" on the command line).
+	// Samples per pixel to ask the next device for; 0, or 2..16.  Set this before Set_Render_Device
+	// or the device is created without multisampling.
+	static void					Set_Requested_MultiSample_Level (unsigned samples);
+	// Samples per pixel actually in use, 0 if not multisampling.
 	static unsigned				Get_MultiSample_Level (void);
 	// Depth/stencil to use with a non-multisampled render target; NULL if not multisampling.
 	static IDirect3DSurface8 *	_Get_Non_MultiSampled_Depth_Buffer (void);

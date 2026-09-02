@@ -107,20 +107,8 @@ public:
 	Int	 getStaticGameDetail(void);	// detail level selected by the user.
 	Int	 getIdealStaticGameDetail(void);	// detail level detected for user.
  	Real getGammaValue(void);
-	Bool getEdgeScrollInWindowedMode(void);
-	Bool getSnapBuildPlacementTo45(void);
-	Bool getSnapCameraRotateTo45(void);
-	Bool getGridBuildPlacement(void);
-	Bool getNudgeBuildPlacement(void);
-	Bool getMiddleMousePans(void);
-	Bool getZoomToCursor(void);
-	Bool getShowHudOverlay(void);
-	Bool getShowPlacementRangeRing(void);
-	Bool getWorkersReturnToSupply(void);
-	Bool getDetailedBuildTooltips(void);
-	Bool getArchiveReplays(void);
-	Int	 getBloomIntensity(void);
-	Int	 getBloomThreshold(void);
+	// The fork's own scalar settings do not get a getter each; they are rows in TheOptionCatalog
+	// (Common/OptionsCatalog.h) and reach GlobalData through loadOptionsFromPreferences.
 	Int	 getTextureReduction(void);
 	void getResolution(Int *xres, Int *yres);
 	Bool get3DShadowsEnabled(void);

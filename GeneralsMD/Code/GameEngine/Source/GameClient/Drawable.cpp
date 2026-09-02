@@ -396,6 +396,33 @@ Bool Drawable_structureShowsHealthBar( Bool isBridge, Bool isUnowned, Bool isGar
 }
 
 //-------------------------------------------------------------------------------------------------
+/** The health bar setting, applied to one object.
+	*
+	* Smart is the mode worth explaining.  A bar over a unit at full health tells you nothing you did
+	* not already know, and a base full of them is what makes always-on tiring to look at; a bar over
+	* a unit that has been hit is the whole point of having them.  So smart keeps every damaged thing
+	* marked and lets the healthy ones disappear, with the selection and the object under the cursor
+	* always readable on top of that - those two are how you ask a specific question about a specific
+	* unit, and the answer should not depend on whether it has been shot at yet.
+	*
+	* Selection is retail's rule, exactly. */
+//-------------------------------------------------------------------------------------------------
+Bool Drawable_healthBarModeShows( Int healthBarMode, Bool isSelected, Bool isMousedOver,
+																	Bool isDamaged )
+{
+	if( healthBarMode == HEALTH_BAR_NEVER )
+		return FALSE;
+
+	if( healthBarMode == HEALTH_BAR_ALWAYS )
+		return TRUE;
+
+	if( isSelected || isMousedOver )
+		return TRUE;
+
+	return healthBarMode == HEALTH_BAR_SMART && isDamaged;
+}
+
+//-------------------------------------------------------------------------------------------------
 /** The silhouette is the finished building, not a foundation: the construction model conditions are
 	* left alone until the builder arrives, so what stands on the map is the shape that was under the
 	* cursor.  A drawable with no object behind it is the placement preview itself, which carries the
@@ -4081,7 +4108,8 @@ void Drawable::drawHealthBar(const IRegion2D* healthBarRegion)
 	if (!healthBarRegion)
 		return;
 
-	// health bars are always on (was: only when selected or moused over)
+	// m_showObjectHealth is the debug master switch (a cheat key toggles it); which units wear a bar
+	// while it is on is the player's HealthBars setting, applied further down once the health is known
 	if( TheGlobalData->m_showObjectHealth )
 	{
 		Object *obj = getObject();
@@ -4158,6 +4186,15 @@ void Drawable::drawHealthBar(const IRegion2D* healthBarRegion)
 
 		// if no max health or health at all we will draw nothing
 		if( maxHealth == 0.0f || health == 0.0f )
+			return;
+
+		// the player's setting decides who wears one.  It is tested here rather than at the top of the
+		// function because smart mode needs the health, and the health needs the body module.
+		if( !Drawable_healthBarModeShows( TheGlobalData->m_healthBarMode,
+																			isSelected(),
+																			TheInGameUI != NULL &&
+																				TheInGameUI->getMousedOverDrawableID() == getID(),
+																			health < maxHealth ) )
 			return;
 
 		// what is our health ratio

@@ -317,3 +317,217 @@ END
 GUI:HumanSlot
 "Human"
 END
+
+// ---------------------------------------------------------------------------
+// Options screen.  The five page buttons across the top.
+// ---------------------------------------------------------------------------
+
+GUI:OptionsTabDisplay
+"Display"
+END
+
+GUI:OptionsTabAudio
+"Audio"
+END
+
+GUI:OptionsTabControls
+"Controls"
+END
+
+GUI:OptionsTabGameplay
+"Gameplay"
+END
+
+GUI:OptionsTabNetwork
+"Network"
+END
+
+// ---------------------------------------------------------------------------
+// One GUI: label and one TOOLTIP: line per row of TheOptionCatalog.  A label
+// and the combo box under it share the tooltip; an OPTION_ENUM row also needs
+// its entries, numbered from zero in the order the enum declares them.
+// ---------------------------------------------------------------------------
+
+GUI:WindowMode
+"Window Mode"
+END
+
+GUI:WindowMode0
+"Fullscreen"
+END
+
+GUI:WindowMode1
+"Borderless"
+END
+
+GUI:WindowMode2
+"Windowed"
+END
+
+TOOLTIP:WindowMode
+"Fullscreen takes the display mode, borderless covers it with a window and alt-tabs instantly. Takes effect the next time the game starts."
+END
+
+GUI:MSAA
+"Antialiasing"
+END
+
+GUI:MSAA0
+"Off"
+END
+
+GUI:MSAA1
+"2x"
+END
+
+GUI:MSAA2
+"4x"
+END
+
+GUI:MSAA3
+"8x"
+END
+
+GUI:MSAA4
+"16x"
+END
+
+TOOLTIP:MSAA
+"Smooths the stair steps along model edges. A level your card does not offer drops to the highest one it does. Applied when the display device is next reset."
+END
+
+GUI:Bloom
+"Bloom"
+END
+
+TOOLTIP:Bloom
+"How much bright surfaces glow into what is around them. Zero turns it off."
+END
+
+GUI:BloomThreshold
+"Bloom Threshold"
+END
+
+TOOLTIP:BloomThreshold
+"The brightness below which nothing glows. Lower it and more of the picture joins in."
+END
+
+GUI:MiddleMousePans
+"Middle Mouse Pans"
+END
+
+TOOLTIP:MiddleMousePans
+"Hold the middle button to drag the map under the cursor."
+END
+
+GUI:ZoomToCursor
+"Zoom To Cursor"
+END
+
+TOOLTIP:ZoomToCursor
+"The wheel zooms towards whatever the cursor is over instead of the middle of the screen."
+END
+
+GUI:EdgeScrollWindowed
+"Edge Scroll In A Window"
+END
+
+TOOLTIP:EdgeScrollWindowed
+"Retail refuses to scroll from the screen edge in windowed mode. Turn this on to get it back on a second monitor or in borderless."
+END
+
+GUI:SnapCamera45
+"Snap Camera Rotation"
+END
+
+TOOLTIP:SnapCamera45
+"Rotating the camera clicks to the eight 45 degree headings instead of stopping anywhere."
+END
+
+GUI:GridBuild
+"Grid Building Placement"
+END
+
+TOOLTIP:GridBuild
+"Structures land on the pathfinder's own 10-unit grid, so two buildings put down by eye share an edge instead of leaving a gap too narrow to walk through."
+END
+
+GUI:NudgeBuild
+"Nudge Blocked Placement"
+END
+
+TOOLTIP:NudgeBuild
+"A structure whose spot is blocked slides to the nearest one it fits instead of going red under the cursor."
+END
+
+GUI:SnapBuild45
+"Snap Building Rotation"
+END
+
+TOOLTIP:SnapBuild45
+"Drag-to-rotate clicks to the eight 45 degree headings, which is what walls and defenses along a base edge want."
+END
+
+GUI:RangeRing
+"Placement Range Ring"
+END
+
+TOOLTIP:RangeRing
+"Draws the weapon range of the structure you are about to place."
+END
+
+GUI:WorkersReturn
+"Workers Return To Supply"
+END
+
+TOOLTIP:WorkersReturn
+"A worker that finishes a building goes back to gathering instead of standing where it built."
+END
+
+GUI:BuildTooltips
+"Detailed Build Tooltips"
+END
+
+TOOLTIP:BuildTooltips
+"Build buttons list cost, build time and prerequisites."
+END
+
+GUI:HudOverlay
+"HUD Overlay"
+END
+
+TOOLTIP:HudOverlay
+"The extra readouts across the top of the screen: power, income and the production strip."
+END
+
+GUI:ArchiveReplays
+"Archive Replays"
+END
+
+TOOLTIP:ArchiveReplays
+"Every game is kept under its own name instead of overwriting the last one."
+END
+
+GUI:HealthBars
+"Health Bars"
+END
+
+GUI:HealthBars0
+"Always"
+END
+
+GUI:HealthBars1
+"Smart"
+END
+
+GUI:HealthBars2
+"Selection Only"
+END
+
+GUI:HealthBars3
+"Never"
+END
+
+TOOLTIP:HealthBars
+"Smart shows a bar over anything hurt, plus the selection and whatever is under the cursor. Selection only is what retail did."
+END

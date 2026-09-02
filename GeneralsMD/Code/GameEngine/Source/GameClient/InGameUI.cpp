@@ -6168,13 +6168,13 @@ static void appendProducerQueue( Object *obj, InGameUI::ProductionStripSlot *slo
 }
 
 //-------------------------------------------------------------------------------------------------
-/** A building going up on the map, for the row above the queue.
+/** A building going up on the map, for the same column the queues go in.
 	*
 	* A factory's queue is the only production this strip used to know about, and a base spends half
 	* its early game on the other kind: what a dozer or a worker is putting up is nowhere in a queue,
-	* it is an object on the ground with a construction percentage on it.  So it gets its own row,
-	* sorted the same way - soonest finished first - and a click on one takes the camera to the site,
-	* which is the question a half-built base actually raises: where is it. */
+	* it is an object on the ground with a construction percentage on it.  It is sorted in among the
+	* queued items on the one thing they share - how long it still has - and a click on one takes the
+	* camera to the site, which is the question a half-built base actually raises: where is it. */
 //-------------------------------------------------------------------------------------------------
 static void appendStructureUnderConstruction( Object *obj, InGameUI::ProductionStripSlot *slots,
 																							Int *count, Int max, Int *total )
@@ -6230,46 +6230,30 @@ static void appendStructureUnderConstruction( Object *obj, InGameUI::ProductionS
 }
 
 //-------------------------------------------------------------------------------------------------
-/** Player::iterateObjects callback for the global row. */
+/** What one Player::iterateObjects sweep fills in: one column of the strip. */
 //-------------------------------------------------------------------------------------------------
 struct ProductionStripGather
 {
 	InGameUI::ProductionStripSlot *slot;
 	Int *count;
 	Int *total;
-	Int max;						///< cameos this row will draw; the rest are counted into the "+N"
-	ObjectID skip;			///< a building already put into the row ahead of the sweep, so it is not
-											///  gathered a second time when the sweep reaches it
+	Int max;						///< cameos this column will draw; the rest are counted into the "+N"
+	ObjectID skip;			///< a building already put into the column ahead of the sweep, so its queue
+											///  is not gathered a second time when the sweep reaches it
 };
 
-static void gatherProductionStrip( Object *obj, void *userData )
-{
-	ProductionStripGather *g = (ProductionStripGather *)userData;
-	if( obj && obj->getID() == g->skip )
-		return;
-	appendProducerQueue( obj, g->slot, g->count, g->max, g->total, FALSE );
-}
-
 //-------------------------------------------------------------------------------------------------
-/** Player::iterateObjects callback for the row of buildings going up. */
-//-------------------------------------------------------------------------------------------------
-static void gatherStripStructures( Object *obj, void *userData )
-{
-	ProductionStripGather *g = (ProductionStripGather *)userData;
-	appendStructureUnderConstruction( obj, g->slot, g->count, g->max, g->total );
-}
-
-//-------------------------------------------------------------------------------------------------
-/** Player::iterateObjects callback for a watched player's row: everything that player has coming,
-	* queued in a factory or going up on the ground, in the one line.  Playing, those are two rows
-	* because you act on them differently; watching, a row is a whole player and what is being built
-	* is the same question either way.  Nothing is counted twice - a building under construction
-	* produces nothing until it is finished. */
+/** Player::iterateObjects callback: everything one player has coming, queued in a factory or going
+	* up on the ground, in the one column.  Both answer the same question - when does the next thing
+	* land - so they are sorted against each other rather than kept apart, and a base whose dozers are
+	* busy no longer reads its own building sites in a second column off to the side.  Nothing is
+	* counted twice: a building under construction produces nothing until it is finished. */
 //-------------------------------------------------------------------------------------------------
 static void gatherStripEverything( Object *obj, void *userData )
 {
 	ProductionStripGather *g = (ProductionStripGather *)userData;
-	appendProducerQueue( obj, g->slot, g->count, g->max, g->total, FALSE );
+	if( obj == NULL || obj->getID() != g->skip )
+		appendProducerQueue( obj, g->slot, g->count, g->max, g->total, FALSE );
 	appendStructureUnderConstruction( obj, g->slot, g->count, g->max, g->total );
 }
 
@@ -6367,17 +6351,6 @@ Bool InGameUI::stripSlotGoesBefore( Bool leads, Int remaining,
 		return leads;						// the selected building's block leads, whatever anything finishes in
 
 	return otherRemaining > remaining;		// inside a block: soonest first, ties stay as they were met
-}
-
-//-------------------------------------------------------------------------------------------------
-/** How far one row of trays stands below the row above it: a tray less the overlap that bar keeps
-	* between its own stacked slots, taken as a fraction of the tray so it holds at any size. */
-//-------------------------------------------------------------------------------------------------
-Int InGameUI::stripRowStep( Int trayHeight )
-{
-	return trayHeight
-					- ( trayHeight * (Int)PRODUCTION_STRIP_TRAY_OVER )
-						/ (Int)PRODUCTION_STRIP_TRAY_H;
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -6561,7 +6534,7 @@ void InGameUI::drawSuperweaponStrip( void )
 		if( hidden > 0 && lastRow )
 			rowWidth += gap + more;
 
-		const Int trayY = top + row * stripRowStep( trayH );
+		const Int trayY = top + row * trayH;
 		const Int y = trayY + trayHole.y;
 
 		//
@@ -6681,13 +6654,18 @@ void InGameUI::drawSuperweaponStrip( void )
 }
 
 //-------------------------------------------------------------------------------------------------
-/** Lay out and draw one column, its left edge at x and the bottom cameo's top edge at bottomY.
+/** Lay out and draw one run of cells, its left edge at left and the first cameo's top edge at
+	* bottomY.
 	*
-	* A column, not a row: the strip grows upward out of the corner instead of across the bottom of
+	* Playing, the run is a column: it grows upward out of the corner instead of across the bottom of
 	* the screen.  The soonest thing to arrive is the bottom cell - the one nearest the command bar
 	* and nearest the eye - and everything behind it is stacked above.  Five cells, and whatever is
 	* left over closes the column as a sixth wearing a "+N", so the strip's whole footprint is one
-	* tray wide however much the base has queued. */
+	* tray wide however much the base has queued.
+	*
+	* Watching, the run is a row instead, because there the vertical belongs to the players: one row
+	* each, stacked, and a row that grew upward too would have nowhere to put the next player.  The
+	* soonest is then the left hand cell and the run reads left to right. */
 //-------------------------------------------------------------------------------------------------
 void InGameUI::drawProductionStripColumn( Int row, Int left, Int bottomY )
 {
@@ -6702,8 +6680,9 @@ void InGameUI::drawProductionStripColumn( Int row, Int left, Int bottomY )
 	// any resolution, and it is never squeezed to fit anything - squeezed, its rail and its inner
 	// frame collapse into a coloured smudge and none of it reads as that bar any more.
 	//
-	// Trays overlap by what that bar overlaps its own by, so a column of them is one run of metal
-	// rather than a pile of separate boxes, and the column is flush against the left edge.
+	// Along a row the trays overlap by what that bar overlaps its own by, so the row is one run of
+	// metal rather than a line of separate boxes.  Stacked they do not overlap at all: a cell steps
+	// a whole tray, so no cameo has the tray above it lying over its top edge.
 	//
 	ICoord2D traySize, cameoSize, trayHole;
 	Int trayStep = 0;
@@ -6718,8 +6697,15 @@ void InGameUI::drawProductionStripColumn( Int row, Int left, Int bottomY )
 	const Int trayInsetX = trayW - trayHole.x - cameoW;
 	const Int trayInsetY = trayHole.y;
 	const Int trayX = left;
-	const Int x = left + trayInsetX;		///< every cameo in a column shares its left edge
-	const Int cellStep = stripRowStep( trayH );
+	const Int x = left + trayInsetX;		///< where the first cameo starts
+
+	//
+	// Which way the cells run.  Down a column they step a whole tray, so no cameo has the tray above
+	// it lying over its top edge; along a row they step the way that bar steps its own slots, six
+	// short of the tray, and the six is the rail the next tray covers.
+	//
+	const Int cellStepX = m_productionStripWatching ? trayStep : 0;
+	const Int cellStepY = m_productionStripWatching ? 0 : trayH;
 
 	const Image *tray = productionStripTray();
 
@@ -6735,19 +6721,21 @@ void InGameUI::drawProductionStripColumn( Int row, Int left, Int bottomY )
 	const Int cells = count + ( hidden > 0 ? 1 : 0 );
 
 	//
-	// The trays go down first, all of them, and from the top down: the bottom one carries the item
-	// that arrives next, so it is the one drawn last and the one whose frame is whole.
+	// The trays go down first, all of them, and from the far end back: the near one carries the item
+	// that arrives next, so it is the one drawn last and the one whose frame is whole.  In a row
+	// that draw order is also what covers each tray's rail, which the mirrored art puts on its left.
 	//
 	// Without the art - a mod that ships no shortcut bar - a slot keeps the flat plate it used to
 	// have rather than losing its backing.
 	//
 	for( Int back = cells - 1; back >= 0; back-- )
 	{
-		const Int backY = bottomY - back * cellStep - trayInsetY;
+		const Int backX = trayX + back * cellStepX;
+		const Int backY = bottomY - back * cellStepY - trayInsetY;
 		if( tray )
-			TheDisplay->drawImage( tray, trayX, backY, trayX + trayW, backY + trayH );
+			TheDisplay->drawImage( tray, backX, backY, backX + trayW, backY + trayH );
 		else
-			TheDisplay->drawFillRect( trayX, backY, trayW, trayH, GameMakeColor( 0, 0, 0, 130 ) );
+			TheDisplay->drawFillRect( backX, backY, trayW, trayH, GameMakeColor( 0, 0, 0, 130 ) );
 	}
 
 	//
@@ -6759,6 +6747,7 @@ void InGameUI::drawProductionStripColumn( Int row, Int left, Int bottomY )
 	//
 	struct StripSlotDraw
 	{
+		Int x;										///< left edge of this cameo
 		Int y;										///< top edge of this cameo
 		const Image *cameo;				///< its picture, NULL when the template carries none
 		Int percent;							///< how much of the scrim has been swept off, -1 for no scrim
@@ -6774,10 +6763,13 @@ void InGameUI::drawProductionStripColumn( Int row, Int left, Int bottomY )
 		ProductionStripSlot *slot = &m_productionStrip[ row ][ i ];
 		StripSlotDraw *draw = &slots[ i ];
 
-		const Int y = bottomY - i * cellStep;		// the soonest is the bottom cell
-		slot->pos.x = x;
+		// the soonest is the near cell: the bottom of a column, the left hand end of a row
+		const Int slotX = x + i * cellStepX;
+		const Int y = bottomY - i * cellStepY;
+		slot->pos.x = slotX;
 		slot->pos.y = y;
 
+		draw->x = slotX;
 		draw->y = y;
 		draw->cameo = NULL;
 		draw->percent = -1;
@@ -6864,7 +6856,7 @@ void InGameUI::drawProductionStripColumn( Int row, Int left, Int bottomY )
 				&& TheKeyboard && TheKeyboard->isCtrl() && TheMouse )
 		{
 			const MouseIO *io = TheMouse->getMouseStatus();
-			draw->cancelHover = io && io->pos.x >= x && io->pos.x < x + cameoW &&
+			draw->cancelHover = io && io->pos.x >= draw->x && io->pos.x < draw->x + cameoW &&
 													io->pos.y >= draw->y && io->pos.y < draw->y + cameoH;
 		}
 
@@ -6890,7 +6882,8 @@ void InGameUI::drawProductionStripColumn( Int row, Int left, Int bottomY )
 	{
 		const StripSlotDraw *draw = &slots[ cameoSlot ];
 		if( draw->cameo )
-			TheDisplay->drawImage( draw->cameo, x, draw->y, x + cameoW, draw->y + cameoH );
+			TheDisplay->drawImage( draw->cameo, draw->x, draw->y,
+														 draw->x + cameoW, draw->y + cameoH );
 	}
 
 	// the sweeps over them
@@ -6898,7 +6891,7 @@ void InGameUI::drawProductionStripColumn( Int row, Int left, Int bottomY )
 	{
 		const StripSlotDraw *draw = &slots[ clockSlot ];
 		if( draw->percent >= 0 )
-			TheDisplay->drawRemainingRectClock( x, draw->y, cameoW, cameoH,
+			TheDisplay->drawRemainingRectClock( draw->x, draw->y, cameoW, cameoH,
 																					draw->percent, GameMakeColor( 0, 0, 0, 100 ) );
 	}
 
@@ -6908,7 +6901,7 @@ void InGameUI::drawProductionStripColumn( Int row, Int left, Int bottomY )
 		const StripSlotDraw *draw = &slots[ secondsSlot ];
 		if( draw->seconds >= 0 )
 			drawStripSeconds( row * PRODUCTION_STRIP_ROW_MAX + secondsSlot,
-												x, draw->y, cameoW, cameoH, draw->seconds );
+												draw->x, draw->y, cameoW, cameoH, draw->seconds );
 	}
 
 	// how many of the same thing each one stands for, in the corner the countdown leaves free
@@ -6917,14 +6910,14 @@ void InGameUI::drawProductionStripColumn( Int row, Int left, Int bottomY )
 		const StripSlotDraw *draw = &slots[ quantitySlot ];
 		if( draw->quantity > 1 )
 			drawStripQuantity( row * PRODUCTION_STRIP_ROW_MAX + quantitySlot,
-												 x, draw->y, cameoW, draw->quantity );
+												 draw->x, draw->y, cameoW, draw->quantity );
 	}
 
 	// and the borders round them, a team border heavy enough to read as the row's whole label
 	for( Int borderSlot = 0; borderSlot < count; borderSlot++ )
 	{
 		const StripSlotDraw *draw = &slots[ borderSlot ];
-		TheDisplay->drawOpenRect( x, draw->y, cameoW, cameoH,
+		TheDisplay->drawOpenRect( draw->x, draw->y, cameoW, cameoH,
 															m_productionStripRowColor[ row ] != 0 ? 2.0f : 1.0f,
 															draw->border );
 	}
@@ -6937,17 +6930,17 @@ void InGameUI::drawProductionStripColumn( Int row, Int left, Int bottomY )
 			const Int barInset = cameoW / 4;
 			const Int barHeight = stripPixels( 4 );
 
-			TheDisplay->drawFillRect( x, draw->y, cameoW, cameoH,
+			TheDisplay->drawFillRect( draw->x, draw->y, cameoW, cameoH,
 																GameMakeColor( 190, 0, 0, 120 ) );
-			TheDisplay->drawFillRect( x + barInset, draw->y + ( cameoH - barHeight ) / 2,
+			TheDisplay->drawFillRect( draw->x + barInset, draw->y + ( cameoH - barHeight ) / 2,
 																cameoW - 2 * barInset, barHeight,
 																GameMakeColor( 255, 255, 255, 255 ) );
 		}
 	}
 
 	//
-	// whatever did not fit closes the column as a sixth cell wearing a "+N", at the top of it: the
-	// column is read from the bottom, so the overflow sits at the far end.  It is not clickable -
+	// whatever did not fit closes the run with a "+N" at its far end - the top of a column, the
+	// right hand end of a row, which is the end each is read towards.  It is not clickable -
 	// there is no one item behind it, and what it stands for is already reachable by selecting the
 	// building.
 	//
@@ -6971,9 +6964,10 @@ void InGameUI::drawProductionStripColumn( Int row, Int left, Int bottomY )
 		Int textWidth = 0, textHeight = 0;
 		overflow->getSize( &textWidth, &textHeight );
 
-		const Int moreY = bottomY - count * cellStep;
+		const Int moreX = x + count * cellStepX;
+		const Int moreY = bottomY - count * cellStepY;
 
-		overflow->draw( x + ( cameoW - textWidth ) / 2,
+		overflow->draw( moreX + ( cameoW - textWidth ) / 2,
 										moreY + ( cameoH - textHeight ) / 2,
 										GameMakeColor( 235, 235, 235, 255 ),
 										GameMakeColor( 0, 0, 0, 255 ) );
@@ -7056,23 +7050,10 @@ void InGameUI::drawProductionStrip( void )
 	else
 	{
 		//
-		// the buildings going up take the column beside the queue, off the edge: they are the
-		// slower half of what a base is doing and the half that has a place on the map, so they
-		// read as the column you glance at rather than the one you live on
-		//
-		ProductionStripGather sites;
-		sites.slot = m_productionStrip[ PRODUCTION_ROW_SITES ];
-		sites.count = &m_productionStripCount[ PRODUCTION_ROW_SITES ];
-		sites.total = &m_productionStripTotal[ PRODUCTION_ROW_SITES ];
-		sites.max = PRODUCTION_STRIP_ROW_MAX;
-		sites.skip = INVALID_ID;
-		player->iterateObjects( gatherStripStructures, &sites );
-
-		//
-		// A single selected producer leads the queue row rather than getting a row of its own: what
-		// the building you are looking at is making is the front of the strip, and the rest of the
-		// base follows it. It goes in before the sweep over everything else, and the sweep skips it,
-		// so nothing is drawn or counted twice.
+		// A single selected producer leads the column rather than getting one of its own: what the
+		// building you are looking at is making is the front of the strip, and the rest of the base
+		// follows it. It goes in before the sweep over everything else, and the sweep skips it, so
+		// nothing is drawn or counted twice.
 		//
 		ObjectID selected = INVALID_ID;
 		if( getSelectCount() == 1 && !m_selectedDrawables.empty() )
@@ -7089,13 +7070,19 @@ void InGameUI::drawProductionStrip( void )
 			}
 		}
 
+		//
+		// One sweep, one column: the queues and the buildings going up are gathered into the same
+		// cells and sorted against each other, so the strip is a single run of what the base has
+		// coming.  A dozer raising a war factory now sits in the queue where its finishing time puts
+		// it instead of standing in a column of its own beside it.
+		//
 		ProductionStripGather gather;
 		gather.slot = m_productionStrip[ PRODUCTION_ROW_QUEUE ];
 		gather.count = &m_productionStripCount[ PRODUCTION_ROW_QUEUE ];
 		gather.total = &m_productionStripTotal[ PRODUCTION_ROW_QUEUE ];
 		gather.max = PRODUCTION_STRIP_ROW_MAX;
 		gather.skip = selected;
-		player->iterateObjects( gatherProductionStrip, &gather );
+		player->iterateObjects( gatherStripEverything, &gather );
 	}
 
 #ifdef DEBUG_LOGGING
@@ -7104,9 +7091,8 @@ void InGameUI::drawProductionStrip( void )
 #endif
 
 	//
-	// The rows in use are closed up before they are placed: the sites row is empty for most of a
-	// match, and leaving the space it would have taken puts a band of nothing between the queue and
-	// the control bar.
+	// The rows in use are closed up before they are placed: playing there is one of them, and
+	// watching, a player with nothing coming would otherwise leave a gap where his column stood.
 	//
 	Int used[ PRODUCTION_STRIP_ROWS ];
 	Int rowsUsed = 0;
@@ -7144,17 +7130,16 @@ void InGameUI::drawProductionStrip( void )
 	m_productionStripCameoH = cameoSize.y;
 
 	//
-	// Each row is a column now, standing on the corner just above the control bar and growing
+	// Playing, the queue is a column standing on the corner just above the control bar and growing
 	// upward: the next thing to arrive is the bottom cell, always in the same place, and the rest
 	// of the queue is stacked over it.  Six cells is the whole of it, so the strip is one tray wide
 	// however deep the base's queue goes - across the bottom of the screen it used to run over the
-	// battlefield instead.
+	// battlefield instead.  Cells step a whole tray, so none of them is clipped by the one above.
 	//
-	// Columns then stand side by side, the last one flush against the left edge: playing, that puts
-	// the queue on the edge and the buildings going up beside it; watching, it is one column per
-	// player.  Columns overlap sideways, and cells overlap upward, by the six that bar overlaps its
-	// own slots by - its 35 pixel step between 41 pixel slots, taken as a fraction of the tray so
-	// it holds at whatever size that bar was loaded at.
+	// Watching, the vertical belongs to the players: one row per player, piled up from the bar, each
+	// row a few cameos running rightward from the left edge.  Those close up by the six that bar
+	// closes its own slots by - its 35 pixel step between 41 pixel slots - so a row reads as one run
+	// of metal, and the rows themselves are a whole tray apart.
 	//
 	const Int trayBelow = traySize.y - trayHole.y;
 	const Int lowerY = barTop - trayBelow - stripPixels( PRODUCTION_STRIP_LIFT );
@@ -7167,16 +7152,17 @@ void InGameUI::drawProductionStrip( void )
 	TheDisplay->beginBatch2D();
 
 	//
-	// The rightmost column is drawn first: the artwork is mirrored, so each tray's heavy rail is on
-	// its left, and it takes the column to its left drawn over it to cover that rail.
+	// Playing there is the one run and it stands on the edge.  Watching, each player is a row of his
+	// own and the rows are piled up from the bar, the first of them lowest, so the vertical says who
+	// and the horizontal says what - a queue that grew upward as well would have nowhere to put the
+	// next player.
 	//
 	for( Int at = 0; at < rowsUsed; at++ )
 	{
-		const Int column = rowsUsed - 1 - at;			// used[rowsUsed-1] is the one on the edge
-		const Int x = column * trayStep;
-		if( x + traySize.x > TheDisplay->getWidth() )
+		const Int y = lowerY - at * traySize.y;
+		if( y - traySize.y < 0 )
 			continue;
-		drawProductionStripColumn( used[ at ], x, lowerY );
+		drawProductionStripColumn( used[ at ], 0, y );
 	}
 
 	TheDisplay->endBatch2D();

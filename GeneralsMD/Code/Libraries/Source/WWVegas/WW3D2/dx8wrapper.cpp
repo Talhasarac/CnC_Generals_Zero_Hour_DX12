@@ -195,29 +195,17 @@ static D3DDISPLAYMODE DesktopMode;
 static D3DPRESENT_PARAMETERS								_PresentParameters;
 
 // Multisampling (anti-aliasing) is opt-in and off by default, which is exactly what retail did.
-// "-msaa" on the command line asks for 4x, "-msaa N" for N (2..16); the highest level the device
-// actually reports for BOTH the back buffer and the depth/stencil format is the one used, so an
-// unsupported request quietly degrades instead of failing device creation.  The command line is
-// read here rather than plumbed through GlobalData because WW3D2 has no view of it - and it must
-// be the WIDE one: WinMain tokenizes the ANSI command line in place, so GetCommandLineA() is
-// already truncated by the time the device is created.
-static unsigned Get_Requested_MultiSample_Level(void)
+// The sample count is pushed in from the app layer before the device is created, because WW3D2 has
+// no view of GlobalData and is deliberately not given one.  The highest level the device actually
+// reports for BOTH the back buffer and the depth/stencil format is the one used, so an unsupported
+// request quietly degrades instead of failing device creation.
+static unsigned _RequestedMultiSampleLevel = 0;
+
+void DX8Wrapper::Set_Requested_MultiSample_Level(unsigned samples)
 {
-	static int requested = -1;
-	if (requested >= 0) return (unsigned)requested;
-	requested = 0;
-	for (const wchar_t * p = ::GetCommandLineW(); p != NULL && *p != L'\0'; ++p) {
-		if ((*p != L'-' && *p != L'/') || ::_wcsnicmp(p + 1, L"msaa", 4) != 0) continue;
-		p += 5;
-		while (*p == L' ' || *p == L'=' || *p == L':') ++p;
-		int n = 0;
-		while (*p >= L'0' && *p <= L'9') { n = n * 10 + (int)(*p - L'0'); ++p; }
-		requested = n ? n : 4;	// a bare "-msaa" means 4x
-		break;
-	}
-	if (requested < 2) requested = 0;	// 0 and 1 both mean "no multisampling"
-	if (requested > 16) requested = 16;
-	return (unsigned)requested;
+	if (samples < 2) samples = 0;	// 0 and 1 both mean "no multisampling"
+	if (samples > 16) samples = 16;
+	_RequestedMultiSampleLevel = samples;
 }
 
 // Non-multisampled depth/stencil for render-to-texture.  A multisampled back buffer gets a
@@ -1109,7 +1097,7 @@ bool DX8Wrapper::Set_Render_Device(int dev, int width, int height, int bits, int
 	*/
 	_PresentParameters.MultiSampleType = D3DMULTISAMPLE_NONE;
 	{
-		unsigned wanted = Get_Requested_MultiSample_Level();
+		unsigned wanted = _RequestedMultiSampleLevel;
 		for (unsigned samples = wanted; samples >= 2; --samples) {
 			D3DMULTISAMPLE_TYPE type = (D3DMULTISAMPLE_TYPE)samples;
 			if (FAILED(D3DInterface->CheckDeviceMultiSampleType(CurRenderDevice,D3DDEVTYPE_HAL,
