@@ -1162,7 +1162,19 @@ UpdateSleepTime AIUpdateInterface::update( void )
 	// assume we can sleep forever, unless the state machine (or turret, etc) demand otherwise
 	UpdateSleepTime subMachineSleep = UPDATE_SLEEP_FOREVER;
 
-	StateReturnType stRet = getStateMachine()->updateStateMachine();
+	/* -aislice: think every n-th frame, drive every frame.
+
+		 The state machine below is where a unit decides - what to attack, where the next waypoint is,
+		 whether to give up and repath - and it is the expensive half of the object walk. The
+		 locomotor at the bottom of this function is what actually moves it, and that is not skipped,
+		 so a sliced-out frame is a frame the unit keeps driving along the route it already has
+		 without asking any new questions. The stagger is the object id: creation order, identical on
+		 every machine, so this stays inside the CRC. Off by default (n = 1). */
+	const Int aiSlice = TheGlobalData ? TheGlobalData->m_aiSliceFrames : 1;
+	const Bool thinkThisFrame = (aiSlice <= 1) ||
+		(((TheGameLogic->getFrame() + (UnsignedInt)getObject()->getID()) % (UnsignedInt)aiSlice) == 0);
+
+	StateReturnType stRet = thinkThisFrame ? getStateMachine()->updateStateMachine() : STATE_CONTINUE;
 
 	// A unit that was just built walks a short exit path out of its producer and then, if the player
 	// set a rally point, attack moves to it - so it stops and fights whatever it runs into on the way
@@ -1249,9 +1261,10 @@ UpdateSleepTime AIUpdateInterface::update( void )
 			! obj->isDisabledByType( DISABLED_HACKED ) )
 	{
 		// If we are dead, don't let the turrets do anything anymore, or else they will keep attacking
-		for (int i = 0; i < MAX_TURRETS; ++i) 
+		// (a turret is deciding too, so it waits with the rest of the unit's thinking under -aislice)
+		for (int i = 0; thinkThisFrame && i < MAX_TURRETS; ++i)
 		{
-			if (m_turretAI[i]) 
+			if (m_turretAI[i])
 			{
 				UpdateSleepTime tmp = m_turretAI[i]->updateTurretAI();
 				if (tmp < subMachineSleep)

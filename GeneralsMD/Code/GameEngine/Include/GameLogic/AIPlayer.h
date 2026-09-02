@@ -399,6 +399,13 @@ protected:
 
 	Int			m_frameLastBuildingBuilt;	///< When we built the last building.
 
+	/* Where buildStructureWithDozer's search for somewhere to put a building had got to when it ran
+		 out of its per-frame budget, and the spot it was searching around.  Deliberately not xferred:
+		 both machines in a network game compute them the same way from the same frames, and a
+		 savegame that restarts a half-finished scan loses nothing but a few frames of searching. */
+	Real		m_buildProbeOffset;
+	Coord3D m_buildProbePos;
+
 	GameDifficulty m_difficulty;
 
 	Int			m_skillsetSelector;

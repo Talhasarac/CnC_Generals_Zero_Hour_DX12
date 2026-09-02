@@ -1741,14 +1741,38 @@ void AIGroup::groupMoveToPosition( const Coord3D *p_posIn, Bool addWaypoint, Com
 	const Bool gatherOnPoint = ( cmdSource == CMD_FROM_PLAYER && !isFormation &&
 															 m_memberListSize > MAX_MEMBERS_FOR_GROUP_LANES );
 
-	if (!addWaypoint && !isFormation && !gatherOnPoint) {
+	/* The corridor and the orders that ride on it, timed: it is one search plus a move order for
+		 every member, all of it inside the one logic frame the order arrives on, and a skirmish AI
+		 team taking an approach path is the slowest frame left in a four-player match. The probe has
+		 always printed what this block decided; it now prints what it cost as well. */
+#ifdef DEBUG_LOGGING
+	Int64 corridorStart, corridorEnd, corridorFreq;
+	QueryPerformanceCounter( (LARGE_INTEGER *)&corridorStart );
+#endif
+	/* A group of one is not a group. The corridor is a wide search plus a set of lanes to spread a
+		 selection across, and a single unit uses neither: it drives the centre line, which is the
+		 route its own path would have taken, and the search cost twice what that path costs. Two
+		 Twilight Flame matches issue 65 group orders and 18 of them are for one unit, six of those
+		 slow enough to log - 44ms of corridor searching to move one tank. Below two members the unit
+		 falls through to the move loop and paths for itself, which is what retail did with it.
+
+		 -nogrouppath is the control arm for the rest: no shared corridor at any size, every unit
+		 solves its own path below. */
+	if (!addWaypoint && !isFormation && !gatherOnPoint && m_memberListSize > 1 &&
+			TheGlobalData->m_useGroupPaths) {
 		friend_computeGroundPath(pos, cmdSource);
 		didInfantry = friend_moveInfantryToPos(pos, cmdSource);
 		didVehicles = friend_moveVehicleToPos(pos, cmdSource);
 	}
-	DEBUG_LOG(("GROUPMOVE probe: members %d src %d gatherOnPoint %d formation %d waypoint %d corridor %d infantry %d vehicles %d\n",
+#ifdef DEBUG_LOGGING
+	QueryPerformanceCounter( (LARGE_INTEGER *)&corridorEnd );
+	QueryPerformanceFrequency( (LARGE_INTEGER *)&corridorFreq );
+	const Real corridorMS = corridorFreq > 0
+		? (Real)((double)(corridorEnd - corridorStart) * 1000.0 / (double)corridorFreq) : 0.0f;
+#endif
+	DEBUG_LOG(("GROUPMOVE probe: members %d src %d gatherOnPoint %d formation %d waypoint %d corridor %d infantry %d vehicles %d took %.1fms\n",
 		m_memberListSize, (Int)cmdSource, gatherOnPoint?1:0, isFormation?1:0, addWaypoint?1:0,
-		m_groundPath!=NULL?1:0, didInfantry?1:0, didVehicles?1:0));
+		m_groundPath!=NULL?1:0, didInfantry?1:0, didVehicles?1:0, corridorMS));
 	if (m_dirty)
 		recompute();
 
@@ -1926,6 +1950,22 @@ void AIGroup::groupMoveToPosition( const Coord3D *p_posIn, Bool addWaypoint, Com
 			ai->aiFollowPathAppend(&dest, cmdSource);
 		}
 	}
+
+	/* Where a slow group order actually went. The corridor above is one search for everybody; this
+		 loop is the part that scales with the selection, because a member the corridor did not take
+		 care of gets its own destination adjusted and its own path. */
+#ifdef DEBUG_LOGGING
+	Int64 ordersEnd;
+	QueryPerformanceCounter( (LARGE_INTEGER *)&ordersEnd );
+	if( corridorFreq > 0 )
+	{
+		const Real ordersMS =
+			(Real)((double)(ordersEnd - corridorEnd) * 1000.0 / (double)corridorFreq);
+		if( corridorMS + ordersMS > 5.0f )
+			DEBUG_LOG(("SLOW GROUPMOVE: %d members, corridor %.1fms, orders %.1fms\n",
+				m_memberListSize, corridorMS, ordersMS));
+	}
+#endif
 }
 
 //-------------------------------------------------------------------------------------------------

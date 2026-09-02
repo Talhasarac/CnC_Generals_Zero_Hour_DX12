@@ -256,6 +256,7 @@ m_supplySourceAttackCheckFrame(0),
 m_attackedSupplyCenter(INVALID_ID),
 m_teamSeconds(10),
 m_curWarehouseID(INVALID_ID),
+m_buildProbeOffset(0.0f),
 m_scoutTimer(1),
 m_retreatTimer(1),
 m_expandTimer(1),
@@ -284,6 +285,7 @@ m_role(AIROLE_AGGRESSIVE)
 		m_structuresToRepair[i] = INVALID_ID;
 	}
 	m_repairDozerOrigin.zero();
+	m_buildProbePos.zero();
 	m_baseCenter.zero();
 	m_baseCenterSet = false;
 	m_difficulty = TheScriptEngine->getGlobalDifficulty(); 
@@ -841,9 +843,54 @@ Object *AIPlayer::buildStructureWithDozer(const ThingTemplate *bldgPlan, BuildLi
 			Real limit = 10*PATHFIND_CELL_SIZE_F;
 			if (isSkirmishAI()) {
 				limit = 120*PATHFIND_CELL_SIZE_F;
-			}	
+			}
 			Coord3D newPos = pos;
-			for (posOffset = 0; posOffset<limit; posOffset += 2*PATHFIND_CELL_SIZE_F) {
+
+			/* One ring of that wiggle per logic frame.
+
+				 The spot in the build list is taken, so this walks a square ring outwards looking for
+				 one that is not, and for a skirmish AI it walks it 120 pathfind cells out - most of a
+				 generated map. Every position costs a call to isLocationLegalToBuild, which is a
+				 partition query for overlapping objects and a zone check for a route to it, and the
+				 rings get longer the further out they go: 3,720 of them by the outermost, 46ms in one
+				 logic frame, measured, and the worst frame of a four-player Twilight Flame match.
+				 It is rare - four such frames in 55,876 - and that is exactly what a stutter is.
+
+				 So the scan gets a budget and remembers where it was. It stops at the end of whichever
+				 ring takes it past BUILD_PROBES_PER_FRAME positions, asks to be called again next
+				 frame, and carries on from that ring; the positions are tried in the same order they
+				 always were, so the spot it settles on is the spot it would have found in one go. The
+				 budget counts positions rather than milliseconds on purpose: a stopwatch would test a
+				 different number of them on a slower machine, and the two would desync.
+
+				 A ring is finished once started rather than resumed part way through, which keeps the
+				 whole of the state in one number.
+
+				 The budget is small because the positions are not equally expensive. The rings near
+				 the base are the dear ones - the partition query there comes back full of the
+				 player's own buildings, and a position that gets past it pays for the terrain
+				 sampling as well - while the outer rings are mostly off the map and are rejected on
+				 the first line. A budget of 100 left a 19.7ms frame made of about 120 inner
+				 positions; at 32 the first frame walks three rings and the worst frame this can cost
+				 is either those, or one whole outer ring of 240 cheap ones. */
+			const Int BUILD_PROBES_PER_FRAME = 32;
+			Int probes = 0;
+			Bool outOfBudget = false;
+			Real firstOffset = 0;
+			if (m_buildProbeOffset > 0 &&
+					m_buildProbePos.x == pos.x && m_buildProbePos.y == pos.y) {
+				firstOffset = m_buildProbeOffset;		// same spot as last frame: carry on from there
+			}
+			m_buildProbePos = pos;
+			m_buildProbeOffset = 0;
+
+			for (posOffset = firstOffset; posOffset<limit; posOffset += 2*PATHFIND_CELL_SIZE_F) {
+				if (probes >= BUILD_PROBES_PER_FRAME) {
+					// out of budget with rings left to walk: pick this one up again next frame
+					m_buildProbeOffset = posOffset;
+					outOfBudget = true;
+					break;
+				}
 				if (isSkirmishAI()) {
 					posOffset += 2*PATHFIND_CELL_SIZE_F;
 				}
@@ -852,6 +899,7 @@ Object *AIPlayer::buildStructureWithDozer(const ThingTemplate *bldgPlan, BuildLi
 				yPos = pos.y-offset;
 				for (xPos = pos.x-offset; xPos <= pos.x+offset; xPos+=PATHFIND_CELL_SIZE_F) {
 					if (isSkirmishAI()) xPos += PATHFIND_CELL_SIZE_F;
+					probes += 2;
 					newPos.x = xPos;
 					newPos.y = yPos;
 					valid = TheBuildAssistant->isLocationLegalToBuild( &newPos, bldgPlan, angle,
@@ -871,6 +919,7 @@ Object *AIPlayer::buildStructureWithDozer(const ThingTemplate *bldgPlan, BuildLi
 				xPos = pos.x-offset;
 				for (yPos = pos.y-offset; yPos <= pos.y+offset; yPos+=PATHFIND_CELL_SIZE_F) {
 					if (isSkirmishAI()) yPos += PATHFIND_CELL_SIZE_F;
+					probes += 2;
 					newPos.x = xPos;
 					newPos.y = yPos;
 					valid = TheBuildAssistant->isLocationLegalToBuild( &newPos, bldgPlan, angle,
@@ -889,6 +938,14 @@ Object *AIPlayer::buildStructureWithDozer(const ThingTemplate *bldgPlan, BuildLi
 				if (valid) break;
 			}
 			if (valid) pos = newPos;
+			if (!valid && outOfBudget) {
+				/* Out of budget with the search unfinished. The fallback below settles for the
+					 original spot, and taking it here would be answering a question this frame has not
+					 finished asking. */
+				TheTerrainVisual->removeAllBibs();	// isLocationLegalToBuild adds bib feedback
+				m_buildDelay = 1;		// try again next frame; doBaseBuilding leaves any value >= 1 alone
+				return NULL;
+			}
 			if (!valid) {
 				valid = TheBuildAssistant->isLocationLegalToBuild( &pos, bldgPlan, angle,
 																						 BuildAssistant::NO_ENEMY_OBJECT_OVERLAP,

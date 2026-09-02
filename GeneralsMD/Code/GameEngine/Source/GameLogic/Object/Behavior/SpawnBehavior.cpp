@@ -201,10 +201,25 @@ UpdateSleepTime SpawnBehavior::update( void )
 {
 /// @todo srj use SLEEPY_UPDATE here
 
-	//EVERY FRAME
-	if ( m_aggregateHealth )
+	/* Not every frame, and not on the same frame as the mob next to it.
+
+		 computeAggregateStates walks every member of the mob, reading each one's veterancy, weapon
+		 bonus, health and selection state, and rolls them into the nexus. EA ran it every frame for
+		 every spawner alive. On Twilight Flame with four brutal AI that is 73 of them in one logic
+		 frame costing 32.4ms, measured, which is two frames' worth of budget spent on a health bar
+		 and a selection rule.
+
+		 It runs every AGGREGATE_STATE_RATE frames instead, offset by the nexus' own object id so the
+		 mobs do not all land on the same frame - the same staggering the AI players got, for the
+		 same reason. What it costs is up to a fifth of a second of lag on the mob's aggregate health
+		 bar and on click-one-select-all, neither of which anybody can see. The offset is an object
+		 id, which is assigned in creation order and is identical on every machine, so this stays
+		 inside the CRC. */
+	const Int AGGREGATE_STATE_RATE = 6;
+	if ( m_aggregateHealth &&
+			 ((TheGameLogic->getFrame() + (UnsignedInt)getObject()->getID()) % AGGREGATE_STATE_RATE) == 0 )
 	{
-		computeAggregateStates();	
+		computeAggregateStates();
 	}
 
 	const SpawnBehaviorModuleData* md = getSpawnBehaviorModuleData();

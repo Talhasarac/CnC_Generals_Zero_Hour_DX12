@@ -1777,12 +1777,35 @@ void ScriptActions::doTeamMoveToSkirmishApproachPath(const AsciiString& teamName
 
 	AsciiString pathLabel;
 	pathLabel.format("%s%d", waypointPathLabel.str(), mpNdx);
+	/* This action is the slowest single thing left in a four-player skirmish frame - 40ms of a 45ms
+		 logic frame, once or twice a match, on the frame a team is told to take its approach path.
+		 The script engine already lets only one of these through per frame. The three parts are
+		 timed apart so the next person does not have to guess which one it is. */
+#ifdef DEBUG_LOGGING
+	Int64 tStart, tWaypoint, tEnd, tFreq;
+	QueryPerformanceCounter( (LARGE_INTEGER *)&tStart );
+#endif
 	Waypoint *way = TheTerrainLogic->getClosestWaypointOnPath( &pos, pathLabel );
 	if (!way) {
 		return;
 	}
 	DEBUG_ASSERTLOG(TheTerrainLogic->isPurposeOfPath(way, pathLabel), ("***Wrong waypoint purpose. Make jba fix this.\n"));
+#ifdef DEBUG_LOGGING
+	QueryPerformanceCounter( (LARGE_INTEGER *)&tWaypoint );
+#endif
 	theGroup->groupMoveToPosition(way->getLocation(), false, CMD_FROM_SCRIPT);
+#ifdef DEBUG_LOGGING
+	QueryPerformanceCounter( (LARGE_INTEGER *)&tEnd );
+	QueryPerformanceFrequency( (LARGE_INTEGER *)&tFreq );
+	if( tFreq > 0 )
+	{
+		const Real wayMS = (Real)((double)(tWaypoint - tStart) * 1000.0 / (double)tFreq);
+		const Real moveMS = (Real)((double)(tEnd - tWaypoint) * 1000.0 / (double)tFreq);
+		if( wayMS + moveMS > 5.0f )
+			DEBUG_LOG(("SLOW APPROACH PATH: team %s, %d members, waypoint search %.1fms, group move %.1fms\n",
+				teamName.str(), count, wayMS, moveMS));
+	}
+#endif
 }
 
 //-------------------------------------------------------------------------------------------------

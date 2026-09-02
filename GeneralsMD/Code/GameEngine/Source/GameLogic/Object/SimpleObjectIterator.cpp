@@ -70,6 +70,16 @@ SimpleObjectIterator::~SimpleObjectIterator()
 }
 
 //=============================================================================
+/* Recycling these through a free list instead of the pool was tried and measured at nothing.
+
+	 A gathering range query keeps every object it finds in one of these and an eight-player match
+	 makes 111 such queries a logic frame, so this is thousands of pool allocations and frees a
+	 frame, every one of them taking the global memory lock that THREADING-ROADMAP section 1.1 is
+	 about. Recycling removes all of them, comes back bit-identical over four matches, and moves the
+	 mean logic frame from 1.24ms to 1.26 - which is to say it does nothing. The pool is a free list
+	 already and the lock is uncontended in a single-threaded logic frame, so the 16,523
+	 critical-section operations a frame are cheap operations. Worth knowing before anybody spends a
+	 fortnight on the allocator. */
 void SimpleObjectIterator::insert(Object *obj, Real numeric)
 {
 	DEBUG_ASSERTCRASH(obj, ("sorry, no nulls allowed here"));

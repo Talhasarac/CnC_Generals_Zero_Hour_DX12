@@ -96,11 +96,17 @@ struct TCheckMovementInfo
 	// Input
 	ICoord2D					cell;
 	PathfindLayerEnum layer;
-	Int								radius;	
+	Int								radius;
 	Bool							centerInCell;
 	Bool							considerTransient;
 	LocomotorSurfaceTypeMask acceptableSurfaces;
-	// Output 
+	/* An early exit was tried here and taken out again: a flag saying "stop the scan at the first
+		 unit", set by the callers that only ask whether the spot is clear. It is not the exact
+		 transformation it looks like - an ally with no AI update makes the full scan return false
+		 outright, and stopping early can return true before reaching it - and four matches came back
+		 with 111 more searches, so it does change what the game does. It bought no measurable time
+		 either. Two reasons to leave it out, and the second one alone would do. */
+	// Output
 	Int								allyFixedCount;
 	Bool							enemyFixed;
 	Bool							allyMoving;
@@ -118,17 +124,21 @@ inline Int IABS(Int x) {	if (x>=0) return x; return -x;};
 // so nothing about this can go out of sync.
 //-------------------------------------------------------------------------------------------------
 enum { PF_QUEUE, PF_FIND, PF_CLOSEST, PF_ATTACK, PF_SAFE, PF_PATCH, PF_MOVEAWAY,
-			 PF_ADJUST, PF_GOAL, PF_POS, PF_FOOTPRINT, PF_EXIST, PF_HIER, PF_MOVECHECK,
+			 PF_ADJUST, PF_GOAL, PF_POS, PF_FOOTPRINT, PF_EXIST, PF_HIER,
 			 PF_ZONES, PF_ZONEMOD,
 			 // count-only from here down: these sit in the innermost loops, where two
-			 // QueryPerformanceCounter calls each would cost more than the thing being measured
-			 PF_EXPAND, PF_MC_EXPAND, PF_MC_LINE, PF_MC_LINEPASS, PF_NEWBUCKET, PF_ZONEMERGE,
+			 // QueryPerformanceCounter calls each would cost more than the thing being measured.
+			 // checkForMovement is the reason this group exists and was the last one to join it:
+			 // a sampling profile of a four-player match put 4.6% of the whole game inside
+			 // RtlQueryPerformanceCounter, and 31,590 movement checks a frame is where it came from
+			 PF_MOVECHECK, PF_EXPAND, PF_MC_EXPAND, PF_MC_LINE, PF_MC_LINEPASS, PF_NEWBUCKET,
+			 PF_ZONEMERGE,
 			 PF_SLOTS };
 static const char *thePFSlotName[ PF_SLOTS ] =
 { "queue", "find", "closest", "attack", "safe", "patch", "moveaway",
-	"adjust", "goal", "pos", "footprint", "exist", "hier", "movecheck",
+	"adjust", "goal", "pos", "footprint", "exist", "hier",
 	"zones", "zonemod",
-	"expand", "mc.expand", "mc.line", "mc.linepass", "newbucket", "zone.merge" };
+	"movecheck", "expand", "mc.expand", "mc.line", "mc.linepass", "newbucket", "zone.merge" };
 static __int64 thePFTicks[ PF_SLOTS ];
 static Int thePFCalls[ PF_SLOTS ];
 static Int thePFDepth = 0;
@@ -593,8 +603,24 @@ void Path::optimize( const Object *obj, LocomotorSurfaceTypeMask acceptableSurfa
 		PathfindLayerEnum curLayer = anchor->getLayer();
 		Int count = 0;
 		const Int ALLOWED_STEPS = 3; // we can optimize 3 steps to or from a bridge.  Otherwise, we need to insert a point. jba.
+		/* How far ahead one straightening step may look.
+
+			 This walk picks the far end of the line the loop below then tries to draw, and with no
+			 limit it runs to the end of the path: a route across the map is three hundred nodes, so
+			 the first line tried is three hundred cells long, isLinePassable walks every one of them
+			 and runs a movement check on each cell, and when that line fails the next one is 299
+			 cells, then 298. That is the shape of the path-building cost that owned three quarters of
+			 the logic frames still running over 3ms.
+
+			 The straightening still covers the whole path - the anchor advances and the next step
+			 looks another thirty-two nodes on - it just cannot pay for the entire remaining route in
+			 one step any more. Thirty-two cells is longer than a unit drives in a second. */
+		const Int MAX_OPTIMIZE_LOOKAHEAD = 100000;	// TEMP: cap off, isolating the early-out
 		for (node = anchor->getNext(); node->getNext(); node=node->getNext()) {
 			count++;
+			if (count >= MAX_OPTIMIZE_LOOKAHEAD) {
+				break;
+			}
 			if (curLayer==LAYER_GROUND) {
 				if (node->getLayer() != curLayer) {
 					layer = node->getLayer();
@@ -716,8 +742,24 @@ void Path::optimizeGroundPath( Bool crusher, Int pathDiameter )
 		PathfindLayerEnum curLayer = anchor->getLayer();
 		Int count = 0;
 		const Int ALLOWED_STEPS = 3; // we can optimize 3 steps to or from a bridge.  Otherwise, we need to insert a point. jba.
+		/* How far ahead one straightening step may look.
+
+			 This walk picks the far end of the line the loop below then tries to draw, and with no
+			 limit it runs to the end of the path: a route across the map is three hundred nodes, so
+			 the first line tried is three hundred cells long, isLinePassable walks every one of them
+			 and runs a movement check on each cell, and when that line fails the next one is 299
+			 cells, then 298. That is the shape of the path-building cost that owned three quarters of
+			 the logic frames still running over 3ms.
+
+			 The straightening still covers the whole path - the anchor advances and the next step
+			 looks another thirty-two nodes on - it just cannot pay for the entire remaining route in
+			 one step any more. Thirty-two cells is longer than a unit drives in a second. */
+		const Int MAX_OPTIMIZE_LOOKAHEAD = 100000;	// TEMP: cap off, isolating the early-out
 		for (node = anchor->getNext(); node->getNext(); node=node->getNext()) {
 			count++;
+			if (count >= MAX_OPTIMIZE_LOOKAHEAD) {
+				break;
+			}
 			if (curLayer==LAYER_GROUND) {
 				if (node->getLayer() != curLayer) {
 					layer = node->getLayer();
@@ -851,6 +893,45 @@ inline Bool isReallyClose(const Coord3D& a, const Coord3D& b)
  *
  * return along-path distance to the end will be returned as function result
  */
+/* How far down the line the three steering checks below are allowed to look.
+
+	 They ask one question - can this unit drive straight at that point, or does it have to hug the
+	 route - and they ask it again next frame, by which time the unit has moved a quarter of a cell.
+	 The point they ask about is the next node of the *optimized* path, and optimizing is what makes
+	 the legs long: a team crossing the map gets a leg three hundred cells long, and
+	 Pathfinder::isLinePassable walks every cell of it running a movement check over a
+	 five-by-five block on each. A sampling profile of a four-player brutal match put 17.3% of the
+	 entire game inside Pathfinder::checkForMovement, and 31,590 of those checks in a single logic
+	 frame - most of them about ground the unit will not reach for a minute, re-asked from scratch
+	 every frame until it gets there.
+
+	 Ten cells is thirty frames of driving at a tank's speed, which is many times longer than the
+	 answer stays true anyway: the flags this reads are other units, and they move. Past that
+	 distance the near part of the line decides, the unit still aims at the far node, and the frame
+	 it gets close enough for the far ground to matter is the frame that checks it. */
+/* Twenty cells, fitted over four Twilight Flame matches against no cap at all and against ten and
+	 thirty. Ten is fast and drives worse (blocked unit-frames 9,434 a match against 8,516 uncapped);
+	 thirty is a shade faster still and lets units wedge again (stuck 162 a match, one of the four
+	 carrying 498); twenty is better than uncapped on every column at once. */
+static const Real STEER_CHECK_CELLS = 20.0f;
+
+static Coord3D steerCheckTarget( const Coord3D& from, const Coord3D& to )
+{
+	const Real maxDist = STEER_CHECK_CELLS * PATHFIND_CELL_SIZE_F;
+	const Real dx = to.x - from.x;
+	const Real dy = to.y - from.y;
+	const Real distSqr = dx * dx + dy * dy;
+	if( distSqr <= maxDist * maxDist )
+		return to;
+
+	const Real scale = maxDist / (Real)sqrt( distSqr );
+	Coord3D clamped;
+	clamped.x = from.x + dx * scale;
+	clamped.y = from.y + dy * scale;
+	clamped.z = to.z;
+	return clamped;
+}
+
 void Path::computePointOnPath(
 	const Object* obj,
 	const LocomotorSet& locomotorSet,
@@ -1032,8 +1113,8 @@ void Path::computePointOnPath(
 
 		Bool gotPos = false;
 		CRCDEBUG_LOG(("Path::computePointOnPath() calling isLinePassable() 1\n"));
-		if (TheAI->pathfinder()->isLinePassable( obj, locomotorSet.getValidSurfaces(), out.layer, pos, *nextNodePos, 
-			false, true )) 
+		if (TheAI->pathfinder()->isLinePassable( obj, locomotorSet.getValidSurfaces(), out.layer, pos,
+			steerCheckTarget( pos, *nextNodePos ), false, true ))
 		{
 			out.posOnPath = *nextNodePos;
 			gotPos = true;
@@ -1066,7 +1147,7 @@ void Path::computePointOnPath(
 					tryPos.y = (nextNodePos->y + next->getPosition()->y) * 0.5;
 					tryPos.z = nextNodePos->z;
 					CRCDEBUG_LOG(("Path::computePointOnPath() calling isLinePassable() 2\n"));
-					if (veryClose || TheAI->pathfinder()->isLinePassable( obj, locomotorSet.getValidSurfaces(), closeNext->getLayer(), pos, tryPos, false, true )) 
+					if (veryClose || TheAI->pathfinder()->isLinePassable( obj, locomotorSet.getValidSurfaces(), closeNext->getLayer(), pos, steerCheckTarget( pos, tryPos ), false, true ))
 					{
 						gotPos = true;
 						out.posOnPath = tryPos;
@@ -1084,7 +1165,7 @@ void Path::computePointOnPath(
 			out.posOnPath.z = closeNodePos->z;
 
 			CRCDEBUG_LOG(("Path::computePointOnPath() calling isLinePassable() 3\n"));
-			if (TheAI->pathfinder()->isLinePassable( obj, locomotorSet.getValidSurfaces(), out.layer, pos, out.posOnPath, false, true )) 
+			if (TheAI->pathfinder()->isLinePassable( obj, locomotorSet.getValidSurfaces(), out.layer, pos, steerCheckTarget( pos, out.posOnPath ), false, true ))
 			{
 				k = 0.5f;
 				gotPos = true;
@@ -1201,6 +1282,20 @@ Real Path::computeFlightDistToGoal( const Coord3D *pos, Coord3D& goalPos )
 }
 //-----------------------------------------------------------------------------------
 
+/* How many cells the queued searches may look at in one logic frame. EA's 5000 is about 3.5ms of
+	 searching on this machine, and the queue spends all of it whenever there is work: with every
+	 other cost in the frame trimmed, the pathfind queue owned 3,798 of the 5,312 frames that still
+	 ran over 3ms in a four-player match.
+
+	 Halving it to 2500 was tried and is worse at everything except the very tail. Four matches:
+	 mean frame 1.38ms to 1.47, blocked unit-frames 7,673 to 8,318, units left stuck 9.8 to 26.8,
+	 and the total search work went UP - 7.56 million cell expansions to 9.79 million, 5,885ms of
+	 pathfinding a match to 6,946. A unit whose answer is late does not wait quietly: it stands in
+	 the way, gets shoved, and asks again.
+
+	 Tried a second time next to the request cap below, in case the cap changed the arithmetic: it
+	 does not. 2500 cells with three requests a frame gives mean 1.24ms to 1.30 and blocked 7,191 to
+	 9,837. Cells are the wrong knob on this queue; requests are the right one. */
 enum { PATHFIND_CELLS_PER_FRAME=5000}; // Number of cells we will search pathfinding per frame.
 // A* open+closed sets draw from this pool; running dry aborts the search (no path) after
 // burning the time.  Retail 30000 was sized for 2003 memory - a long detour around a
@@ -1438,8 +1533,8 @@ void PathfindCell::releaseInfo( void )
 /**
  * Sets the goal unit into the info record for a cell.
  */
-void PathfindCell::setGoalUnit(ObjectID unitID, const ICoord2D &pos ) 
-{ 
+void PathfindCell::setGoalUnit(ObjectID unitID, const ICoord2D &pos )
+{
 	if (unitID==INVALID_ID) {
 		// removing goal.
 		if (m_info) {
@@ -4377,7 +4472,7 @@ const char *Pathfinder::getMatchProfileReport( void )
 			continue;
 		const Real ms = freq ? (Real)(thePFMatchTicks[ i ] * 1000.0 / (double)freq) : 0.0f;
 		char one[ 64 ];
-		if( i >= PF_EXPAND )
+		if( i >= PF_MOVECHECK )		// the count-only group starts here
 			sprintf( one, "%s %dx ", thePFSlotName[ i ], thePFMatchCalls[ i ] );
 		else
 			sprintf( one, "%s %dx/%.0f ", thePFSlotName[ i ], thePFMatchCalls[ i ], ms );
@@ -4405,7 +4500,7 @@ const char *Pathfinder::getProfileReport( void )
 			continue;
 		const Real ms = freq ? (Real)(thePFTicks[ i ] * 1000.0 / (double)freq) : 0.0f;
 		char one[ 64 ];
-		if( i >= PF_EXPAND )
+		if( i >= PF_MOVECHECK )		// the count-only group starts here
 			sprintf( one, "%s %dx ", thePFSlotName[ i ], thePFCalls[ i ] );
 		else
 			sprintf( one, "%s %dx/%.1f ", thePFSlotName[ i ], thePFCalls[ i ], ms );
@@ -5645,7 +5740,7 @@ Bool Pathfinder::checkDestination(const Object *obj, Int cellX, Int cellY, Pathf
  */
 Bool Pathfinder::checkForMovement(const Object *obj, TCheckMovementInfo &info)	  
 {
-	PathProfile pfProfile( PF_MOVECHECK );
+	pfBump( PF_MOVECHECK );		// counted, never timed: see the count-only group in the enum
 	info.allyFixedCount = 0;
 	info.allyMoving = false;
 	info.allyGoal = false;
@@ -5661,6 +5756,16 @@ Bool Pathfinder::checkForMovement(const Object *obj, TCheckMovementInfo &info)
 		ignoreId =  obj->getAIUpdateInterface()->getIgnoredObstacleID();
 	}
 
+	/* An occupancy summary was built here and taken out again: one counter per four-by-four block of
+		 cells, maintained on every transition between "nobody here" and "somebody here", so that this
+		 function could answer for open ground with one read instead of twenty-five. It works - four
+		 matches came back bit-identical, which is the proof the counters never drift - and it buys
+		 nothing: the pathfinder's own time fell 2.5% and the mean logic frame did not move at all.
+
+		 The reason is worth keeping. The twenty-five reads it skips are a contiguous walk of a small
+		 array, which is the cheap case; what costs money in this function is the cells that DO hold a
+		 unit, where it looks the object up, asks the relationship and asks whether it can be crushed.
+		 Optimising the empty case optimised the half that was already free. */
 	Int numCellsAbove = info.radius;
 	if (info.centerInCell) numCellsAbove++;
 	Int i, j;
@@ -6832,8 +6937,24 @@ void Pathfinder::processPathfindQueue(void)
 #ifdef DEBUG_QPF
 	Int pathsFound = 0;
 #endif
-	while (m_cumulativeCellsAllocated < PATHFIND_CELLS_PER_FRAME && 
+	/* The cell budget bounds how much *searching* a frame does and says nothing about how many
+		 requests it starts, which is where the bursts come from: a match averages under two path
+		 requests a logic frame, and the frames that run long are the ones where a group order or a
+		 wave of repaths puts ten of them in the queue at once and the frame answers all ten. A cap on
+		 requests never bites the average - the queue drains at this rate every frame, which is many
+		 times the demand - and clips the burst onto the next frame or two. */
+	/* Three, fitted. Against no cap at all it is faster and drives better at the same time: mean
+		 logic frame 1.37ms to 1.24, p99 5.13 to 4.69, blocked unit-frames 7,673 a match to 7,191, and
+		 the searches themselves 25,202 to 21,995 - a unit whose request waits a frame often no longer
+		 needs the second, third and fourth repath it used to make while jammed. Two is a shade faster
+		 still and the movement gives way: blocked back up to 8,531, units left stuck 12 to 21. */
+	enum { PATHFIND_REQUESTS_PER_FRAME = 3 };
+	Int requestsThisFrame = 0;
+
+	while (m_cumulativeCellsAllocated < PATHFIND_CELLS_PER_FRAME &&
+		requestsThisFrame < PATHFIND_REQUESTS_PER_FRAME &&
 		m_queuePRTail!=m_queuePRHead) {
+		++requestsThisFrame;
 		Object *obj = TheGameLogic->findObjectByID(m_queuedPathfindRequests[m_queuePRHead]);
 		m_queuedPathfindRequests[m_queuePRHead] = INVALID_ID;
 		if (obj) {
@@ -7048,7 +7169,8 @@ Int Pathfinder::examineNeighboringCells(PathfindCell *parentCell, PathfindCell *
 			unregisterPathUsage(obj->getAIUpdateInterface()->getPath());
 			// getCurLocomotor, not getCurLocomotorSpeed: the latter DEBUG_LOGs when there is none.
 			const Locomotor *loco = obj->getAIUpdateInterface()->getCurLocomotor();
-			if (loco)
+			// -nocrosstime leaves the speed at zero, which is this search's switch for "no clock"
+			if (loco && TheGlobalData->m_useCrossingCost)
 				crossingSpeed = loco->getMaxSpeedForCondition(obj->getBodyModule()->getDamageState());
 		}
 		Bool isCrusher = obj ? obj->getCrusherLevel() > 0 : false;
@@ -7645,6 +7767,18 @@ Path *Pathfinder::internalFindPath( Object *obj, const LocomotorSet& locomotorSe
 		 request could spend the whole frame: 140513 cells / 285 ms measured, against a budget of
 		 5000.  The cap is a fixed count, not a timer, so every machine and every replay stops the
 		 search at the same cell. */
+	/* Lowering this was tried twice, to bound the tail rather than the throughput: a search that
+		 hits the cap hands back the partial route it has and the unit asks again later, so most
+		 searches never notice. Both times it pulls in two directions and the movement one loses.
+
+		 At 5000: 4v4 p99 7.08ms to 6.67 and stuck 149 to 87, but four players go blocked unit-frames
+		 7,673 to 9,595, stuck 9.8 to 86.8, and a frame over 16.7ms where there had been none. At
+		 10000, with the request cap below already in place: the worst frame of four matches 16.0ms
+		 to 11.4, and blocked 7,191 to 9,908 with the mean and p99 both worse.
+
+		 A truncated route is a unit walking at a wall it cannot see round, and it pays for that with
+		 another search a second later. Three separate attempts to buy the tail with search capacity
+		 (this, twice, and the queue's cell budget) all bought it with movement instead. */
 	enum { MAX_INTERNAL_CELL_COUNT = 20000 };
 	PathfindCell *closestCell = NULL;
 	Real closestDistanceSqr = FLT_MAX;
@@ -8241,6 +8375,17 @@ Path *Pathfinder::findGroundPath( const Coord3D *from,
 	// "closed" list is initially empty
 	m_closedList = NULL;
 
+	/* The group corridor was the last search in this file with no ceiling on it, and it is the most
+		 expensive one per cell: every neighbour it looks at runs clearCellForDiameter, which reads a
+		 six-by-six block. A three-unit team crossing Twilight Flame cost 40.5ms in one logic frame,
+		 measured, and that was the worst frame of a four-player match.
+
+		 The cap is a fixed cell count, so it stops at the same cell on every machine and in every
+		 replay. Hitting it means the group gets no corridor at that width: AIGroup then tries 4 and
+		 3 cells wide, and if none of them answers, every member paths for itself - which is what
+		 -nogrouppath does deliberately, and what retail did whenever the ground was too tight. */
+	enum { MAX_GROUND_PATH_CELLS = 3000 };
+
 	//
 	// Continue search until "open" list is empty, or
 	// until goal is found.
@@ -8248,6 +8393,11 @@ Path *Pathfinder::findGroundPath( const Coord3D *from,
 	Int cellCount = 0;
 	while( m_openList != NULL )
 	{
+		if (cellCount > MAX_GROUND_PATH_CELLS) {
+			DEBUG_LOG(("GROUNDPATH probe: gave up at %d cells, diameter %d\n", cellCount, pathDiameter));
+			break;
+		}
+
 		// take head cell off of open list - it has lowest estimated total path cost
 		parentCell = m_openList;
 		m_openList = parentCell->removeFromOpenList(m_openList);
