@@ -14,6 +14,8 @@ columns use one after the other is fine, a junction they reach together is not.
 
     python pathlab.py                 # corridor mode, the engine's default
     python pathlab.py --mode single   # -nogrouppath: one path per unit, congestion the whole way
+    python pathlab.py --mode band     # the ribbon: one line, a lateral position each, density
+    python pathlab.py --mode flat     # ... and the same band with the pressure term off
     python pathlab.py --map open      # no chokepoint, to see lanes on open ground
     python pathlab.py --headless 6 --scenario cross --map open --units 16 --sweep 20/4/0,20/4/60
 
@@ -25,7 +27,7 @@ spread anyone out, it sends them to queue at the next doorway instead.
 Controls
     left click          order the selection to a point
     right drag          select units (right click empty ground selects all)
-    1 / 2               corridor mode / individual mode
+    1 / 2 / 3           corridor mode / individual mode / band mode (the ribbon)
     c                   congestion cost on/off
     t                   crossing cost on/off (the time dimension)
     r                   draw the line-of-sight rays planning used
@@ -49,6 +51,7 @@ from collections import Counter
 from collections.abc import Iterable, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from functools import partial
 from enum import IntEnum
 from typing import NamedTuple
 import pygame
@@ -73,7 +76,7 @@ PATH_CONGESTION_MAX_PATHS: int = 4          # cap, so a mob cannot make a cell i
 GROUP_PATH_DIAMETERS: tuple[int, ...] = (6, 4, 3)   # what friend_computeGroundPath tries in order
 STRAIGHTEN_MAX_RUN: int = 16                # raycast simplify: points dropped in a row
 MAP_KINDS: tuple[str, ...] = ("choke", "open", "twogaps")
-MODES: tuple[str, ...] = ("corridor", "single")
+MODES: tuple[str, ...] = ("corridor", "flat", "band", "single")
 SCENARIOS: tuple[str, ...] = ("column", "cross")
 UNIT_RADIUS: float = 11.0                   # a Crusader's bounding circle, near enough
 UNIT_SPEED: float = 2.4                     # world units per logic frame
@@ -159,6 +162,21 @@ LANE_CHANGE_SAME_WAY: float = 0.5           # headings this aligned are traffic,
 LANE_HOLD_FRAMES: int = 45                  # hold a lane this long, or it flickers every frame
 LANE_CHANGE_STALLED_ONLY: bool = True       # overtake a queue that is stopped, not one that flows
 LANE_RAYS_KEPT: int = 24                    # how many lane probes stay drawable per unit
+
+# The ribbon.  The corridor stops being a line and becomes a band: every unit keeps a continuous
+# lateral position inside it, clamped to the band's half width, and each frame slides that position
+# away from whichever side of the band in front of it is busier.  A queue is a density hump and the
+# units behind it drain sideways on their own; where the band is too narrow to hold two of them the
+# clamp gathers them back into single file, which is the doorway case Grid.has_room exists for,
+# expressed as geometry rather than as a special case.
+#
+# It shares the corridor search with column mode and adds no search of its own: the per-frame work
+# is counting units in a slice in front, in buckets a footprint wide, and one clearance probe.
+BAND_STEP: float = 0.15                     # footprints of lateral drift per frame
+BAND_LOOKAHEAD: float = 4.0                 # footprints of band read in front of the unit
+BAND_BUCKET: float = 1.0                    # footprints per bucket: a cell is 10 and a tank 22, so
+                                            # a narrower one measures noise and the drift chatters
+BAND_DEADBAND: int = 1                      # a side must be this much busier before anybody moves
 
 # Ordering
 LANES_MAX: int = 3
@@ -308,7 +326,9 @@ def make_map(kind: str, width: int = MAP_WIDTH_CELLS, height: int = MAP_HEIGHT_C
         scatter_blocks(grid, rng, CHOKE_MAP_ROCKS, CHOKE_MAP_MARGIN, keep_clear_of=wall)
         return grid
     if kind == "twogaps":
-        # the case the whole exercise is about: a cheap narrow way and a wider way round
+        # the case the whole exercise is about: a cheap narrow way and a wider way round.
+        # Nothing here reads the seed, on purpose - it is a hand-made map, so a headless run over
+        # sixteen seeds is one match played sixteen times and its columns are one data point
         wall = width // 2
         for y in range(1, height - 1):
             grid.block(wall, y)
@@ -713,6 +733,14 @@ class Unit:
     lane_dy: float = 0.0
     lane_frames: int = 0                    # ... and how much longer it is held
     lane_changes: int = 0
+    band_half: float = 0.0                  # w(s)/2 of the band this unit drives, 0 = not on one
+    band_t: float = 0.0                     # ... and where it sits across it, clamped to +-half
+    band_step: float = 0.0                  # ... and how far the pressure term may slide it in a
+                                            # frame.  Zero is the control arm: the same band, the
+                                            # same shared line, nobody drifting
+    band_line: list[Point] = field(default_factory=list)    # the band's centre, shared, from the
+                                            # corridor start: segment i is band_line[i:i+2]
+    band_drifts: int = 0                    # frames the pressure term actually moved this unit
     stuck_run: int = 0                      # consecutive frames going nowhere -> repath
     jam_priced: int = 0                     # repaths that had jammed ground in front of them at all
     jam_detours: int = 0                    # ... and of those, the ones that came out avoiding it
@@ -847,6 +875,96 @@ def update_lane(grid: Grid, units: Sequence[Unit], mover: Unit, hx: float, hy: f
     mover.blocked_run = 0
 
 
+def band_frame(unit: Unit) -> tuple[Heading, Heading] | None:
+    """The tangent and normal of the band segment this unit is driving, or None when it is not on
+       a band.  Taken from the band's own centre line rather than from where the unit happens to
+       be: a unit that has drifted sideways must not tilt its own idea of sideways."""
+    if unit.band_half <= 0.0 or unit.has_arrived or len(unit.band_line) < 2:
+        return None
+    first = min(unit.index, len(unit.band_line) - 2)
+    (ax, ay), (bx, by) = unit.band_line[first], unit.band_line[first + 1]
+    dx, dy = bx - ax, by - ay
+    length = math.hypot(dx, dy)
+    if length < EPSILON:
+        return None
+    return (dx / length, dy / length), (-dy / length, dx / length)
+
+
+def band_target(unit: Unit, target: Point) -> Point:
+    """Where a unit on the band actually drives: its waypoint, pushed out by its lateral place in
+       the band.  The last waypoint is exempt - the goals were spread and reserved when the order
+       was given, and shoving them sideways again lands two units on one spot."""
+    axes = band_frame(unit)
+    if axes is None or unit.index >= len(unit.path) - 1:
+        return target
+    (_, _), (nx, ny) = axes
+    return target[0] + nx * unit.band_t, target[1] + ny * unit.band_t
+
+
+def band_pressure(units: Sequence[Unit], mover: Unit, tangent: Heading,
+                  normal: Heading) -> float:
+    """Which way the band is emptier in front of this unit: -1, 0 or +1.
+
+       The slice ahead is split into buckets a footprint wide - narrower and it counts noise - and
+       only the two beside the mover's own line are compared.  Nothing in front means nothing to
+       drain around, and the unit holds its line."""
+    footprint = mover.radius * 2.0
+    ahead = BAND_LOOKAHEAD * footprint
+    bucket = BAND_BUCKET * footprint
+    reach = mover.band_half + bucket
+    counts = {-1: 0, 0: 0, 1: 0}
+    for other in units:
+        if other is mover:
+            continue
+        ox, oy = other.x - mover.x, other.y - mover.y
+        along = ox * tangent[0] + oy * tangent[1]
+        if along <= 0.0 or along > ahead:
+            continue
+        lateral = ox * normal[0] + oy * normal[1]
+        if abs(lateral) > reach:
+            continue
+        side = int(math.floor(lateral / bucket + 0.5))
+        if -1 <= side <= 1:
+            counts[side] += 1
+    if not counts[0]:
+        return 0.0
+    if counts[-1] - counts[1] >= BAND_DEADBAND:
+        return 1.0
+    if counts[1] - counts[-1] >= BAND_DEADBAND:
+        return -1.0
+    # both sides equally busy: keep drifting the way this unit was already going rather than
+    # picking a side at random, which would put two units into the same gap on alternate frames
+    return math.copysign(1.0, mover.band_t) if mover.band_t else 0.0
+
+
+def update_band(grid: Grid, units: Sequence[Unit], mover: Unit) -> None:
+    """One unit's lateral place in the band, one frame.  Continuous, small and uncommitted: there
+       is no lane to latch onto and nothing to hold, so the moment the ground in front clears the
+       unit stops drifting and stays where it is."""
+    axes = band_frame(mover)
+    if axes is None or mover.band_step <= 0.0:
+        return
+    tangent, normal = axes
+    direction = band_pressure(units, mover, tangent, normal)
+    if direction == 0.0:
+        return
+    wanted = min(mover.band_half,
+                 max(-mover.band_half,
+                     mover.band_t + direction * mover.band_step * mover.radius * 2.0))
+    if wanted == mover.band_t:
+        return
+    # the band's width came from the corridor's clearance, which was measured on the centre line;
+    # a lateral offset is still a blind sideways step, so probe it the way the lane ladder does
+    tx, ty = mover.path[mover.index]
+    px, py = tx + normal[0] * wanted, ty + normal[1] * wanted
+    if not (grid.passable_world(px, py)
+            and grid.passable_world(px + normal[0] * mover.radius, py + normal[1] * mover.radius)
+            and grid.passable_world(px - normal[0] * mover.radius, py - normal[1] * mover.radius)):
+        return
+    mover.band_t = wanted
+    mover.band_drifts += 1
+
+
 def yield_for(units: Sequence[Unit], grid: Grid, mover: Unit, hx: float, hy: float) -> None:
     """A unit that has arrived is parked, not welded down: when someone still driving cannot get
        past it, it steps aside.  The engine does this too, and without it a tank that has finished
@@ -871,7 +989,9 @@ def step_units(units: Sequence[Unit], grid: Grid, *, traffic: TrafficModel, now:
     for unit in units:
         if unit.has_arrived:
             continue
-        tx, ty = unit.path[unit.index]
+        if unit.band_half > 0.0:
+            update_band(grid, units, unit)
+        tx, ty = band_target(unit, unit.path[unit.index])
         dx, dy = tx - unit.x, ty - unit.y
         distance = math.hypot(dx, dy)
         is_final = unit.index == len(unit.path) - 1
@@ -933,6 +1053,11 @@ def apply_path(unit: Unit, points: list[Point], cells: list[Cell], traffic: Traf
     unit.path = points
     unit.index = 0
     unit.cells = cells
+    # a fresh path is a line until somebody says otherwise; order_band says so straight after, and
+    # a unit that repathed out of a jam is off the band and back on its own route
+    unit.band_half = 0.0
+    unit.band_t = 0.0
+    unit.band_line = []
     traffic.usage.register(unit.id, cells)
     traffic.reservations.reserve(unit.id, *track_reservations(unit.pos, points, now))
 
@@ -1070,31 +1195,39 @@ def summarise_order(stats: OrderStats, units: Sequence[Unit], traffic: TrafficMo
     stats.crossings = count_planned_crossings(traffic.reservations)
 
 
+def plan_corridor(grid: Grid, units: Sequence[Unit], goal: Point, *, traffic: TrafficModel,
+                  stats: OrderStats, now: float) -> tuple[list[Cell], int]:
+    """The one search both group planners start from: a hierarchical corridor for the whole
+       selection, narrowing 6 -> 4 -> 3 before anybody falls back to solving for themselves.
+       Returns (cells, diameter), or ([], 0) when the ground carries none of the three widths."""
+    cx, cy = compute_centroid(units)
+    # this group is about to be re-planned, so its own old reservations must not price the corridor
+    for unit in units:
+        traffic.reservations.release(unit.id)
+    for candidate in GROUP_PATH_DIAMETERS:
+        corridor, expansions = astar(grid, cell_of(cx, cy), cell_of(*goal),
+                                     clearance=candidate // 2,
+                                     pricing=traffic.corridor_pricing(now))
+        stats.expansions += expansions
+        stats.searches += 1
+        if corridor:
+            stats.corridor = [world_of(*cell) for cell in corridor]
+            stats.diameter = candidate
+            return corridor, candidate
+    return [], 0
+
+
 def order_corridor(grid: Grid, units: Sequence[Unit], goal: Point, *, traffic: TrafficModel,
                    stats: OrderStats, now: float) -> None:
     """AIGroup::friend_computeGroundPath + friend_moveVehicleToPos."""
     cx, cy = compute_centroid(units)
     start_cell = cell_of(cx, cy)
     goal_cell = cell_of(*goal)
-    # this group is about to be re-planned, so its own old reservations must not price the corridor
-    for unit in units:
-        traffic.reservations.release(unit.id)
-    corridor: list[Cell] = []
-    diameter = 0
-    for candidate in GROUP_PATH_DIAMETERS:
-        corridor, expansions = astar(grid, start_cell, goal_cell, clearance=candidate // 2,
-                                     pricing=traffic.corridor_pricing(now))
-        stats.expansions += expansions
-        stats.searches += 1
-        if corridor:
-            diameter = candidate
-            break
+    corridor, _ = plan_corridor(grid, units, goal, traffic=traffic, stats=stats, now=now)
     if not corridor:
         stats.notes.append("no corridor at any width - falling back to individual paths")
         order_individual(grid, units, goal, traffic=traffic, stats=stats, now=now)
         return
-    stats.corridor = [world_of(*cell) for cell in corridor]
-    stats.diameter = diameter
     if start_cell == goal_cell:
         # ordered onto the group's own centre: there is no corridor to lay lanes along
         stats.notes.append("goal is the group's own cell - nothing to move to")
@@ -1149,6 +1282,59 @@ def order_corridor(grid: Grid, units: Sequence[Unit], goal: Point, *, traffic: T
     summarise_order(stats, units, traffic)
 
 
+def order_band(grid: Grid, units: Sequence[Unit], goal: Point, *, traffic: TrafficModel,
+               stats: OrderStats, now: float, step: float | None = None) -> None:
+    """The ribbon: the same corridor as column mode, driven as a band rather than as three lanes.
+
+       Every unit gets the one straightened centre line and a lateral position on it, taken from
+       where it is standing when the order is given, so the group keeps the shape it had.  From
+       there the pressure term in update_band owns that position: nothing is latched, nothing is
+       held for a fixed number of frames, and the clamp to the band's half width is what stops it
+       trying to spread a column out inside a doorway."""
+    # None means "whatever --band-step left in the global", so a sweep row still reaches this;
+    # the flat control arm passes 0.0 and means it
+    step = BAND_STEP if step is None else step
+    cx, cy = compute_centroid(units)
+    start_cell = cell_of(cx, cy)
+    corridor, diameter = plan_corridor(grid, units, goal, traffic=traffic, stats=stats, now=now)
+    if not corridor:
+        stats.notes.append("no corridor at any width - falling back to individual paths")
+        order_individual(grid, units, goal, traffic=traffic, stats=stats, now=now)
+        return
+    if start_cell == cell_of(*goal):
+        stats.notes.append("goal is the group's own cell - nothing to move to")
+        return
+    radius = max(unit.radius for unit in units)
+    centre = [world_of(*cell) for cell in corridor]
+    # straightened once for the whole group rather than once per unit: on a band every unit drives
+    # the same line, and the offset that tells them apart is not in the line
+    straight, rays = simplify_raycast(grid, centre[0], centre[1:], radius=radius,
+                                      lane_spacing=2.0 * radius)
+    band_line = [centre[0], *straight]
+    # w(s)/2, fixed for now.  The corridor was searched with a clearance of diameter//2, so every
+    # cell that near the centre line is drivable: that is (clearance + half a cell) of room either
+    # side, less the unit's own radius, which is how far off the line it can sit and still be in
+    half = max(0.0, (diameter // 2 + 0.5) * CELL - radius)
+    hx, hy = straight[0][0] - centre[0][0], straight[0][1] - centre[0][1]
+    hlen = math.hypot(hx, hy) or 1.0
+    nx, ny = -hy / hlen, hx / hlen
+    taken: set[Point] = set()
+    # nearest the goal first, so the units in front claim the spots in front
+    for unit in sorted(units, key=lambda unit: math.hypot(unit.x - goal[0], unit.y - goal[1])):
+        lateral = min(half, max(-half, (unit.x - cx) * nx + (unit.y - cy) * ny))
+        gx, gy = reserve_goal(grid, taken, goal[0] + lateral * nx, goal[1] + lateral * ny,
+                              radius=unit.radius)
+        unit.goal = (gx, gy)
+        unit.rays = list(rays)
+        points = [*straight[:-1], (gx, gy)]
+        apply_path(unit, points, [cell_of(*point) for point in points], traffic, now)
+        unit.band_half = half
+        unit.band_t = lateral
+        unit.band_step = step
+        unit.band_line = band_line
+    summarise_order(stats, units, traffic)
+
+
 def order_individual(grid: Grid, units: Sequence[Unit], goal: Point, *, traffic: TrafficModel,
                      stats: OrderStats, now: float) -> None:
     """-nogrouppath: one A* per unit, and the congestion cost is what holds them apart.
@@ -1189,6 +1375,13 @@ def order_individual(grid: Grid, units: Sequence[Unit], goal: Point, *, traffic:
         # reserve the straightened line, not the A* cells: the shortcut is where it drives
         apply_path(unit, points, cells, traffic, now)
     summarise_order(stats, units, traffic)
+
+
+# what --mode and the headless table's first column name.  MODES is the order they are compared in.
+# `flat` is the band without the pressure term - the same shared line and the same clamp, nobody
+# drifting - because a band that measures differently from a column has to say which half did it
+PLANNERS = {"corridor": order_corridor, "flat": partial(order_band, step=0.0),
+            "band": order_band, "single": order_individual}
 
 
 def spawn_block(grid: Grid, count: int, cx: int, cy: int, first_id: int = 0) -> list[Unit]:
@@ -1237,6 +1430,8 @@ class Measurement:
     expansions: float = 0.0
     repaths: float = 0.0
     lanes: float = 0.0
+    drift: float = 0.0          # band mode: frames the pressure term actually moved somebody.
+                                # A flat result with this at zero says nothing about the idea
     jam_peak: float = 0.0       # most cells jammed at once, whether or not the cost is charged
     jam_priced: float = 0.0     # repaths with jammed ground in front of them ...
     jam_detours: float = 0.0    # ... and the ones that came back avoiding it
@@ -1254,6 +1449,7 @@ class Measurement:
         self.expansions /= divisor
         self.repaths /= divisor
         self.lanes /= divisor
+        self.drift /= divisor
         self.jam_peak /= divisor
         self.jam_priced /= divisor
         self.jam_detours /= divisor
@@ -1261,10 +1457,15 @@ class Measurement:
 
 def measure(map_kind: str, unit_count: int, seeds: int, mode: str, *,
             is_congestion_charged: bool, is_crossing_charged: bool,
-            scenario: str, is_jam_charged: bool = True) -> Measurement:
-    """The scenario's orders, played out, averaged over `seeds` maps."""
+            scenario: str, is_jam_charged: bool = True, first_seed: int = 0) -> Measurement:
+    """The scenario's orders, played out, averaged over `seeds` maps.
+
+       `first_seed` is for pairing rather than averaging: an average of sixteen seeds hides the one
+       seed that carries the whole difference, and this file's own history has an idea that looked
+       decisive on the mean and went ten better against six worse when the maps were counted one at
+       a time.  A caller that wants that count asks for one seed at a time."""
     total = Measurement()
-    for seed in range(seeds):
+    for seed in range(first_seed, first_seed + seeds):
         grid = make_map(map_kind, seed=seed)
         traffic = TrafficModel(UsageMap(), ReservationMap(),
                                is_congestion_charged=is_congestion_charged,
@@ -1272,7 +1473,7 @@ def measure(map_kind: str, unit_count: int, seeds: int, mode: str, *,
                                is_jam_charged=is_jam_charged)
         units, orders = build_scenario(grid, unit_count, scenario)
         stats = OrderStats()
-        planner = order_corridor if mode == "corridor" else order_individual
+        planner = PLANNERS[mode]
         for group, goal in orders:
             planner(grid, group, goal, traffic=traffic, stats=stats, now=0.0)
         total.overlap += count_path_overlap(units)
@@ -1295,6 +1496,7 @@ def measure(map_kind: str, unit_count: int, seeds: int, mode: str, *,
         total.expansions += stats.expansions
         total.repaths += sum(unit.repaths for unit in units)
         total.lanes += sum(unit.lane_changes for unit in units)
+        total.drift += sum(unit.band_drifts for unit in units)
         total.jam_peak += traffic.jam.peak
         total.jam_priced += sum(unit.jam_priced for unit in units)
         total.jam_detours += sum(unit.jam_detours for unit in units)
@@ -1305,14 +1507,15 @@ def measure(map_kind: str, unit_count: int, seeds: int, mode: str, *,
 def print_table_head() -> None:
     print(f"{'mode':<9} {'lane':<5} {'jam':<4} {'cost/cap/x':<11} {'waypts':>8} {'length':>8} "
           f"{'frames':>8} {'blocked':>9} {'overlap':>8} {'cross':>6} {'stuck':>7} {'cells':>8} "
-          f"{'lanes':>6} {'jamcell':>8} {'priced':>7} {'round':>6}")
+          f"{'lanes':>6} {'drift':>7} {'jamcell':>8} {'priced':>7} {'round':>6}")
 
 
 def print_row(mode: str, lane: str, jam: str, label: str, result: Measurement) -> None:
     print(f"{mode:<9} {lane:<5} {jam:<4} {label:<11} {result.waypoints:>8.1f} {result.length:>8.0f} "
           f"{result.frames:>8.0f} {result.blocked:>9.0f} {result.overlap:>8.0f} "
           f"{result.crossings:>6.0f} {result.stuck:>7d} {result.expansions:>8.0f} "
-          f"{result.lanes:>6.0f} {result.jam_peak:>8.0f} {result.jam_priced:>7.1f} "
+          f"{result.lanes:>6.0f} {result.drift:>7.0f} {result.jam_peak:>8.0f} "
+          f"{result.jam_priced:>7.1f} "
           f"{result.jam_detours:>6.1f}")
 
 
@@ -1442,7 +1645,7 @@ class Simulation:
         selected = self.selected_units
         for unit in selected:
             unit.blocked_frames = 0
-        planner = order_corridor if self.mode == "corridor" else order_individual
+        planner = PLANNERS[self.mode]
         planner(self.grid, selected, goal, traffic=self.traffic, stats=self.stats,
                 now=float(self.frames))
         print(f"[order] mode={self.mode} units={len(selected)} searches={self.stats.searches} "
@@ -1605,7 +1808,7 @@ class Renderer:
         lines = [
             f"mode {sim.mode:<9} congestion {congestion:<3} crossing {crossing:<3} "
             f"jam {jam:<3} rays {self.ray_detail.name.lower():<8} heat {heat:<3}   "
-            f"[1][2] [c][t][j][k][r][p] [n]map [tab]replan",
+            f"[1][2][3] [c][t][j][k][r][p] [n]map [tab]replan",
             f"corridor width {sim.stats.diameter} cells   searches {sim.stats.searches}   "
             f"cell expansions {sim.stats.expansions}   "
             f"avg waypoints/unit {sim.stats.avg_waypoints:.1f}",
@@ -1662,6 +1865,8 @@ class Lab:
             self.sim.mode = "corridor"
         elif key == pygame.K_2:
             self.sim.mode = "single"
+        elif key == pygame.K_3:
+            self.sim.mode = "band"
         elif key == pygame.K_c:
             self.sim.traffic.is_congestion_charged = not self.sim.traffic.is_congestion_charged
         elif key == pygame.K_t:
@@ -1705,6 +1910,7 @@ class Lab:
 
 
 def main() -> None:
+    global BAND_STEP
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--mode", choices=MODES, default="corridor")
@@ -1728,9 +1934,12 @@ def main() -> None:
                         help="headless only: cost/cap/crossing triples to compare (crossing 0 = off)")
     parser.add_argument("--lanes", choices=("off", "on", "both"), default="off",
                         help="overtake instead of queueing; 'both' measures it against itself")
+    parser.add_argument("--band-step", type=float, default=BAND_STEP, dest="band_step",
+                        help="band mode: footprints of lateral drift per frame (0 = the flat band)")
     parser.add_argument("--jam", choices=("off", "on", "both"), default="on",
                         help="charge a repath for ground somebody is stuck on; 'both' compares")
     args = parser.parse_args()
+    BAND_STEP = args.band_step
     sweep = parse_sweep(args.sweep)
     if args.headless:
         run_headless(args, sweep)

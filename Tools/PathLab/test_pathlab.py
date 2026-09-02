@@ -15,11 +15,11 @@ from pathlab import (CELL, COST_DIAGONAL, COST_ORTHOGONAL, PATH_CONGESTION_COST,
                      PATH_CONGESTION_MAX_PATHS, PATH_CROSSING_COST, PATH_CROSSING_MAX,
                      PATH_JAM_COST, PATH_JAM_DECAY_FRAMES, PATH_JAM_FLOOR, PATH_JAM_MAX,
                      PATH_JAM_MAX_CHARGED, PATH_JAM_RANGE,
-                     Grid, JamMap, OrderStats, ReservationMap, TrafficModel, UsageMap,
+                     Grid, JamMap, OrderStats, ReservationMap, TrafficModel, Unit, UsageMap,
                      astar, build_scenario, cell_of, compute_centroid, count_planned_crossings,
-                     find_crossing_cells, make_map, order_corridor, order_individual, parse_sweep,
-                     price_congestion, price_crossing, price_jam, simplify_raycast, spawn_block,
-                     track_reservations, tuning, world_of)
+                     find_crossing_cells, make_map, order_band, order_corridor, order_individual,
+                     parse_sweep, price_congestion, price_crossing, price_jam, simplify_raycast,
+                     spawn_block, track_reservations, tuning, update_band, world_of)
 
 
 def open_grid(size: int = 21) -> Grid:
@@ -310,6 +310,87 @@ class StraighteningTests(unittest.TestCase):
         self.assertEqual(simplified[-1], points[-1])
 
 
+class BandTests(unittest.TestCase):
+    """The ribbon's pressure term.  Every one of these is a case the headless table cannot show:
+       a number moving there says something happened, not that the right thing happened."""
+
+    def on_a_band(self, grid, x, y, *, half=20.0, t=0.0, line=None):
+        unit = Unit(x, y, id=0)
+        unit.path = line[1:] if line else [world_of(10, 5), world_of(18, 5)]
+        unit.band_line = line or [world_of(2, 5), *unit.path]
+        unit.band_half = half
+        unit.band_t = t
+        unit.band_step = pathlab.BAND_STEP
+        return unit
+
+    def test_the_band_frame_is_the_line_and_not_where_the_unit_drifted_to(self):
+        # the unit sits well off the centre line; sideways is still the line's sideways
+        unit = self.on_a_band(open_grid(), *world_of(4, 9))
+        (tx, ty), (nx, ny) = pathlab.band_frame(unit)
+        self.assertAlmostEqual(math.hypot(tx, ty), 1.0)
+        self.assertAlmostEqual(tx * nx + ty * ny, 0.0)
+        self.assertAlmostEqual(ty, 0.0)                 # the line runs east
+
+    def test_a_unit_with_no_band_has_no_frame(self):
+        unit = self.on_a_band(open_grid(), *world_of(4, 5), half=0.0)
+        self.assertIsNone(pathlab.band_frame(unit))
+
+    def test_the_last_waypoint_is_driven_without_the_offset(self):
+        """The goals were spread and reserved when the order was given; offsetting them again puts
+           two units on one spot."""
+        unit = self.on_a_band(open_grid(), *world_of(4, 5), t=15.0)
+        first = unit.path[0]
+        self.assertNotEqual(pathlab.band_target(unit, first), first)
+        unit.index = len(unit.path) - 1
+        last = unit.path[-1]
+        self.assertEqual(pathlab.band_target(unit, last), last)
+
+    def test_the_pressure_points_away_from_the_busier_side(self):
+        grid = open_grid()
+        mover = self.on_a_band(grid, *world_of(4, 5))
+        tangent, normal = (1.0, 0.0), (0.0, 1.0)
+        ahead = Unit(*world_of(6, 5), id=1)             # straight in front
+        crowd = Unit(*world_of(6, 8), id=2)             # ... and one more, a bucket over
+        self.assertEqual(
+            pathlab.band_pressure([mover, ahead, crowd], mover, tangent, normal), -1.0)
+
+    def test_nothing_in_front_means_nobody_moves(self):
+        grid = open_grid()
+        mover = self.on_a_band(grid, *world_of(4, 5))
+        beside = Unit(*world_of(4, 6), id=1)            # abreast, not ahead
+        behind = Unit(*world_of(2, 5), id=2)
+        self.assertEqual(
+            pathlab.band_pressure([mover, beside, behind], mover, (1.0, 0.0), (0.0, 1.0)), 0.0)
+        update_band(grid, [mover, beside, behind], mover)
+        self.assertEqual(mover.band_t, 0.0)
+
+    def test_the_drift_is_clamped_to_the_band(self):
+        grid = open_grid()
+        mover = self.on_a_band(grid, *world_of(4, 5), half=5.0, t=5.0)
+        crowd = [Unit(*world_of(6, 4), id=1), Unit(*world_of(6, 5), id=2)]
+        for _ in range(20):
+            update_band(grid, [mover, *crowd], mover)
+        self.assertLessEqual(abs(mover.band_t), 5.0)
+
+    def test_a_drift_into_a_wall_is_refused(self):
+        """The band's width was measured on the centre line, so a lateral step is still a blind
+           sideways step - the same reason the lane ladder probes before it commits."""
+        grid = open_grid()
+        for cx in range(grid.width):
+            grid.block(cx, 6)
+        mover = self.on_a_band(grid, *world_of(4, 5), half=40.0)
+        crowd = [Unit(*world_of(6, 5), id=1), Unit(*world_of(6, 4), id=2)]
+        for _ in range(20):
+            update_band(grid, [mover, *crowd], mover)
+        self.assertEqual(mover.band_t, 0.0)             # the only way out is under the wall
+
+    def test_a_repath_takes_a_unit_off_the_band(self):
+        unit = self.on_a_band(open_grid(), *world_of(4, 5), t=12.0)
+        traffic = TrafficModel(UsageMap(), ReservationMap())
+        pathlab.apply_path(unit, [world_of(8, 5)], [(8, 5)], traffic, 0.0)
+        self.assertEqual((unit.band_half, unit.band_t, unit.band_line), (0.0, 0.0, []))
+
+
 class OrderTests(unittest.TestCase):
     def plan(self, planner, map_kind="open", unit_count=6):
         grid = make_map(map_kind, seed=3)
@@ -339,6 +420,30 @@ class OrderTests(unittest.TestCase):
         _, units, _, single_stats = self.plan(order_individual)
         self.assertEqual(single_stats.searches, len(units))
         self.assertLess(corridor_stats.searches, single_stats.searches)
+
+    def test_the_band_gives_every_unit_one_line_and_its_own_goal(self):
+        _, units, _, stats = self.plan(order_band)
+        self.assertTrue(all(unit.band_half > 0.0 for unit in units))
+        self.assertEqual(len({id(unit.band_line) for unit in units}), 1)
+        self.assertEqual(len({unit.goal for unit in units}), len(units))
+        self.assertTrue(all(abs(unit.band_t) <= unit.band_half for unit in units))
+        # the group keeps the shape it had: one t per rank of the spawn block, not one per unit -
+        # units abreast along the direction of travel are a column and belong on one line
+        self.assertGreater(len({unit.band_t for unit in units}), 1)
+        self.assertIn(stats.diameter, pathlab.GROUP_PATH_DIAMETERS)
+
+    def test_the_band_is_one_search_for_the_group_like_the_corridor(self):
+        _, _, _, band_stats = self.plan(order_band)
+        _, units, _, single_stats = self.plan(order_individual)
+        self.assertLess(band_stats.searches, len(units))
+        self.assertLess(band_stats.searches, single_stats.searches)
+
+    def test_the_flat_band_is_the_same_plan_with_nobody_drifting(self):
+        _, band_units, _, _ = self.plan(pathlab.PLANNERS["band"])
+        _, flat_units, _, _ = self.plan(pathlab.PLANNERS["flat"])
+        self.assertEqual([unit.path for unit in band_units], [unit.path for unit in flat_units])
+        self.assertTrue(all(unit.band_step > 0.0 for unit in band_units))
+        self.assertTrue(all(unit.band_step == 0.0 for unit in flat_units))
 
     def test_a_group_ordered_onto_itself_says_so_instead_of_moving(self):
         grid = make_map("open", seed=3)
