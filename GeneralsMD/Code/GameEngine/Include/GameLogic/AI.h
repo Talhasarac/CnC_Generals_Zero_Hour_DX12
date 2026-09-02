@@ -447,6 +447,14 @@ public:
 		* find out. */
 	static Real getLastPathfindMS( void ) { return s_lastPathfindMS; }
 	static Real getLastPlayerUpdateMS( void ) { return s_lastPlayerUpdateMS; }
+
+	/* Target acquisitions this logic frame. The partition manager counts every range query it is
+		 asked for; this counts the ones that are a unit looking for somebody to shoot, which is the
+		 difference between knowing which subsystem to work on and guessing. Zeroed with the partition
+		 counters at the top of the frame. */
+	static Int getEnemyScanCountThisFrame( void ) { return s_enemyScans; }
+	static void resetEnemyScanCount( void ) { s_enemyScans = 0; }
+	static void bumpEnemyScanCount( void ) { ++s_enemyScans; }
 	enum
 	{
 		CAN_SEE														=	1 << 0,
@@ -479,6 +487,7 @@ public:
 
 	static void parseAiDataDefinition( INI* ini );
 
+	static Int s_enemyScans;								///< see getEnemyScanCountThisFrame
 	static Real s_lastPathfindMS;						///< see getLastPathfindMS
 	static Real s_lastPlayerUpdateMS;				///< see getLastPlayerUpdateMS
 	const TAiData *getAiData() {return m_aiData;}

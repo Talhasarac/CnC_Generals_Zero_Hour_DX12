@@ -6690,6 +6690,48 @@ TEST(an_option_read_before_the_parser_exists_is_read_on_word_boundaries)
 	CHECK( !findCommandLineValueIn( L"-logPrefix abcdef", L"-logPrefix", tiny, 0 ) );
 }
 
+TEST(the_two_group_movement_switches_are_on_until_the_command_line_says_otherwise)
+{
+	/* Both of these were declared with a comment promising a switch and then never written, never
+	   read and never initialised - so the field held whatever the allocator left there, and the
+	   only way to measure either mechanism was to build a second exe.  A control arm has to be in
+	   the same binary as the thing it is controlling: two exes differ in more than the change. */
+	GlobalData *saved = TheWritableGlobalData;
+	TheWritableGlobalData = NEW GlobalData;
+
+	// the default is what this fork has always done: the shared corridor, and the crossing cost
+	CHECK( TheGlobalData->m_useGroupPaths );
+	CHECK( TheGlobalData->m_useCrossingCost );
+
+	char exe[] = "generals.exe";
+	char noGroupPath[] = "-nogrouppath";
+	char noCrossTime[] = "-NOCROSSTIME";	// the table matches case-insensitively
+	char *argv[] = { exe, noGroupPath, noCrossTime };
+	parseCommandLine( 3, argv );
+
+	CHECK( !TheGlobalData->m_useGroupPaths );
+	CHECK( !TheGlobalData->m_useCrossingCost );
+
+	/* -slowframe is the third of the same family: it lowers the bar a logic frame has to clear
+	   before it writes its own breakdown, which is how a subsystem's cost gets hunted rather than
+	   a stutter.  A value that is not a positive number leaves the default alone rather than
+	   silencing the log. */
+	CHECK_NEAR( TheGlobalData->m_slowFrameMS, 20.0f, 0.001f );
+	char slowFrame[] = "-slowframe";
+	char three[] = "3";
+	char *argvSlow[] = { exe, slowFrame, three };
+	parseCommandLine( 3, argvSlow );
+	CHECK_NEAR( TheGlobalData->m_slowFrameMS, 3.0f, 0.001f );
+
+	char nonsense[] = "later";
+	char *argvBad[] = { exe, slowFrame, nonsense };
+	parseCommandLine( 3, argvBad );
+	CHECK_NEAR( TheGlobalData->m_slowFrameMS, 3.0f, 0.001f );
+
+	delete TheWritableGlobalData;
+	TheWritableGlobalData = saved;
+}
+
 TEST(a_netgame_slot_list_is_the_player_order_on_every_machine)
 {
 	/* -netgame carries what the LAN lobby otherwise agrees on: who plays, at which address, in

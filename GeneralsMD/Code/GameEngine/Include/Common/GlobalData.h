@@ -115,7 +115,7 @@ public:
 	Bool m_useHeatEffects;
 	Bool m_useFpsLimit;
 	Bool m_useGroupPaths;			///< false = -nogrouppath: every unit solves its own path, no shared corridor
-	Bool m_useCrossingCost;		///< false = -nocrosstime: the reservation map is not kept and paths ignore when other units will be where
+	Bool m_useCrossingCost;		///< false = -nocrosstime: the reservation map is still kept, but no search reads it
 	Bool m_dumpAssetUsage;
 	Int m_framesPerSecondLimit;
 	Int	m_chipSetType;	///<See W3DShaderManager::ChipsetType for options
@@ -374,9 +374,12 @@ public:
 	Bool m_autoSkirmishObserver;			///< -observer: the local slot of an auto-started skirmish watches instead of playing
 	Bool m_headless;							///< -headless: never draw a frame, never pace the logic tick, quit when the match ends
 	Int m_autoSkirmishAIStateOdd;		///< -aidiff2 <name>: rung for the odd-numbered slots (0 = same as -aidiff)
+	Int m_autoSkirmishTeams;				///< -teams <n>: split the auto-skirmish slots into n allied teams (0 or 1 = free-for-all)
 	Int m_maxGameFrames;						///< -maxframes <n>: quit after n logic frames however the match is going (0 = no limit)
 	Int m_autoCameraSeconds;				///< -autocamera <n>: every n seconds, move the camera to wherever the fighting is (0 = off)
 	Int m_traceMoveID;							///< -tracemove [id]: log one movement line a frame for this object (0 = off, -1 = the first unit that gets blocked)
+	Real m_slowFrameMS;							///< -slowframe <ms>: a logic frame over this long logs its own breakdown (default 20)
+	Int m_aiSliceFrames;						///< -aislice <n>: a unit's AI decides once every n logic frames, staggered by id (1 = every frame, the default)
 	AsciiString m_netGameHosts;				///< -netgame <ip>[,<ip>...]: the slot list of a LAN game started from the command line (empty = off)
 	Int m_netGameLocalSlot;						///< -netslot <n>: which of those addresses this copy of the game is
 

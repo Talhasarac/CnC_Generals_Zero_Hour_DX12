@@ -90,6 +90,18 @@
 #include "common/mapobject.h"
 #endif
 
+/* Range queries this logic frame, and objects looked at inside them. Zeroed by
+	 PartitionManager::update, read by the slow-frame log; counts only, no clock, because this sits
+	 in the innermost loop of the most called function in the game. */
+static Int thePartitionQueries = 0;
+static Int thePartitionGathers = 0;
+static Int thePartitionQueryObjects = 0;
+
+Int PartitionManager::getQueryCountThisFrame( void ) { return thePartitionQueries; }
+Int PartitionManager::getGatherCountThisFrame( void ) { return thePartitionGathers; }
+Int PartitionManager::getQueryObjectCountThisFrame( void ) { return thePartitionQueryObjects; }
+void PartitionManager::resetQueryCounts( void ) { thePartitionQueries = 0; thePartitionGathers = 0; thePartitionQueryObjects = 0; }
+
 #ifdef DUMP_PERF_STATS
 	long s_countInClosestObjects = 0;
 	long s_countInClosestObjectsThisFrame = 0;
@@ -3292,6 +3304,15 @@ Object *PartitionManager::getClosestObjects(
 		objPos = obj->getPosition();
 		objToUse = obj;
 	}
+	/* This is the single most expensive function in an eight-player match - 9.6% of the whole game
+		 in a sampling profile - and nothing said whether that was a few enormous queries or a great
+		 many small ones. Two counters, read by the slow-frame log, which is the difference between
+		 knowing and guessing. */
+	++thePartitionQueries;
+	// the gathering form is the dear one: it keeps every survivor, sorted, in a pooled iterator
+	if (iterArg)
+		++thePartitionGathers;
+
 	Int cellCenterX, cellCenterY;
 	worldToCell(objPos->x, objPos->y, &cellCenterX, &cellCenterY);
 
@@ -3342,9 +3363,10 @@ Object *PartitionManager::getClosestObjects(
 			{
 				PartitionData *thisMod = thisCoi->getModule();
 				Object *thisObj = thisMod->getObject();
+				++thePartitionQueryObjects;
 
 				// never compare against ourself.
-				if (thisObj == obj || thisObj == NULL) 
+				if (thisObj == obj || thisObj == NULL)
 					continue;
 
 				// since an object can exist in multiple COIs, we use this to avoid processing

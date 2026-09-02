@@ -1328,6 +1328,15 @@ public:
 	virtual void init( void );			///< initialize
 	virtual void reset( void );			///< system reset
 	virtual void update( void );		///< system update
+
+	/* Range queries made this logic frame, and objects looked at inside them. getClosestObjects is
+		 the most expensive single function in an eight-player match; these say whether that is a few
+		 huge queries or a great many small ones, which is not something a sampling profile can tell
+		 you. GameLogic zeroes them at the top of its frame and the slow-frame log reads them. */
+	static Int getQueryCountThisFrame( void );
+	static Int getGatherCountThisFrame( void );		///< of those, the ones that keep every hit in a sorted iterator
+	static Int getQueryObjectCountThisFrame( void );
+	static void resetQueryCounts( void );
 	// ----------------------------------------------------------------
 
 	// --------------- inherited from Snapshot interface --------------

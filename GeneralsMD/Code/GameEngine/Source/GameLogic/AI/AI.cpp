@@ -356,6 +356,7 @@ void AI::reset( void )
 /**
  * Update the AI system
  */
+Int AI::s_enemyScans = 0;
 Real AI::s_lastPathfindMS = 0.0f;
 Real AI::s_lastPlayerUpdateMS = 0.0f;
 
@@ -677,6 +678,9 @@ Object *AI::findClosestEnemy( const Object *me, Real range, UnsignedInt qualifie
 		return NULL;
 	}
 
+	// counted, so the slow-frame log can say how many of the frame's range queries are this
+	bumpEnemyScanCount();
+
 	// only consider live, on-map enemies.
 	// since this gets called a ton, I made a special custom filter to
 	// combine several canned ones, in the name of speed (srj)
@@ -767,6 +771,23 @@ Object *AI::findClosestEnemy( const Object *me, Real range, UnsignedInt qualifie
 			MemoryPoolObjectHolder threatHolder(threatIter);
 			for (Object *theEnemy = threatIter->first(); theEnemy; theEnemy = threatIter->next())
 			{
+				Real dist = sqrt( ThePartitionManager->getDistanceSquared(me, theEnemy, FROM_BOUNDINGSPHERE_2D) );
+
+				/* Score it as if it were armed first, which is the best this candidate can possibly
+					 do: the armed bonus is the only thing getAbleToAttackSpecificObject decides here and
+					 it only ever adds. If the best it can do does not beat what we already have, the
+					 expensive question never has to be asked at all.
+
+					 Same answer as asking every time, and most of the asking gone. This is where an
+					 eight-player match spends its partition time - the list is every enemy in vision
+					 range, sorted near to far, so the first candidate sets a high bar and the far ones
+					 cannot clear it. */
+				const Int armedScore = AI_threatScore( theEnemy->getTemplate()->getThreatValue(),
+																		theEnemy->getTemplate()->calcCostToBuild( theEnemy->getControllingPlayer() ),
+																		true, dist, distanceModifier );
+				if (armedScore <= bestScore)
+					continue;
+
 				Bool threatensMe = theEnemy->isAbleToAttack();		// cheap bit test, and required before the call below
 				if (threatensMe)
 				{
@@ -774,10 +795,8 @@ Object *AI::findClosestEnemy( const Object *me, Real range, UnsignedInt qualifie
 					threatensMe = (r == ATTACKRESULT_POSSIBLE || r == ATTACKRESULT_POSSIBLE_AFTER_MOVING);
 				}
 
-				Real dist = sqrt( ThePartitionManager->getDistanceSquared(me, theEnemy, FROM_BOUNDINGSPHERE_2D) );
-				Int score = AI_threatScore( theEnemy->getTemplate()->getThreatValue(),
-																		theEnemy->getTemplate()->calcCostToBuild( theEnemy->getControllingPlayer() ),
-																		threatensMe, dist, distanceModifier );
+				// the bonus is added last and nothing else in the score depends on it
+				const Int score = threatensMe ? armedScore : (armedScore - AI_THREAT_ARMED_BONUS);
 				if (score > bestScore)
 				{
 					bestScore = score;

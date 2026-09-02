@@ -630,6 +630,8 @@ GlobalData::GlobalData()
 	m_useDrawModuleLOD = FALSE;
 	m_useHeatEffects = TRUE;
 	m_useFpsLimit = FALSE;
+	m_useGroupPaths = TRUE;
+	m_useCrossingCost = TRUE;
 	m_dumpAssetUsage = FALSE;
 	m_framesPerSecondLimit = 0;
 	m_chipSetType = 0;
@@ -675,11 +677,14 @@ GlobalData::GlobalData()
 	m_autoSkirmishPlayers = 0; // no skirmish from the command line
 	m_autoSkirmishAIState = SLOT_BRUTAL_AI;
 	m_autoSkirmishAIStateOdd = 0;		// 0 = not set: every slot plays at -aidiff
+	m_autoSkirmishTeams = 0;				// 0 = not set: every slot fights every other slot
 	m_autoSkirmishObserver = FALSE;
 	m_headless = FALSE;
 	m_maxGameFrames = 0; // run until the match ends
 	m_autoCameraSeconds = 0; // the camera stays where it was put
 	m_traceMoveID = 0; // no movement trace
+	m_slowFrameMS = 20.0f; // a frame worth a line in the log; -slowframe lowers it for a hunt
+	m_aiSliceFrames = 1; // every unit thinks every frame, which is what the game has always done
 	m_netGameHosts.clear(); // no network game from the command line
 	m_netGameLocalSlot = 0;
 	m_horizontalScrollSpeedFactor = 1.0;

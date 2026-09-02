@@ -343,7 +343,20 @@ static void startAutoSkirmish( void )
 		}
 		slot.setColor( -1 );			// -1 is "random" to populateRandomSideAndColor
 		slot.setStartPos( -1 );		// and to populateRandomStartPosition
-		slot.setTeamNumber( -1 );	// -1 is "no team", so everybody fights everybody
+		/* -teams splits the lobby into allied blocks: with eight players and two teams the first
+			 four are team 0 and the rest team 1, the way the lobby numbers them. GameLogic's own
+			 alliance pass reads the slot's team number and does the rest. Without it every slot is
+			 -1, which is "no team", and everybody fights everybody. */
+		Int teamNumber = -1;
+		const Int teams = TheGlobalData->m_autoSkirmishTeams;
+		if (teams > 1 && numPlayers >= teams)
+		{
+			const Int perTeam = (numPlayers + teams - 1) / teams;
+			teamNumber = i / perTeam;
+			if (teamNumber >= teams)
+				teamNumber = teams - 1;		// an uneven split puts the remainder on the last team
+		}
+		slot.setTeamNumber( teamNumber );
 		TheSkirmishGameInfo->setSlot( i, slot );
 	}
 	TheSkirmishGameInfo->setLocalIP( TheSkirmishGameInfo->getSlot(0)->getIP() );

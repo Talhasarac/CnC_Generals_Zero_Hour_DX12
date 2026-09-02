@@ -35,6 +35,10 @@ param(
 	[string] $Difficulty = "brutal",
 	# rung for the odd-numbered slots; empty means the same as -Difficulty, so a rung plays itself
 	[string] $Difficulty2 = "",
+	# split the slots into this many allied teams instead of a free-for-all: 2 with -Players 8 is
+	# 4v4. Free-for-all spreads the fighting over the whole map; teams put every unit on one of two
+	# fronts, which is the load a player actually complains about
+	[int] $Teams = 0,
 	# a match that has not been decided by here is a result in itself: the AI cannot finish
 	[int] $MaxFrames = 30000,
 	# names this batch's logs, so two batches can be compared afterwards
@@ -107,6 +111,7 @@ for ($i = 0; $i -lt $Runs; $i++) {
 	)
 	# a second rung for the odd slots, so one rung can be played against another
 	if ($Difficulty2) { $args += "-aidiff2"; $args += $Difficulty2 }
+	if ($Teams -gt 1) { $args += "-teams"; $args += $Teams }
 	if ($ExtraArgs.Count) { $args += $ExtraArgs }
 
 	$where = if ($Map) { $Map } else { "$cells cells" }
@@ -204,7 +209,7 @@ for ($i = 0; $i -lt $Runs; $i++) {
 
 # ---------------------------------------------------------------------------------------------
 Write-Host ""
-Write-Host "=== $Tag : $Runs matches, $Players players, $Difficulty$(if ($Difficulty2) { " vs " + $Difficulty2 }), $(if ($Map) { "on $Map" } else { "generated maps" }), $Exe, cap $MaxFrames frames$(if ($ExtraArgs.Count) { ", " + ($ExtraArgs -join ' ') }) ==="
+Write-Host "=== $Tag : $Runs matches, $Players players$(if ($Teams -gt 1) { " in $Teams teams" }), $Difficulty$(if ($Difficulty2) { " vs " + $Difficulty2 }), $(if ($Map) { "on $Map" } else { "generated maps" }), $Exe, cap $MaxFrames frames$(if ($ExtraArgs.Count) { ", " + ($ExtraArgs -join ' ') }) ==="
 
 $decided = @($rows | Where-Object { $_.Why -eq "decided" })
 Write-Host ("decided {0}/{1}   frame-limited {2}   failed {3}" -f

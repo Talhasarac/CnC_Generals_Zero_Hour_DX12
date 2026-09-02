@@ -1252,6 +1252,33 @@ Int parseNoFPSLimit(char *args[], int num)
 	return 1;
 }
 
+/* -nogrouppath and -nocrosstime are the control arms for the two group-movement mechanisms this
+	 fork added on top of retail, in one binary.  Without them the only way to measure either is two
+	 exes, and two exes differ in more than the thing being measured.
+
+	 -nogrouppath drops the shared corridor: every unit in a selection solves its own path and the
+	 congestion cost is all that holds the column apart, which is what retail does for a formation
+	 and what PathLab calls single mode.  -nocrosstime keeps the reservation map but stops any
+	 search reading it, so a route is priced for ground another unit's path covers and not for the
+	 moment it will be there. */
+Int parseNoGroupPath(char *args[], int num)
+{
+	if (TheWritableGlobalData)
+	{
+		TheWritableGlobalData->m_useGroupPaths = FALSE;
+	}
+	return 1;
+}
+
+Int parseNoCrossingCost(char *args[], int num)
+{
+	if (TheWritableGlobalData)
+	{
+		TheWritableGlobalData->m_useCrossingCost = FALSE;
+	}
+	return 1;
+}
+
 /* -headless is the unattended-run switch: no frame is ever drawn, the logic tick runs flat out
 	 instead of being paced against wall clock, audio is silenced, and the process quits by itself
 	 the moment the match is decided.  A window and a D3D device are still created - W3D reaches into
@@ -1369,6 +1396,72 @@ Int parseTraceMove(char *args[], int num)
 			id = -1; // 0 is not a valid object id, and it is how the feature is switched off
 		TheWritableGlobalData->m_traceMoveID = id;
 		return consumed;
+	}
+	return 1;
+}
+
+/* -aislice <n> lets a unit's AI decide once every n logic frames instead of every one.
+
+	 This is the only lever left that reduces what the AI does rather than how fast it does it, and
+	 it is off by default because what it spends is reaction time, not milliseconds: a unit acquires
+	 a target and obeys an order up to n-1 frames late. Movement is not sliced - the locomotor still
+	 runs every frame, so units keep driving smoothly along the route they already have; it is the
+	 deciding that waits. The offset is the object id, so the units do not all think on the same
+	 frame, and an id is assigned in creation order and identical on every machine, which keeps this
+	 inside the CRC. */
+Int parseAISlice(char *args[], int num)
+{
+	if (TheWritableGlobalData && num > 1 && args[1])
+	{
+		Int slice = atoi(args[1]);
+		if (slice < 1)
+			slice = 1;
+		if (slice > 8)
+			slice = 8;			// past this a unit is visibly asleep, and it is a measuring tool anyway
+		TheWritableGlobalData->m_aiSliceFrames = slice;
+		return 2;
+	}
+	return 1;
+}
+
+/* -teams <n> splits an -autoskirmish lobby into n allied teams instead of a free-for-all.
+
+	 Free-for-all and 4v4 are not the same load and not the same game. Eight players each fighting
+	 seven others spread the fighting over the whole map; two sides of four put every unit on one of
+	 two fronts, which is where units bunch up, where the pathfinder earns its money, and where a
+	 player says the game is chugging. Slots are handed out in blocks - the first n-th of them are
+	 team 0, the next team 1 - which is how the lobby numbers them, and GameLogic's own alliance
+	 setup does the rest from each slot's team number. */
+Int parseTeams(char *args[], int num)
+{
+	if (TheWritableGlobalData && num > 1 && args[1])
+	{
+		Int teams = atoi(args[1]);
+		if (teams < 1)
+			teams = 1;								// one team is a free-for-all, same as not asking
+		if (teams > MAX_SLOTS)
+			teams = MAX_SLOTS;
+		TheWritableGlobalData->m_autoSkirmishTeams = teams;
+		return 2;
+	}
+	return 1;
+}
+
+/* -slowframe <ms> lowers the bar a logic frame has to clear before it logs its own breakdown.
+
+	 The default of 20ms is a stutter hunt: it catches the frames a player would notice. Chasing a
+	 subsystem's cost is a different search - the question is not "which frames were terrible" but
+	 "which frames did this cost anything at all" - and for that the bar wants to be a few
+	 milliseconds. Every frame over it writes a line and a flush, so a low bar on a long run is a
+	 large log and a slower run; it is a measuring tool, not a setting. */
+Int parseSlowFrame(char *args[], int num)
+{
+	if (TheWritableGlobalData && num > 1 && args[1])
+	{
+		const Real ms = (Real)atof(args[1]);
+		if (ms > 0.0f)
+			TheWritableGlobalData->m_slowFrameMS = ms;
+		return 2;
 	}
 	return 1;
 }
@@ -1616,6 +1709,11 @@ static CommandLineParam params[] =
 	{ "-msaa", parseMSAA },
 	{ "-autocamera", parseAutoCamera },
 	{ "-tracemove", parseTraceMove },
+	{ "-slowframe", parseSlowFrame },
+	{ "-teams", parseTeams },
+	{ "-aislice", parseAISlice },
+	{ "-nogrouppath", parseNoGroupPath },
+	{ "-nocrosstime", parseNoCrossingCost },
 	{ "-replay", parseReplay },
 	{ "-netgame", parseNetGame },
 	{ "-netslot", parseNetSlot },
