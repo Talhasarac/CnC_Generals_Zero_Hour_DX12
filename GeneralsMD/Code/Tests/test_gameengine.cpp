@@ -8139,16 +8139,17 @@ TEST(a_plate_covers_the_windows_its_panel_is_responsible_for)
 		 toolbar column, the command grid and the selection portrait.  A plate that has drifted - and
 		 an earlier version of this, fitted by eye instead of to the painting, had drifted about four
 		 percent - leaves one of them hanging off its own artwork. */
-	struct Seated { const char *what; Int panel; Int x0, y0, x1, y1; };
+	struct Seated { const char *what; Int panel; Int x0, y0, x1, y1; Bool closedUnder; };
 	static const Seated seated[] =
 	{
-		{ "radar",							ControlBar::CB_PANEL_LEFT,		  7, 443, 174, 595 },
-		{ "money",							ControlBar::CB_PANEL_CENTER,	360, 437, 439, 462 },
-		{ "power bar",					ControlBar::CB_PANEL_CENTER,	259, 469, 538, 476 },
-		{ "toolbar column",			ControlBar::CB_PANEL_CENTER,	184, 490, 220, 592 },
-		{ "command grid",				ControlBar::CB_PANEL_CENTER,	223, 494, 603, 589 },
-		{ "selection portrait",	ControlBar::CB_PANEL_RIGHT,		621, 483, 760, 592 },
-		{ NULL, 0, 0, 0, 0, 0 }
+		{ "radar",							ControlBar::CB_PANEL_LEFT,		  7, 443, 174, 595, TRUE },
+		{ "money",							ControlBar::CB_PANEL_CENTER,	360, 437, 439, 462, TRUE },
+		{ "power bar",					ControlBar::CB_PANEL_CENTER,	259, 469, 538, 476, TRUE },
+		// the American painting ends its centre plate three pixels above this column's last button
+		{ "toolbar column",			ControlBar::CB_PANEL_CENTER,	184, 490, 220, 592, FALSE },
+		{ "command grid",				ControlBar::CB_PANEL_CENTER,	223, 494, 603, 589, TRUE },
+		{ "selection portrait",	ControlBar::CB_PANEL_RIGHT,		621, 483, 760, 592, TRUE },
+		{ NULL, 0, 0, 0, 0, 0, FALSE }
 	};
 	static const char *sides[] = { "America", "China", "GLA", NULL };
 
@@ -8158,10 +8159,19 @@ TEST(a_plate_covers_the_windows_its_panel_is_responsible_for)
 			const ControlBarPlate *plate = ControlBarPlateForSide( AsciiString( *s ), w->panel );
 			CHECK( plate != NULL );
 
-			// the bottom edge is the one that may hang off: the bar runs to the bottom of the screen
 			CHECK( plate->design.lo.x <= w->x0 );
 			CHECK( plate->design.hi.x >= w->x1 );
 			CHECK( plate->design.lo.y <= w->y0 );
+
+			/* And the bottom edge, for the windows the painting does close under.  A plate does not
+				 have to run to the bottom of the screen - the American centre one is a closed plate
+				 that ends where the command grid does - but where it is meant to be underneath a
+				 window it has to reach that window's own bottom, or the battlefield shows through.
+				 The American centre plate had a strip of the painting spliced onto it to take it to
+				 the bottom of the screen, and that strip drew a second bar edge with a line of ground
+				 between the two. */
+			if( w->closedUnder )
+				CHECK( plate->design.hi.y >= w->y1 );
 		}
 }
 

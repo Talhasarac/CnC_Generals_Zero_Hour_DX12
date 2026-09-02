@@ -1423,8 +1423,9 @@ static const ControlBarPlateSet thePlateSets[] =
 	{ "America",
 		{
 			{ "RebornBarAmericaLeft.tga",		{ {   0, 412 }, { 183, 599 } } },
-			// this one was cut a little above the bar's bottom edge and has that strip put back on it
-			{ "RebornBarAmericaCenter.tga",	{ { 180, 419 }, { 623, 599 } } },
+			// this one ends at the bottom of the command grid rather than at the bottom of the screen,
+			// which is where the painting ends it - it is a closed plate and the ground shows below it
+			{ "RebornBarAmericaCenter.tga",	{ { 180, 419 }, { 623, 589 } } },
 			{ "RebornBarAmericaRight.tga",	{ { 610, 433 }, { 800, 599 } } },
 		}
 	},
