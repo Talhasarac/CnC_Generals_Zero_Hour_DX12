@@ -30,6 +30,8 @@
 // USER INCLUDES //////////////////////////////////////////////////////////////////////////////////
 
 #include "PreRTS.h"	// This must go first in EVERY cpp file int the GameEngine
+
+#include <map>
 #define DEFINE_GUI_COMMMAND_NAMES
 #define DEFINE_COMMAND_OPTION_NAMES
 #define DEFINE_WEAPONSLOTTYPE_NAMES
@@ -1104,6 +1106,12 @@ ControlBar::ControlBar( void )
 	m_commandBarBorderColor = GameMakeColor(0,0,0,100);
 	for( i = 0; i < NUM_CONTEXT_PARENTS; i++ )
 		m_contextParent[ i ] = NULL;
+	// an empty panel is a panel with no plate, which is what the builder tool wants
+	for( i = 0; i < CB_PANEL_COUNT; i++ )
+	{
+		m_panelRect[ i ].lo.x = m_panelRect[ i ].lo.y = 0;
+		m_panelRect[ i ].hi.x = m_panelRect[ i ].hi.y = 0;
+	}
 	for( i = 0; i < MAX_COMMANDS_PER_SET; i++ )
 	{
 		m_commandWindows[ i ] = NULL;
@@ -1275,6 +1283,331 @@ ControlBar::~ControlBar( void )
 void ControlBarPopupDescriptionUpdateFunc( WindowLayout *layout, void *param );
 
 //-------------------------------------------------------------------------------------------------
+// Three-panel control bar layout -----------------------------------------------------------------
+//-------------------------------------------------------------------------------------------------
+//
+// ControlBar.wnd is authored at 800x600 and GameWindowManagerScript stretches every coordinate by
+// the display size over that, separately in x and y.  On a 16:9 screen that is a 1.33x horizontal
+// smear: square cameos come out as rectangles and one strip eats the whole bottom of the screen.
+// layoutPanels throws the stretch away.  It recovers each window's authored rectangle, then puts it
+// back at ONE uniform scale inside one of three panels - radar hard left, command grid centred,
+// selection hard right.  Nothing is distorted and the world shows through the two gaps.
+//
+
+static const Real CONTROL_BAR_DESIGN_W = 800.0f;
+static const Real CONTROL_BAR_DESIGN_H = 600.0f;
+static const Real CONTROL_BAR_DESIGN_TOP = 404.0f;		///< the highest any panel reaches
+
+//
+// The authored 800x600 rectangle each panel covers, art and all - the three plate rectangles below
+// unioned over the three sides, run down to the bottom edge of the screen.  It is what the panel's
+// input-blocking pane becomes, so a click on the artwork does not reach the world behind it.
+//
+static const IRegion2D thePanelDesignRect[ ControlBar::CB_PANEL_COUNT ] =
+{
+	{ {   0, 410 }, { 216, 600 } },		// CB_PANEL_LEFT   - radar
+	{ { 167, 417 }, { 624, 600 } },		// CB_PANEL_CENTER - money, power, toolbar column, command grid
+	{ { 609, 421 }, { 800, 600 } },		// CB_PANEL_RIGHT  - selection portrait and the general's tabs
+};
+
+/// where each panel is pinned: the fraction of the screen its anchor lands on...
+static const Real thePanelAnchorFraction[ ControlBar::CB_PANEL_COUNT ] = { 0.0f, 0.5f, 1.0f };
+/// ...and which authored x that anchor is, so at 4:3 the three plates reassemble the shipped bar
+static const Real thePanelAnchorDesignX[ ControlBar::CB_PANEL_COUNT ] = { 0.0f, 400.0f, 800.0f };
+
+//-------------------------------------------------------------------------------------------------
+Bool ControlBarPanelDesignToScreen( Int panel, const IRegion2D *design,
+																		Int displayWidth, Int displayHeight, IRegion2D *rectOut )
+{
+	if( panel < 0 || panel >= ControlBar::CB_PANEL_COUNT || design == NULL || rectOut == NULL )
+		return FALSE;
+	if( displayWidth <= 0 || displayHeight <= 0 )
+		return FALSE;
+
+	const Real dispW = (Real)displayWidth;
+	const Real dispH = (Real)displayHeight;
+
+	//
+	// One scale for both axes, the smaller of the two so the three panels always fit side by side.
+	// At 4:3 that is exactly what the .wnd loader would have used and the panels still meet; at
+	// anything wider they shrink together and leave the middle of the screen bottom open instead of
+	// stretching to fill it.
+	//
+	const Real loadScaleX = dispW / CONTROL_BAR_DESIGN_W;
+	const Real loadScaleY = dispH / CONTROL_BAR_DESIGN_H;
+	const Real s = loadScaleX < loadScaleY ? loadScaleX : loadScaleY;
+
+	const Real originX = dispW * thePanelAnchorFraction[ panel ]
+											 - thePanelAnchorDesignX[ panel ] * s;
+
+	rectOut->lo.x = REAL_TO_INT_FLOOR( originX + design->lo.x * s );
+	rectOut->hi.x = REAL_TO_INT_CEIL ( originX + design->hi.x * s );
+	rectOut->lo.y = REAL_TO_INT_FLOOR( dispH - ( CONTROL_BAR_DESIGN_H - design->lo.y ) * s );
+	rectOut->hi.y = REAL_TO_INT_CEIL ( dispH - ( CONTROL_BAR_DESIGN_H - design->hi.y ) * s );
+
+	return TRUE;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** What layoutPanels remembers about one window: the 800x600 rectangle it was authored at, and the
+	* screen rectangle it was last given.  If a window is not where we left it, something else moved
+	* it - ControlBarScheme::init does, in the loader's own stretched space - and its authored
+	* rectangle has to be read back out of that. */
+//-------------------------------------------------------------------------------------------------
+struct ControlBarPanelPlacement
+{
+	Bool known;
+	Real designX, designY, designW, designH;
+	Int placedX, placedY, placedW, placedH;
+};
+typedef std::map< GameWindow *, ControlBarPanelPlacement > ControlBarPanelPlacementMap;
+static ControlBarPanelPlacementMap theControlBarPlacement;
+
+//-------------------------------------------------------------------------------------------------
+/** Which panel a direct child of ControlBarParent belongs to.  Everything not named here rides in
+	* the middle, which is where the .wnd already puts the money, power and command windows - and
+	* where the plate art puts the column of worker/beacon/chat/options slots.
+	*
+	* The three GameWinBlockInput panes have no name at all, and one of them sits over each panel in
+	* the authored layout, so they go by where they were drawn: the pane that used to cover the radar
+	* keeps covering the radar. */
+//-------------------------------------------------------------------------------------------------
+static Int panelForWindow( const char *shortName, Real designCenterX )
+{
+	static const char *leftNames[] =
+	{
+		"LeftHUD", "WinUAttack", "BackgroundMarker", "ForegroundMarker", "OnTopDraw", NULL
+	};
+	static const char *rightNames[] =
+	{
+		"RightHUD", "GeneralsExp", "ExpBarForeground", "ButtonGeneral",
+		"ButtonSmall", "ButtonMedium", "ButtonLarge", NULL
+	};
+
+	if( shortName[ 0 ] == 0 )
+	{
+		for( Int p = 0; p < ControlBar::CB_PANEL_COUNT; p++ )
+			if( designCenterX >= thePanelDesignRect[ p ].lo.x &&
+					designCenterX <= thePanelDesignRect[ p ].hi.x )
+				return p;
+		return ControlBar::CB_PANEL_CENTER;
+	}
+
+	for( const char **n = leftNames; *n; n++ )
+		if( strcmp( shortName, *n ) == 0 )
+			return ControlBar::CB_PANEL_LEFT;
+
+	for( const char **n = rightNames; *n; n++ )
+		if( strcmp( shortName, *n ) == 0 )
+			return ControlBar::CB_PANEL_RIGHT;
+
+	return ControlBar::CB_PANEL_CENTER;
+}
+
+//-------------------------------------------------------------------------------------------------
+// The plates -------------------------------------------------------------------------------------
+//-------------------------------------------------------------------------------------------------
+//
+// Three per side, cut from that side's shipped painting of the bar.  See ControlBar.h for what the
+// readout rectangle is and why it is the thing that gets anchored.
+//
+
+struct ControlBarPlateSet
+{
+	const char *sidePrefix;		///< matched against the scheme's Side, so every China general fits China
+	ControlBarPlate plate[ ControlBar::CB_PANEL_COUNT ];
+};
+
+static const ControlBarPlateSet thePlateSets[] =
+{
+	{ "America",
+		{
+			{ "RebornBarAmericaLeft.tga",		{ {   0, 412 }, { 183, 599 } } },
+			// this one was cut a little above the bar's bottom edge and has that strip put back on it
+			{ "RebornBarAmericaCenter.tga",	{ { 180, 419 }, { 623, 599 } } },
+			{ "RebornBarAmericaRight.tga",	{ { 610, 433 }, { 800, 599 } } },
+		}
+	},
+	{ "China",
+		{
+			{ "RebornBarChinaLeft.tga",		{ {   1, 417 }, { 196, 598 } } },
+			{ "RebornBarChinaCenter.tga",	{ { 176, 433 }, { 617, 597 } } },
+			{ "RebornBarChinaRight.tga",	{ { 611, 424 }, { 798, 598 } } },
+		}
+	},
+	{ "GLA",
+		{
+			{ "RebornBarGLALeft.tga",		{ {   0, 416 }, { 215, 599 } } },
+			{ "RebornBarGLACenter.tga",	{ { 168, 437 }, { 617, 599 } } },
+			{ "RebornBarGLARight.tga",	{ { 612, 423 }, { 799, 599 } } },
+		}
+	},
+};
+static const Int NUM_PLATE_SETS = sizeof( thePlateSets ) / sizeof( thePlateSets[ 0 ] );
+
+//-------------------------------------------------------------------------------------------------
+const ControlBarPlate *ControlBarPlateForSide( const AsciiString& side, Int panel )
+{
+	if( side.isEmpty() || panel < 0 || panel >= ControlBar::CB_PANEL_COUNT )
+		return NULL;
+
+	// the boss bar is Chinese and the observer bar is American - EA built each out of that art
+	if( side.startsWithNoCase( "Boss" ) )
+		return &thePlateSets[ 1 ].plate[ panel ];
+	if( side.startsWithNoCase( "Observer" ) )
+		return &thePlateSets[ 0 ].plate[ panel ];
+
+	for( Int i = 0; i < NUM_PLATE_SETS; i++ )
+		if( side.startsWithNoCase( thePlateSets[ i ].sidePrefix ) )
+			return &thePlateSets[ i ].plate[ panel ];
+
+	return NULL;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** The part of a window's decorated name after the colon. */
+//-------------------------------------------------------------------------------------------------
+static const char *shortWindowName( GameWindow *win )
+{
+	const char *name = win->winGetInstanceData()->m_decoratedNameString.str();
+	const char *colon = strchr( name, ':' );
+	return colon ? colon + 1 : name;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Place 'win' and everything under it inside 'panel'.  Positions are relative to the parent, so
+	* both the parent's old and new screen origins travel down the recursion: the old one to work out
+	* where the window was, the new one to say where to put it. */
+//-------------------------------------------------------------------------------------------------
+void ControlBar::placeInPanel( GameWindow *win, Int panel,
+															 Int oldParentX, Int oldParentY,
+															 Int newParentX, Int newParentY )
+{
+	const Real dispW = (Real)TheDisplay->getWidth();
+	const Real dispH = (Real)TheDisplay->getHeight();
+	const Real loadScaleX = dispW / CONTROL_BAR_DESIGN_W;
+	const Real loadScaleY = dispH / CONTROL_BAR_DESIGN_H;
+	const Real s = loadScaleX < loadScaleY ? loadScaleX : loadScaleY;
+	const Real originX = dispW * thePanelAnchorFraction[ panel ]
+											 - thePanelAnchorDesignX[ panel ] * s;
+
+	ICoord2D rel, size;
+	win->winGetPosition( &rel.x, &rel.y );
+	win->winGetSize( &size.x, &size.y );
+
+	const Int oldX = oldParentX + rel.x;
+	const Int oldY = oldParentY + rel.y;
+
+	ControlBarPanelPlacement &place = theControlBarPlacement[ win ];
+	if( place.known == FALSE || oldX != place.placedX || oldY != place.placedY ||
+			size.x != place.placedW || size.y != place.placedH )
+	{
+		// first sight of this window, or somebody else has moved it in the loader's stretched space
+		place.designX = oldX / loadScaleX;
+		place.designY = oldY / loadScaleY;
+		place.designW = size.x / loadScaleX;
+		place.designH = size.y / loadScaleY;
+	}
+
+	Int newX = REAL_TO_INT_FLOOR( originX + place.designX * s );
+	Int newY = REAL_TO_INT_FLOOR( dispH - ( CONTROL_BAR_DESIGN_H - place.designY ) * s );
+	Int newW = REAL_TO_INT_CEIL( place.designW * s );
+	Int newH = REAL_TO_INT_CEIL( place.designH * s );
+
+	const char *shortName = shortWindowName( win );
+
+	//
+	// The unnamed children are the GameWinBlockInput panes: their only job is to keep clicks on the
+	// bar out of the world, so they become exactly their panel.  CenterBackground blocks input as
+	// well as holding the command windows, and is authored full width, so it gets the same
+	// treatment - left alone it would swallow every click over the gaps we just opened up.
+	//
+	if( shortName[ 0 ] == 0 || strcmp( shortName, "CenterBackground" ) == 0 )
+	{
+		newX = m_panelRect[ panel ].lo.x;
+		newW = m_panelRect[ panel ].width();
+		if( shortName[ 0 ] == 0 )
+		{
+			newY = m_panelRect[ panel ].lo.y;
+			newH = m_panelRect[ panel ].height();
+		}
+	}
+
+	win->winSetPosition( newX - newParentX, newY - newParentY );
+	win->winSetSize( newW, newH );
+
+	place.known = TRUE;
+	place.placedX = newX;
+	place.placedY = newY;
+	place.placedW = newW;
+	place.placedH = newH;
+
+	for( GameWindow *child = win->winGetChild(); child; child = child->winGetNext() )
+		placeInPanel( child, panel, oldX, oldY, newX, newY );
+
+}  // end placeInPanel
+
+//-------------------------------------------------------------------------------------------------
+/** Re-anchor the control bar as three panels at one uniform scale. */
+//-------------------------------------------------------------------------------------------------
+void ControlBar::layoutPanels( void )
+{
+	GameWindow *parent = m_contextParent[ CP_MASTER ];
+	if( parent == NULL || TheDisplay == NULL )
+		return;
+
+	const Real dispW = (Real)TheDisplay->getWidth();
+	const Real dispH = (Real)TheDisplay->getHeight();
+
+	// what the .wnd loader already multiplied every coordinate by, so we can divide it back out
+	const Real loadScaleX = dispW / CONTROL_BAR_DESIGN_W;
+	const Real loadScaleY = dispH / CONTROL_BAR_DESIGN_H;
+
+	//
+	// One scale for both axes, the smaller of the two so the three panels always fit side by side.
+	// At 4:3 that is exactly the old scale and the panels still meet; at anything wider they shrink
+	// together and leave the middle of the screen bottom open instead of stretching to fill it.
+	//
+	const Real s = loadScaleX < loadScaleY ? loadScaleX : loadScaleY;
+
+	Int p;
+	for( p = 0; p < CB_PANEL_COUNT; p++ )
+		ControlBarPanelDesignToScreen( p, &thePanelDesignRect[ p ],
+																	 TheDisplay->getWidth(), TheDisplay->getHeight(),
+																	 &m_panelRect[ p ] );
+
+	// the children's positions are relative to the frame, so grab where it is before moving it
+	ICoord2D barOrigin;
+	parent->winGetScreenPosition( &barOrigin.x, &barOrigin.y );
+
+	// the frame itself stays full width - it draws nothing and passes input through
+	const Int parentTop =
+		REAL_TO_INT_FLOOR( dispH - ( CONTROL_BAR_DESIGN_H - CONTROL_BAR_DESIGN_TOP ) * s );
+	parent->winSetPosition( 0, parentTop );
+	parent->winSetSize( REAL_TO_INT_CEIL( dispW ), REAL_TO_INT_CEIL( dispH ) - parentTop );
+
+	for( GameWindow *child = parent->winGetChild(); child; child = child->winGetNext() )
+	{
+		// the nameless panes go by where they were authored, so ask the cache before it is rewritten
+		ControlBarPanelPlacementMap::const_iterator it = theControlBarPlacement.find( child );
+		Real designCenterX;
+		if( it != theControlBarPlacement.end() && it->second.known )
+			designCenterX = it->second.designX + it->second.designW * 0.5f;
+		else
+		{
+			ICoord2D rel, size;
+			child->winGetPosition( &rel.x, &rel.y );
+			child->winGetSize( &size.x, &size.y );
+			designCenterX = ( barOrigin.x + rel.x + size.x * 0.5f ) / loadScaleX;
+		}
+
+		placeInPanel( child, panelForWindow( shortWindowName( child ), designCenterX ),
+									barOrigin.x, barOrigin.y, 0, parentTop );
+	}
+
+}  // end layoutPanels
+
+//-------------------------------------------------------------------------------------------------
 /** Initialzie the control bar, this is our interface to the context sinsitive GUI */
 //-------------------------------------------------------------------------------------------------
 void ControlBar::init( void )
@@ -1310,6 +1643,14 @@ void ControlBar::init( void )
 		NameKeyType id;
 		id = TheNameKeyGenerator->nameToKey( "ControlBar.wnd:ControlBarParent" );
 		m_contextParent[ CP_MASTER ] = TheWindowManager->winGetWindowFromId( NULL, id );
+
+		//
+		// These windows are new, so anything remembered about the last set of them is about
+		// addresses that may well have been handed back out.  Re-anchor the bar as three uniformly
+		// scaled panels before anything reads a position off it.
+		//
+		theControlBarPlacement.clear();
+		layoutPanels();
 
 	m_contextParent[ CP_MASTER ]->winGetPosition(&m_defaultControlBarPosition.x, &m_defaultControlBarPosition.y);
 		

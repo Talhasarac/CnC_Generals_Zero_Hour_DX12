@@ -517,7 +517,12 @@ add_custom_command(TARGET generals POST_BUILD
   # in gitignored Run/.
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
           ${CMAKE_CURRENT_SOURCE_DIR}/Data/Install_Final.bmp
-          ${CMAKE_CURRENT_SOURCE_DIR}/../Run/)
+          ${CMAKE_CURRENT_SOURCE_DIR}/../Run/
+  # The three command bar plates per side.  A loose texture beats every .big, so
+  # these land in Run/Art/Textures where the W3D file system looks first.
+  COMMAND ${CMAKE_COMMAND} -E copy_directory
+          ${CMAKE_CURRENT_SOURCE_DIR}/Data/Art/Textures
+          ${CMAKE_CURRENT_SOURCE_DIR}/../Run/Art/Textures)
 add_dependencies(generals d3d8to9)
 
 # ===========================================================================

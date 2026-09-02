@@ -37,6 +37,7 @@
 #include "GameClient/ControlBar.h"
 #include "GameClient/GameWindowManager.h"
 #include "GameClient/ControlBarScheme.h"
+#include "GameClient/Image.h"
 #include "GameClient/MapUtil.h"
 #include "GameLogic/GameLogic.h"
 #ifdef _INTERNAL
@@ -633,52 +634,78 @@ void W3DCommandBarTopDraw( GameWindow *window, WinInstanceData *instData )
 }
 
 
+//-------------------------------------------------------------------------------------------------
+/** The Image for one plate.  These are not in any MappedImage INI - the whole targa is the image
+	* and nothing else uses it - so the first draw builds one and hands it to the mapped image
+	* collection, which owns it from then on. */
+//-------------------------------------------------------------------------------------------------
+static const Image *plateImage( const ControlBarPlate *plate )
+{
+	if( TheMappedImageCollection == NULL )
+		return NULL;
+
+	AsciiString name( plate->filename );
+	const Image *found = TheMappedImageCollection->findImageByName( name );
+	if( found )
+		return found;
+
+	Image *image = newInstance( Image );
+	image->setName( name );
+	image->setFilename( name );
+
+	// the whole targa is the image, so there is nothing to look up and no page to share
+	Region2D uv;
+	uv.lo.x = 0.0f;
+	uv.lo.y = 0.0f;
+	uv.hi.x = 1.0f;
+	uv.hi.y = 1.0f;
+	image->setUV( &uv );
+
+	ICoord2D size;
+	size.x = plate->design.width();
+	size.y = plate->design.height();
+	image->setTextureWidth( size.x );
+	image->setTextureHeight( size.y );
+	image->setImageSize( &size );
+
+	TheMappedImageCollection->addImage( image );
+	return image;
+}
+
+//-------------------------------------------------------------------------------------------------
+/** Each panel wears a plate of its own now - see ControlBarPlateForSide in ControlBar.cpp for what
+	* a plate is and why the scheme's one-piece painting is not drawn at all. */
+//-------------------------------------------------------------------------------------------------
 void W3DCommandBarBackgroundDraw( GameWindow *window, WinInstanceData *instData )
 {
-
-	ControlBarSchemeManager *man = TheControlBar->getControlBarSchemeManager();
-	if(!man)
+	ControlBarSchemeManager *man = TheControlBar ? TheControlBar->getControlBarSchemeManager() : NULL;
+	if( man == NULL || TheDisplay == NULL )
 		return;
-	static NameKeyType winNamekey	= TheNameKeyGenerator->nameToKey( AsciiString( "ControlBar.wnd:BackgroundMarker" ) );
-	GameWindow *win =  TheWindowManager->winGetWindowFromId(NULL,winNamekey);
-	static ICoord2D basePos;
-	if(!win)
+
+	for( Int p = 0; p < ControlBar::CB_PANEL_COUNT; p++ )
 	{
-		return;
-		//win = TheWindowManager->winGetWindowFromId(NULL,TheNameKeyGenerator->nameToKey( AsciiString( "ControlBar.wnd:BackgroundMarker" ) ));
-	}
-	TheControlBar->getBackgroundMarkerPos(&basePos.x, &basePos.y);
-	ICoord2D pos, offset;
-	win->winGetScreenPosition(&pos.x,&pos.y);
-	offset.x = pos.x - basePos.x;
-	offset.y = pos.y - basePos.y;
+		const ControlBarPlate *plate = ControlBarPlateForSide( man->getCurrentSide(), p );
+		if( plate == NULL )
+			plate = ControlBarPlateForSide( man->getCurrentArtTwinSide(), p );
+		if( plate == NULL )
+			continue;
 
-	man->drawBackground(offset);
+		IRegion2D rect;
+		if( ControlBarPanelDesignToScreen( p, &plate->design, TheDisplay->getWidth(),
+																			 TheDisplay->getHeight(), &rect ) == FALSE )
+			continue;
+
+		const Image *image = plateImage( plate );
+		if( image )
+			TheDisplay->drawImage( image, rect.lo.x, rect.lo.y, rect.hi.x, rect.hi.y );
+	}
 }
 
 
 void W3DCommandBarForegroundDraw( GameWindow *window, WinInstanceData *instData )
 {
 
-	ControlBarSchemeManager *man = TheControlBar->getControlBarSchemeManager();
-	if(!man)
-		return;
-
-	static NameKeyType winNamekey	= TheNameKeyGenerator->nameToKey( AsciiString( "ControlBar.wnd:BackgroundMarker" ) );
-	GameWindow *win = TheWindowManager->winGetWindowFromId(NULL,winNamekey);
-	static ICoord2D basePos;
-	if(!win)
-	{
-		return;
-		//win = TheWindowManager->winGetWindowFromId(NULL,TheNameKeyGenerator->nameToKey( AsciiString( "ControlBar.wnd:BackgroundMarker" ) ));
-	}
-	TheControlBar->getForegroundMarkerPos(&basePos.x, &basePos.y);
-	ICoord2D pos, offset;
-	win->winGetScreenPosition(&pos.x,&pos.y);
-	offset.x = pos.x - basePos.x;
-	offset.y = pos.y - basePos.y;
-
-	man->drawForeground(offset);
+	// nothing sits on top of the plates - see W3DCommandBarBackgroundDraw
 
 }
 

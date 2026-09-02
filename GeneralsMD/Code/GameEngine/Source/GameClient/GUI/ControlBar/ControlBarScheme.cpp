@@ -684,6 +684,15 @@ void ControlBarScheme::init(void)
 			win->winSetSize(m_powerPurchaseImage->getImageWidth() * resMultiplier.x, m_powerPurchaseImage->getImageHeight() * resMultiplier.y);
 		}
 	}
+
+	//
+	// Everything above put a window back where the loader would have stretched it to, which is
+	// the whole width of the screen rather than one of the three panels the bar is really in.
+	// layoutPanels reads those positions and re-anchors them; it is why it has to run last, and
+	// why it runs again every time a scheme is set rather than once at startup.
+	//
+	if( TheControlBar )
+		TheControlBar->layoutPanels();
 }
 
 //

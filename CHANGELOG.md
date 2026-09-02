@@ -366,6 +366,7 @@ found and fixed â€” EA's own, not port damage.**
 
 - The writing on screen grows with your monitor now. Every panel is stretched to your resolution and always was, but the text inside it stayed the size it was drawn at in 2003, and what growth there was stopped dead at twice - so on a 2560 wide screen a command bar three times its original size still wore eight point lettering. The keys on the build buttons, the prices and the build times were the worst of it: at 2K they were drawn, and unreadable.
 - The strip of everything your base is building follows the screen too, instead of staying a row of postage stamps under a command bar three times its size.
+- On a widescreen monitor the command bar is three pieces instead of one stretched strip. It was drawn for a 4:3 screen and every measurement in it is multiplied by your resolution separately across and down, so at 16:9 the whole thing came out a third wider than it is tall: square build pictures as rectangles, and one slab of metal across the entire bottom edge. The radar now sits hard in the left corner, the build grid in the middle, the selected unit's panel hard in the right corner, each at the size it was drawn at, and the battlefield shows through the two gaps that opens. At 4:3 the three pieces meet and it is the bar it has always been.
 - Widescreen resolutions are back in the options menu.
 - Borderless fullscreen: start with `-borderless` and the game fills the screen at your desktop resolution with no frame and no display mode change, so alt-tab is instant, nothing on the desktop gets shuffled around behind it, and a second monitor stays usable. Screen-edge scrolling works there, the way it does in fullscreen. The loading picture still opens as its own small window with your desktop around it, and the game only takes the screen once it has something to draw.
 - Picking High detail gives you high resolution textures. The setting was ignored: the resolution came from a machine benchmark that answers 'low' on anything modern, so there was no way to ask for better.
@@ -492,7 +493,8 @@ found and fixed â€” EA's own, not port damage.**
 - That found every multiplayer replay falsely accusing itself of desync since 2003.
 - Every fix was proved by putting the bug back and watching the test fail.
 - No debugger here: a crash symboliser, a sampling profiler, probes in live matches.
-- Reverted and recorded: wide FOV, four pathfinding experiments, a three-panel command bar, tree shadows.
+- Reverted and recorded: wide FOV, four pathfinding experiments, tree shadows.
+- The three-piece command bar was reverted once, for having nowhere to put the painting of the bar, and is back now that the painting has been cut into three to match. Each piece is fitted by matching it against the artwork it was cut from rather than by eye: the eyeballed fit was four percent out, which nobody sees on the metal and everybody sees on the money readout.
 - The opponent's decisions are argued with a number: 20 headless matches per change, same seeds, win rate and match length before and after.
 - That caught two changes that looked right and measured catastrophic - a wave that waited jammed the whole production line, and a retreat rule that counted buildings as gunfire sent every attack home. Both showed up as twenty matches with zero kills.
 - Massing an army before attacking is written and measured but switched off: it needs somewhere to wait that is not the production queue.

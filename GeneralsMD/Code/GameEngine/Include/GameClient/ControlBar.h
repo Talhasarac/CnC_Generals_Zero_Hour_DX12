@@ -871,7 +871,33 @@ public:
 
 	Bool hasAnyShortcutSelection() const;
 
+	//
+	// The bar is three independently anchored panels rather than one strip stretched across the
+	// bottom edge.  layoutPanels() re-places every window in ControlBar.wnd at a single uniform
+	// scale inside one of them; the plate art is drawn around the content rectangles it records.
+	//
+	enum ControlBarPanel
+	{
+		CB_PANEL_LEFT = 0,		///< radar, hard against the left edge
+		CB_PANEL_CENTER,			///< money, power, the toolbar column and the command grid, centred
+		CB_PANEL_RIGHT,				///< selection portrait and the general's tabs, hard against the right edge
+
+		CB_PANEL_COUNT
+	};
+
+	/// the whole panel, art included - this is what blocks a click from reaching the world
+	const IRegion2D *getPanelRect( Int which ) const { return &m_panelRect[ which ]; }
+
+	/** Re-anchor the three panels at one uniform scale.  Idempotent, and safe to call again after
+		* something else has moved a window - ControlBarScheme::init does, every time a scheme is
+		* set - because it remembers both the authored rectangle and the one it last handed out. */
+	void layoutPanels( void );
+
 protected:
+	/// place one window and its descendants inside 'panel'; see layoutPanels
+	void placeInPanel( GameWindow *win, Int panel,
+										 Int oldParentX, Int oldParentY, Int newParentX, Int newParentY );
+
 	void updateRadarAttackGlow ( void );
 	
 	void setDefaultControlBarConfig( void );
@@ -1009,6 +1035,8 @@ protected:
 
 	ICoord2D m_defaultControlBarPosition;				///< Stored the original position of the control bar on the screen
 	ControlBarStages m_currentControlBarStage;
+
+	IRegion2D m_panelRect[ CB_PANEL_COUNT ];				///< screen rect of each panel, filled by layoutPanels()
 
 	Bool m_UIDirty;																///< the context UI must be re-evaluated
 
@@ -1236,6 +1264,38 @@ private:
 
 // EXTERNALS //////////////////////////////////////////////////////////////////////////////////////
 extern ControlBar *TheControlBar;
+
+//-------------------------------------------------------------------------------------------------
+/** The plate one panel wears.
+	*
+	* The scheme art (ControlBarScheme) is one wide painting of the whole bar, drawn from a single
+	* anchor and stretched by the display over 800x600.  The bar is three separately anchored panels
+	* now, so that painting has nowhere to go and is not drawn at all: each panel wears a plate.
+	*
+	* The nine plates are the three shipped paintings cut into three, so each one has an exact
+	* rectangle in the .wnd's own 800x600 space - the rectangle of the painting it came from.  That
+	* is what a plate carries, and drawing it is that rectangle put through the same anchor and the
+	* same uniform scale layoutPanels puts every window through.  Nothing is measured by eye, so the
+	* money slot, the power rail and the toolbar column land on the windows the scheme puts there,
+	* and at 4:3 each side's three plates slide back together into the strip they came from. */
+//-------------------------------------------------------------------------------------------------
+struct ControlBarPlate
+{
+	const char *filename;			///< the targa, which is all the Image needs
+	IRegion2D design;					///< the 800x600 rectangle of the painting this piece is
+};
+
+/** The plate 'panel' wears while the bar is dressed in 'side'.  A general's scheme names a side
+	* like "ChinaTankGeneral", so the match is on the front of the name.  NULL when nothing fits. */
+extern const ControlBarPlate *ControlBarPlateForSide( const AsciiString& side, Int panel );
+
+/** Where a design rectangle belonging to 'panel' lands on a display this size.  This is the one
+	* piece of arithmetic the whole layout is built out of: one uniform scale, and an anchor that
+	* pins the left panel to the left edge, the right panel to the right edge and the middle one to
+	* the middle.  FALSE for a panel that does not exist. */
+extern Bool ControlBarPanelDesignToScreen( Int panel, const IRegion2D *design,
+																					 Int displayWidth, Int displayHeight,
+																					 IRegion2D *rectOut );
 
 //-------------------------------------------------------------------------------------------------
 /** Logic frames as the whole seconds they will really take at the current logic rate, rounded up

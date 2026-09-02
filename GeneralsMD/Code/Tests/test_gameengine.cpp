@@ -7726,6 +7726,129 @@ TEST(borderless_asks_for_a_windowed_device_the_size_of_the_desktop)
 	delete scratch;
 }
 
+TEST(every_side_has_three_plates_and_every_general_wears_its_sides)
+{
+	/* The bar is three panels and each wears a plate cut from its side's own painting.  A scheme
+		 names a side like "ChinaTankGeneral", the boss bar calls itself "Boss" and the observer bar
+		 "Observer", and none of those three has artwork of its own - so a side that fell through this
+		 lookup would leave the whole bar with no background at all. */
+	static const char *sides[] =
+	{
+		"America", "China", "GLA",
+		"AmericaSuperWeaponGeneral", "AmericaLaserGeneral", "AmericaAirForceGeneral",
+		"ChinaTankGeneral", "ChinaInfantryGeneral", "ChinaNukeGeneral",
+		"GLAToxinGeneral", "GLADemolitionGeneral", "GLAStealthGeneral",
+		"Boss", "Observer", NULL
+	};
+
+	for( const char **s = sides; *s; s++ )
+	{
+		Int previousRight = -1;
+		for( Int p = 0; p < ControlBar::CB_PANEL_COUNT; p++ )
+		{
+			const ControlBarPlate *plate = ControlBarPlateForSide( AsciiString( *s ), p );
+			CHECK( plate != NULL );
+			CHECK( plate->filename != NULL && plate->filename[ 0 ] != 0 );
+
+			/* every piece is a rectangle of the shipped painting, which is drawn across the bottom
+				 of the .wnd's 800x600 - so it lives in the bottom quarter and nowhere else */
+			CHECK( plate->design.width() > 0 && plate->design.height() > 0 );
+			CHECK( plate->design.lo.x >= 0 && plate->design.hi.x <= 800 );
+			CHECK( plate->design.lo.y >= 399 && plate->design.hi.y <= 600 );
+
+			// left, middle, right, in that order
+			CHECK( plate->design.hi.x > previousRight );
+			previousRight = plate->design.hi.x;
+		}
+	}
+
+	/* a side nobody drew art for gets no plate rather than somebody else's */
+	CHECK( ControlBarPlateForSide( AsciiString( "Martians" ), ControlBar::CB_PANEL_LEFT ) == NULL );
+	CHECK( ControlBarPlateForSide( AsciiString::TheEmptyString, ControlBar::CB_PANEL_LEFT ) == NULL );
+	CHECK( ControlBarPlateForSide( AsciiString( "America" ), ControlBar::CB_PANEL_COUNT ) == NULL );
+}
+
+TEST(the_three_panels_are_one_bar_at_4x3_and_pull_apart_on_a_wide_screen)
+{
+	/* Every window and every plate goes through this one piece of arithmetic, so it is where a
+		 misplaced money slot or a smeared cameo would come from.  Two things have to hold: at 4:3 it
+		 reproduces what the .wnd loader would have done, which is what makes the three plates slide
+		 back into the one strip EA drew; and above 4:3 it scales by one factor for both axes and
+		 opens the two gaps rather than stretching to fill them. */
+	IRegion2D whole;			// the whole authored bar
+	whole.lo.x = 0;
+	whole.lo.y = 408;
+	whole.hi.x = 800;
+	whole.hi.y = 600;
+
+	IRegion2D left, centre, right;
+	CHECK( ControlBarPanelDesignToScreen( ControlBar::CB_PANEL_LEFT,   &whole, 800, 600, &left ) );
+	CHECK( ControlBarPanelDesignToScreen( ControlBar::CB_PANEL_CENTER, &whole, 800, 600, &centre ) );
+	CHECK( ControlBarPanelDesignToScreen( ControlBar::CB_PANEL_RIGHT,  &whole, 800, 600, &right ) );
+
+	// at the authored size all three anchors land on the authored rectangle itself
+	CHECK_EQ( left.lo.x, 0 );		CHECK_EQ( left.hi.x, 800 );
+	CHECK_EQ( centre.lo.x, 0 );	CHECK_EQ( centre.hi.x, 800 );
+	CHECK_EQ( right.lo.x, 0 );	CHECK_EQ( right.hi.x, 800 );
+	CHECK_EQ( left.lo.y, 408 );	CHECK_EQ( left.hi.y, 600 );
+
+	/* 1920x1080 is 1.8 times the authored height and 2.4 times its width; the smaller one wins, so
+		 a square cameo stays square instead of coming out a third wider than it is tall */
+	CHECK( ControlBarPanelDesignToScreen( ControlBar::CB_PANEL_LEFT,   &whole, 1920, 1080, &left ) );
+	CHECK( ControlBarPanelDesignToScreen( ControlBar::CB_PANEL_CENTER, &whole, 1920, 1080, &centre ) );
+	CHECK( ControlBarPanelDesignToScreen( ControlBar::CB_PANEL_RIGHT,  &whole, 1920, 1080, &right ) );
+
+	CHECK_NEAR( (Real)left.width(), 800.0f * 1.8f, 1.5f );
+	CHECK_NEAR( (Real)left.height(), 192.0f * 1.8f, 1.5f );
+
+	// left edge to left edge, right edge to right edge, and the middle one centred between them
+	CHECK_EQ( left.lo.x, 0 );
+	CHECK_EQ( right.hi.x, 1920 );
+	CHECK_NEAR( (Real)( centre.lo.x + centre.hi.x ) * 0.5f, 960.0f, 2.0f );
+
+	// and every panel still sits on the bottom edge of the screen
+	CHECK_EQ( left.hi.y, 1080 );
+	CHECK_EQ( centre.hi.y, 1080 );
+	CHECK_EQ( right.hi.y, 1080 );
+
+	CHECK( ControlBarPanelDesignToScreen( ControlBar::CB_PANEL_COUNT, &whole, 1920, 1080, &left ) == FALSE );
+	CHECK( ControlBarPanelDesignToScreen( ControlBar::CB_PANEL_LEFT, &whole, 0, 0, &left ) == FALSE );
+}
+
+TEST(a_plate_covers_the_windows_its_panel_is_responsible_for)
+{
+	/* The plates are cuts of the shipped painting and the windows are at the coordinates the .wnd
+		 and ControlBarScheme.ini give them, so the two only agree if the plate rectangles are right.
+		 These are the windows a player looks at: the radar, the money readout, the power rail, the
+		 toolbar column, the command grid and the selection portrait.  A plate that has drifted - and
+		 an earlier version of this, fitted by eye instead of to the painting, had drifted about four
+		 percent - leaves one of them hanging off its own artwork. */
+	struct Seated { const char *what; Int panel; Int x0, y0, x1, y1; };
+	static const Seated seated[] =
+	{
+		{ "radar",							ControlBar::CB_PANEL_LEFT,		  7, 443, 174, 595 },
+		{ "money",							ControlBar::CB_PANEL_CENTER,	360, 437, 439, 462 },
+		{ "power bar",					ControlBar::CB_PANEL_CENTER,	259, 469, 538, 476 },
+		{ "toolbar column",			ControlBar::CB_PANEL_CENTER,	184, 490, 220, 592 },
+		{ "command grid",				ControlBar::CB_PANEL_CENTER,	223, 494, 603, 589 },
+		{ "selection portrait",	ControlBar::CB_PANEL_RIGHT,		621, 483, 760, 592 },
+		{ NULL, 0, 0, 0, 0, 0 }
+	};
+	static const char *sides[] = { "America", "China", "GLA", NULL };
+
+	for( const char **s = sides; *s; s++ )
+		for( const Seated *w = seated; w->what; w++ )
+		{
+			const ControlBarPlate *plate = ControlBarPlateForSide( AsciiString( *s ), w->panel );
+			CHECK( plate != NULL );
+
+			// the bottom edge is the one that may hang off: the bar runs to the bottom of the screen
+			CHECK( plate->design.lo.x <= w->x0 );
+			CHECK( plate->design.hi.x >= w->x1 );
+			CHECK( plate->design.lo.y <= w->y0 );
+		}
+}
+
 /* A build order is a message, and the structure it orders does not exist until the logic runs it -
 	 on a network game, however long the link takes.  Until then the client remembers the ground it
 	 spent, so a shift-held run of clicks does not put two structures on the same square.  What it
