@@ -202,10 +202,10 @@ void GameSlot::setMapAvailability( Bool hasMap )
 
 /** Which slot states are an opponent seat.
 	*
-	* This used to be written out as a list in three places, and appending the ladder's three rungs to
-	* the enum broke two of them: the seat came back named "Closed" because setState's name switch
-	* had no case for it, and its start position was wiped on every menu refresh because the guard
-	* below did not recognise it as still being the same kind of seat.  One function, three callers.
+	* This used to be written out as a list in three places and no two of them agreed, which cost a
+	* seat its name (it came back "Closed") and its start position (wiped on every menu refresh,
+	* because the guard below did not recognise it as still being the same kind of seat).  One
+	* function, three callers.
 	*
 	* SLOT_TAKEOVER counts here on purpose: to the lobby it is an ordinary opponent seat that the
 	* host owns and that no network peer is expected to check in from.  It differs in one place only
@@ -215,11 +215,8 @@ Bool IsAISlotState( SlotState state )
 	switch( state )
 	{
 		case SLOT_EASY_AI:
-		case SLOT_STEADY_AI:
 		case SLOT_MED_AI:
-		case SLOT_HARD_AI:
 		case SLOT_BRUTAL_AI:
-		case SLOT_MERCILESS_AI:
 		case SLOT_TAKEOVER:
 			return TRUE;
 		default:
@@ -229,18 +226,15 @@ Bool IsAISlotState( SlotState state )
 
 /** The one letter an AI seat is written as in the options string the host sends round.
 	*
-	* 'E', 'M', 'H' and 'P' are what shipped, so they keep their meaning - 'H' is Brutal, from when
-	* Brutal was the top rung and the menu called it Hard.  The three rungs the ladder added take
-	* free letters.  Every seat that was none of the four went out as 'H', which is why picking
-	* Steady or Merciless in the LAN or online lobby handed everybody a Brutal opponent instead. */
+	* 'E', 'M' and 'H' are EA's own and keep their meaning - 'H' is Brutal, from when the menu called
+	* that rung Hard.  The takeover seat took a free letter.  This is the whole table: a seat the
+	* host cannot write a letter for used to go out as 'H', which handed everybody at the table a
+	* Brutal opponent regardless of what the host had picked. */
 static const struct { SlotState state; char code; } theAISlotCodes[] =
 {
 	{ SLOT_EASY_AI,      'E' },
-	{ SLOT_STEADY_AI,    'S' },
 	{ SLOT_MED_AI,       'M' },
-	{ SLOT_HARD_AI,      'D' },
 	{ SLOT_BRUTAL_AI,    'H' },
-	{ SLOT_MERCILESS_AI, 'X' },
 	{ SLOT_TAKEOVER,     'P' },
 };
 
@@ -271,14 +265,12 @@ Bool OptionsCharToSlotState( char c, SlotState *state )
 
 /** What a seat is called wherever one is listed: the lobby's drop-down, the seat itself, the game
 	* info panel, the online browser's tooltip.  Four switch statements used to answer this and no
-	* two of them agreed - EA's shipped strings read "Easy Army" and "Medium Army" next to the
-	* ladder's own "Steady AI" and "Merciless AI", so one drop-down offered both namings at once,
-	* and "GUI:HardAI" sat on the Brutal rung in one file and on the Hard rung in another.
+	* two of them agreed, so the same rung read "Easy Army" in one list and "Easy AI" in the next,
+	* and "GUI:HardAI" sat on the Brutal rung in one file and somewhere else in another.
 	*
-	* So the six rungs are named here, in one style, and none of them goes through the shipped
-	* strings any more: three of the six never had one, and a ladder that reads half in EA's words
-	* and half in ours reads like two different lists.  Open, Closed and the takeover seat are not
-	* rungs and keep their localised strings. */
+	* So the three rungs are named here, in one style, and none of them goes through the shipped
+	* strings any more.  Open, Closed and the takeover seat are not rungs and keep their localised
+	* strings. */
 UnicodeString SlotStateName( SlotState state )
 {
 	switch( state )
@@ -286,11 +278,8 @@ UnicodeString SlotStateName( SlotState state )
 		case SLOT_OPEN:					return TheGameText->fetch("GUI:Open");
 		case SLOT_TAKEOVER:			return TheGameText->fetch("GUI:HumanSlot");
 		case SLOT_EASY_AI:			return UnicodeString( L"Easy AI" );
-		case SLOT_STEADY_AI:		return UnicodeString( L"Steady AI" );
 		case SLOT_MED_AI:				return UnicodeString( L"Medium AI" );
-		case SLOT_HARD_AI:			return UnicodeString( L"Hard AI" );
 		case SLOT_BRUTAL_AI:		return UnicodeString( L"Brutal AI" );
-		case SLOT_MERCILESS_AI:	return UnicodeString( L"Merciless AI" );
 		case SLOT_CLOSED:
 		default:								return TheGameText->fetch("GUI:Closed");
 	}

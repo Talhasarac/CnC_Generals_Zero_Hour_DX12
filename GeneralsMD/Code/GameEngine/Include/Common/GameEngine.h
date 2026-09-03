@@ -55,7 +55,7 @@ Int GameEngine_logicCatchupMaxFrames( Int logicFps );
 
 	A frame count cannot tell a cheap tick from an expensive one, and that is the whole difference
 	between the two situations the loop is in.  Behind because the *renderer* hitched, the ticks are
-	2ms each and paying three of them costs nothing.  Behind because eight Merciless AIs are all
+	2ms each and paying three of them costs nothing.  Behind because eight Brutal AIs are all
 	fighting at once, the ticks are 25ms each and paying three of them freezes the picture for 75ms
 	on top of the render - which is exactly the 91ms and 113ms frames measured on Twilight Flame.
 

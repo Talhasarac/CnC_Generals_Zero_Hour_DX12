@@ -1033,24 +1033,16 @@ Int parseAIDifficulty(char *args[], int num)
 	if (TheWritableGlobalData && num > 1)
 	{
 		//
-		// The six rungs of the ladder. Anything unrecognised is still the top rung, so a batch
-		// script written before the ladder existed keeps meaning what it meant.
+		// The three rungs of the ladder. Anything unrecognised is still the top rung, so a batch
+		// script naming a rung that no longer exists gets the hardest AI rather than the easiest.
 		//
 		AsciiString difficulty = args[1];
 		if (difficulty.compareNoCase("easy") == 0)
 			TheWritableGlobalData->m_autoSkirmishAIState = SLOT_EASY_AI;
-		else if (difficulty.compareNoCase("steady") == 0)
-			TheWritableGlobalData->m_autoSkirmishAIState = SLOT_STEADY_AI;
 		else if (difficulty.compareNoCase("medium") == 0 || difficulty.compareNoCase("med") == 0)
 			TheWritableGlobalData->m_autoSkirmishAIState = SLOT_MED_AI;
-		else if (difficulty.compareNoCase("hard") == 0)
-			TheWritableGlobalData->m_autoSkirmishAIState = SLOT_HARD_AI;
-		else if (difficulty.compareNoCase("brutal") == 0)
-			TheWritableGlobalData->m_autoSkirmishAIState = SLOT_BRUTAL_AI;
-		else if (difficulty.compareNoCase("merciless") == 0)
-			TheWritableGlobalData->m_autoSkirmishAIState = SLOT_MERCILESS_AI;
 		else
-			TheWritableGlobalData->m_autoSkirmishAIState = SLOT_MERCILESS_AI;
+			TheWritableGlobalData->m_autoSkirmishAIState = SLOT_BRUTAL_AI;
 	}
 	return 2;
 }
@@ -1068,16 +1060,10 @@ Int parseAIDifficulty2(char *args[], int num)
 		AsciiString difficulty = args[1];
 		if (difficulty.compareNoCase("easy") == 0)
 			TheWritableGlobalData->m_autoSkirmishAIStateOdd = SLOT_EASY_AI;
-		else if (difficulty.compareNoCase("steady") == 0)
-			TheWritableGlobalData->m_autoSkirmishAIStateOdd = SLOT_STEADY_AI;
 		else if (difficulty.compareNoCase("medium") == 0 || difficulty.compareNoCase("med") == 0)
 			TheWritableGlobalData->m_autoSkirmishAIStateOdd = SLOT_MED_AI;
-		else if (difficulty.compareNoCase("hard") == 0)
-			TheWritableGlobalData->m_autoSkirmishAIStateOdd = SLOT_HARD_AI;
-		else if (difficulty.compareNoCase("brutal") == 0)
-			TheWritableGlobalData->m_autoSkirmishAIStateOdd = SLOT_BRUTAL_AI;
 		else
-			TheWritableGlobalData->m_autoSkirmishAIStateOdd = SLOT_MERCILESS_AI;
+			TheWritableGlobalData->m_autoSkirmishAIStateOdd = SLOT_BRUTAL_AI;
 	}
 	return 2;
 }

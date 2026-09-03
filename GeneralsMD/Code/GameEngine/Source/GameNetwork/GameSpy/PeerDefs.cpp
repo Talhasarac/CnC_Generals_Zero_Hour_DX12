@@ -249,15 +249,6 @@ void GameSpyInfo::setGameOptions( void )
 				case SLOT_MED_AI:
 					playerName = "CM";
 					break;
-				case SLOT_STEADY_AI:
-					playerName = "CS";
-					break;
-				case SLOT_HARD_AI:
-					playerName = "CD";
-					break;
-				case SLOT_MERCILESS_AI:
-					playerName = "CX";
-					break;
 				case SLOT_BRUTAL_AI:
 					playerName = "CH";
 					break;

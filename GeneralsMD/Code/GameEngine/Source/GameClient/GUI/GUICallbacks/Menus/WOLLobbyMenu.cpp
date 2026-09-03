@@ -1221,8 +1221,8 @@ void WOLLobbyMenuUpdate( WindowLayout * layout, void *userData)
 									slot->setProfileID( resp.stagingRoom.profileID[i] );
 									slot->setPlayerTemplate( resp.stagingRoom.faction[i] );
 									slot->setColor( resp.stagingRoom.color[i] );
-									// Every rung of the ladder, not the three the enum happened to start with: an online game
-									// advertising a Steady or a Merciless seat used to show up in the browser as an empty one.
+									// Every AI seat the ladder has, asked in one place: an advertised seat this list did not
+									// recognise used to show up in the browser as an empty one.
 									if (IsAISlotState((SlotState)resp.stagingRoom.profileID[i]))
 									{
 										slot->setState((SlotState)resp.stagingRoom.profileID[i]);

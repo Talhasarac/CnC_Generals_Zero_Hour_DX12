@@ -988,14 +988,8 @@ AsciiString LANAPI::createSlotString( void )
 			//
 			if (slot->getState() == SLOT_EASY_AI)
 				str = "CE,";
-			else if (slot->getState() == SLOT_STEADY_AI)
-				str = "CS,";
 			else if (slot->getState() == SLOT_MED_AI)
 				str = "CM,";
-			else if (slot->getState() == SLOT_HARD_AI)
-				str = "CH,";
-			else if (slot->getState() == SLOT_MERCILESS_AI)
-				str = "CX,";
 			else
 				str = "CB,";
 		}

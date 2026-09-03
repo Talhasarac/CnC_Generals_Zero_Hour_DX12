@@ -500,7 +500,7 @@ Int AISkirmishPlayer::getMyEnemyPlayerIndex(void) {
 	* are.  Fog-masked, so it is somewhere this AI has actually seen; FALSE means it has not looked
 	* yet and the caller keeps the old aim point.
 	*
-	* Off below the top rung: this is what Merciless adds.
+	* Off on every rung, deliberately - see the note on useInfluenceMapForAttackLane in AI.cpp.
 	*/
 //----------------------------------------------------------------------------------------------------------
 Bool AISkirmishPlayer::influenceMapAttackGoal( Coord3D *goal )

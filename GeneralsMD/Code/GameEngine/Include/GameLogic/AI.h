@@ -134,21 +134,20 @@ public:
 
 
 //-------------------------------------------------------------------------------------------------
-/** Six rungs of how well the AI plays.  Deliberately NOT GameDifficulty, which stays at three
-	* values: that enum answers "which scripts run" and is baked into every shipped map and .scb,
-	* into the campaign's stat bonus tables and into network messages.  This one answers "how well
-	* does it play", and every rung of it plays by the player's rules - no income, build-rate, vision
-	* or stat handicap at any level, in either direction.  See AI-ROADMAP.md sections D6, D7 and D10.
+/** Three rungs of how well the AI plays.  Deliberately NOT GameDifficulty, which carries the same
+	* three values for a different reason: that enum answers "which scripts run" and is baked into
+	* every shipped map and .scb, into the campaign's stat bonus tables and into network messages.
+	* This one answers "how well does it play", and every rung of it plays by the player's rules - no
+	* income, build-rate, vision or stat handicap at any level, in either direction.  Keeping it a
+	* separate enum is what lets a rung be tuned in AI.ini without touching what a map's scripts do.
+	* See AI-ROADMAP.md sections D6, D7 and D10.
 	*/
 //-------------------------------------------------------------------------------------------------
 enum AISkillLevel
 {
 	AISKILL_EASY = 0,			///< slow and brave: looks around, but reacts far too late
-	AISKILL_STEADY,				///< + unit-level retreat, adaptive harvesters
-	AISKILL_MEDIUM,				///< + closest-target focus, expands on its own
-	AISKILL_HARD,					///< + counters what you field, groups fire together
-	AISKILL_BRUTAL,				///< + masses before attacking, team retreat, defended expansions
-	AISKILL_MERCILESS,		///< + influence-map attack lanes, no reaction delay
+	AISKILL_MEDIUM,				///< + unit retreat, closest-target focus, expands on its own
+	AISKILL_BRUTAL,				///< the baseline: counters what you field, masses, no reaction delay
 
 	AISKILL_COUNT
 };

@@ -2697,7 +2697,7 @@ Bool Player::grantScience(ScienceType science)
 //=============================================================================
 AISkillLevel Player::getAISkillLevel(void) const
 {
-	return m_ai ? m_ai->getAISkillLevel() : AISKILL_MERCILESS;
+	return m_ai ? m_ai->getAISkillLevel() : AISKILL_BRUTAL;
 }
 
 AIRole Player::getAIRole(void) const

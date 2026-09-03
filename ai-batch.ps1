@@ -21,7 +21,7 @@
     ... then compare the two win rates.
 
 .EXAMPLE
-  .\ai-batch.ps1 -Runs 8 -Map "Twilight Flame" -Difficulty merciless -Exe generals_perf.exe
+  .\ai-batch.ps1 -Runs 8 -Map "Twilight Flame" -Difficulty brutal -Exe generals_perf.exe
     A fixed map instead of a generated one, so the terrain and the unit load are the same in every
     batch, and the PERF_TIMERS exe, so the run also prints where the frame went. That is the pair
     of switches THREADING-ROADMAP.md section 0 is measured with.

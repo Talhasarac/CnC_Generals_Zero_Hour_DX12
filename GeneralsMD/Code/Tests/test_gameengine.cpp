@@ -759,7 +759,7 @@ TEST(logic_tick_is_wall_clock_paced_not_render_paced)
 
 /* The count above cannot tell a cheap logic tick from an expensive one, and that is the whole
 	 difference between the two situations the catch-up loop is ever in. Measured on Twilight Flame
-	 with eight Merciless AI: three 25ms ticks back to back with no picture in between is where the
+	 with eight Brutal AI: three 25ms ticks back to back with no picture in between is where the
 	 91ms and 113ms frames came from. So the loop is bounded by a clock as well. */
 extern Bool GameEngine_mayStartAnotherCatchupTick( Int ticksSoFar, Int maxTicks, Real elapsedMsInLoop );
 
@@ -6616,10 +6616,11 @@ TEST(the_difficulty_ladder_climbs_in_every_direction_it_should)
 		CHECK( upper.m_defendExpansions >= lower.m_defendExpansions );
 	}
 
-	// the ends of the ladder are what they say they are
+	// the ends of the ladder are what they say they are: Easy ignores what it is facing and Brutal
+	// is the baseline, which means it counters fully and answers the moment it sees something
 	CHECK_EQ( 0.0f, data.m_skill[ AISKILL_EASY ].m_counterCompositionWeight );
-	CHECK_EQ( 1.0f, data.m_skill[ AISKILL_MERCILESS ].m_counterCompositionWeight );
-	CHECK_EQ( 0.0f, data.m_skill[ AISKILL_MERCILESS ].m_reactionDelaySeconds );
+	CHECK_EQ( 1.0f, data.m_skill[ AISKILL_BRUTAL ].m_counterCompositionWeight );
+	CHECK_EQ( 0.0f, data.m_skill[ AISKILL_BRUTAL ].m_reactionDelaySeconds );
 
 	// every rung scouts. An AI that never looks reads as broken, not as easy.
 	for( Int i = 0; i < AISKILL_COUNT; ++i )
@@ -6715,8 +6716,8 @@ TEST(retreat_ratio_measures_the_exchange_not_the_health_bar)
 
 	//
 	// The ladder's thresholds mean what they say, and where they sit was measured rather than
-	// guessed: at the roadmap's 0.8 a force quit a fight it was very nearly winning, and Merciless
-	// lost 4-7 to Easy - which does not know how to retreat and simply kept shooting.  They are
+	// guessed: at the roadmap's 0.8 a force quit a fight it was very nearly winning, and the top
+	// rung lost 4-7 to Easy - which does not know how to retreat and simply kept shooting.  They are
 	// "clearly losing" numbers now.  A force that lasts a third as long as the one it faces breaks
 	// off at every rung that retreats at all; one at parity never does.
 	//
@@ -6890,9 +6891,9 @@ TEST(massing_waits_for_a_force_but_never_waits_for_ever)
 
 	// the ladder turns it on at Brutal, which is the rung the roadmap puts it at
 	TAiData data;
-	CHECK( !data.m_skill[ AISKILL_HARD ].m_massBeforeAttacking );
+	CHECK( !data.m_skill[ AISKILL_EASY ].m_massBeforeAttacking );
+	CHECK( !data.m_skill[ AISKILL_MEDIUM ].m_massBeforeAttacking );
 	CHECK( data.m_skill[ AISKILL_BRUTAL ].m_massBeforeAttacking );
-	CHECK( data.m_skill[ AISKILL_MERCILESS ].m_massBeforeAttacking );
 }
 
 
@@ -6958,7 +6959,7 @@ TEST(a_cash_hoard_shortens_the_wait_but_only_so_far)
 	CHECK_EQ( 75, aiHoardAdjustedDelay( 300, 200000, 5000 ) );
 	CHECK_EQ( 75, aiHoardAdjustedDelay( 300, 2000000, 5000 ) );
 
-	// no threshold is the bottom two rungs, and is EA's behaviour: never hurry
+	// no threshold is the bottom rung, and is EA's behaviour: never hurry
 	CHECK_EQ( 300, aiHoardAdjustedDelay( 300, 999999, 0 ) );
 
 	// a delay never goes to zero, or the AI would try to build on every frame
@@ -6968,9 +6969,8 @@ TEST(a_cash_hoard_shortens_the_wait_but_only_so_far)
 	// the ladder switches it on at Medium and tightens it as you climb
 	TAiData data;
 	CHECK_EQ( 0, data.m_skill[ AISKILL_EASY ].m_cashHoardThreshold );
-	CHECK_EQ( 0, data.m_skill[ AISKILL_STEADY ].m_cashHoardThreshold );
 	CHECK( data.m_skill[ AISKILL_MEDIUM ].m_cashHoardThreshold > 0 );
-	CHECK( data.m_skill[ AISKILL_MERCILESS ].m_cashHoardThreshold <
+	CHECK( data.m_skill[ AISKILL_BRUTAL ].m_cashHoardThreshold <
 				 data.m_skill[ AISKILL_MEDIUM ].m_cashHoardThreshold );
 }
 
@@ -7038,16 +7038,14 @@ TEST(walking_away_breaks_a_capture_but_turning_towards_it_does_not)
 
 /* Every AI seat a lobby offers has to survive the trip to the other machines.  The host writes the
 	 slot list into one options string and every client reads it back; an AI seat is one letter in
-	 there, and the writer used to have four - E, M, P and "everything else is H" - while the enum had
-	 grown to seven states.  Steady, Hard and Merciless all went out as H, so a LAN or online game
-	 that was set up against the rungs in between was played against Brutal on every machine, the
-	 host's included.  These two functions are the one place the letters live now. */
+	 there, and the writer used to be three letters plus "everything else is H", so any seat the
+	 table did not name went out as Brutal on every machine, the host's included.  These two
+	 functions are the one place the letters live now, and this asserts the table is whole. */
 TEST(every_ai_seat_survives_the_options_string_the_host_sends_round)
 {
 	static const SlotState aiStates[] =
 	{
-		SLOT_EASY_AI, SLOT_STEADY_AI, SLOT_MED_AI, SLOT_HARD_AI, SLOT_BRUTAL_AI, SLOT_MERCILESS_AI,
-		SLOT_TAKEOVER
+		SLOT_EASY_AI, SLOT_MED_AI, SLOT_BRUTAL_AI, SLOT_TAKEOVER
 	};
 	const Int numAIStates = sizeof(aiStates)/sizeof(aiStates[0]);
 
@@ -7060,7 +7058,7 @@ TEST(every_ai_seat_survives_the_options_string_the_host_sends_round)
 		CHECK_EQ( (Int)aiStates[i], (Int)readBack );
 	}
 
-	// and no two of them share one - the bug was six rungs sharing three letters
+	// and no two of them share one - the bug was several seats sharing one letter
 	for (Int a = 0; a < numAIStates; ++a)
 		for (Int b = a + 1; b < numAIStates; ++b)
 			CHECK_NE( SlotStateToOptionsChar( aiStates[a] ), SlotStateToOptionsChar( aiStates[b] ) );
@@ -7114,16 +7112,15 @@ TEST(text_keeps_growing_with_the_screen_instead_of_stopping_at_twice)
 }
 /* The lobby, the seat itself, the game info panel and the online browser's tooltip each carried
 	 their own switch over the slot states, and no two agreed: EA's shipped strings read "Easy Army"
-	 and "Medium Army" while the rungs the ladder added were written "Steady AI" and "Merciless AI",
-	 so one drop-down offered a ladder named half one way and half the other - and "GUI:HardAI" sat
-	 on the Brutal rung in one file and on the Hard rung in another.  SlotStateName is the only list
-	 now.  (Only the AI rungs are checked here: Open, Closed and the takeover seat go through
-	 TheGameText, which no test has.) */
+	 and "Medium Army" where another list wrote "Easy AI", so one drop-down offered a ladder named
+	 half one way and half the other - and "GUI:HardAI" sat on the Brutal rung in one file and
+	 somewhere else in another.  SlotStateName is the only list now.  (Only the AI rungs are checked
+	 here: Open, Closed and the takeover seat go through TheGameText, which no test has.) */
 TEST(every_ai_rung_is_named_the_same_way_as_every_other)
 {
 	static const SlotState rungs[] =
 	{
-		SLOT_EASY_AI, SLOT_STEADY_AI, SLOT_MED_AI, SLOT_HARD_AI, SLOT_BRUTAL_AI, SLOT_MERCILESS_AI
+		SLOT_EASY_AI, SLOT_MED_AI, SLOT_BRUTAL_AI
 	};
 	const Int numRungs = sizeof(rungs)/sizeof(rungs[0]);
 
@@ -7134,7 +7131,7 @@ TEST(every_ai_rung_is_named_the_same_way_as_every_other)
 		// a rung with no case of its own used to come back named "Closed"
 		CHECK( name.getLength() > 3 );
 
-		// and one style for the lot: "Easy Army" beside "Steady AI" is what this is here to stop
+		// and one style for the lot: "Easy Army" beside "Medium AI" is what this is here to stop
 		// (CHECK_STR is narrow-char, and casting a WideChar* into it compares one byte and passes)
 		CHECK( wcscmp( name.str() + name.getLength() - 3, L" AI" ) == 0 );
 	}

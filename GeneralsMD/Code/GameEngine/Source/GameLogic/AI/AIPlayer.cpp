@@ -260,7 +260,7 @@ m_buildProbeOffset(0.0f),
 m_scoutTimer(1),
 m_retreatTimer(1),
 m_expandTimer(1),
-m_skillLevel(AISKILL_MERCILESS),
+m_skillLevel(AISKILL_BRUTAL),
 m_role(AIROLE_AGGRESSIVE)
 {
 	for (Int scoutSlot = 0; scoutSlot < MAX_AI_SCOUTS; ++scoutSlot) {
@@ -327,7 +327,7 @@ m_role(AIROLE_AGGRESSIVE)
 		 of them on the same logic frame - and kept doing so for the rest of the match, because each
 		 re-arms with a fixed interval and so never drifts apart again.
 
-		 Measured on Twilight Flame with eight Merciless AI: doExpansion alone cost 15.4ms of a
+		 Measured on Twilight Flame with eight top-rung AI: doExpansion alone cost 15.4ms of a
 		 16.7ms frame, all of it landing on one frame a minute. Spread across the cycle it is under
 		 6ms, and nothing runs any less often than it did. */
 	/* What is needed is only that the players land on *different* frames, not that they are spread
@@ -5008,7 +5008,7 @@ void AIPlayer::doScouting( void )
 	//
 	// A scout that has just been sent somewhere is left alone for this rung's scouting interval.
 	// This is the ladder's honest perception knob: every rung scouts, they differ in how diligently.
-	// Ninety seconds between legs on Easy is a scout that wanders; twenty-five on Merciless is one
+	// Ninety seconds between legs on Easy is a scout that wanders; twenty-five on Brutal is one
 	// that keeps the map current.
 	//
 	if( ordered )

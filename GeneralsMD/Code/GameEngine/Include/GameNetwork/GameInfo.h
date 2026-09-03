@@ -47,15 +47,7 @@ enum SlotState
 	// fork: an opponent seat with nothing behind it - no AI is ever created for it and you take
 	// it over in game with Shift-Ctrl-T.  Appended on purpose: the values above are written into
 	// save games and replays.
-	SLOT_TAKEOVER,
-
-	// fork: the three rungs that fill in the ladder between Easy, Medium and Brutal.  Appended for
-	// the same reason - never inserted.  Each maps onto one of the three GameDifficulty values for
-	// script gating (GameLogic::startNewGame); what they really select is the AISkillLevel, which is
-	// what decides how well the AI plays.  See AI-ROADMAP.md D6/D7.
-	SLOT_STEADY_AI,
-	SLOT_HARD_AI,
-	SLOT_MERCILESS_AI
+	SLOT_TAKEOVER
 };
 
 enum

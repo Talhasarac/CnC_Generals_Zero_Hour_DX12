@@ -189,10 +189,9 @@ void ShowUnderlyingGUIElements( Bool show, const char *layoutFilename, const cha
 /** Fill a lobby's player slot combo box with every seat it can offer.
 	*
 	* All three lobbies used to keep their own list.  The LAN and online ones held five entries in
-	* SlotState order and read the choice back as SlotState(position), so the ladder's three added
-	* rungs - appended to the enum, hence out of that order - could not be offered there at all: a
-	* network game had Easy, Medium and Brutal and nothing else.  Every entry now carries the state
-	* it stands for and the position it sits at means nothing. */
+	* SlotState order and read the choice back as SlotState(position), so a seat appended to the enum
+	* - the takeover seat - could not be offered there at all.  Every entry now carries the state it
+	* stands for and the position it sits at means nothing. */
 void PopulatePlayerSlotComboBox(GameWindow *comboBox, Int color, Bool allowTakeover)
 {
 	if (!comboBox)
@@ -205,11 +204,8 @@ void PopulatePlayerSlotComboBox(GameWindow *comboBox, Int color, Bool allowTakeo
 		SLOT_CLOSED,
 		SLOT_TAKEOVER,
 		SLOT_EASY_AI,
-		SLOT_STEADY_AI,
 		SLOT_MED_AI,
-		SLOT_HARD_AI,
 		SLOT_BRUTAL_AI,
-		SLOT_MERCILESS_AI,
 	};
 
 	// The combo box only grows its listbox when an add crosses the current length, and both
