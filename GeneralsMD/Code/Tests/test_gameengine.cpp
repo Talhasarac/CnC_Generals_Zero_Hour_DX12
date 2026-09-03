@@ -7844,32 +7844,38 @@ TEST(a_plate_covers_the_windows_its_panel_is_responsible_for)
 		}
 }
 
-TEST(the_money_readout_follows_the_plate_that_paints_its_box)
+TEST(the_grid_and_the_readout_follow_the_plate_that_paints_them)
 {
-	/* A plate is its side's own painting rather than a cut of the shipped bar, so the money box is
-		 where the plate draws it and not where ControlBarScheme.ini puts the readout.  On the American
-		 centre plate the two are ten design units apart: the box's dark interior measures 448.5 to
-		 465.4 and the readout is 19 units tall, so it centres on 457 - ten below the scheme's 447.5.
-		 China and GLA draw their boxes where the scheme expects and shift nothing. */
-	struct Expect { const char *side; Int shift; };
+	/* A plate is its side's own painting rather than a cut of the shipped bar, so the money box and
+		 the grid field are where the plate draws them and not where ControlBarScheme.ini and the .wnd
+		 put the windows.  On the American centre plate both disagree, and both were measured off the
+		 targa: the box's dark interior runs 448.5 to 465.4 and the 19-unit readout centres on 457,
+		 ten below the scheme's 447.5; the striped field runs 224.6 to 614.2 and the fourteen command
+		 buttons are 223 to 603, so the block sits six units left of centre in it.  China and GLA
+		 paint theirs where the windows already are and shift nothing. */
+	struct Expect { const char *side; Int readout; Int grid; };
 	static const Expect expected[] =
 	{
-		{ "America", 10 }, { "China", 0 }, { "GLA", 0 }, { NULL, 0 }
+		{ "America", 10, 6 }, { "China", 0, 0 }, { "GLA", 0, 0 }, { NULL, 0, 0 }
 	};
 
-	// what ControlBarScheme.ini gives the readout, before any plate has its say
+	// what ControlBarScheme.ini gives the readout and the .wnd gives the button block
 	const Int schemeTop = 438, schemeBottom = 457;
+	const Int gridLeft = 223, gridRight = 603;
 
 	for( const Expect *e = expected; e->side; e++ )
 	{
 		const ControlBarPlate *plate = ControlBarPlateForSide( AsciiString( e->side ), ControlBar::CB_PANEL_CENTER );
 		CHECK( plate != NULL );
-		CHECK_EQ( plate->readoutShiftY, e->shift );
+		CHECK_EQ( plate->readoutShiftY, e->readout );
+		CHECK_EQ( plate->gridShiftX, e->grid );
 
-		// wherever it ends up, the readout has to land on the plate rather than off the top or the
-		// bottom of it - a shift big enough to hang it in the battlefield is the failure to catch
+		// wherever they end up, both have to land on the plate rather than off an edge of it - a
+		// shift big enough to hang either one in the battlefield is the failure to catch
 		CHECK( schemeTop + plate->readoutShiftY >= plate->design.lo.y );
 		CHECK( schemeBottom + plate->readoutShiftY <= plate->design.hi.y );
+		CHECK( gridLeft + plate->gridShiftX >= plate->design.lo.x );
+		CHECK( gridRight + plate->gridShiftX <= plate->design.hi.x );
 	}
 }
 

@@ -1451,8 +1451,13 @@ static const ControlBarPlateSet thePlateSets[] =
 				 the command buttons (494-589) exactly where it stands, and its money box does not line
 				 up with the scheme's readout.  So it stands on the bottom of the screen, where a plate
 				 belongs, and the readout moves the ten units down into the box - the box's dark
-				 interior measures 448.5 to 465.4, and the 19-unit readout centres on 457. */
-			{ "RebornBarAmericaCenter.tga",	{ { 180, 429 }, { 623, 599 } }, 10 },
+				 interior measures 448.5 to 465.4, and the 19-unit readout centres on 457.
+
+				 The grid moves the same way and for the same reason.  The painting's striped field
+				 runs 224.6 to 614.2, and the fourteen command buttons are 223 to 603: the first
+				 column overhangs the left bezel by a unit and a half while eleven units stand empty
+				 on the right.  Six to the right centres the block in the field. */
+			{ "RebornBarAmericaCenter.tga",	{ { 180, 429 }, { 623, 599 } }, 10, 6 },
 			{ "RebornBarAmericaRight.tga",	{ { 610, 433 }, { 800, 599 } } },
 		}
 	},
@@ -1509,7 +1514,8 @@ static const char *shortWindowName( GameWindow *win )
 //-------------------------------------------------------------------------------------------------
 void ControlBar::placeInPanel( GameWindow *win, Int panel,
 															 Int oldParentX, Int oldParentY,
-															 Int newParentX, Int newParentY )
+															 Int newParentX, Int newParentY,
+															 Int shiftX )
 {
 	const Real dispW = (Real)TheDisplay->getWidth();
 	const Real dispH = (Real)TheDisplay->getHeight();
@@ -1545,25 +1551,35 @@ void ControlBar::placeInPanel( GameWindow *win, Int panel,
 	const char *shortName = shortWindowName( win );
 
 	//
+	// A plate is its side's own painting rather than a cut of the shipped one, so where it draws the
+	// money box and the grid field is the plate's business and not ControlBarScheme.ini's.  Where
+	// the two disagree the plate says by how much and the windows follow the art: the readout drops
+	// into its box, and everything CenterBackground holds - the command grid, the beacon pane, the
+	// observer panes - slides across into the field.  See ControlBarPlate.
+	//
+	const ControlBarPlate *plate = NULL;
+	if( m_controlBarSchemeManager )
+	{
+		plate = ControlBarPlateForSide( m_controlBarSchemeManager->getCurrentSide(), panel );
+		if( plate == NULL )
+			plate = ControlBarPlateForSide( m_controlBarSchemeManager->getCurrentArtTwinSide(), panel );
+	}
+
+	newX += shiftX;
+	if( plate && strcmp( shortName, "MoneyDisplay" ) == 0 )
+		newY += REAL_TO_INT_FLOOR( plate->readoutShiftY * s );
+
+	// the grid shift starts at CenterBackground and is inherited by everything under it
+	Int childShiftX = shiftX;
+	if( strcmp( shortName, "CenterBackground" ) == 0 )
+		childShiftX = plate ? REAL_TO_INT_FLOOR( plate->gridShiftX * s ) : 0;
+
+	//
 	// The unnamed children are the GameWinBlockInput panes: their only job is to keep clicks on the
 	// bar out of the world, so they become exactly their panel.  CenterBackground blocks input as
 	// well as holding the command windows, and is authored full width, so it gets the same
 	// treatment - left alone it would swallow every click over the gaps we just opened up.
 	//
-	//
-	// A plate is its side's own painting, not a cut of the shipped one, so where it draws the money
-	// box is the plate's business and not ControlBarScheme.ini's.  Where the two disagree the plate
-	// says by how much and the readout follows the art - see ControlBarPlate::readoutShiftY.
-	//
-	if( strcmp( shortName, "MoneyDisplay" ) == 0 && m_controlBarSchemeManager )
-	{
-		const ControlBarPlate *plate = ControlBarPlateForSide( m_controlBarSchemeManager->getCurrentSide(), panel );
-		if( plate == NULL )
-			plate = ControlBarPlateForSide( m_controlBarSchemeManager->getCurrentArtTwinSide(), panel );
-		if( plate )
-			newY += REAL_TO_INT_FLOOR( plate->readoutShiftY * s );
-	}
-
 	if( shortName[ 0 ] == 0 || strcmp( shortName, "CenterBackground" ) == 0 )
 	{
 		newX = m_panelRect[ panel ].lo.x;
@@ -1585,7 +1601,7 @@ void ControlBar::placeInPanel( GameWindow *win, Int panel,
 	place.placedH = newH;
 
 	for( GameWindow *child = win->winGetChild(); child; child = child->winGetNext() )
-		placeInPanel( child, panel, oldX, oldY, newX, newY );
+		placeInPanel( child, panel, oldX, oldY, newX, newY, childShiftX );
 
 }  // end placeInPanel
 

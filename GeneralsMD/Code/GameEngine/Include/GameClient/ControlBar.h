@@ -896,7 +896,8 @@ public:
 protected:
 	/// place one window and its descendants inside 'panel'; see layoutPanels
 	void placeInPanel( GameWindow *win, Int panel,
-										 Int oldParentX, Int oldParentY, Int newParentX, Int newParentY );
+										 Int oldParentX, Int oldParentY, Int newParentX, Int newParentY,
+										 Int shiftX = 0 );
 
 	void updateRadarAttackGlow ( void );
 	
@@ -1284,6 +1285,7 @@ struct ControlBarPlate
 	const char *filename;			///< the targa, which is all the Image needs
 	IRegion2D design;					///< the 800x600 rectangle of the painting this piece is
 	Int readoutShiftY;				///< design units the money readout moves to sit in this art's box
+	Int gridShiftX;						///< design units the command grid moves to centre in this art's field
 };
 
 /** The plate 'panel' wears while the bar is dressed in 'side'.  A general's scheme names a side
