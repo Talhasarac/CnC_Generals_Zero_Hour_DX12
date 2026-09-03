@@ -654,21 +654,28 @@ static const Image *plateImage( const ControlBarPlate *plate )
 	image->setFilename( name );
 
 	//
-	// The whole targa is the image, so there is nothing to look up and no page to share.  Not quite
-	// the whole targa, though: the last pixel column the quad draws samples the texture's outermost
-	// texel, and on the American centre plate that came out as a one-pixel light line standing off
-	// the plate's right edge, from the top of the frame to the bottom, over rows the painting leaves
-	// transparent.  Drawing the plate with the centre panel skipped removed it, so it is this draw
-	// and nothing behind it.  Stopping a texel and a half short of each edge keeps the sampler off
-	// that column; the painting's own edges are transparent or a rim of bezel, so nothing is lost.
+	// Nothing else uses this targa, so there is no page to look the image up in - but there is
+	// padding.  The painting is artW by artH texels in a texture rounded up to the next power of
+	// two, because the loader hands D3DXCreateTextureFromFileEx D3DX_DEFAULT for both dimensions and
+	// that *stretches* a non-power-of-two image into the bigger texture.  That stretch left the
+	// texture's last column holding a vertically mirrored copy of the painting, and the last pixel
+	// column of every quad drawn from it sampled that column: a one-pixel wire down the right edge
+	// of a plate, and where the mirrored row happened to be opaque, a lit speck standing out in the
+	// battlefield.  Padded to a power of two there is no resize and no mirrored column.
 	//
-	const Real insetX = 1.5f / (Real)( plate->design.width() * 1.6f );	// the targas are ~1.6 texels per design unit
-	const Real insetY = 1.5f / (Real)( plate->design.height() * 1.6f );
+	// So the UV is the painting's own corner of the texture, half a texel in at each edge, which is
+	// the mapping that puts the quad's first and last pixel centres on the first and last texel
+	// centres.
+	//
+	Real potW = 1.0f, potH = 1.0f;
+	while( potW < (Real)plate->artW ) potW *= 2.0f;
+	while( potH < (Real)plate->artH ) potH *= 2.0f;
+
 	Region2D uv;
-	uv.lo.x = insetX;
-	uv.lo.y = insetY;
-	uv.hi.x = 1.0f - insetX;
-	uv.hi.y = 1.0f - insetY;
+	uv.lo.x = 0.5f / potW;
+	uv.lo.y = 0.5f / potH;
+	uv.hi.x = ( (Real)plate->artW - 0.5f ) / potW;
+	uv.hi.y = ( (Real)plate->artH - 0.5f ) / potH;
 	image->setUV( &uv );
 
 	ICoord2D size;

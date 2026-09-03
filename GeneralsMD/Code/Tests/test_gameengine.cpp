@@ -7844,6 +7844,38 @@ TEST(a_plate_covers_the_windows_its_panel_is_responsible_for)
 		}
 }
 
+TEST(a_plates_targa_is_the_shape_its_design_rectangle_says)
+{
+	/* Each plate carries the size of the painting inside its targa, because the targa is padded out
+		 to a power of two: the loader hands D3DXCreateTextureFromFileEx D3DX_DEFAULT for width and
+		 height, and that stretches a non-power-of-two image into the bigger texture - which left the
+		 texture's last column holding a vertically mirrored copy of the painting, and every quad's
+		 last pixel column sampling it.  The UV comes from these two numbers, so a typo in them
+		 stretches or crops the plate.  The painting is a cut of the side's bar at one scale, so its
+		 texels-per-design-unit is the same across and down; that is what this checks. */
+	static const char *sides[] = { "America", "China", "GLA", NULL };
+
+	for( const char **s = sides; *s; s++ )
+		for( Int p = 0; p < ControlBar::CB_PANEL_COUNT; p++ )
+		{
+			const ControlBarPlate *plate = ControlBarPlateForSide( AsciiString( *s ), p );
+			CHECK( plate != NULL );
+			CHECK( plate->artW > 0 );
+			CHECK( plate->artH > 0 );
+
+			const Real acrossScale = (Real)plate->artW / (Real)plate->design.width();
+			const Real downScale   = (Real)plate->artH / (Real)plate->design.height();
+			CHECK_NEAR( acrossScale, downScale, 0.03f );
+
+			// and a power-of-two texture has room for it
+			Int potW = 1, potH = 1;
+			while( potW < plate->artW ) potW *= 2;
+			while( potH < plate->artH ) potH *= 2;
+			CHECK( potW >= plate->artW && potW < plate->artW * 2 );
+			CHECK( potH >= plate->artH && potH < plate->artH * 2 );
+		}
+}
+
 TEST(the_grid_and_the_readout_follow_the_plate_that_paints_them)
 {
 	/* A plate is its side's own painting rather than a cut of the shipped bar, so the money box and
