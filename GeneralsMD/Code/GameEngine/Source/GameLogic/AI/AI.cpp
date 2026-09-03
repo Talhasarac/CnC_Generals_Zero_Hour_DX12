@@ -376,9 +376,6 @@ void AI::update( void )
 	Int64 start, afterPathfind, end;
 	QueryPerformanceCounter( (LARGE_INTEGER *)&start );
 
-	// age the record of where units have been getting stuck, before any search reads it
-	m_pathfinder->decayJamMap();
-
 	// Do pathfinding.
 	m_pathfinder->processPathfindQueue();
 

@@ -1239,7 +1239,6 @@ private:
 
 	UnsignedInt m_id;												///< the unique ID of this group
 	Path *m_groundPath;											///< Group ground path.
-	Int m_groundPathDiameter;								///< width in cells the group corridor was actually found at.
 	
 	mutable VecObjectID	m_lastRequestedIDList;			///< this is used so we can return by reference, saving a copy
 };

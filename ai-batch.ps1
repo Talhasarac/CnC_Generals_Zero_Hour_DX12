@@ -61,7 +61,7 @@ param(
 	# between batches - and the only way to run a batch at all while a copy of the game is open.
 	[string] $Exe = "generals.exe",
 	# extra arguments handed to every run, for sweeping a knob the game reads from the command line
-	# (e.g. -ExtraArgs "-pathcongestion",'10') without a rebuild between batches
+	# (e.g. -ExtraArgs "-aislice",'4') without a rebuild between batches
 	[string[]] $ExtraArgs = @(),
 	# minutes before a wedged run is killed rather than waited on forever
 	[int] $TimeoutMinutes = 20
@@ -138,7 +138,7 @@ for ($i = 0; $i -lt $Runs; $i++) {
 	# what the pathfinder did over the whole match, for comparing a pathing change against its
 	# baseline: search time and count say what it cost, nopath/outofcells say whether it broke,
 	# blocked/stuck say whether the traffic jams it was aimed at actually got shorter
-	$pf = [pscustomobject]@{ FindMs = 0.0; Finds = 0; Expands = 0; NoPath = 0; OutOfCells = 0; Blocked = 0; Stuck = 0; QueueDetour = 0 }
+	$pf = [pscustomobject]@{ FindMs = 0.0; Finds = 0; Expands = 0; NoPath = 0; OutOfCells = 0; Blocked = 0; Stuck = 0 }
 	# THREADING-ROADMAP.md section 0: the per-scope frame cost, present only in a PERF_TIMERS
 	# build (-Exe generals_perf.exe), and the job pool's own report, present in every build.
 	$perf = @{}
@@ -188,7 +188,6 @@ for ($i = 0; $i -lt $Runs; $i++) {
 			if ($report -match "outofcells (\d+)")        { $pf.OutOfCells = [int]$Matches[1] }
 			if ($report -match "blocked (\d+)")           { $pf.Blocked = [int]$Matches[1] }
 			if ($report -match "stuck (\d+)")             { $pf.Stuck = [int]$Matches[1] }
-			if ($report -match "queuedetour (\d+)")       { $pf.QueueDetour = [int]$Matches[1] }
 		}
 		elseif ($line -match "HEADLESS PLAYER (\d+) '(.*?)': (\w+) \| score (\d+) \| money (\d+) earned (\d+) spent \| units (\d+) built (\d+) lost (\d+) killed peak (\d+)") {
 			$slots[[int]$Matches[1]] = [pscustomobject]@{
@@ -260,10 +259,6 @@ if ($pfRows.Count -gt 0) {
 	$totFrames = ($pfRows | Measure-Object Frames -Sum).Sum
 	$totBlocked = ($pfRows | ForEach-Object { $_.Pf.Blocked } | Measure-Object -Sum).Sum
 	Write-Host ("blocked unit-frames per 1000 logic frames: {0:n1}" -f (1000.0 * $totBlocked / $totFrames))
-	# how often a unit gave up on the line it was standing in and repathed round it. Zero here and
-	# a change to the queue detour cannot have done anything, good or bad.
-	$totDetour = ($pfRows | ForEach-Object { $_.Pf.QueueDetour } | Measure-Object -Sum).Sum
-	Write-Host ("queue detours per 1000 logic frames: {0:n1}" -f (1000.0 * $totDetour / $totFrames))
 }
 
 # Stability. A mean frame time is the statistic that hides a stutter, so this reports the tail:

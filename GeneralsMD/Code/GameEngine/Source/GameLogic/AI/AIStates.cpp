@@ -1761,25 +1761,6 @@ void AIInternalMoveToState::onExit( StateExitType status )
 	}
 }
 
-/* Does this unit look like it is moving, to a player watching it?  EA answered with a frame count -
-	 a quarter of a second of blocked frames cleared MODELCONDITION_MOVING - and a frame count is not
-	 a speed.  A tank easing round a jam at a third of its top speed is moving; it was drawn parked
-	 and sliding along the ground, and half of the stop-and-go a player complains about is that
-	 drawing rather than the movement underneath it.
-
-	 A tenth of top speed, from the physics, because that is under anything a wheel or a walk cycle
-	 reads as: a unit doing 10% is covering its own length in about two seconds.  Split out so the
-	 threshold can be checked without a renderer, which is the only check available - a headless run
-	 draws nothing, so no batch can measure this.  Client-side and outside the CRC either way.
-
-	 With no locomotor to ask, maxSpeed is zero and the test degenerates to "is it moving at all",
-	 which is what the code did before the threshold went in and is the right answer for something
-	 being carried or shoved rather than driving. */
-Bool AIState_looksLikeMoving( Real speedNow, Real maxSpeed )
-{
-	return speedNow > 0.1f * maxSpeed;
-}
-
 /**
  * Execute the moveTo behavior towards GoalPosition.
  */
@@ -1838,14 +1819,7 @@ StateReturnType AIInternalMoveToState::update()
 		forceRecompute = true;
 	}
 	Bool blocked=false;
-	// isQueuedBehindUnits is the intermittent case the two-second rule misses: a unit shuffling
-	// along at the back of a column touches the one in front every few frames, never for two
-	// seconds together, and used to stay in the line for as long as the line existed.  Throttled
-	// to once a second because not every state answers a forced recompute by actually computing
-	// one - the ones that decline (tightening, pursuing) would otherwise be asked every frame.
-	Bool queued = ai->isQueuedBehindUnits()
-			&& TheGameLogic->getFrame() - m_blockedRepathTimestamp > LOGICFRAMES_PER_SECOND;
-	if (ai->isBlockedAndStuck() || ai->getNumFramesBlocked()>2*LOGICFRAMES_PER_SECOND || queued) {
+	if (ai->isBlockedAndStuck() || ai->getNumFramesBlocked()>2*LOGICFRAMES_PER_SECOND) {
 		forceRecompute = true;
 		blocked = true;
 		m_blockedRepathTimestamp = TheGameLogic->getFrame();
@@ -1872,19 +1846,10 @@ StateReturnType AIInternalMoveToState::update()
 			obj->clearModelConditionState( MODELCONDITION_RAPPELLING );
 		}
 	}
-	/* Whether the drive animation plays is a question about speed, and EA asked it about frames: a
-		 quarter second of blocked frames stopped the animation whatever the unit was actually doing,
-		 so a tank crawling round a jam at a third of its speed stood still on screen and slid.  Half
-		 of the stop-and-go a player complains about is this line rather than the movement code.  Ask
-		 the physics instead, through AIState_looksLikeMoving. */
-	Real speedNow = obj->getPhysics() ? obj->getPhysics()->getVelocityMagnitude() : 0.0f;
-	Real maxSpeed = 0.0f;
-	if (ai->getCurLocomotor())
-		maxSpeed = ai->getCurLocomotor()->getMaxSpeedForCondition( obj->getBodyModule()->getDamageState() );
-	if (!AIState_looksLikeMoving( speedNow, maxSpeed ))
+	if (ai->getNumFramesBlocked()>LOGICFRAMES_PER_SECOND/4) 
 	{
 		obj->clearModelConditionState( MODELCONDITION_MOVING );
-	}
+	}	
 	else 
 	{
 		//Clear climbing if modelConditionFlag is not climbing
@@ -2455,22 +2420,11 @@ Bool AIAttackApproachTargetState::computePath()
 
 	AIUpdateInterface *ai = getMachineOwner()->getAI();
 
-	if (ai->isBlockedAndStuck())
+	if (ai->isBlockedAndStuck()) 
 	{
 		forceRepath = true;
 		// Intense logging. jba
 		//CRCDEBUG_LOG(("AIAttackApproachTargetState::computePath - stuck, recomputing for object %d\n", getMachineOwner()->getID()));
-	}
-	//
-	// This state is where a group of tanks piles up nose to tail, and it is the one state that
-	// could not get itself out.  The base move state asks for a repath after two seconds of being
-	// blocked; this override ignored that, and the "victim has not moved, so do not re-path" bail
-	// below then held every tank behind the ones in front for as long as the target stood still.
-	// A unit that has given up on its queue repaths whatever the victim is doing.
-	//
-	if (ai->isQueuedBehindUnits())
-	{
-		forceRepath = true;
 	}
 	if (m_waitingForPath) return true;
 

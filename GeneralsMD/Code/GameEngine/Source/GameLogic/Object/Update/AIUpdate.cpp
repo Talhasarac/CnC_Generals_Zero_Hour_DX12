@@ -73,146 +73,6 @@
 
 #define SLEEPY_AI
 
-//
-// Leaving a queue.  A unit standing behind another one collides, backs its speed off, drifts
-// apart, and collides again a few frames later, so m_blockedFrames - which a single clean frame
-// zeroes - rarely reaches the two seconds that force a repath.  The column therefore sits.
-// m_queueFrames counts the same collisions but decays by one per clear frame instead of resetting,
-// so a unit touching more often than it clears climbs; one that is genuinely moving falls to zero.
-// Past the threshold the unit repaths once, and that search prices the traffic beside it (see
-// PATH_QUEUE_COST in AIPathfind.cpp) so the route it gets back leaves the line instead of
-// rejoining it.
-//
-// The threshold is under the two-second rule on purpose: a unit that is being reliably crushed
-// against a blocker every frame still hits the old rule first, and this only catches the
-// intermittent case the old rule misses.  The ceiling stops a unit wedged for a minute from
-// carrying a minute of credit into open ground.
-//
-enum
-{
-	QUEUE_FRAMES_THRESHOLD = 40,	///< about 1.3 seconds of mostly-blocked frames
-	QUEUE_FRAMES_CEILING = 80
-};
-
-/* Split out so the climb-and-decay can be checked on its own: it is the whole of the "am I in a
-	 line" decision, and a version that gets it wrong either never fires or fires on open ground. */
-Int AIUpdate_queueFrameStep( Int queueFrames, Bool blocked )
-{
-	if (blocked)
-		return queueFrames < QUEUE_FRAMES_CEILING ? queueFrames + 1 : QUEUE_FRAMES_CEILING;
-	return queueFrames > 0 ? queueFrames - 1 : 0;
-}
-
-Bool AIUpdate_isQueued( Int queueFrames )
-{
-	return queueFrames >= QUEUE_FRAMES_THRESHOLD;
-}
-
-//
-// Following the unit in front.  See calculateMaxBlockedSpeed for why EA's version (copy his speed,
-// read no distance) turns one leader's hiccup into a full stop for everybody behind him.
-//
-// FOLLOW_GAIN is per logic frame, so at 30fps a car one cell too close closes about a third of the
-// error each frame and settles inside half a second without overshooting into a collision.  Higher
-// values ring; lower ones let the column concertina.
-//
-const Real FOLLOW_GAIN = 0.35f;					///< how much of the spacing error is corrected per frame
-const Real BLOCKED_HEAD_ON = -0.3f;			///< headings this opposed are a collision, not a queue
-const Real BLOCKED_SPEED_FILTER = 0.3f;	///< how much of the new ceiling the speed limit takes per frame
-
-/* Split out so the following law can be checked without a game: it is the whole of "how fast may I
-	 go behind him", and a version that gets it wrong either rear-ends the leader or stops dead. */
-Real AIUpdate_followSpeed( Real leaderSpeed, Real gap, Real desiredGap )
-{
-	Real speed = leaderSpeed + FOLLOW_GAIN * (gap - desiredGap);
-	if (speed < 0.0f)
-		speed = 0.0f;
-	return speed;
-}
-
-/* The blocked speed limit, one frame at a time.  EA multiplied it by 0.95 for every blocked frame
-	 and by 1.05 on the way out, off a floor of a fifth of the desired speed: twenty blocked frames
-	 took a unit to 36% and forty to 13%, and climbing back cost over a second.  Blocked traffic
-	 therefore ratcheted itself to a crawl and released in a sawtooth, which is the stop-and-go a
-	 player watches.  A first-order filter toward the ceiling absorbs a one-frame dip and still
-	 tracks a ceiling that stays low, with no direction that is cheaper than the other. */
-Real AIUpdate_smoothBlockedSpeed( Real current, Real target, Real cap )
-{
-	// FAST_AS_POSSIBLE is a sentinel, not a speed; and no ceiling above what we want means anything
-	if (current > cap) current = cap;
-	if (target > cap) target = cap;
-	if (target < 0.0f) target = 0.0f;
-	return current + BLOCKED_SPEED_FILTER * (target - current);
-}
-
-// Overtaking - a unit blocked by traffic going its own way steering one or two footprints sideways
-// and driving in that lane - was built here and taken out again.  Two 40-match batches on maps its
-// constants were never fitted to: blocked unit-frames a coin flip (thirteen matches better, seven
-// worse, one seed carrying three quarters of the mean), and stuck frames worse.  The only effect
-// that reproduced was search work, about a sixth fewer cell expansions, which is not what the
-// change was for.  PATHFINDING-PLAN.md P3 has the numbers; EA turned their own version off too.
-
-//
-// -tracemove [id]: one line a frame for one unit.  A jam is an argument between the speed the unit
-// wants, the ceiling its last collision put on it, the decaying bump limit and the frames it has
-// spent blocked, and from outside the object none of those four is visible - the run-level counters
-// can say 40000 blocked frames and still not say which of the four zeroed the tank.  The columns
-// are in the order the code applies them, so the first one that goes to zero is the culprit.
-//
-// With no id the trace latches onto the first unit that gets blocked and follows it for the rest of
-// the run: in a batch nobody knows an object id in advance, and the interesting unit is by
-// definition one that is stuck.  Output only - nothing here is read back by any logic.
-//
-static ObjectID theTracedObjectID = INVALID_ID;
-
-void AIUpdate_resetMoveTrace( void )
-{
-	theTracedObjectID = INVALID_ID;
-}
-
-static void AIUpdate_traceMove( const Object *obj, Bool blocked, Int blockedFrames, Int queueFrames,
-																Real desiredSpeed, Real maxSpeed, Real maxBlockedSpeed,
-																Real bumpSpeedLimit, Bool waitingForPath, Bool hasPath,
-																Bool stuck )
-{
-	const Int wanted = TheGlobalData ? TheGlobalData->m_traceMoveID : 0;
-	if (wanted == 0)
-		return;
-
-	if (wanted > 0)
-	{
-		if (obj->getID() != (ObjectID)wanted)
-			return;
-	}
-	else
-	{
-		// no id given: the first unit to get blocked is the one we follow from then on
-		if (theTracedObjectID == INVALID_ID)
-		{
-			if (!blocked)
-				return;
-			theTracedObjectID = obj->getID();
-		}
-		else if (obj->getID() != theTracedObjectID)
-		{
-			return;
-		}
-	}
-
-	const Coord3D *pos = obj->getPosition();
-	const PhysicsBehavior *physics = obj->getPhysics();
-	const Real actualSpeed = physics ? physics->getVelocityMagnitude() : 0.0f;
-	DEBUG_LOG(("MOVETRACE %d,%d,%.2f,%.2f,%.3f,%.3f,%.3f,%.3f,%.3f,%d,%d,%d,%d,%d\n",
-		TheGameLogic->getFrame(), (Int)obj->getID(), pos->x, pos->y,
-		actualSpeed, desiredSpeed, maxSpeed, maxBlockedSpeed, bumpSpeedLimit,
-		blocked ? 1 : 0, blockedFrames, queueFrames, waitingForPath ? 1 : 0,
-		hasPath ? 1 : 0));
-	if (stuck)
-	{
-		DEBUG_LOG(("MOVETRACE %d,%d,stuck\n", TheGameLogic->getFrame(), (Int)obj->getID()));
-	}
-}
-
 #ifdef _INTERNAL
 // for occasional debugging...
 //#pragma optimize("", off)
@@ -266,8 +126,69 @@ const LocomotorTemplateVector* AIUpdateModuleData::findLocomotorTemplateVector(L
 	}
 }
 
+//
+// -tracemove [id]: one line a frame for one unit.  A jam is an argument between the speed the unit
+// wants, the ceiling its last collision put on it, the decaying bump limit and the frames it has
+// spent blocked, and from outside the object none of those is visible - the run-level counters
+// can say 40000 blocked frames and still not say which of them zeroed the tank.  The columns are
+// in the order the code applies them, so the first one that goes to zero is the culprit.
+//
+// With no id the trace latches onto the first unit that gets blocked and follows it for the rest of
+// the run: in a batch nobody knows an object id in advance, and the interesting unit is by
+// definition one that is stuck.  Output only - nothing here is read back by any logic.
+//
+static ObjectID theTracedObjectID = INVALID_ID;
+
+void AIUpdate_resetMoveTrace( void )
+{
+	theTracedObjectID = INVALID_ID;
+}
+
+static void AIUpdate_traceMove( const Object *obj, Bool blocked, Int blockedFrames,
+																Real desiredSpeed, Real maxSpeed, Real maxBlockedSpeed,
+																Real bumpSpeedLimit, Bool waitingForPath, Bool hasPath,
+																Bool stuck )
+{
+	const Int wanted = TheGlobalData ? TheGlobalData->m_traceMoveID : 0;
+	if (wanted == 0)
+		return;
+
+	if (wanted > 0)
+	{
+		if (obj->getID() != (ObjectID)wanted)
+			return;
+	}
+	else
+	{
+		// no id given: the first unit to get blocked is the one we follow from then on
+		if (theTracedObjectID == INVALID_ID)
+		{
+			if (!blocked)
+				return;
+			theTracedObjectID = obj->getID();
+		}
+		else if (obj->getID() != theTracedObjectID)
+		{
+			return;
+		}
+	}
+
+	const Coord3D *pos = obj->getPosition();
+	const PhysicsBehavior *physics = obj->getPhysics();
+	const Real actualSpeed = physics ? physics->getVelocityMagnitude() : 0.0f;
+	DEBUG_LOG(("MOVETRACE %d,%d,%.2f,%.2f,%.3f,%.3f,%.3f,%.3f,%.3f,%d,%d,%d,%d\n",
+		TheGameLogic->getFrame(), (Int)obj->getID(), pos->x, pos->y,
+		actualSpeed, desiredSpeed, maxSpeed, maxBlockedSpeed, bumpSpeedLimit,
+		blocked ? 1 : 0, blockedFrames, waitingForPath ? 1 : 0,
+		hasPath ? 1 : 0));
+	if (stuck)
+	{
+		DEBUG_LOG(("MOVETRACE %d,%d,stuck\n", TheGameLogic->getFrame(), (Int)obj->getID()));
+	}
+}
+
 //-------------------------------------------------------------------------------------------------
-/*static*/ void AIUpdateModuleData::buildFieldParse(MultiIniFieldParse& p) 
+/*static*/ void AIUpdateModuleData::buildFieldParse(MultiIniFieldParse& p)
 {
   ModuleData::buildFieldParse(p);
 
@@ -380,7 +301,6 @@ AIUpdateInterface::AIUpdateInterface( Thing *thing, const ModuleData* moduleData
 	m_pathfindGoalCell.x = m_pathfindGoalCell.y = -1;
 	m_pathfindCurCell.x = m_pathfindCurCell.y = -1;
 	m_blockedFrames = 0;
-	m_queueFrames = 0;
 	m_curMaxBlockedSpeed = 0;
 	m_bumpSpeedLimit = FAST_AS_POSSIBLE;
 	m_ignoreCollisionsUntil = 0;
@@ -1422,19 +1342,6 @@ Bool AIUpdateInterface::hasHigherPathPriority(AIUpdateInterface *otherAI) const
 
 //-------------------------------------------------------------------------------------------------
 /* Returns max speed we can have and not run into unit that is blocking us.
-
-	 EA set our ceiling to exactly the blocker's speed away from us and read no distance at all, so a
-	 blocker that dipped for one frame stopped the follower for that frame whether it was one foot
-	 behind or five - and the follower's own dip did the same to whoever was behind it.  That is a
-	 phantom jam: it grows as it travels backwards down a column, and it is a property of the rule
-	 rather than of the traffic.
-
-	 The gap term is what a following model needs and this one had none of: match the leader's speed,
-	 plus a correction proportional to how much room is left.  Closer than we want, give some back;
-	 further, close it up.  Both units then hold a spacing instead of trading full stops.
-
-	 The head-on early return keeps its zero, but only for headings genuinely opposed.  At exactly
-	 zero it fired on anything a shade off perpendicular, which on a curve is most of a column.
 */
 Real AIUpdateInterface::calculateMaxBlockedSpeed(Object *other) const
 {
@@ -1444,21 +1351,19 @@ Real AIUpdateInterface::calculateMaxBlockedSpeed(Object *other) const
 	Coord2D vectorToOther;
 	vectorToOther.x = other->getPosition()->x - getObject()->getPosition()->x;
 	vectorToOther.y = other->getPosition()->y - getObject()->getPosition()->y;
-	Real distance = vectorToOther.length();
 	vectorToOther.normalize();
 	Real dotProduct = vectorToOther.x*otherDir.x	+ vectorToOther.y*otherDir.y;
-	if (dotProduct<BLOCKED_HEAD_ON) return 0; // They are running into us.
+	if (dotProduct<0) return 0; // They are running into us.
 
 	Real speedFactor = dotProduct;
-	if (speedFactor < 0) speedFactor = 0;	// off to one side: they are taking nothing with them
 	PhysicsBehavior *otherPhysics = other->getPhysics();
 	if (!otherPhysics) {
 		return m_curMaxBlockedSpeed;
-	}
+	}	
 	Coord3D otherVel = *otherPhysics->getVelocity();
 	otherVel.z = 0;
 	// Calculate how fast other is moving away from us...
-	Real awaySpeed = otherVel.length() * speedFactor;
+	Real awaySpeed = otherVel.length() * speedFactor;				 
 
 	// Now calculate the amount we are moving relative to towards them...
 	dotProduct = vectorToOther.x*ourDir.x	+ vectorToOther.y*ourDir.y;
@@ -1467,17 +1372,9 @@ Real AIUpdateInterface::calculateMaxBlockedSpeed(Object *other) const
 		return m_curMaxBlockedSpeed;
 	}
 	Real maxSpeed = awaySpeed / dotProduct;
-
-	// the room between the two hulls, and the room we would like there to be
-	Real myRadius = getObject()->getGeometryInfo().getBoundingCircleRadius();
-	Real hisRadius = other->getGeometryInfo().getBoundingCircleRadius();
-	Real gap = distance - (myRadius + hisRadius);
-	Real desiredGap = 0.5f * PATHFIND_CELL_SIZE_F;
 	if (other->getFormationID()!=NO_FORMATION_ID && getObject()->getFormationID()==other->getFormationID()) {
-		desiredGap *= 2.0f; // don't let formations crowd each other.
+		maxSpeed *= 0.55f; // don't let formations crowd each other.
 	}
-	maxSpeed = AIUpdate_followSpeed( maxSpeed, gap, desiredGap );
-
 	if (maxSpeed>m_curMaxBlockedSpeed) return m_curMaxBlockedSpeed;
 	return maxSpeed;
 }
@@ -1620,34 +1517,7 @@ Bool AIUpdateInterface::needToRotate(void)
 
 
 //-------------------------------------------------------------------------------------------------
-/* Returns TRUE if this unit has spent long enough standing behind other units to call it a queue
-	 rather than a moment of traffic.  See QUEUE_FRAMES_THRESHOLD at the top of this file. */
-Bool AIUpdateInterface::isQueuedBehindUnits(void) const
-{
-	return AIUpdate_isQueued( m_queueFrames );
-}
-
-//-------------------------------------------------------------------------------------------------
-/* Called at the end of every path computation.  The search that just ran is the detour, so the
-	 credit is spent and the unit counts again from zero to decide whether it worked - without this
-	 a queued unit asks for a new path on every frame for as long as it is queued.  It is also where
-	 the headless run's "queuedetour" count comes from: how often a unit gave up on the line it was
-	 standing in, which is the number that says whether a change to the threshold did anything. */
-void AIUpdateInterface::spendQueueCredit(void)
-{
-	if (isQueuedBehindUnits())
-	{
-		Pathfinder::bumpQueueDetour();
-		// the headless counter only prints at the end of an unattended run, and this behaviour is
-		// something you watch happen in a real game - so say it in the log too, once per detour
-		DEBUG_LOG(("QUEUE DETOUR: frame %d, '%s' %d leaving a queue\n", TheGameLogic->getFrame(),
-			getObject()->getTemplate()->getName().str(), getObject()->getID()));
-	}
-	m_queueFrames = 0;
-}
-
-//-------------------------------------------------------------------------------------------------
-/* Returns TRUE if the physics collide should apply the force.  Normally not.
+/* Returns TRUE if the physics collide should apply the force.  Normally not.  
 Also determines whether objects are blocked, and if so, if they are stuck.  jba.*/
 Bool AIUpdateInterface::processCollision(PhysicsBehavior *physics, Object *other)
 {
@@ -1684,7 +1554,7 @@ Bool AIUpdateInterface::processCollision(PhysicsBehavior *physics, Object *other
 				}
 			}
 			m_isBlocked = TRUE; // we are blocked.
- 			if (otherMoving && aiOther->isWaitingForPath())
+ 			if (otherMoving && aiOther->isWaitingForPath()) 
 			{
 				return FALSE; // let them get their path;
 			}
@@ -1887,7 +1757,6 @@ Bool AIUpdateInterface::computeQuickPath( const Coord3D *destination )
 	m_pathTimestamp = TheGameLogic->getFrame();
 
 	m_blockedFrames = 0;
-	spendQueueCredit();
 	m_isBlockedAndStuck = FALSE;
 	return TRUE;
 }
@@ -1898,6 +1767,7 @@ Bool AIUpdateInterface::computeQuickPath( const Coord3D *destination )
  */
 Bool AIUpdateInterface::computePath( PathfindServicesInterface *pathServices, Coord3D *destination )
 {
+
 	if (!m_isBlockedAndStuck)	{
 		destroyPath();
 	}
@@ -1963,10 +1833,8 @@ Bool AIUpdateInterface::computePath( PathfindServicesInterface *pathServices, Co
 	}
 	if (theNewPath==NULL && m_path==NULL) {
 		Real pathCostFactor = 0.0f;	
-		// a unit leaving a queue is blocked in every sense that matters to the search, even though
-		// nothing has been jammed against it long enough to call it stuck
-		theNewPath = pathServices->findClosestPath( getObject(), m_locomotorSet, getObject()->getPosition(),
-			destination, m_isBlockedAndStuck || isQueuedBehindUnits(), pathCostFactor, FALSE );
+		theNewPath = pathServices->findClosestPath( getObject(), m_locomotorSet, getObject()->getPosition(), 
+			destination, m_isBlockedAndStuck, pathCostFactor, FALSE );
 		m_retryPath = true;
 	}
 	TheAI->pathfinder()->setIgnoreObstacleID( INVALID_ID );
@@ -2010,7 +1878,6 @@ Bool AIUpdateInterface::computePath( PathfindServicesInterface *pathServices, Co
 	m_pathTimestamp = TheGameLogic->getFrame();
 
 	m_blockedFrames = 0;
-	spendQueueCredit();
 	m_isBlockedAndStuck = FALSE;
 	if (m_path)
 		return TRUE;
@@ -2030,11 +1897,10 @@ Bool AIUpdateInterface::computeAttackPath( PathfindServicesInterface *pathServic
 	{
 		// jba intense debug
 		//CRCDEBUG_LOG(("Info - RePathing very quickly %d, %d.\n", m_pathTimestamp, TheGameLogic->getFrame()));
-		if (m_path && m_isBlockedAndStuck)
+		if (m_path && m_isBlockedAndStuck) 
 		{
 			setIgnoreCollisionTime(2*LOGICFRAMES_PER_SECOND);
 			m_blockedFrames = 0;
-			spendQueueCredit();
 			m_isBlocked = FALSE;
 			m_isBlockedAndStuck = FALSE;
 			return TRUE;
@@ -2247,7 +2113,6 @@ Bool AIUpdateInterface::computeAttackPath( PathfindServicesInterface *pathServic
 	m_pathTimestamp = TheGameLogic->getFrame();
 
 	m_blockedFrames = 0;
-	spendQueueCredit();
 	m_isBlockedAndStuck = FALSE;
 	//CRCDEBUG_LOG(("AIUpdateInterface::computeAttackPath() done\n"));
 	if (m_path)
@@ -2375,16 +2240,12 @@ UpdateSleepTime AIUpdateInterface::doLocomotor( void )
 
 	chooseGoodLocomotorFromCurrentSet();
 
-	m_queueFrames = AIUpdate_queueFrameStep( m_queueFrames, m_isBlocked );
 	if (m_isBlocked)
 	{
 		++m_blockedFrames;
 		// this is the only place a blocked unit is counted once per frame rather than once per
 		// collision pair, so it is where the traffic-jam number for the headless run comes from
 		Pathfinder::bumpBlockedFrame( m_isBlockedAndStuck );
-		// and for the same reason it is where the jam map is stamped: this ground was not passable
-		// this frame, whatever the cell says by the time somebody searches it
-		TheAI->pathfinder()->noteJam( m_pathfindCurCell );
 	}
 	else
 	{
@@ -2464,22 +2325,26 @@ UpdateSleepTime AIUpdateInterface::doLocomotor( void )
 						if( speed == FAST_AS_POSSIBLE || speed > myMaxSpeed )
 							speed = myMaxSpeed;
 
-						if (blocked && speed>m_curMaxBlockedSpeed)
+						if (blocked && speed>m_curMaxBlockedSpeed) 
 						{
-							// track the ceiling instead of ratcheting down to it - see
-							// AIUpdate_smoothBlockedSpeed
-							m_bumpSpeedLimit = AIUpdate_smoothBlockedSpeed( m_bumpSpeedLimit, m_curMaxBlockedSpeed, speed );
+							speed = m_curMaxBlockedSpeed;
+							if (m_bumpSpeedLimit>speed) {
+								m_bumpSpeedLimit = speed;
+							}
+							m_bumpSpeedLimit *= 0.95f;
 							speed = m_bumpSpeedLimit;
-						}
-						else
+						} 
+						else 
 						{
 							blocked = FALSE;
-							if (m_bumpSpeedLimit<speed) {
-								// the same filter, now aimed at what we actually want
-								m_bumpSpeedLimit = AIUpdate_smoothBlockedSpeed( m_bumpSpeedLimit, speed, speed );
+							if (m_bumpSpeedLimit<FAST_AS_POSSIBLE) {
+								if (m_bumpSpeedLimit<speed*0.2f) {
+									m_bumpSpeedLimit = speed*0.2f;
+								}
+								m_bumpSpeedLimit *= 1.05f;
+							}
+							if (speed>m_bumpSpeedLimit) {
 								speed = m_bumpSpeedLimit;
-							} else {
-								m_bumpSpeedLimit = FAST_AS_POSSIBLE;
 							}
 						}
 
@@ -2545,7 +2410,7 @@ UpdateSleepTime AIUpdateInterface::doLocomotor( void )
 			getObject()->clearStatus( MAKE_OBJECT_STATUS_MASK( OBJECT_STATUS_AIRBORNE_TARGET ) );
 
 		// before the ceiling is thrown away for the frame - it is the value the trace is about
-		AIUpdate_traceMove( getObject(), traceWasBlocked, m_blockedFrames, m_queueFrames,
+		AIUpdate_traceMove( getObject(), traceWasBlocked, m_blockedFrames,
 			m_desiredSpeed,
 			m_curLocomotor->getMaxSpeedForCondition(getObject()->getBodyModule()->getDamageState()),
 			m_curMaxBlockedSpeed, m_bumpSpeedLimit, isWaitingForPath(), getPath() != NULL,

@@ -1252,33 +1252,6 @@ Int parseNoFPSLimit(char *args[], int num)
 	return 1;
 }
 
-/* -nogrouppath and -nocrosstime are the control arms for the two group-movement mechanisms this
-	 fork added on top of retail, in one binary.  Without them the only way to measure either is two
-	 exes, and two exes differ in more than the thing being measured.
-
-	 -nogrouppath drops the shared corridor: every unit in a selection solves its own path and the
-	 congestion cost is all that holds the column apart, which is what retail does for a formation
-	 and what PathLab calls single mode.  -nocrosstime keeps the reservation map but stops any
-	 search reading it, so a route is priced for ground another unit's path covers and not for the
-	 moment it will be there. */
-Int parseNoGroupPath(char *args[], int num)
-{
-	if (TheWritableGlobalData)
-	{
-		TheWritableGlobalData->m_useGroupPaths = FALSE;
-	}
-	return 1;
-}
-
-Int parseNoCrossingCost(char *args[], int num)
-{
-	if (TheWritableGlobalData)
-	{
-		TheWritableGlobalData->m_useCrossingCost = FALSE;
-	}
-	return 1;
-}
-
 /* -headless is the unattended-run switch: no frame is ever drawn, the logic tick runs flat out
 	 instead of being paced against wall clock, audio is silenced, and the process quits by itself
 	 the moment the match is decided.  A window and a D3D device are still created - W3D reaches into
@@ -1712,8 +1685,6 @@ static CommandLineParam params[] =
 	{ "-slowframe", parseSlowFrame },
 	{ "-teams", parseTeams },
 	{ "-aislice", parseAISlice },
-	{ "-nogrouppath", parseNoGroupPath },
-	{ "-nocrosstime", parseNoCrossingCost },
 	{ "-replay", parseReplay },
 	{ "-netgame", parseNetGame },
 	{ "-netslot", parseNetSlot },
