@@ -7844,6 +7844,35 @@ TEST(a_plate_covers_the_windows_its_panel_is_responsible_for)
 		}
 }
 
+TEST(the_money_readout_follows_the_plate_that_paints_its_box)
+{
+	/* A plate is its side's own painting rather than a cut of the shipped bar, so the money box is
+		 where the plate draws it and not where ControlBarScheme.ini puts the readout.  On the American
+		 centre plate the two are ten design units apart: the box's dark interior measures 448.5 to
+		 465.4 and the readout is 19 units tall, so it centres on 457 - ten below the scheme's 447.5.
+		 China and GLA draw their boxes where the scheme expects and shift nothing. */
+	struct Expect { const char *side; Int shift; };
+	static const Expect expected[] =
+	{
+		{ "America", 10 }, { "China", 0 }, { "GLA", 0 }, { NULL, 0 }
+	};
+
+	// what ControlBarScheme.ini gives the readout, before any plate has its say
+	const Int schemeTop = 438, schemeBottom = 457;
+
+	for( const Expect *e = expected; e->side; e++ )
+	{
+		const ControlBarPlate *plate = ControlBarPlateForSide( AsciiString( e->side ), ControlBar::CB_PANEL_CENTER );
+		CHECK( plate != NULL );
+		CHECK_EQ( plate->readoutShiftY, e->shift );
+
+		// wherever it ends up, the readout has to land on the plate rather than off the top or the
+		// bottom of it - a shift big enough to hang it in the battlefield is the failure to catch
+		CHECK( schemeTop + plate->readoutShiftY >= plate->design.lo.y );
+		CHECK( schemeBottom + plate->readoutShiftY <= plate->design.hi.y );
+	}
+}
+
 TEST(every_plate_that_touches_a_design_edge_touches_the_screen_edge)
 {
 	/* The plate rectangles were measured against the paintings, and a painting stops a pixel or two

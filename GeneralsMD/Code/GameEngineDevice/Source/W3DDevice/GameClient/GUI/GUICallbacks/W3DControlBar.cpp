@@ -653,12 +653,22 @@ static const Image *plateImage( const ControlBarPlate *plate )
 	image->setName( name );
 	image->setFilename( name );
 
-	// the whole targa is the image, so there is nothing to look up and no page to share
+	//
+	// The whole targa is the image, so there is nothing to look up and no page to share.  Not quite
+	// the whole targa, though: the last pixel column the quad draws samples the texture's outermost
+	// texel, and on the American centre plate that came out as a one-pixel light line standing off
+	// the plate's right edge, from the top of the frame to the bottom, over rows the painting leaves
+	// transparent.  Drawing the plate with the centre panel skipped removed it, so it is this draw
+	// and nothing behind it.  Stopping a texel and a half short of each edge keeps the sampler off
+	// that column; the painting's own edges are transparent or a rim of bezel, so nothing is lost.
+	//
+	const Real insetX = 1.5f / (Real)( plate->design.width() * 1.6f );	// the targas are ~1.6 texels per design unit
+	const Real insetY = 1.5f / (Real)( plate->design.height() * 1.6f );
 	Region2D uv;
-	uv.lo.x = 0.0f;
-	uv.lo.y = 0.0f;
-	uv.hi.x = 1.0f;
-	uv.hi.y = 1.0f;
+	uv.lo.x = insetX;
+	uv.lo.y = insetY;
+	uv.hi.x = 1.0f - insetX;
+	uv.hi.y = 1.0f - insetY;
 	image->setUV( &uv );
 
 	ICoord2D size;

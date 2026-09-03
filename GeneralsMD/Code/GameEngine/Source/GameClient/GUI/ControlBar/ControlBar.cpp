@@ -1446,10 +1446,13 @@ static const ControlBarPlateSet thePlateSets[] =
 	{ "America",
 		{
 			{ "RebornBarAmericaLeft.tga",		{ {   0, 412 }, { 183, 599 } } },
-			// the drawing registers at its bottom edge, which is the bottom of the bar - hung from its
-			// top instead it sat ten units high, showing ground under the grid and starting higher
-			// than the Chinese (433) and GLA (437) centre pieces do
-			{ "RebornBarAmericaCenter.tga",	{ { 180, 429 }, { 623, 599 } } },
+			/* This painting is 170 design units tall for a 180-unit slot, and it is the plate's own
+				 composition rather than a straight cut of the shipped bar: its grid field lines up with
+				 the command buttons (494-589) exactly where it stands, and its money box does not line
+				 up with the scheme's readout.  So it stands on the bottom of the screen, where a plate
+				 belongs, and the readout moves the ten units down into the box - the box's dark
+				 interior measures 448.5 to 465.4, and the 19-unit readout centres on 457. */
+			{ "RebornBarAmericaCenter.tga",	{ { 180, 429 }, { 623, 599 } }, 10 },
 			{ "RebornBarAmericaRight.tga",	{ { 610, 433 }, { 800, 599 } } },
 		}
 	},
@@ -1547,6 +1550,20 @@ void ControlBar::placeInPanel( GameWindow *win, Int panel,
 	// well as holding the command windows, and is authored full width, so it gets the same
 	// treatment - left alone it would swallow every click over the gaps we just opened up.
 	//
+	//
+	// A plate is its side's own painting, not a cut of the shipped one, so where it draws the money
+	// box is the plate's business and not ControlBarScheme.ini's.  Where the two disagree the plate
+	// says by how much and the readout follows the art - see ControlBarPlate::readoutShiftY.
+	//
+	if( strcmp( shortName, "MoneyDisplay" ) == 0 && m_controlBarSchemeManager )
+	{
+		const ControlBarPlate *plate = ControlBarPlateForSide( m_controlBarSchemeManager->getCurrentSide(), panel );
+		if( plate == NULL )
+			plate = ControlBarPlateForSide( m_controlBarSchemeManager->getCurrentArtTwinSide(), panel );
+		if( plate )
+			newY += REAL_TO_INT_FLOOR( plate->readoutShiftY * s );
+	}
+
 	if( shortName[ 0 ] == 0 || strcmp( shortName, "CenterBackground" ) == 0 )
 	{
 		newX = m_panelRect[ panel ].lo.x;
