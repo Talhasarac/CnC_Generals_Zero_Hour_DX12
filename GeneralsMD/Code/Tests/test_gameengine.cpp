@@ -7818,8 +7818,7 @@ TEST(a_plate_covers_the_windows_its_panel_is_responsible_for)
 		{ "radar",							ControlBar::CB_PANEL_LEFT,		  7, 443, 174, 595, TRUE },
 		{ "money",							ControlBar::CB_PANEL_CENTER,	360, 437, 439, 462, TRUE },
 		{ "power bar",					ControlBar::CB_PANEL_CENTER,	259, 469, 538, 476, TRUE },
-		// the American painting ends its centre plate three pixels above this column's last button
-		{ "toolbar column",			ControlBar::CB_PANEL_CENTER,	184, 490, 220, 592, FALSE },
+		{ "toolbar column",			ControlBar::CB_PANEL_CENTER,	184, 490, 220, 592, TRUE },
 		{ "command grid",				ControlBar::CB_PANEL_CENTER,	223, 494, 603, 589, TRUE },
 		{ "selection portrait",	ControlBar::CB_PANEL_RIGHT,		621, 483, 760, 592, TRUE },
 		{ NULL, 0, 0, 0, 0, 0, FALSE }
@@ -7836,16 +7835,67 @@ TEST(a_plate_covers_the_windows_its_panel_is_responsible_for)
 			CHECK( plate->design.hi.x >= w->x1 );
 			CHECK( plate->design.lo.y <= w->y0 );
 
-			/* And the bottom edge, for the windows the painting does close under.  A plate does not
-				 have to run to the bottom of the screen - the American centre one is a closed plate
-				 that ends where the command grid does - but where it is meant to be underneath a
-				 window it has to reach that window's own bottom, or the battlefield shows through.
-				 The American centre plate had a strip of the painting spliced onto it to take it to
-				 the bottom of the screen, and that strip drew a second bar edge with a line of ground
-				 between the two. */
+			/* And the bottom edge.  Where a plate is meant to be underneath a window it has to reach
+				 that window's own bottom, or the battlefield shows through.  The American centre plate
+				 was hung from its top for a while and ended ten units short of the others, which put a
+				 band of ground under the command grid. */
 			if( w->closedUnder )
 				CHECK( plate->design.hi.y >= w->y1 );
 		}
+}
+
+TEST(every_plate_that_touches_a_design_edge_touches_the_screen_edge)
+{
+	/* The plate rectangles were measured against the paintings, and a painting stops a pixel or two
+		 inside its own edge - so the left plates start at design x 0 or 1, the right ones end at 798,
+		 799 or 800, and the bottoms land anywhere from 597 to 599.  Multiplied up by the display
+		 scale that is a line of battlefield down the side of the screen and along the bottom, which
+		 is what the snap in ControlBarPanelDesignToScreen is for.  Nothing may be short of an edge it
+		 is supposed to be standing on. */
+	static const char *sides[] = { "America", "China", "GLA", NULL };
+	struct Res { Int w, h; };
+	static const Res screens[] =
+	{
+		{ 800, 600 }, { 1024, 768 }, { 1366, 768 }, { 1920, 1080 }, { 2560, 1080 }, { 0, 0 }
+	};
+
+	for( const char **s = sides; *s; s++ )
+		for( const Res *r = screens; r->w; r++ )
+		{
+			IRegion2D rect;
+
+			const ControlBarPlate *left = ControlBarPlateForSide( AsciiString( *s ), ControlBar::CB_PANEL_LEFT );
+			CHECK( left != NULL );
+			CHECK( ControlBarPanelDesignToScreen( ControlBar::CB_PANEL_LEFT, &left->design, r->w, r->h, &rect ) );
+			CHECK_EQ( rect.lo.x, 0 );
+			CHECK_EQ( rect.hi.y, r->h );
+
+			const ControlBarPlate *centre = ControlBarPlateForSide( AsciiString( *s ), ControlBar::CB_PANEL_CENTER );
+			CHECK( centre != NULL );
+			CHECK( ControlBarPanelDesignToScreen( ControlBar::CB_PANEL_CENTER, &centre->design, r->w, r->h, &rect ) );
+			CHECK_EQ( rect.hi.y, r->h );
+
+			const ControlBarPlate *right = ControlBarPlateForSide( AsciiString( *s ), ControlBar::CB_PANEL_RIGHT );
+			CHECK( right != NULL );
+			CHECK( ControlBarPanelDesignToScreen( ControlBar::CB_PANEL_RIGHT, &right->design, r->w, r->h, &rect ) );
+			CHECK_EQ( rect.hi.x, r->w );
+			CHECK_EQ( rect.hi.y, r->h );
+		}
+
+	/* the snap is for an edge a rectangle was meant to reach, not for one it deliberately stops
+		 short of - the two gaps the three panels open at 16:9 are not edges and stay open */
+	IRegion2D middle;
+	middle.lo.x = 300;
+	middle.lo.y = 500;
+	middle.hi.x = 500;
+	middle.hi.y = 560;
+
+	IRegion2D rect;
+	CHECK( ControlBarPanelDesignToScreen( ControlBar::CB_PANEL_LEFT, &middle, 1920, 1080, &rect ) );
+	CHECK( rect.lo.x > 0 );
+	CHECK( rect.hi.y < 1080 );
+	CHECK( ControlBarPanelDesignToScreen( ControlBar::CB_PANEL_RIGHT, &middle, 1920, 1080, &rect ) );
+	CHECK( rect.hi.x < 1920 );
 }
 
 /* A build order is a message, and the structure it orders does not exist until the logic runs it -

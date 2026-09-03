@@ -1299,6 +1299,15 @@ static const Real CONTROL_BAR_DESIGN_H = 600.0f;
 static const Real CONTROL_BAR_DESIGN_TOP = 404.0f;		///< the highest any panel reaches
 
 //
+// Every rectangle below was measured off the artwork rather than off the screen, and the artwork
+// stops a pixel or two inside its own edges: two of the nine plates start at design x 1 rather than
+// 0, two more end at 798 rather than 800, and seven of the nine end at y 597 to 599 rather than 600.
+// Multiplied up that is a hairline of battlefield down both sides of the screen and along the
+// bottom.  Anything this close to an edge is that edge.
+//
+static const Int CONTROL_BAR_EDGE_SNAP = 4;		///< design units
+
+//
 // The authored 800x600 rectangle each panel covers, art and all - the three plate rectangles below
 // unioned over the three sides, run down to the bottom edge of the screen.  It is what the panel's
 // input-blocking pane becomes, so a click on the artwork does not reach the world behind it.
@@ -1344,6 +1353,20 @@ Bool ControlBarPanelDesignToScreen( Int panel, const IRegion2D *design,
 	rectOut->hi.x = REAL_TO_INT_CEIL ( originX + design->hi.x * s );
 	rectOut->lo.y = REAL_TO_INT_FLOOR( dispH - ( CONTROL_BAR_DESIGN_H - design->lo.y ) * s );
 	rectOut->hi.y = REAL_TO_INT_CEIL ( dispH - ( CONTROL_BAR_DESIGN_H - design->hi.y ) * s );
+
+	//
+	// The screen has three edges the bar touches and each belongs to one panel: the left panel owns
+	// the left edge, the right panel the right, and all three stand on the bottom.  The centre
+	// panel's own left and right are interior - at 4:3 they are where it meets the other two - so
+	// they are left where the arithmetic put them.
+	//
+	if( panel == ControlBar::CB_PANEL_LEFT && design->lo.x <= CONTROL_BAR_EDGE_SNAP )
+		rectOut->lo.x = 0;
+	if( panel == ControlBar::CB_PANEL_RIGHT &&
+			design->hi.x >= REAL_TO_INT( CONTROL_BAR_DESIGN_W ) - CONTROL_BAR_EDGE_SNAP )
+		rectOut->hi.x = displayWidth;
+	if( design->hi.y >= REAL_TO_INT( CONTROL_BAR_DESIGN_H ) - CONTROL_BAR_EDGE_SNAP )
+		rectOut->hi.y = displayHeight;
 
 	return TRUE;
 }
@@ -1423,9 +1446,10 @@ static const ControlBarPlateSet thePlateSets[] =
 	{ "America",
 		{
 			{ "RebornBarAmericaLeft.tga",		{ {   0, 412 }, { 183, 599 } } },
-			// this one ends at the bottom of the command grid rather than at the bottom of the screen,
-			// which is where the painting ends it - it is a closed plate and the ground shows below it
-			{ "RebornBarAmericaCenter.tga",	{ { 180, 419 }, { 623, 589 } } },
+			// the drawing registers at its bottom edge, which is the bottom of the bar - hung from its
+			// top instead it sat ten units high, showing ground under the grid and starting higher
+			// than the Chinese (433) and GLA (437) centre pieces do
+			{ "RebornBarAmericaCenter.tga",	{ { 180, 429 }, { 623, 599 } } },
 			{ "RebornBarAmericaRight.tga",	{ { 610, 433 }, { 800, 599 } } },
 		}
 	},
