@@ -23,6 +23,16 @@ and nobody had touched the bugs inside it in twenty-two years.
 Studio 2022, and around sixty original defects found and fixed. Not port damage. EA's own, shipped
 in 2003 and never noticed.
 
+## Native D3D12 fork
+
+This fork ports the game renderer from Direct3D 8 to native Direct3D 12. It issues D3D12 API calls
+directly and does not use D3D9On12, DXVK, or another translation, interception, compatibility, or
+wrapper layer. The migration includes native GPU resources, embedded HLSL shaders, mesh lighting,
+textures, UI, terrain, fog, tree animation, water basics, and D3D12 regression tests.
+
+The renderer port is an active work in progress. Specialized water reflections, some screen filters,
+terrain/shroud visual cleanup, broader effect parity, and legacy renderer source cleanup remain.
+
 You need to own the game; no game data ships here. Nothing changes unit stats, weapons or balance.
 
 ## Then and now
