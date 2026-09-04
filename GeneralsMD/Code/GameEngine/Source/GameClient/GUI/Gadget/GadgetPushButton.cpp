@@ -51,6 +51,7 @@
 #include "Common/Language.h"
 #include "Common/GameAudio.h"
 #include "GameClient/Gadget.h"
+#include "GameClient/DisplayStringManager.h"
 #include "GameClient/GameWindowManager.h"
 #include "GameClient/InGameUI.h"
 
@@ -463,7 +464,14 @@ WindowMsgHandledType GadgetPushButtonSystem( GameWindow *window, UnsignedInt msg
 		{
 			PushButtonData *pData = (PushButtonData *)window->winGetUserData();
 			if(pData)
+			{
+				// Labels belong to this window, not a process-wide cache. The window
+				// manager is destroyed before the display-string manager at shutdown.
+				if (pData->countLabel) TheDisplayStringManager->freeDisplayString(pData->countLabel);
+				if (pData->secondsLabel) TheDisplayStringManager->freeDisplayString(pData->secondsLabel);
+				if (pData->costLabel) TheDisplayStringManager->freeDisplayString(pData->costLabel);
 				delete pData;
+			}
 			window->winSetUserData(NULL);
 		}
 			break;
@@ -606,6 +614,9 @@ PushButtonData * getNewPushButtonData( void )
 	p->drawCount = 0;
 	p->drawSeconds = 0;
 	p->drawCost = 0;
+	p->countLabel = NULL;
+	p->secondsLabel = NULL;
+	p->costLabel = NULL;
 	p->barPercent = -1;
 	p->barColor = GAME_COLOR_UNDEFINED;
 	p->overlayImage = NULL;

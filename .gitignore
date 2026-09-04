@@ -3,6 +3,15 @@
 build/
 build-perf/
 
+# Local D3D12 migration builds, installed game data, and working artifacts.
+/steamfiles/
+/build-full/
+/GeneralsMD/Code/build-full/
+/GeneralsMD/Code/build-d3d12/
+/_vendor_stage/
+/_wrapper_quarantine/
+/output/
+
 # Build/test logs from the CMake port loop
 *.log
 

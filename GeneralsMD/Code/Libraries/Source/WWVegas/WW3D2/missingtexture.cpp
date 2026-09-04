@@ -60,6 +60,8 @@ IDirect3DSurface8* MissingTexture::_Create_Missing_Surface()
 void MissingTexture::_Init()
 {
 	WWASSERT(!_MissingTexture);
+	if (NativeD3D12Renderer::Active() != nullptr)
+		return;
 
 	IDirect3DTexture8* tex=DX8Wrapper::_Create_DX8_Texture
 	(
@@ -97,24 +99,8 @@ void MissingTexture::_Init()
 
 	DX8_ErrorCode(tex->UnlockRect(0));
 
-	for (unsigned i=1;i<tex->GetLevelCount();++i) {
-		IDirect3DSurface8 *src,*dst;
-		DX8_ErrorCode(tex->GetSurfaceLevel(i-1,&src));
-		DX8_ErrorCode(tex->GetSurfaceLevel(i,&dst));
-
-		DX8_ErrorCode(D3DXLoadSurfaceFromSurface(
-			dst,
-			NULL,	// palette
-			NULL,	// rect
-			src,
-			NULL,	// palette
-			NULL,	// rect
-			D3DX_FILTER_BOX,	// box is good for 2:1 filtering
-			0));
-
-		src->Release();
-		dst->Release();
-	}
+	// Native textures are uploaded with their complete mip chain.  The legacy
+	// D3DX mip-copy loop is intentionally omitted from the native-only build.
 
 	_MissingTexture=tex;
 /*
@@ -158,6 +144,8 @@ void MissingTexture::_Init()
 
 void MissingTexture::_Deinit()
 {
+	if (_MissingTexture == nullptr)
+		return;
 	_MissingTexture->Release();
 	_MissingTexture=0;
 }

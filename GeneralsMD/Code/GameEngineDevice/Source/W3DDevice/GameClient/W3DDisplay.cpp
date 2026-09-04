@@ -794,16 +794,7 @@ void W3DDisplay::init( void )
 
 	}  // end if
 
-	extern bool DX8Wrapper_IsWindowed;	// dx8wrapper.cpp
-	// which runtime the device really landed on - d3d8.dll in the exe directory is our d3d8to9,
-	// so normally Direct3D 9, or Direct3D 9On12 (Direct3D 12) when the player started with -d3d12
-	// and is fullscreen (d3d8to9 keeps windowed devices on Direct3D 9 - its 9On12 windowed
-	// present is blank above ~640x480 on at least one machine)
-	DEBUG_LOG(("W3DDisplay::init - renderer runtime: %s\n",
-						 GetModuleHandleA("d3d9on12.dll") ? (DX8Wrapper_IsWindowed ? "Direct3D 9 (d3d8to9; -d3d12 given, but windowed devices stay on Direct3D 9)"
-						                                                        : "Direct3D 12 (d3d8to9 -> Direct3D 9On12)")
-						 : GetModuleHandleA("d3d9.dll")  ? "Direct3D 9 (d3d8to9)"
-						                                 : "Direct3D 8 (system d3d8.dll)"));
+	DEBUG_LOG(("W3DDisplay::init - native Direct3D 12 device layer active\n"));
 	// multisampling is opt-in with "-msaa" / "-msaa N" and silently degrades to whatever the
 	// device supports, so log what was actually granted
 	DEBUG_LOG(("W3DDisplay::init - multisampling: %ux\n", DX8Wrapper::Get_MultiSample_Level()));
@@ -1704,6 +1695,8 @@ static void saveScreenShot(void);
 //
 extern Real TheSceneDrawMS;
 extern Real TheUIDrawMS;
+extern Real TheUIPostDrawMS;
+extern Real TheWindowRepaintMS;
 
 static Real w3dElapsedMS( const Int64 &from, const Int64 &to )
 {
@@ -1718,6 +1711,10 @@ static Real w3dElapsedMS( const Int64 &from, const Int64 &to )
 void W3DDisplay::draw( void )
 {
 	USE_PERF_TIMER(W3DDisplay_draw)
+#ifdef DEBUG_LOGGING
+	Int64 nativeDrawStart;
+	QueryPerformanceCounter(reinterpret_cast<LARGE_INTEGER*>(&nativeDrawStart));
+#endif
 	static UnsignedInt syncTime = 0;
 
 	extern HWND ApplicationHWnd;
@@ -1927,7 +1924,8 @@ AGAIN:
 		}
 
 		// update all views of the world - recomputes data which will affect drawing
-		if (DX8Wrapper::_Get_D3D_Device8() && (DX8Wrapper::_Get_D3D_Device8()->TestCooperativeLevel()) == D3D_OK)
+		if (NativeD3D12Renderer::Active() != NULL ||
+			(DX8Wrapper::_Get_D3D_Device8() && (DX8Wrapper::_Get_D3D_Device8()->TestCooperativeLevel()) == D3D_OK))
 		{	//Checking if we have the device before updating views because the heightmap crashes otherwise while
 			//trying to refresh the visible terrain geometry.
 //			if(TheGlobalData->m_loadScreenRender != TRUE)
@@ -1998,6 +1996,8 @@ AGAIN:
 				QueryPerformanceCounter( (LARGE_INTEGER *)&tUIEnd );
 				TheSceneDrawMS = w3dElapsedMS( tSceneStart, tSceneEnd );
 				TheUIDrawMS = w3dElapsedMS( tSceneEnd, tUIEnd );
+				if (NativeD3D12Renderer* native = NativeD3D12Renderer::Active())
+					native->SetEngineCpuTiming(TheSceneDrawMS,TheUIDrawMS,w3dElapsedMS(nativeDrawStart,tSceneStart),TheUIPostDrawMS,TheWindowRepaintMS);
 #endif
 
 				// end of video example code
@@ -2091,10 +2091,10 @@ AGAIN:
 			}
 			else
 			{
-				if (couldRender)
+				if (couldRender && TheGlobalData->m_breakTheMovie == FALSE && TheGlobalData->m_disableRender == false)
 				{
 					couldRender = false;
-					DEBUG_LOG(("Could not do WW3D::Begin_Render()!  Are we ALT-Tabbed out?\n"));
+					DEBUG_LOG(("WW3D::Begin_Render failed; frame was not submitted.\n"));
 				}
 			}
 		}
@@ -3187,9 +3187,9 @@ static void CreateBMPFile(LPTSTR pszFile, char *image, Int width, Int height)
 }
 
 // A system-memory copy of the back buffer (32-bit, not multisampled), NULL when that is
-// not possible.  Taken at the end of draw(), before Present: the front-buffer path is a
-// desktop capture, and on the Direct3D 12 (9On12) runtime the window is presented through
-// a DXGI flip swap chain that desktop captures do not see - the old code saved black.
+// not possible. Taken at the end of draw(), before Present: the front-buffer path is a
+// desktop capture, and on the native D3D12 flip swap chain desktop captures do not
+// see the back buffer - the old code saved black.
 static IDirect3DSurface8 *captureBackBuffer(void)
 {
 	IDirect3DDevice8 *dev = DX8Wrapper::_Get_D3D_Device8();
@@ -3216,6 +3216,8 @@ static IDirect3DSurface8 *captureBackBuffer(void)
 ///Save Screen Capture to a file - deferred to the end of the next rendered frame
 void W3DDisplay::takeScreenShot(void)
 {
+	if (NativeD3D12Renderer::Active() != NULL)
+		return; //The legacy capture path requires an IDirect3DSurface8 readback.
 	s_screenShotPending = TRUE;
 }
 

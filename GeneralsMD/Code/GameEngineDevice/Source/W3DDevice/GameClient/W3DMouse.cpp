@@ -46,6 +46,7 @@
 #include "GameClient/InGameUI.h"
 #include "mutex.h"
 #include "thread.h"
+#include "native_d3d12_renderer.h"
 
 #ifdef _INTERNAL
 // for occasional debugging...
@@ -596,6 +597,11 @@ void W3DMouse::draw(void)
 
 void W3DMouse::setRedrawMode(RedrawMode mode)
 {
+	// The D3D8 cursor uses IDirect3DDevice8::SetCursorProperties and has no
+	// native D3D12 equivalent.  Reuse the image cursor, whose draw path already
+	// submits through WW3D2, when the native renderer is active.
+	if (mode == RM_DX8 && NativeD3D12Renderer::Active() != NULL)
+		mode = RM_POLYGON;
 	MouseCursor cursor = getMouseCursor();
 
 	//Turn off the previous cursor mode

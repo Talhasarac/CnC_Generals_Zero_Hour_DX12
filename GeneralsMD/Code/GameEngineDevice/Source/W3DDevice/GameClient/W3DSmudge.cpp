@@ -206,6 +206,11 @@ error:
 
 Bool W3DSmudgeManager::testHardwareSupport(void)
 {
+	if (NativeD3D12Renderer::Active() != NULL)
+	{
+		m_hardwareSupportStatus = SMUDGE_SUPPORT_NO;
+		return FALSE; //The probe needs D3D8 render-target readback; native frames do not.
+	}
 	if (m_hardwareSupportStatus == SMUDGE_SUPPORT_UNKNOWN)
 	{	//we have not done the test yet.
 

@@ -45,6 +45,7 @@ enum CpuType;
 enum GraphicsVenderID;
 
 class TextureClass;	///forward reference
+class NativeD3D12Texture;
 /** System for managing complex rendering settings which are either not handled by
 	WW3D2 or need custom paths depending on the video card.  This system will determine
 	the proper shader given video card limitations and also allow the app to query the
@@ -106,10 +107,12 @@ public:
 	static Bool filterSetup(FilterTypes filter, enum FilterModes mode);
 
 	// Support routines for filter methods.
-	static Bool canRenderToTexture(void) { return (m_oldRenderSurface && m_newRenderSurface);}
+	static Bool canRenderToTexture(void);
 	static void startRenderToTexture(void); ///< Sets render target to texture.
 	static IDirect3DTexture8 * endRenderToTexture(void); ///< Ends render to texture, & returns texture.
 	static IDirect3DTexture8 * getRenderTexture(void);	///< returns last used render target texture
+	static NativeD3D12Texture *endNativeRenderToTexture(void);
+	static NativeD3D12Texture *getNativeRenderTexture(void);
 	static Bool isRenderingToTexture(void) {return m_renderingToTexture; }
 	static void drawViewport(Int color);	///<draws 2 triangles covering the current tactical viewport
 
@@ -129,6 +132,7 @@ protected:
 	static IDirect3DTexture8 *m_renderTexture;		///<texture into which rendering will be redirected.
 	static IDirect3DSurface8 *m_newRenderSurface;	///<new render target inside m_renderTexture
 	static IDirect3DSurface8 *m_oldDepthSurface;	///<previous depth buffer surface
+	static NativeD3D12Texture *m_renderTextureNative;
 
 
 };

@@ -63,6 +63,7 @@
 #include "WW3D2/shader.h"
 #include "WW3D2/DX8Caps.h"
 #include "WW3D2/colorspace.h"
+#include "WW3D2/native_d3d12_renderer.h"
 
 #include "WW3D2/shdlib.h"
 #ifdef _INTERNAL
@@ -1231,6 +1232,51 @@ Int playerIndexToColorIndex(Int playerIndex)
 stencil mask*/
 void renderStenciledPlayerColor( UnsignedInt color, UnsignedInt stencilRef, Bool clear=FALSE)
 {
+	if (NativeD3D12Renderer::Active() != NULL)
+	{
+		Int xpos, ypos;
+		TheTacticalView->getOrigin(&xpos, &ypos);
+		if (clear)
+		{
+			const Int occludedMask = TheW3DShadowManager->getStencilShadowMask();
+			DX8Wrapper::Set_DX8_Render_State(D3DRS_STENCILENABLE, TRUE);
+			DX8Wrapper::Set_DX8_Render_State(D3DRS_ZENABLE, TRUE);
+			DX8Wrapper::Set_DX8_Render_State(D3DRS_STENCILREF, 0x80808080);
+			DX8Wrapper::Set_DX8_Render_State(D3DRS_STENCILMASK, occludedMask);
+			DX8Wrapper::Set_DX8_Render_State(D3DRS_STENCILWRITEMASK, 0xffffffff);
+			DX8Wrapper::Set_DX8_Render_State(D3DRS_STENCILFUNC, D3DCMP_LESS);
+			DX8Wrapper::Set_DX8_Render_State(D3DRS_STENCILZFAIL, D3DSTENCILOP_REPLACE);
+			DX8Wrapper::Set_DX8_Render_State(D3DRS_STENCILPASS, D3DSTENCILOP_REPLACE);
+			DX8Wrapper::Set_DX8_Render_State(D3DRS_STENCILFAIL, D3DSTENCILOP_ZERO);
+			DX8Wrapper::Set_DX8_Render_State(D3DRS_ZFUNC, D3DCMP_NEVER);
+			DX8Wrapper::Set_DX8_Render_State(D3DRS_COLORWRITEENABLE, 0);
+		}
+		else
+		{
+			DX8Wrapper::Set_DX8_Render_State(D3DRS_STENCILENABLE, TRUE);
+			DX8Wrapper::Set_DX8_Render_State(D3DRS_STENCILREF, stencilRef);
+			DX8Wrapper::Set_DX8_Render_State(D3DRS_STENCILMASK, 0xffffffff);
+			DX8Wrapper::Set_DX8_Render_State(D3DRS_STENCILWRITEMASK, 0xffffffff);
+			DX8Wrapper::Set_DX8_Render_State(D3DRS_STENCILFUNC, D3DCMP_EQUAL);
+			DX8Wrapper::Set_DX8_Render_State(D3DRS_STENCILZFAIL, D3DSTENCILOP_KEEP);
+			DX8Wrapper::Set_DX8_Render_State(D3DRS_STENCILPASS, D3DSTENCILOP_KEEP);
+			DX8Wrapper::Set_DX8_Render_State(D3DRS_STENCILFAIL, D3DSTENCILOP_KEEP);
+			DX8Wrapper::Set_DX8_Render_State(D3DRS_ALPHABLENDENABLE, TRUE);
+			DX8Wrapper::Set_DX8_Render_State(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+			DX8Wrapper::Set_DX8_Render_State(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
+		}
+		NativeD3D12Renderer::Active()->DrawScreenQuad(
+			static_cast<FLOAT>(xpos), static_cast<FLOAT>(ypos),
+			static_cast<FLOAT>(TheTacticalView->getWidth()),
+			static_cast<FLOAT>(TheTacticalView->getHeight()), color);
+		DX8Wrapper::Set_DX8_Render_State(D3DRS_STENCILENABLE, FALSE);
+		DX8Wrapper::Set_DX8_Render_State(D3DRS_ALPHABLENDENABLE, FALSE);
+		DX8Wrapper::Set_DX8_Render_State(D3DRS_SRCBLEND, D3DBLEND_ONE);
+		DX8Wrapper::Set_DX8_Render_State(D3DRS_DESTBLEND, D3DBLEND_ZERO);
+		DX8Wrapper::Set_DX8_Render_State(D3DRS_ZFUNC, D3DCMP_ALWAYS);
+		DX8Wrapper::Set_DX8_Render_State(D3DRS_COLORWRITEENABLE, 0x0000000f);
+		return;
+	}
 	struct _TRANSLITVERTEX {
 	    Vector4 p;
 		DWORD color;   // diffuse color    

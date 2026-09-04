@@ -2209,7 +2209,7 @@ TextureClass *WorldHeightMap::getTerrainTexture(void)
 				getAlphaUVData(x, y, UA, VA, alpha, &flipForBlend, false);
 
 				m_cellFlipState[y*m_flipStateWidth+(x>>3)] |= flipForBlend << (x & 0x7);
-				DEBUG_ASSERTCRASH ((y*m_flipStateWidth+(x>>3)) < (m_flipStateWidth * m_height), ("Bad range"));
+					DEBUG_ASSERTCRASH ((y*m_flipStateWidth+(x>>3)) < (m_flipStateWidth * m_height), ("Bad range"));
 			}
 	}
 

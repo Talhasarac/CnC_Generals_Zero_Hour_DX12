@@ -97,6 +97,9 @@ class WorldHeightMap : public RefCountClass,
                        public WorldHeightMapInterfaceClass
 {
 	friend class TerrainTextureClass;
+	friend int UpdateTerrainSurfaceNative(TextureClass *texture, WorldHeightMap *height_map);
+	friend Bool UpdateFlatSurfaceNative(TextureClass *texture, WorldHeightMap *height_map,
+		Int x_cell, Int y_cell, Int cell_width, Int pixels_per_cell);
 	friend class AlphaTerrainTextureClass;
 	friend class W3DCustomEdging;
 	friend class AlphaEdgeTextureClass;

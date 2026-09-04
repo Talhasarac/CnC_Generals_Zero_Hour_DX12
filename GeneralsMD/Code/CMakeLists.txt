@@ -9,7 +9,27 @@ endif()
 set(WW ${CMAKE_CURRENT_SOURCE_DIR}/Libraries/Source/WWVegas)
 set(COMP ${CMAKE_CURRENT_SOURCE_DIR}/Libraries/Source/Compression)
 
+# The native device smoke test must remain runnable on a clean checkout.  The
+# complete game target also needs ignored vendor drops such as GameSpy and the
+# legacy asset headers, while this target only needs the Windows SDK.
+option(NATIVE_D3D12_SMOKE_ONLY "Configure only the native D3D12 smoke test" OFF)
+
 add_compile_definitions(WIN32 _WINDOWS _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_WARNINGS)
+
+if(NATIVE_D3D12_SMOKE_ONLY)
+  add_library(native_d3d12 STATIC
+    ${WW}/WW3D2/native_d3d12_renderer.cpp
+    ${WW}/WW3D2/native_d3d12_renderer.h)
+  target_include_directories(native_d3d12 PUBLIC ${WW}/WW3D2)
+  target_link_libraries(native_d3d12 PUBLIC d3d12 dxgi d3dcompiler)
+
+  add_executable(d3d12_smoke WIN32 ${WW}/WW3D2/test_d3d12_renderer.cpp)
+  target_link_libraries(d3d12_smoke PRIVATE native_d3d12 user32)
+
+  enable_testing()
+  add_test(NAME d3d12_smoke COMMAND d3d12_smoke)
+  return()
+endif()
 
 # EA's own switch for exactly this situation ("Good for startup problems", Debug.h):
 # it turns DEBUG_LOG back on in a Release build so the hundreds of existing log
@@ -114,10 +134,15 @@ add_library(compression STATIC
   ${COMP}/ZLib/uncompr.c  ${COMP}/ZLib/zutil.c)
 target_include_directories(compression
   PUBLIC ${COMP} ${CMAKE_CURRENT_SOURCE_DIR}/Libraries/Include
-  PRIVATE ${COMP}/LZHCompress/CompLibHeader)
+  PRIVATE ${COMP}/LZHCompress/CompLibHeader ${COMP}/LZHCompress/CompLibSource)
 # CompressionManager calls z_compress2/z_uncompress and BaseType.h owns 'Byte',
 # so zlib must be built with its Z_PREFIX renames on.
 target_compile_definitions(compression PRIVATE Z_PREFIX)
+if(MSVC)
+  # The original LZH sources intentionally use pre-standard loop-variable
+  # scope (the same convention as the rest of this 2003 codebase).
+  target_compile_options(compression PRIVATE /Zc:forScope-)
+endif()
 
 # Round-trip check over every codec CompressionManager exposes.
 add_executable(compression_selfcheck ${COMP}/test_compression.cpp)
@@ -174,6 +199,15 @@ add_library(wwsaveload STATIC
 target_include_directories(wwsaveload PUBLIC ${WW}/WWSaveLoad PRIVATE ${WW}/WWLib ${WW}/WWMath ${WW}/Wwutil)
 target_link_libraries(wwsaveload PRIVATE wwdebug wwlib wwmath)
 
+# ---- native D3D12 device layer ---------------------------------------------
+# The port creates and submits D3D12 command lists directly.  No proxy DLL or
+# legacy translated runtime is part of this target.
+add_library(native_d3d12 STATIC
+  ${WW}/WW3D2/native_d3d12_renderer.cpp
+  ${WW}/WW3D2/native_d3d12_renderer.h)
+target_include_directories(native_d3d12 PUBLIC ${WW}/WW3D2)
+target_link_libraries(native_d3d12 PUBLIC d3d12 dxgi d3dcompiler)
+
 # ---- ww3d2 (renderer core) ------------------------------------------------
 # wwshade is header-only here on purpose: no .dsp links wwshade.lib and its
 # shd*bump* sources need shdpp/NVASM-generated headers.  Revisit at exe link.
@@ -224,14 +258,15 @@ target_include_directories(ww3d2
           ${WW}/wwshade ${WW}/WWAudio ${WW}/Miles6/include
           ${CMAKE_CURRENT_SOURCE_DIR}/Libraries/DirectX/Include)
 target_link_directories(ww3d2 PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/Libraries/DirectX/Lib)
-# vfw32: FramGrab.cpp writes AVIs.  legacy_stdio_definitions: d3dx8.lib calls
-# _vsnprintf, which the modern CRT only provides as an inline.
+# vfw32: FramGrab.cpp writes AVIs.  The renderer no longer links the legacy
+# D3DX helper library; native D3D12 owns texture creation and upload.
 target_link_libraries(ww3d2
-  PUBLIC d3d8 d3dx8 dxguid vfw32 legacy_stdio_definitions
+  PUBLIC native_d3d12 dxguid vfw32 legacy_stdio_definitions
   PRIVATE wwlib wwmath wwdebug wwsaveload)
-# The 2001 d3dx8.lib predates SAFESEH and was built against the long-gone
-# libci.lib CRT, so anything linking it has to opt out of both.
-target_link_options(ww3d2 INTERFACE /SAFESEH:NO /NODEFAULTLIB:libci.lib)
+# The legacy DirectInput import library is not marked SAFESEH, while the game
+# executable is a 32-bit image.  Keep this linker setting independent of the
+# removed D3DX library.
+target_link_options(ww3d2 INTERFACE /SAFESEH:NO)
 # dx8webbrowser.cpp is the one file /MP cannot have: MSVC rejects #import under
 # multi-process compilation (C2813) and finds the directive by a lexical scan, so
 # even though ENABLE_EMBEDDED_BROWSER's block is what holds it, disabling the block
@@ -243,13 +278,8 @@ set_source_files_properties(${WW}/WW3D2/dx8webbrowser.cpp PROPERTIES COMPILE_OPT
 add_executable(eip_sampler ${CMAKE_CURRENT_SOURCE_DIR}/Tools/ProfileSampler/eip_sampler.cpp)
 set_target_properties(eip_sampler PROPERTIES CXX_STANDARD 17)
 
-# Phase 1 checkpoint: vendored DX8 SDK + a d3d8.dll create a real device.  Our d3d8to9
-# d3d8.dll is copied next to the exe (see below, after d3d8to9 is defined) so the test
-# exercises the game's real path: Direct3D 9 by default, Direct3D 9On12 / Direct3D 12 with -d3d12.
-add_executable(dx8_smoke ${WW}/WW3D2/test_dx8_smoke.cpp)
-target_include_directories(dx8_smoke PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/Libraries/DirectX/Include)
-target_link_directories(dx8_smoke PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/Libraries/DirectX/Lib)
-target_link_libraries(dx8_smoke PRIVATE d3d8 user32)
+add_executable(d3d12_smoke WIN32 ${WW}/WW3D2/test_d3d12_renderer.cpp)
+target_link_libraries(d3d12_smoke PRIVATE native_d3d12 user32)
 
 # ===========================================================================
 # Phase 2 - remaining support libs.  None of these touch DX8.
@@ -340,12 +370,6 @@ set(GS_SECURESECONNECT  OFF CACHE BOOL "" FORCE)
 set(GS_BUILD_TESTS      OFF CACHE BOOL "" FORCE)
 set(GS_INCLUDE_VOICE    OFF CACHE BOOL "" FORCE)
 add_subdirectory(${LIBSRC}/GameSpy ${CMAKE_CURRENT_BINARY_DIR}/gamespy)
-
-# d3d8to9 (vendored, github.com/crosire/d3d8to9): builds our own d3d8.dll that
-# translates every D3D8 call to Direct3D 9.  It sits next to generals.exe, the
-# loader prefers the application directory over system32, and the whole
-# renderer runs on the DX9 runtime without touching the ~5600 D3D8 call sites.
-add_subdirectory(${LIBSRC}/d3d8to9 ${CMAKE_CURRENT_BINARY_DIR}/d3d8to9)
 
 # ===========================================================================
 # Phase 3 - GameEngine.  ~580 files of game logic; no DX8, no device code.
@@ -492,9 +516,6 @@ add_custom_command(TARGET generals POST_BUILD
   # and without it the crash log's stack is addresses with no names.
   COMMAND ${CMAKE_COMMAND} -E copy_if_different
           $<TARGET_PDB_FILE:generals> ${CMAKE_CURRENT_SOURCE_DIR}/../Run/
-  # d3d8to9's d3d8.dll next to the exe = the renderer runs on Direct3D 9.
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different
-          $<TARGET_FILE:d3d8to9> ${CMAKE_CURRENT_SOURCE_DIR}/../Run/
   # The fork's key bindings and their labels.  Run/ is gitignored, so these two
   # used to be hand-made files that silently went stale every time a command was
   # added - the tracked copies under Code/Data are the masters and this puts them
@@ -531,8 +552,6 @@ add_custom_command(TARGET generals POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_directory
           ${CMAKE_CURRENT_SOURCE_DIR}/Data/Window
           ${CMAKE_CURRENT_SOURCE_DIR}/../Run/Window)
-add_dependencies(generals d3d8to9)
-
 # ===========================================================================
 # Tests.  Run with:  ctest --test-dir build -C Release --output-on-failure
 # ===========================================================================
@@ -602,14 +621,7 @@ target_compile_definitions(test_gameengine PRIVATE
 # too so one command covers everything.
 add_test(NAME wwmath_selfcheck COMMAND wwmath_selfcheck)
 add_test(NAME compression_selfcheck COMMAND compression_selfcheck)
-# dx8_smoke runs through our d3d8to9 d3d8.dll (copied next to it): once on its default,
-# Direct3D 9, once opted in to Direct3D 9On12 / Direct3D 12 via -d3d12 (each run fails if
-# it did not land on its runtime)
-add_custom_command(TARGET dx8_smoke POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:d3d8to9> $<TARGET_FILE_DIR:dx8_smoke>)
-add_dependencies(dx8_smoke d3d8to9)
-add_test(NAME dx8_smoke COMMAND dx8_smoke)
-add_test(NAME dx8_smoke_d3d12 COMMAND dx8_smoke -d3d12)
+add_test(NAME d3d12_smoke COMMAND d3d12_smoke)
 
 # bink_smoke validates the hand-reconstructed Bink ABI against the real
 # BINKW32.DLL the game ships - it loads that DLL by path, so it does not link
@@ -618,10 +630,6 @@ add_executable(bink_smoke ${TESTS}/bink_smoke.c)
 target_include_directories(bink_smoke PRIVATE ${WW}/Bink/include)
 add_test(NAME bink_smoke COMMAND bink_smoke
          WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../Run)
-# "-msaa": a multisampled back buffer, and the plain render target + non-multisampled depth
-# buffer pairing that DX8Wrapper::_Get_Non_MultiSampled_Depth_Buffer hands the screen filters.
-add_test(NAME dx8_smoke_msaa COMMAND dx8_smoke -msaa 4)
-
 # Tools/bigfile.py reads and writes the game's BIG archives (that is how the shipped INIs
 # come out for editing).  Its selfcheck round-trips synthetic files, so it needs no game
 # data - but it does need an interpreter, so it is only registered when one is present.

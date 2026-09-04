@@ -78,6 +78,7 @@ W3DShroud::W3DShroud(void)
 	m_finalFogData=NULL;
 	m_currentFogData=NULL;
 	m_pSrcTexture=NULL;
+	m_pSrcSurfaceNative=NULL;
 	m_pDstTexture=NULL;
 	m_srcTextureData=NULL;
 	m_srcTexturePitch=NULL;
@@ -100,6 +101,7 @@ W3DShroud::~W3DShroud(void)
 	if (m_pSrcTexture)
 		m_pSrcTexture->Release();
 	m_pSrcTexture=NULL;
+	REF_PTR_RELEASE(m_pSrcSurfaceNative);
 	if (m_finalFogData)
 		delete [] m_finalFogData;
 	if (m_currentFogData)
@@ -114,7 +116,7 @@ W3DShroud::~W3DShroud(void)
 */
 void W3DShroud::init(WorldHeightMap *pMap, Real worldCellSizeX, Real worldCellSizeY)
 {
-	DEBUG_ASSERTCRASH( m_pSrcTexture == NULL, ("ReAcquire of existing shroud textures"));
+	DEBUG_ASSERTCRASH( m_pSrcTexture == NULL && m_pSrcSurfaceNative == NULL, ("ReAcquire of existing shroud textures"));
 	DEBUG_ASSERTCRASH( pMap != NULL, ("Shroud init with NULL WorldHeightMap"));
 
 	Int dstTextureWidth=0;
@@ -160,26 +162,42 @@ void W3DShroud::init(WorldHeightMap *pMap, Real worldCellSizeX, Real worldCellSi
  	memset(m_finalFogData,0,srcWidth*srcHeight);
 #endif
 
+	WW3DFormat srcFormat = WW3D_FORMAT_R5G6B5;
 #if defined(_DEBUG) || defined(_INTERNAL)
 	if (TheGlobalData && TheGlobalData->m_fogOfWarOn)
-		m_pSrcTexture = DX8Wrapper::_Create_DX8_Surface(srcWidth,srcHeight, WW3D_FORMAT_A4R4G4B4);
-	else
+		srcFormat = WW3D_FORMAT_A4R4G4B4;
 #endif
-		m_pSrcTexture = DX8Wrapper::_Create_DX8_Surface(srcWidth,srcHeight, WW3D_FORMAT_R5G6B5);
+	if (NativeD3D12Renderer::Active() != NULL)
+	{
+		m_pSrcSurfaceNative = NEW_REF(SurfaceClass,(srcWidth,srcHeight,srcFormat));
+		Int nativePitch = 0;
+		m_srcTextureData = m_pSrcSurfaceNative != NULL ? m_pSrcSurfaceNative->Lock(&nativePitch) : NULL;
+		m_srcTexturePitch = nativePitch;
+		if (m_pSrcSurfaceNative != NULL)
+			m_pSrcSurfaceNative->Unlock();
+	}
+	else
+	{
+#if defined(_DEBUG) || defined(_INTERNAL)
+		if (TheGlobalData && TheGlobalData->m_fogOfWarOn)
+			m_pSrcTexture = DX8Wrapper::_Create_DX8_Surface(srcWidth,srcHeight, WW3D_FORMAT_A4R4G4B4);
+		else
+#endif
+			m_pSrcTexture = DX8Wrapper::_Create_DX8_Surface(srcWidth,srcHeight, WW3D_FORMAT_R5G6B5);
 
-	DEBUG_ASSERTCRASH( m_pSrcTexture != NULL, ("Failed to Allocate Shroud Src Surface"));
+		DEBUG_ASSERTCRASH( m_pSrcTexture != NULL, ("Failed to Allocate Shroud Src Surface"));
 
-	D3DLOCKED_RECT rect;
+		D3DLOCKED_RECT rect;
 
-	//Get a pointer to source surface pixels.
-	HRESULT res = m_pSrcTexture->LockRect(&rect,NULL,D3DLOCK_NO_DIRTY_UPDATE);
-	m_pSrcTexture->UnlockRect();
+		//Get a pointer to source surface pixels.
+		HRESULT res = m_pSrcTexture->LockRect(&rect,NULL,D3DLOCK_NO_DIRTY_UPDATE);
+		m_pSrcTexture->UnlockRect();
 
-	DEBUG_ASSERTCRASH( res == D3D_OK, ("Failed to lock shroud src surface"));
-	res = 0;// just to avoid compiler warnings
-
-	m_srcTextureData=rect.pBits;
-	m_srcTexturePitch=rect.Pitch;
+		DEBUG_ASSERTCRASH( res == D3D_OK, ("Failed to lock shroud src surface"));
+		(void)res;
+		m_srcTextureData=rect.pBits;
+		m_srcTexturePitch=rect.Pitch;
+	}
 
 	//clear entire texture to black
 	memset(m_srcTextureData,0,m_srcTexturePitch*srcHeight);
@@ -211,6 +229,7 @@ void W3DShroud::reset()
 	if (m_pSrcTexture)
 		m_pSrcTexture->Release();
 	m_pSrcTexture=NULL;
+	REF_PTR_RELEASE(m_pSrcSurfaceNative);
 	if (m_finalFogData)
 		delete [] m_finalFogData;
 	m_finalFogData=NULL;
@@ -264,7 +283,7 @@ Bool W3DShroud::ReAcquireResources(void)
 //-----------------------------------------------------------------------------
 W3DShroudLevel W3DShroud::getShroudLevel(Int x, Int y)
 {
-	DEBUG_ASSERTCRASH( m_pSrcTexture != NULL, ("Reading empty shroud"));
+	DEBUG_ASSERTCRASH( m_pSrcTexture != NULL || m_pSrcSurfaceNative != NULL, ("Reading empty shroud"));
 
 	// the upper bound was checked and the lower was not, so a negative cell - which is what a
 	// position just off the edge of the map gives - read backwards out of the shroud texture
@@ -287,9 +306,9 @@ W3DShroudLevel W3DShroud::getShroudLevel(Int x, Int y)
 //-----------------------------------------------------------------------------
 void W3DShroud::setShroudLevel(Int x, Int y, W3DShroudLevel level, Bool textureOnly)
 {
-	DEBUG_ASSERTCRASH( m_pSrcTexture != NULL, ("Writing empty shroud.  Usually means that map failed to load."));
+	DEBUG_ASSERTCRASH( m_pSrcTexture != NULL || m_pSrcSurfaceNative != NULL, ("Writing empty shroud.  Usually means that map failed to load."));
 
-	if (!m_pSrcTexture)
+	if (!m_pSrcTexture && !m_pSrcSurfaceNative)
 		return;
 
 	if (x < m_numCellsX && y < m_numCellsY)
@@ -451,6 +470,24 @@ void W3DShroud::fillBorderShroudData(W3DShroudLevel level, SurfaceClass* pDestSu
 		}
 		pixel=( ((bluepixel&0xf8) >> 3) | ((greenpixel&0xfc)<<3) | ((redpixel&0xf8)<<8));
 	}
+	if (pDestSurface != NULL && pDestSurface->Is_Native())
+	{
+		SurfaceClass::SurfaceDescription description;
+		pDestSurface->Get_Description(description);
+		Int pitch = 0;
+		UnsignedByte *bits = static_cast<UnsignedByte *>(pDestSurface->Lock(&pitch));
+		if (bits != NULL && PixelSize(description) == sizeof(UnsignedShort))
+		{
+			for (UnsignedInt y = 0; y < description.Height; ++y)
+			{
+				UnsignedShort *row = reinterpret_cast<UnsignedShort *>(bits + y * pitch);
+				for (UnsignedInt x = 0; x < description.Width; ++x)
+					row[x] = pixel;
+			}
+		}
+		pDestSurface->Unlock();
+		return;
+	}
 
 	//Skip to unused texels within the shroud data
 	UnsignedShort *ptr=(UnsignedShort *)m_srcTextureData + m_numCellsY*(m_srcTexturePitch >> 1);
@@ -527,10 +564,10 @@ DECLARE_PERF_TIMER(shroudCopy)
 /** Updates video memory surface with currently visible shroud data */
 void W3DShroud::render(CameraClass *cam)
 {
-	if (!m_pSrcTexture)
+	if (!m_pSrcTexture && !m_pSrcSurfaceNative)
 		return; //nothing to update from.  Must be in reset state.
 
-	if (DX8Wrapper::_Get_D3D_Device8() && (DX8Wrapper::_Get_D3D_Device8()->TestCooperativeLevel()) != D3D_OK)
+	if (NativeD3D12Renderer::Active() == NULL && DX8Wrapper::_Get_D3D_Device8() && (DX8Wrapper::_Get_D3D_Device8()->TestCooperativeLevel()) != D3D_OK)
 		return;	//device not ready to render anything
 
 #if defined(_DEBUG) || defined(_INTERNAL)
@@ -711,6 +748,16 @@ void W3DShroud::render(CameraClass *cam)
 		m_clearDstTexture=FALSE;
 		
 		fillBorderShroudData(m_boderShroudLevel, pDestSurface);
+	}
+
+	if (NativeD3D12Renderer::Active() != NULL)
+	{
+		pDestSurface->Copy(1, 1, static_cast<unsigned int>(visStartX), static_cast<unsigned int>(visStartY),
+			static_cast<unsigned int>(visEndX - visStartX), static_cast<unsigned int>(visEndY - visStartY),
+			m_pSrcSurfaceNative);
+		m_pDstTexture->Mark_Native_Surface_Dirty();
+		REF_PTR_RELEASE(pDestSurface);
+		return;
 	}
 
 	{

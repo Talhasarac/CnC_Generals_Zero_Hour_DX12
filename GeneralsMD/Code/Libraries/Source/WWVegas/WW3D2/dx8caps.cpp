@@ -697,6 +697,12 @@ void DX8Caps::Check_Texture_Compression_Support(const D3DCAPS8& caps)
 
 void DX8Caps::Check_Texture_Format_Support(WW3DFormat display_format,const D3DCAPS8& caps)
 {
+	if (Direct3D == nullptr)
+	{
+		for (unsigned i = 0; i < WW3D_FORMAT_COUNT; ++i)
+			SupportTextureFormat[i] = i != WW3D_FORMAT_UNKNOWN;
+		return;
+	}
 	if (display_format==WW3D_FORMAT_UNKNOWN) {
 		for (unsigned i=0;i<WW3D_FORMAT_COUNT;++i) {
 			SupportTextureFormat[i]=false;
@@ -729,6 +735,12 @@ void DX8Caps::Check_Texture_Format_Support(WW3DFormat display_format,const D3DCA
 
 void DX8Caps::Check_Render_To_Texture_Support(WW3DFormat display_format,const D3DCAPS8& caps)
 {
+	if (Direct3D == nullptr)
+	{
+		for (unsigned i = 0; i < WW3D_FORMAT_COUNT; ++i)
+			SupportRenderToTextureFormat[i] = i != WW3D_FORMAT_UNKNOWN;
+		return;
+	}
 	if (display_format==WW3D_FORMAT_UNKNOWN) {
 		for (unsigned i=0;i<WW3D_FORMAT_COUNT;++i) {
 			SupportRenderToTextureFormat[i]=false;
@@ -765,6 +777,12 @@ void DX8Caps::Check_Render_To_Texture_Support(WW3DFormat display_format,const D3
 */
 void DX8Caps::Check_Depth_Stencil_Support(WW3DFormat display_format, const D3DCAPS8& caps)
 {
+	if (Direct3D == nullptr)
+	{
+		for (unsigned i = 0; i < WW3D_ZFORMAT_COUNT; ++i)
+			SupportDepthStencilFormat[i] = i != WW3D_ZFORMAT_UNKNOWN;
+		return;
+	}
 	if (display_format==WW3D_FORMAT_UNKNOWN) 
 	{
 		for (unsigned i=0;i<WW3D_ZFORMAT_COUNT;++i) 

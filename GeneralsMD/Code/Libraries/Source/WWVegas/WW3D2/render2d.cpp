@@ -57,6 +57,7 @@
 #include "wwprofile.h"
 #include "wwmemlog.h"
 #include "assetmgr.h"
+#include "native_d3d12_renderer.h"
 
 //#pragma optimize("", off)
 //#pragma MESSAGE("************************************** WARNING, optimization disabled for debugging purposes")
@@ -696,7 +697,11 @@ void Render2DClass::Render(void)
 	}
 	else
 		DX8Wrapper::Set_Shader(Shader);
+	if (NativeD3D12Renderer* native = NativeD3D12Renderer::Active())
+		native->SetGrayscale(IsGrayScale);
 	DX8Wrapper::Draw_Triangles(0,Indices.Count()/3,0,Vertices.Count());	
+	if (NativeD3D12Renderer* native = NativeD3D12Renderer::Active())
+		native->SetGrayscale(false);
 
 	DX8Wrapper::Set_Transform(D3DTS_VIEW,view);
 	DX8Wrapper::Set_Transform(D3DTS_PROJECTION,proj);

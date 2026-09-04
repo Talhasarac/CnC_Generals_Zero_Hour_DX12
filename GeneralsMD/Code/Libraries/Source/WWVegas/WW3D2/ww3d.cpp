@@ -806,8 +806,11 @@ WW3DErrorType WW3D::Begin_Render(bool clear,bool clearz,const Vector3 & color, f
 	SNAPSHOT_SAY(("========== WW3D::Begin_Render ============\r\n"));
 	SNAPSHOT_SAY(("==========================================\r\n\r\n"));
 
-	if (DX8Wrapper::_Get_D3D_Device8() && (hr=DX8Wrapper::_Get_D3D_Device8()->TestCooperativeLevel()) != D3D_OK)
+	NativeD3D12Renderer* native_renderer = NativeD3D12Renderer::Active();
+	if (native_renderer == NULL && DX8Wrapper::_Get_D3D_Device8() && (hr=DX8Wrapper::_Get_D3D_Device8()->TestCooperativeLevel()) != D3D_OK)
 	{
+		DEBUG_LOG(("WW3D::Begin_Render: legacy device reported unavailable (native=%p, d3d8=%p, hr=0x%08lx)\n",
+			native_renderer, DX8Wrapper::_Get_D3D_Device8(), static_cast<unsigned long>(hr)));
         // If the device was lost, do not render until we get it back
         if( D3DERR_DEVICELOST == hr )
             return WW3D_ERROR_GENERIC;	//other app has the device
@@ -842,6 +845,14 @@ WW3DErrorType WW3D::Begin_Render(bool clear,bool clearz,const Vector3 & color, f
 
 	WWASSERT(!IsRendering);
 	IsRendering = true;
+	// Native command recording must start before viewport/clear commands.
+	if (native_renderer != NULL) {
+		DX8Wrapper::Begin_Scene();
+		if (!native_renderer->IsRecording()) {
+			IsRendering = false;
+			return WW3D_ERROR_GENERIC;
+		}
+	}
 
 	// If we want to clear the screen, we need to set the viewport to include the entire screen:
 	if (clear || clearz) {
@@ -860,7 +871,7 @@ WW3DErrorType WW3D::Begin_Render(bool clear,bool clearz,const Vector3 & color, f
 	}
 
 	// Notify D3D that we are beginning to render the frame
-	DX8Wrapper::Begin_Scene();
+	if (native_renderer == NULL) DX8Wrapper::Begin_Scene();
 
 	return WW3D_ERROR_OK;
 }

@@ -100,7 +100,8 @@ standalone and mounts both. No disc, no registry keys, no retail installer.
 
 > [!IMPORTANT]
 > Some third-party sources are not committed — EA stripped them. Drop in zlib 1.1.4, LZH-Light 1.0,
-> a minimal DirectX 8 SDK, the GameSpy SDK and d3d8to9 before the first build. STLport, the 3DSMax 4
+> the GameSpy SDK and the Windows SDK's Direct3D 12 headers and libraries before the first build. The legacy Direct3D 8
+> headers are still needed while the remaining engine call sites are migrated, but no legacy runtime DLL is used. STLport, the 3DSMax 4
 > SDK, NVASM, the Miles and Bink SDKs and the SafeDisk API are **not** needed to build the game —
 > sound and video run through the DLLs your own install already ships.
 

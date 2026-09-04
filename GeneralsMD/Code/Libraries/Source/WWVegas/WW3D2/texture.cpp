@@ -40,6 +40,7 @@
  * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
 #include "texture.h"
+#include "bitmaphandler.h"
 
 #include <d3d8.h>
 #include <stdio.h>
@@ -58,6 +59,8 @@
 #include "meshmatdesc.h"
 #include "texturethumbnail.h"
 #include "wwprofile.h"
+
+#include <vector>
 
 //#pragma optimize("", off)
 //#pragma MESSAGE("************************************** WARNING, optimization disabled for debugging purposes")
@@ -89,6 +92,9 @@ TextureBaseClass::TextureBaseClass
 )
 :	MipLevelCount(mip_level_count),
 	D3DTexture(NULL),
+	NativeTexture(NULL),
+	NativeSurface(NULL),
+	NativeSurfaceNeedsUpload(false),
 	Initialized(false),
    Name(""),
 	FullPath(""),
@@ -128,6 +134,9 @@ TextureBaseClass::~TextureBaseClass(void)
 		D3DTexture->Release();
 		D3DTexture = NULL;
 	}
+	delete NativeTexture;
+	NativeTexture = NULL;
+	REF_PTR_RELEASE(NativeSurface);
 
 	DX8TextureManagerClass::Remove(this);
 }
@@ -210,6 +219,13 @@ void TextureBaseClass::Invalidate()
 		D3DTexture->Release();
 		D3DTexture = NULL;
 	}
+	if (NativeTexture)
+	{
+		delete NativeTexture;
+		NativeTexture = NULL;
+	}
+	REF_PTR_RELEASE(NativeSurface);
+	NativeSurfaceNeedsUpload = false;
 
 	Initialized=false;
 
@@ -290,6 +306,10 @@ void TextureBaseClass::Load_Locked_Surface()
 	WWPROFILE(("TextureClass::Load_Locked_Surface()"));
 	if (D3DTexture) D3DTexture->Release();
 	D3DTexture=0;
+	delete NativeTexture;
+	NativeTexture=NULL;
+	REF_PTR_RELEASE(NativeSurface);
+	NativeSurfaceNeedsUpload = false;
 	TextureLoader::Request_Thumbnail(this);
 	Initialized=false;
 }
@@ -301,6 +321,8 @@ void TextureBaseClass::Load_Locked_Surface()
 */
 bool TextureBaseClass::Is_Missing_Texture()
 {
+	if (NativeD3D12Renderer::Active() != nullptr)
+		return false;
 	bool flag = false;
 	IDirect3DBaseTexture8 *missing_texture = MissingTexture::_Get_Missing_Texture();
 
@@ -632,18 +654,31 @@ TextureClass::TextureClass
 	default: WWASSERT(0);
 	}
 
-	Poke_Texture
-	(
-		DX8Wrapper::_Create_DX8_Texture
+	if (NativeD3D12Renderer::Active() != nullptr)
+	{
+		// Procedural callers provide CPU-side data later; allocate a native
+		// placeholder now so the resource lifetime does not depend on a legacy
+		// texture object. The file-backed path replaces this with uploaded data.
+		Set_Native_Texture(NativeD3D12Renderer::Active()->CreateTexture2D(
+			width, height, rendertarget ? 1 : NativeD3D12Renderer::TextureMipCount(width,height,mip_level_count),
+			DXGI_FORMAT_B8G8R8A8_UNORM, rendertarget));
+		NativeSurfaceNeedsUpload = !rendertarget;
+	}
+	else
+	{
+		Poke_Texture
 		(
-			width, 
-			height, 
-			format, 
-			mip_level_count,
-			d3dpool,
-			rendertarget
-		)
-	);
+			DX8Wrapper::_Create_DX8_Texture
+			(
+				width,
+				height,
+				format,
+				mip_level_count,
+				d3dpool,
+				rendertarget
+			)
+		);
+	}
 
 	if (pool==POOL_DEFAULT)
 	{
@@ -792,14 +827,38 @@ TextureClass::TextureClass
 	default: break;
 	}
 
-	Poke_Texture
-	(
-		DX8Wrapper::_Create_DX8_Texture
+	if (NativeD3D12Renderer::Active() != nullptr && surface->Is_Native())
+	{
+		std::vector<unsigned char> pixels;
+		surface->Build_Native_Bgra(pixels);
+		NativeD3D12Renderer *renderer = NativeD3D12Renderer::Active();
+		NativeD3D12Texture *nativeTexture = renderer->CreateTexture2D(
+			sd.Width, sd.Height, NativeD3D12Renderer::TextureMipCount(sd.Width,sd.Height,mip_level_count),
+			DXGI_FORMAT_B8G8R8A8_UNORM);
+		if (nativeTexture != nullptr)
+		{
+			NativeD3D12TextureLevel level = {
+				pixels.data(), sd.Width * 4, sd.Width * sd.Height * 4 };
+			if (!renderer->UploadBgraTexture(*nativeTexture, level, sd.Format == WW3D_FORMAT_X8R8G8B8))
+			{
+				delete nativeTexture;
+				nativeTexture = nullptr;
+			}
+		}
+		Set_Native_Texture(nativeTexture);
+		if (nativeTexture) MipLevelCount = static_cast<MipCountType>(nativeTexture->MipLevels());
+	}
+	else
+	{
+		Poke_Texture
 		(
-			surface->Peek_D3D_Surface(), 
-			mip_level_count
-		)
-	);
+			DX8Wrapper::_Create_DX8_Texture
+			(
+				surface->Peek_D3D_Surface(),
+				mip_level_count
+			)
+		);
+	}
 	LastAccessed=WW3D::Get_Sync_Time();
 }
 
@@ -861,6 +920,39 @@ void TextureClass::Init()
 			ExtendedInactivationTime=3*InactivationTime;
 		}
 		LastInactivationSyncTime=0;
+	}
+
+	if (NativeD3D12Renderer::Active() != nullptr)
+	{
+		unsigned nativeWidth = static_cast<unsigned>(Width);
+		unsigned nativeHeight = static_cast<unsigned>(Height);
+		WW3DFormat nativeFormat = TextureFormat;
+		NativeD3D12Texture* texture = TextureLoader::Load_Native_Texture(
+			Get_Full_Path(), TextureFormat, IsCompressionAllowed, nativeWidth, nativeHeight,
+			nativeFormat, MipLevelCount);
+		if (texture != nullptr)
+		{
+			Set_Native_Texture(texture);
+			Width = static_cast<int>(nativeWidth);
+			Height = static_cast<int>(nativeHeight);
+			TextureFormat = nativeFormat;
+			MipLevelCount = static_cast<MipCountType>(texture->MipLevels());
+			Initialized = true;
+			LastAccessed = WW3D::Get_Sync_Time();
+			return;
+		}
+		// Native mode must never fall through into the asynchronous DX8 loader:
+		// that path assumes a live IDirect3DTexture8 and crashes before the
+		// renderer has a chance to draw a diagnostic/missing texture.
+		if (Width <= 0) Width = 2;
+		if (Height <= 0) Height = 2;
+		Set_Native_Texture(NativeD3D12Renderer::Active()->CreateTexture2D(
+			static_cast<unsigned>(Width), static_cast<unsigned>(Height), 1,
+			DXGI_FORMAT_B8G8R8A8_UNORM));
+		MipLevelCount = MIP_LEVELS_1;
+		Initialized = true;
+		LastAccessed = WW3D::Get_Sync_Time();
+		return;
 	}
 
 
@@ -963,6 +1055,14 @@ void TextureClass::Apply(unsigned int stage)
 		}*/
 	}
 	LastAccessed=WW3D::Get_Sync_Time();
+	if (NativeD3D12Renderer::Active() != nullptr)
+	{
+		Upload_Native_Surface();
+		// DrawIndexedTextured binds the descriptor after its root signature and
+		// pipeline are active. Texture application only performs pending uploads.
+		Filter.Apply(stage);
+		return;
+	}
 
 	DX8_RECORD_TEXTURE(this);
 
@@ -985,7 +1085,48 @@ void TextureClass::Apply(unsigned int stage)
 */
 SurfaceClass *TextureClass::Get_Surface_Level(unsigned int level)
 {
-	if (!Peek_D3D_Texture()) 
+	if (NativeD3D12Renderer::Active() != nullptr)
+	{
+		if (!Initialized) Init();
+		NativeD3D12Texture* texture = Peek_Native_Texture();
+		if (texture == NULL || level >= texture->MipLevels())
+			return NULL;
+		// Procedural base surfaces are CPU-authored. File-backed textures and
+		// render targets instead need their actual GPU contents, never a blank
+		// allocation that would silently erase the image at the next upload.
+		if (level != 0 || NativeSurface == NULL || texture->HasRenderTargetView())
+		{
+			WW3DFormat surfaceFormat = TextureFormat;
+			if (surfaceFormat == WW3D_FORMAT_UNKNOWN ||
+				surfaceFormat == WW3D_FORMAT_DXT1 || surfaceFormat == WW3D_FORMAT_DXT2 ||
+				surfaceFormat == WW3D_FORMAT_DXT3 || surfaceFormat == WW3D_FORMAT_DXT4 ||
+				surfaceFormat == WW3D_FORMAT_DXT5)
+				surfaceFormat = WW3D_FORMAT_A8R8G8B8;
+			const unsigned width = MAX(1u,texture->Width() >> level);
+			const unsigned height = MAX(1u,texture->Height() >> level);
+			SurfaceClass* surface = new SurfaceClass(width,height,surfaceFormat);
+			if (!IsProcedural || level != 0 || texture->HasRenderTargetView() || !NativeSurfaceNeedsUpload)
+			{
+				if (level != 0) Upload_Native_Surface();
+				std::vector<unsigned char> pixels;
+				if (!NativeD3D12Renderer::Active()->ReadbackTexture(*Peek_Native_Texture(),level,pixels))
+				{
+					surface->Release_Ref();
+					return NULL;
+				}
+				BitmapHandlerClass::Copy_Image(surface->NativePixels.data(),width,height,
+					surface->NativePitch,surfaceFormat,pixels.data(),width,height,width*4,
+					WW3D_FORMAT_A8R8G8B8,NULL,0,false);
+			}
+			if (level != 0) return surface;
+			REF_PTR_RELEASE(NativeSurface);
+			NativeSurface = surface;
+			NativeUploadedRevision = surface->Native_Revision();
+		}
+		NativeSurface->Add_Ref();
+		return NativeSurface;
+	}
+	if (!Peek_D3D_Texture())
 	{
 		WWASSERT_PRINT(0, "Get_Surface_Level: D3DTexture is NULL!\n");
 		return 0;
@@ -997,6 +1138,12 @@ SurfaceClass *TextureClass::Get_Surface_Level(unsigned int level)
 	d3d_surface->Release();
 
 	return surface;
+}
+
+void TextureClass::Mark_Native_Surface_Dirty()
+{
+	if (NativeD3D12Renderer::Active() != nullptr && NativeSurface != nullptr)
+		NativeSurfaceNeedsUpload = true;
 }
 
 //**********************************************************************************************
@@ -1036,6 +1183,8 @@ IDirect3DSurface8 *TextureClass::Get_D3D_Surface_Level(unsigned int level)
 unsigned TextureClass::Get_Texture_Memory_Usage() const
 {
 	int size=0;
+	if (Peek_Native_Texture() != nullptr)
+		return static_cast<unsigned>(Peek_Native_Texture()->Width() * Peek_Native_Texture()->Height() * 4);
 	if (!Peek_D3D_Texture()) return 0;
 	for (unsigned i=0;i<Peek_D3D_Texture()->GetLevelCount();++i) 
 	{
@@ -1909,4 +2058,57 @@ void VolumeTextureClass::Apply_New_Surface
 		Height=d3d_desc.Height;
 		Depth=d3d_desc.Depth;
 	}
+}
+
+
+void TextureClass::Upload_Native_Surface()
+{
+	if (NativeD3D12Renderer::Active() == NULL) return;
+	if (NativeSurface != NULL && Peek_Native_Texture() != NULL &&
+		(NativeSurfaceNeedsUpload || NativeUploadedRevision != NativeSurface->Native_Revision()))
+	{
+		std::vector<unsigned char> pixels;
+		NativeD3D12Renderer* renderer = NativeD3D12Renderer::Active();
+		LARGE_INTEGER conversionStart = {};
+		if (renderer->ProfilingEnabled()) QueryPerformanceCounter(&conversionStart);
+		NativeSurface->Build_Native_Bgra(pixels);
+		if (renderer->ProfilingEnabled()) {
+			LARGE_INTEGER end, frequency;
+			QueryPerformanceCounter(&end); QueryPerformanceFrequency(&frequency);
+			if (frequency.QuadPart) renderer->AddTextureConversionMs(
+				(end.QuadPart-conversionStart.QuadPart)*1000.0/frequency.QuadPart);
+		}
+		SurfaceClass::SurfaceDescription surfaceDescription;
+		NativeSurface->Get_Description(surfaceDescription);
+		NativeD3D12TextureLevel level = {
+			pixels.data(), surfaceDescription.Width * 4,
+			surfaceDescription.Width * surfaceDescription.Height * 4 };
+		// Editing a compressed/packed source produces an ordinary BGRA texture.
+		// Submitted draws retain the old resource until their fence completes.
+		if (Peek_Native_Texture()->Format() != DXGI_FORMAT_B8G8R8A8_UNORM)
+		{
+			NativeD3D12Texture* replacement = renderer->CreateTexture2D(
+				surfaceDescription.Width,surfaceDescription.Height,Peek_Native_Texture()->MipLevels(),
+				DXGI_FORMAT_B8G8R8A8_UNORM);
+			if (replacement == NULL) return;
+			if (!renderer->UploadBgraTexture(*replacement,level,
+				surfaceDescription.Format == WW3D_FORMAT_X8R8G8B8))
+			{
+				delete replacement;
+				return;
+			}
+			delete Peek_Native_Texture();
+			Set_Native_Texture(replacement);
+			NativeSurfaceNeedsUpload = false;
+			NativeUploadedRevision = NativeSurface->Native_Revision();
+			return;
+		}
+		if (NativeD3D12Renderer::Active()->UploadBgraTexture(*Peek_Native_Texture(), level,
+			surfaceDescription.Format == WW3D_FORMAT_X8R8G8B8))
+		{
+			NativeSurfaceNeedsUpload = false;
+			NativeUploadedRevision = NativeSurface->Native_Revision();
+		}
+	}
+
 }

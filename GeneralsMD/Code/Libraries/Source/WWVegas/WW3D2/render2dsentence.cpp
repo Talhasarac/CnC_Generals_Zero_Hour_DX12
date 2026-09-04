@@ -40,6 +40,7 @@
 #include "wwprofile.h"
 #include "wwmemlog.h"
 #include "dx8wrapper.h"
+#include "native_d3d12_renderer.h"
 
 #ifdef _INTERNAL
 // for occasional debugging...
@@ -389,9 +390,24 @@ Render2DSentenceClass::Build_Textures (void)
 		new_texture->Get_Filter().Set_Mip_Mapping(TextureFilterClass::FILTER_TYPE_NONE);
 
 		//
-		//	Copy the contents of the texture from the surface
+		//	Copy the contents of the texture from the surface.  Native surfaces
+		//	are CPU-backed and have no legacy D3D8 surface to pass to the old
+		//	copy helper.
 		//
-		DX8Wrapper::_Copy_DX8_Rects (curr_surface->Peek_D3D_Surface (), NULL, 0, texture_surface->Peek_D3D_Surface (), NULL);
+		if (NativeD3D12Renderer::Active() != NULL)
+		{
+			if (curr_surface != NULL && texture_surface != NULL &&
+				curr_surface->Is_Native() && texture_surface->Is_Native())
+			{
+				texture_surface->Copy(0, 0, 0, 0, desc.Width, desc.Height, curr_surface);
+				new_texture->Mark_Native_Surface_Dirty();
+			}
+		}
+		else
+		{
+			DX8Wrapper::_Copy_DX8_Rects(curr_surface->Peek_D3D_Surface(), NULL, 0,
+				texture_surface->Peek_D3D_Surface(), NULL);
+		}
 		REF_PTR_RELEASE (texture_surface);
 	
 		//

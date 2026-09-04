@@ -192,6 +192,8 @@ void		W3DVideoBuffer::unlock( void )
 	if ( m_surface != NULL )
 	{
 		m_surface->Unlock();
+		if (m_texture != NULL)
+			m_texture->Mark_Native_Surface_Dirty();
 		m_surface->Release_Ref();
 		m_surface = NULL;
 	}

@@ -32,6 +32,7 @@
 										 
 // INCLUDES ///////////////////////////////////////////////////////////////////////////////////////
 #include "stdio.h"
+#include <vector>
 #include "W3DDevice/GameClient/W3DWater.h"
 #include "W3DDevice/GameClient/heightmap.h"
 #include "W3DDevice/GameClient/W3DShroud.h"
@@ -63,6 +64,13 @@
 #include "W3DDevice/GameClient/W3DDisplay.h"
 #include "W3DDevice/GameClient/W3DPoly.h"
 #include "W3DDevice/GameClient/W3DScene.h"
+#include "WW3D2/native_matrix_math.h"
+
+#define D3DXMatrixIdentity NativeMatrixMath::Identity
+#define D3DXMatrixInverse NativeMatrixMath::Inverse
+#define D3DXMatrixScaling NativeMatrixMath::Scaling
+#define D3DXMatrixTranslation NativeMatrixMath::Translation
+#define D3DXMatrixTranspose NativeMatrixMath::Transpose
 #include "W3DDevice/GameClient/W3DCustomScene.h"
 
 
@@ -196,6 +204,17 @@ static Bool wireframeForDebug = 0;
 
 void WaterRenderObjClass::setupJbaWaterShader(void) 
 {
+	if (NativeD3D12Renderer::Active() != NULL)
+	{
+		if (!TheWaterTransparency->m_additiveBlend)
+			DX8Wrapper::Set_Shader(ShaderClass::_PresetAlphaShader);
+		else
+			DX8Wrapper::Set_Shader(ShaderClass::_PresetAdditiveShader);
+		DX8Wrapper::Set_Texture(0, m_riverTexture);
+		DX8Wrapper::Apply_Render_State_Changes();
+		return;
+	}
+
 	if (!TheWaterTransparency->m_additiveBlend)
 		DX8Wrapper::Set_Shader(ShaderClass::_PresetAlphaShader);
 	else
@@ -251,9 +270,9 @@ void WaterRenderObjClass::setupJbaWaterShader(void)
 		D3DXMATRIX scale;
 
 		D3DXMatrixScaling(&scale, NOISE_REPEAT_FACTOR, NOISE_REPEAT_FACTOR,1);
-		D3DXMATRIX destMatrix = inv * scale;
+		D3DXMATRIX destMatrix = NativeMatrixMath::MultiplyValue(inv, scale);
 		D3DXMatrixTranslation(&scale, m_riverVOrigin, m_riverVOrigin,0);
-		destMatrix = destMatrix*scale;
+		destMatrix = NativeMatrixMath::MultiplyValue(destMatrix, scale);
 		DX8Wrapper::_Set_DX8_Transform(D3DTS_TEXTURE2, *(Matrix4x4*)&destMatrix);
 		
 	}
@@ -344,6 +363,8 @@ WaterRenderObjClass::WaterRenderObjClass(void)
 	m_skyBox=NULL;
 	m_vertexBufferD3D=NULL;
 	m_indexBufferD3D=NULL;
+	m_vertexBufferNative=NULL;
+	m_indexBufferNative=NULL;
 	m_vertexBufferD3DOffset=0;
 
 	m_dwWavePixelShader=NULL;
@@ -650,6 +671,38 @@ HRESULT WaterRenderObjClass::generateVertexBuffer( Int sizeX, Int sizeY, Int ver
 		m_numVertices=sizeX*sizeY;
 	}
 
+	if (NativeD3D12Renderer::Active() != NULL)
+	{
+		delete m_vertexBufferNative;
+		m_vertexBufferNative = new NativeD3D12UploadBuffer(
+			static_cast<size_t>(m_numVertices) * static_cast<size_t>(vertexSize));
+		m_vertexBufferD3DOffset=0;
+		if (!doStatic)
+			return m_vertexBufferNative != NULL ? S_OK : E_OUTOFMEMORY;
+
+		void* nativeData = NULL;
+		if (m_vertexBufferNative == NULL || FAILED(m_vertexBufferNative->Lock(0,
+			static_cast<size_t>(m_numVertices) * sizeof(SEA_PATCH_VERTEX), &nativeData)))
+			return E_FAIL;
+		pVertices = static_cast<SEA_PATCH_VERTEX*>(nativeData);
+		Int x,z;
+		for (z=0; z<sizeY; z++)
+		{
+			for (x=0; x<sizeX; x++)
+			{
+				pVertices->x=(float)x;
+				pVertices->y=m_level;
+				pVertices->z=(float)z;
+				pVertices->tu=(float)x*PATCH_UV_SCALE;
+				pVertices->tv=(float)z*PATCH_UV_SCALE;
+				pVertices->c=setting->transparentWaterDiffuse;
+				pVertices++;
+			}
+		}
+		m_vertexBufferNative->Unlock();
+		return S_OK;
+	}
+
 	if (m_vertexBufferD3D == NULL)
 	{	// Create vertex buffer
 
@@ -712,6 +765,35 @@ HRESULT WaterRenderObjClass::generateIndexBuffer(Int sizeX, Int sizeY)
 	//Total index buffer size = (SizeY-1)*(SizeX*2+2) - 2 (drop the extra 2 indices from last strip)
 
 	m_numIndices=(sizeY-1)*(sizeX*2+2) - 2;
+
+	if (NativeD3D12Renderer::Active() != NULL)
+	{
+		delete m_indexBufferNative;
+		m_indexBufferNative = new NativeD3D12UploadBuffer(
+			static_cast<size_t>(m_numIndices + 2) * sizeof(WORD));
+		void* nativeData = NULL;
+		if (m_indexBufferNative == NULL || FAILED(m_indexBufferNative->Lock(0,
+			static_cast<size_t>(m_numIndices) * sizeof(WORD), &nativeData)))
+			return E_FAIL;
+		WORD* pIndices = static_cast<WORD*>(nativeData);
+		Int i,j,k;
+		for (i=0,j=0,k=0; i<m_numIndices; j++)
+		{
+			for (;k<(sizeX*(j+1)); k++,i+=2)
+			{
+				pIndices[i]=(UnsignedShort) k+sizeX;
+				pIndices[i+1]=(UnsignedShort) k;
+			}
+			if (i<m_numIndices)
+			{
+				pIndices[i]=k-1;
+				pIndices[i+1]=k+sizeX;
+				i+=2;
+			}
+		}
+		m_indexBufferNative->Unlock();
+		return S_OK;
+	}
 
 	//old way
 
@@ -811,25 +893,29 @@ void WaterRenderObjClass::ReleaseResources(void)
 	REF_PTR_RELEASE(m_indexBuffer);
 
 	REF_PTR_RELEASE(m_pReflectionTexture);
+	delete m_vertexBufferNative;
+	delete m_indexBufferNative;
+	m_vertexBufferNative = NULL;
+	m_indexBufferNative = NULL;
 	SAFE_RELEASE(m_vertexBufferD3D);
 	SAFE_RELEASE(m_indexBufferD3D);
 
 	if (m_waterTrackSystem)
 		m_waterTrackSystem->ReleaseResources();
 
-	if (m_dwWavePixelShader)
+	if (m_pDev && m_dwWavePixelShader)
 		m_pDev->DeletePixelShader(m_dwWavePixelShader);
 
-	if (m_dwWaveVertexShader)
+	if (m_pDev && m_dwWaveVertexShader)
 		m_pDev->DeleteVertexShader(m_dwWaveVertexShader);
 	
-	if (m_waterPixelShader)
+	if (m_pDev && m_waterPixelShader)
 		m_pDev->DeletePixelShader(m_waterPixelShader);
 
-	if (m_trapezoidWaterPixelShader)
+	if (m_pDev && m_trapezoidWaterPixelShader)
 		m_pDev->DeletePixelShader(m_trapezoidWaterPixelShader);
 
-	if (m_riverWaterPixelShader)
+	if (m_pDev && m_riverWaterPixelShader)
 		m_pDev->DeletePixelShader(m_riverWaterPixelShader);
 
 	m_dwWavePixelShader=0;
@@ -911,6 +997,10 @@ void WaterRenderObjClass::ReAcquireResources(void)
 	if (m_waterTrackSystem)
 		m_waterTrackSystem->ReAcquireResources();
 
+	// Native D3D12 water uses the direct textured/mesh paths above.  The old
+	// ps.1.1 assembly below has no native equivalent and must not touch a null
+	// D3D8 device during resource reacquisition.
+#if 0
 	if (W3DShaderManager::getChipset() >= DC_GENERIC_PIXEL_SHADER_1_1)
 	{
 		ID3DXBuffer *compiledShader;
@@ -959,6 +1049,7 @@ void WaterRenderObjClass::ReAcquireResources(void)
 			compiledShader->Release();
 		}
 	}
+#endif
 
 	//W3D Invalidate textures after losing the device and since we peek at the textures directly, it won't
 	//know to reinit them for us.  Do it here manually:
@@ -1202,6 +1293,10 @@ void WaterRenderObjClass::enableWaterGrid(Bool state)
 		reset();
 
 		//Release existing grid data
+		delete m_vertexBufferNative;
+		delete m_indexBufferNative;
+		m_vertexBufferNative = NULL;
+		m_indexBufferNative = NULL;
 		SAFE_RELEASE(m_vertexBufferD3D);
 		SAFE_RELEASE(m_indexBufferD3D);
 
@@ -1679,7 +1774,7 @@ void WaterRenderObjClass::Render(RenderInfoClass & rinfo)
 				clipMatrix(1,0)=WaterNormal.Y;
 				clipMatrix(2,0)=WaterNormal.Z;
 				clipMatrix(3,0)=WaterPlane.W+0.5f;
-				inv *=clipMatrix;
+				inv = NativeMatrixMath::MultiplyValue(inv, clipMatrix);
 
 				// Change texture wrapping mode to 'clamp' for texture stage 1
 				DX8Wrapper::Set_DX8_Texture_Stage_State( 1, D3DTSS_ADDRESSU, D3DTADDRESS_CLAMP);
@@ -1846,6 +1941,34 @@ void WaterRenderObjClass::drawSea(RenderInfoClass & rinfo)
 	if (!getClippedWaterPlane(&rinfo.Camera,&seaBox))
 		return;	//the sea is not visible
 
+	if (NativeD3D12Renderer* native = NativeD3D12Renderer::Active())
+	{
+		if (m_vertexBufferNative == NULL || m_indexBufferNative == NULL ||
+			m_numVertices <= 0 || m_numIndices <= 0)
+			return;
+		TextureClass *waterTexture = m_settings[m_tod].waterTexture;
+		const NativeD3D12Texture *nativeTexture = waterTexture != NULL ?
+			waterTexture->Peek_Native_Texture() : NULL;
+		DX8Wrapper::Set_Transform(D3DTS_WORLD, Transform);
+		DX8Wrapper::Set_Shader(ShaderClass::_PresetAlphaShader);
+		DX8Wrapper::Set_Texture(0, waterTexture);
+		DX8Wrapper::Apply_Render_State_Changes();
+		DX8Wrapper::Apply_Native_Texture_Sampler(waterTexture);
+		const unsigned short *indices = static_cast<const unsigned short*>(m_indexBufferNative->Data());
+		if (nativeTexture != NULL)
+			native->DrawIndexedTextured(m_vertexBufferNative->Data(),
+				static_cast<UINT>(m_vertexBufferNative->Size()), sizeof(SEA_PATCH_VERTEX),
+				static_cast<UINT>(m_numVertices), static_cast<UINT>(offsetof(SEA_PATCH_VERTEX, tu)),
+				indices, static_cast<UINT>(m_numIndices), D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP,
+				nativeTexture);
+		else
+			native->DrawIndexed(m_vertexBufferNative->Data(),
+				static_cast<UINT>(m_vertexBufferNative->Size()), sizeof(SEA_PATCH_VERTEX),
+				static_cast<UINT>(m_numVertices), indices, static_cast<UINT>(m_numIndices),
+				0, 0, D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+		return;
+	}
+
 	D3DXMATRIX matProj, matView, matWW3D;
 
 	//create a transform which will flip the y and z coordinates to fit our system
@@ -1973,10 +2096,10 @@ void WaterRenderObjClass::drawSea(RenderInfoClass & rinfo)
 			patchMatrix._41=(float)(patchX*PATCH_WIDTH*PATCH_SCALE );
 			patchMatrix._43=(float)(patchY*PATCH_WIDTH*PATCH_SCALE );
 			//convert the default D3D coordinate system into ours
-			D3DXMatrixMultiply(&matTempWorld, &patchMatrix, &matWW3D);
+			NativeMatrixMath::Multiply(&matTempWorld, &patchMatrix, &matWW3D);
 
-			D3DXMatrixMultiply(&matTemp, &matTempWorld, &matView);
-			D3DXMatrixMultiply(&matWorldViewProj, &matTemp, &matProj);
+			NativeMatrixMath::Multiply(&matTemp, &matTempWorld, &matView);
+			NativeMatrixMath::Multiply(&matWorldViewProj, &matTemp, &matProj);
 			//matrices must be transposed before loading into vertex shader registers
 			D3DXMatrixTranspose(&matWorldViewProj, &matWorldViewProj);
 			m_pDev->SetVertexShaderConstant(CV_WORLDVIEWPROJ_0, &matWorldViewProj, 4);	//pass transform matrix into shader
@@ -2032,7 +2155,7 @@ void WaterRenderObjClass::drawSea(RenderInfoClass & rinfo)
 				patchMatrix._41=(float)(patchX*PATCH_WIDTH*PATCH_SCALE);
 				patchMatrix._43=(float)(patchY*PATCH_WIDTH*PATCH_SCALE);
 
-				D3DXMatrixMultiply(&matTemp, &patchMatrix, &matWW3D);
+				NativeMatrixMath::Multiply(&matTemp, &patchMatrix, &matWW3D);
 
 				DX8Wrapper::_Set_DX8_Transform(D3DTS_WORLD, *(Matrix4x4*)&matTemp);
 
@@ -2293,6 +2416,66 @@ void WaterRenderObjClass::renderSkyBody(Matrix3D *mat)
 //-------------------------------------------------------------------------------------------------
 void WaterRenderObjClass::renderWaterMesh(void)
 {
+	if (NativeD3D12Renderer* native = NativeD3D12Renderer::Active())
+	{
+		if (!m_doWaterGrid || m_meshData == NULL || m_vertexBufferNative == NULL ||
+			m_indexBufferNative == NULL || m_numIndices <= 0)
+			return;
+
+		const Int mx = m_gridCellsX + 1;
+		const Int my = m_gridCellsY + 1;
+		std::vector<MaterMeshVertexFormat> vertices(static_cast<size_t>(mx) * my);
+		Setting *setting = &m_settings[m_tod];
+		const Real uScale = setting->waterRepeatCount / 128.0f * m_gridCellSize / 10.0f * 0.2f;
+		const Real vScale = setting->waterRepeatCount / 128.0f * m_gridCellSize / 10.0f * 0.2f;
+		const Int diffuse = setting->waterDiffuse & 0x00ffffff;
+		const Int alpha = ((setting->waterDiffuse >> 24) - 0x20) & 0xff;
+		const DWORD meshDiffuse = diffuse | (alpha << 24);
+		for (Int y = 0; y < my; ++y)
+		{
+			for (Int x = 0; x < mx; ++x)
+			{
+				MaterMeshVertexFormat &vertex = vertices[static_cast<size_t>(y) * mx + x];
+				const WaterMeshData &data = m_meshData[(y + 1) * (mx + 2) + x + 1];
+				vertex.x = static_cast<Real>(x) * m_gridCellSize;
+				vertex.y = static_cast<Real>(y) * m_gridCellSize;
+				vertex.z = data.height;
+				vertex.diffuse = meshDiffuse;
+				vertex.u1 = static_cast<Real>(x) * uScale;
+				vertex.v1 = static_cast<Real>(y) * vScale;
+				vertex.u2 = static_cast<Real>(x) * m_gridCellSize / BUMP_SIZE;
+				vertex.v2 = static_cast<Real>(y) * m_gridCellSize / BUMP_SIZE;
+#ifdef USE_MESH_NORMALS
+				vertex.nx = 0.0f;
+				vertex.ny = 0.0f;
+				vertex.nz = 1.0f;
+#endif
+			}
+		}
+
+		DX8Wrapper::Set_Transform(D3DTS_WORLD, Transform);
+		DX8Wrapper::Set_Material(m_meshVertexMaterialClass);
+		DX8Wrapper::Set_Shader(m_shaderClass);
+		DX8Wrapper::Set_Texture(0, setting->waterTexture);
+		DX8Wrapper::Apply_Render_State_Changes();
+		DX8Wrapper::Apply_Native_Texture_Sampler(setting->waterTexture);
+		const NativeD3D12Texture *nativeTexture = setting->waterTexture != NULL ?
+			setting->waterTexture->Peek_Native_Texture() : NULL;
+		const unsigned short *indices = static_cast<const unsigned short*>(m_indexBufferNative->Data());
+		if (nativeTexture != NULL)
+			native->DrawIndexedTextured(vertices.data(),
+				static_cast<UINT>(vertices.size() * sizeof(MaterMeshVertexFormat)),
+				static_cast<UINT>(sizeof(MaterMeshVertexFormat)), static_cast<UINT>(vertices.size()),
+				static_cast<UINT>(offsetof(MaterMeshVertexFormat, u1)), indices,
+				static_cast<UINT>(m_numIndices), D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP, nativeTexture);
+		else
+			native->DrawIndexed(vertices.data(),
+				static_cast<UINT>(vertices.size() * sizeof(MaterMeshVertexFormat)),
+				static_cast<UINT>(sizeof(MaterMeshVertexFormat)), static_cast<UINT>(vertices.size()),
+				indices, static_cast<UINT>(m_numIndices), 0, 0,
+				D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+		return;
+	}
 
 	if (!m_doWaterGrid)
 		return;	//the water grid is disabled.
@@ -2952,6 +3135,11 @@ void WaterRenderObjClass::drawRiverWater(PolygonTrigger *pTrig)
 	DX8Wrapper::Set_Texture(0,m_riverTexture);	//set to blue
 
 	setupJbaWaterShader();
+	if (NativeD3D12Renderer::Active() != NULL)
+	{
+		DX8Wrapper::Draw_Triangles(0, rectangleCount * 2, 0, (rectangleCount + 1) * 2);
+		return;
+	}
 
 	//In additive blending we need to use the alpha at the edges of river to darken
 	//rgb instead.
@@ -2969,6 +3157,8 @@ void WaterRenderObjClass::drawRiverWater(PolygonTrigger *pTrig)
 		DX8Wrapper::_Get_D3D_Device8()->SetRenderState(D3DRS_FILLMODE,D3DFILL_WIREFRAME);
 	}
 	DX8Wrapper::Draw_Triangles(	0,rectangleCount*2, 0,	(rectangleCount+1)*2);
+	if (NativeD3D12Renderer::Active() != NULL)
+		return;
 	if (wireframeForDebug) {
 		DX8Wrapper::_Get_D3D_Device8()->SetRenderState(D3DRS_FILLMODE,D3DFILL_SOLID);
 	}
@@ -2999,6 +3189,65 @@ void WaterRenderObjClass::drawRiverWater(PolygonTrigger *pTrig)
 
 void WaterRenderObjClass::setupFlatWaterShader(void) 
 {
+	if (NativeD3D12Renderer::Active() != NULL)
+	{
+		const bool highlights = m_waterSparklesTexture && m_waterNoiseTexture;
+		DX8Wrapper::Set_Texture(0, m_riverTexture);
+		DX8Wrapper::Set_Texture(1, highlights ? m_waterSparklesTexture : NULL);
+		DX8Wrapper::Set_Texture(2, highlights ? m_waterNoiseTexture : NULL);
+		DX8Wrapper::Set_Texture(3, NULL);
+		if (!TheWaterTransparency->m_additiveBlend)
+			DX8Wrapper::Set_Shader(ShaderClass::_PresetAlphaShader);
+		else
+			DX8Wrapper::Set_Shader(ShaderClass::_PresetAdditiveShader);
+		DX8Wrapper::Apply_Render_State_Changes();
+		for (unsigned stage=0;stage<4;++stage) {
+			DX8Wrapper::Set_DX8_Texture_Stage_State(stage,D3DTSS_RESULTARG,D3DTA_CURRENT);
+			DX8Wrapper::Set_DX8_Texture_Stage_State(stage,D3DTSS_TEXCOORDINDEX,0);
+			DX8Wrapper::Set_DX8_Texture_Stage_State(stage,D3DTSS_TEXTURETRANSFORMFLAGS,D3DTTFF_DISABLE);
+			DX8Wrapper::Set_DX8_Texture_Stage_State(stage,D3DTSS_MINFILTER,D3DTEXF_LINEAR);
+			DX8Wrapper::Set_DX8_Texture_Stage_State(stage,D3DTSS_MAGFILTER,D3DTEXF_LINEAR);
+			DX8Wrapper::Set_DX8_Texture_Stage_State(stage,D3DTSS_ADDRESSU,D3DTADDRESS_WRAP);
+			DX8Wrapper::Set_DX8_Texture_Stage_State(stage,D3DTSS_ADDRESSV,D3DTADDRESS_WRAP);
+			DX8Wrapper::Set_DX8_Texture_Stage_State(stage,D3DTSS_COLOROP,D3DTOP_DISABLE);
+			DX8Wrapper::Set_DX8_Texture_Stage_State(stage,D3DTSS_ALPHAOP,D3DTOP_SELECTARG1);
+			DX8Wrapper::Set_DX8_Texture_Stage_State(stage,D3DTSS_ALPHAARG1,D3DTA_CURRENT);
+		}
+		DX8Wrapper::Set_DX8_Texture_Stage_State(0,D3DTSS_COLOROP,D3DTOP_MODULATE);
+		DX8Wrapper::Set_DX8_Texture_Stage_State(0,D3DTSS_COLORARG1,D3DTA_TEXTURE);
+		DX8Wrapper::Set_DX8_Texture_Stage_State(0,D3DTSS_COLORARG2,D3DTA_DIFFUSE);
+		DX8Wrapper::Set_DX8_Texture_Stage_State(0,D3DTSS_ALPHAOP,D3DTOP_MODULATE);
+		DX8Wrapper::Set_DX8_Texture_Stage_State(0,D3DTSS_ALPHAARG1,D3DTA_TEXTURE);
+		DX8Wrapper::Set_DX8_Texture_Stage_State(0,D3DTSS_ALPHAARG2,D3DTA_DIFFUSE);
+		if (highlights) {
+			// Preserve the base water color while evaluating sparkle * noise.
+			DX8Wrapper::Set_DX8_Texture_Stage_State(1,D3DTSS_COLOROP,D3DTOP_SELECTARG1);
+			DX8Wrapper::Set_DX8_Texture_Stage_State(1,D3DTSS_COLORARG1,D3DTA_TEXTURE);
+			DX8Wrapper::Set_DX8_Texture_Stage_State(1,D3DTSS_RESULTARG,D3DTA_TEMP);
+			DX8Wrapper::Set_DX8_Texture_Stage_State(2,D3DTSS_COLOROP,D3DTOP_MULTIPLYADD);
+			DX8Wrapper::Set_DX8_Texture_Stage_State(2,D3DTSS_COLORARG0,D3DTA_CURRENT);
+			DX8Wrapper::Set_DX8_Texture_Stage_State(2,D3DTSS_COLORARG1,D3DTA_TEMP);
+			DX8Wrapper::Set_DX8_Texture_Stage_State(2,D3DTSS_COLORARG2,D3DTA_TEXTURE);
+			DX8Wrapper::Set_DX8_Texture_Stage_State(2,D3DTSS_TEXCOORDINDEX,D3DTSS_TCI_CAMERASPACEPOSITION);
+			DX8Wrapper::Set_DX8_Texture_Stage_State(2,D3DTSS_TEXTURETRANSFORMFLAGS,D3DTTFF_COUNT2);
+			Matrix4x4 view;
+			DX8Wrapper::_Get_DX8_Transform(D3DTS_VIEW,view);
+			D3DXMATRIX inverse, scale, offset;
+			float determinant;
+			D3DXMatrixInverse(&inverse,&determinant,reinterpret_cast<D3DXMATRIX*>(&view));
+			D3DXMatrixScaling(&scale,NOISE_REPEAT_FACTOR,NOISE_REPEAT_FACTOR,1);
+			D3DXMatrixTranslation(&offset,m_riverVOrigin,m_riverVOrigin,0);
+			D3DXMATRIX matrix = NativeMatrixMath::MultiplyValue(inverse,scale);
+			matrix = NativeMatrixMath::MultiplyValue(matrix,offset);
+			DX8Wrapper::_Set_DX8_Transform(D3DTS_TEXTURE2,*reinterpret_cast<Matrix4x4*>(&matrix));
+		}
+		const unsigned shroudStage = highlights ? 3 : 1;
+		if (TheTerrainRenderObject && W3DShaderManager::setShroudTex(shroudStage)) {
+			DX8Wrapper::Set_DX8_Texture_Stage_State(shroudStage,D3DTSS_ADDRESSU,D3DTADDRESS_CLAMP);
+			DX8Wrapper::Set_DX8_Texture_Stage_State(shroudStage,D3DTSS_ADDRESSV,D3DTADDRESS_CLAMP);
+		}
+		return;
+	}
 
 	DX8Wrapper::Set_Texture(0,m_riverTexture);
 	if (!TheWaterTransparency->m_additiveBlend)
@@ -3074,9 +3323,9 @@ void WaterRenderObjClass::setupFlatWaterShader(void)
 		D3DXMATRIX scale;
 
 		D3DXMatrixScaling(&scale, NOISE_REPEAT_FACTOR, NOISE_REPEAT_FACTOR,1);
-		D3DXMATRIX destMatrix = inv * scale;
+		D3DXMATRIX destMatrix = NativeMatrixMath::MultiplyValue(inv, scale);
 		D3DXMatrixTranslation(&scale, m_riverVOrigin, m_riverVOrigin,0);
-		destMatrix = destMatrix*scale;
+		destMatrix = NativeMatrixMath::MultiplyValue(destMatrix, scale);
 		DX8Wrapper::_Set_DX8_Transform(D3DTS_TEXTURE2, *(Matrix4x4*)&destMatrix);
 
 	}
@@ -3328,6 +3577,15 @@ void WaterRenderObjClass::drawTrapezoidWater(Vector3 points[4])
 	DX8Wrapper::Set_Vertex_Buffer(vb_access);
 
 	setupFlatWaterShader();// lorenzen sez use the alpha shader
+	if (NativeD3D12Renderer::Active() != NULL)
+	{
+		const unsigned previousCull = DX8Wrapper::Get_DX8_Render_State(D3DRS_CULLMODE);
+		DX8Wrapper::Set_DX8_Render_State(D3DRS_CULLMODE,D3DCULL_NONE);
+		DX8Wrapper::Draw_Triangles(0, rectangleCount * 2, 0, (rectangleCount + 1) * 2);
+		DX8Wrapper::Set_DX8_Render_State(D3DRS_CULLMODE,previousCull);
+		DX8Wrapper::Set_DX8_Texture_Stage_State(1,D3DTSS_RESULTARG,D3DTA_CURRENT);
+		return;
+	}
 
 	//If video card supports it and it's enabled, feather the water edge using destination alpha
 	if (DX8Wrapper::getBackBufferFormat() == WW3D_FORMAT_A8R8G8B8 && TheGlobalData->m_showSoftWaterEdge && TheWaterTransparency->m_transparentWaterDepth !=0)
@@ -3363,6 +3621,8 @@ void WaterRenderObjClass::drawTrapezoidWater(Vector3 points[4])
 //#endif //WAVY_WATER
 		DX8Wrapper::Draw_Triangles(	0,rectangleCount*2, 0,	(rectangleCount+1)*2);//lorenzen thinks this is where to itereate the soft shoreline effect
 	}
+	if (NativeD3D12Renderer::Active() != NULL)
+		return;
 
 
 

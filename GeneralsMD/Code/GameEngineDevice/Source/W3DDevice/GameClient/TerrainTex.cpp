@@ -53,6 +53,141 @@
 #include "common/GlobalData.h"
 #include "WW3D2/dx8wrapper.h"
 #include "d3dx8tex.h"
+#include "WW3D2/native_matrix_math.h"
+
+#define D3DXMatrixInverse NativeMatrixMath::Inverse
+#define D3DXMatrixScaling NativeMatrixMath::Scaling
+#define D3DXMatrixTranslation NativeMatrixMath::Translation
+
+int UpdateTerrainSurfaceNative(TextureClass *texture, WorldHeightMap *htMap)
+{
+	SurfaceClass *surface = texture != NULL ? texture->Get_Surface_Level(0) : NULL;
+	if (surface == NULL || htMap == NULL)
+	{
+		REF_PTR_RELEASE(surface);
+		return 0;
+	}
+	SurfaceClass::SurfaceDescription description;
+	surface->Get_Description(description);
+	if (description.Width < TEXTURE_WIDTH || PixelSize(description) != 2)
+	{
+		REF_PTR_RELEASE(surface);
+		return 0;
+	}
+	int pitch = 0;
+	unsigned char *bits = static_cast<unsigned char *>(surface->Lock(&pitch));
+	if (bits == NULL || pitch < static_cast<int>(description.Width * 2))
+	{
+		REF_PTR_RELEASE(surface);
+		return 0;
+	}
+	const Int tilePixelExtent = TILE_PIXEL_EXTENT;
+	const Int pixelBytes = 2;
+	for (Int tileNdx = 0; tileNdx < htMap->m_numBitmapTiles; ++tileNdx)
+	{
+		TileData *tile = htMap->getSourceTile(tileNdx);
+		if (tile == NULL)
+			continue;
+		ICoord2D position = tile->m_tileLocationInTexture;
+		if (position.x < 0 || position.y < 0 ||
+			position.x + tilePixelExtent > static_cast<Int>(description.Width) ||
+			position.y + tilePixelExtent > static_cast<Int>(description.Height))
+			continue;
+		for (Int j = 0; j < tilePixelExtent; ++j)
+		{
+			unsigned char *source = tile->getRGBDataForWidth(tilePixelExtent) +
+				(tilePixelExtent - 1 - j) * TILE_BYTES_PER_PIXEL * tilePixelExtent;
+			unsigned short *destination = reinterpret_cast<unsigned short *>(bits +
+				static_cast<size_t>(position.y + j) * pitch + position.x * pixelBytes);
+			for (Int i = 0; i < tilePixelExtent; ++i)
+			{
+				*destination++ = static_cast<unsigned short>(0x8000 +
+					((source[2] >> 3) << 10) + ((source[1] >> 3) << 5) + (source[0] >> 3));
+				source += TILE_BYTES_PER_PIXEL;
+			}
+		}
+	}
+	for (Int texClass = 0; texClass < htMap->m_numTextureClasses; ++texClass)
+	{
+		Int width = htMap->m_textureClasses[texClass].width * TILE_PIXEL_EXTENT;
+		ICoord2D origin = htMap->m_textureClasses[texClass].positionInTexture;
+		if (width <= 0 || origin.x < 4 || origin.y < 4 ||
+			origin.x + width + 4 > static_cast<Int>(description.Width) ||
+			origin.y + width + 4 > static_cast<Int>(description.Height))
+			continue;
+		for (Int j = 0; j < width; ++j)
+		{
+			unsigned char *row = bits + static_cast<size_t>(origin.y + j) * pitch + origin.x * pixelBytes;
+			memcpy(row - 4 * pixelBytes, row + (width - 4) * pixelBytes, 4 * pixelBytes);
+			memcpy(row + width * pixelBytes, row, 4 * pixelBytes);
+		}
+		for (Int j = 0; j < 4; ++j)
+		{
+			unsigned char *before = bits + static_cast<size_t>(origin.y - j - 1) * pitch +
+				(origin.x - 4) * pixelBytes;
+			memcpy(before, before + width * pitch, (width + 8) * pixelBytes);
+			unsigned char *after = bits + static_cast<size_t>(origin.y + j) * pitch +
+				(origin.x - 4) * pixelBytes;
+			memcpy(after + width * pitch, after, (width + 8) * pixelBytes);
+		}
+	}
+	surface->Unlock();
+	texture->Mark_Native_Surface_Dirty();
+	const int result = static_cast<int>(description.Height);
+	REF_PTR_RELEASE(surface);
+	return result;
+}
+
+Bool UpdateFlatSurfaceNative(TextureClass *texture, WorldHeightMap *htMap,
+	Int xCell, Int yCell, Int cellWidth, Int pixelsPerCell)
+{
+	SurfaceClass *surface = texture != NULL ? texture->Get_Surface_Level(0) : NULL;
+	if (surface == NULL || htMap == NULL)
+	{
+		REF_PTR_RELEASE(surface);
+		return FALSE;
+	}
+	SurfaceClass::SurfaceDescription description;
+	surface->Get_Description(description);
+	if (description.Width != static_cast<unsigned>(cellWidth * pixelsPerCell) ||
+		description.Height != static_cast<unsigned>(cellWidth * pixelsPerCell) || PixelSize(description) != 2)
+	{
+		REF_PTR_RELEASE(surface);
+		return FALSE;
+	}
+	int pitch = 0;
+	unsigned char *bits = static_cast<unsigned char *>(surface->Lock(&pitch));
+	if (bits == NULL || pitch < static_cast<int>(description.Width * 2))
+	{
+		REF_PTR_RELEASE(surface);
+		return FALSE;
+	}
+	for (Int cellX = 0; cellX < cellWidth; ++cellX)
+	{
+		for (Int cellY = 0; cellY < cellWidth; ++cellY)
+		{
+			unsigned char *source = htMap->getPointerToTileData(xCell + cellX, yCell + cellY, pixelsPerCell);
+			if (source == NULL)
+				continue;
+			for (Int k = pixelsPerCell - 1; k >= 0; --k)
+			{
+				unsigned short *destination = reinterpret_cast<unsigned short *>(bits +
+					static_cast<size_t>(pixelsPerCell * (cellWidth - cellY - 1) + k) * pitch +
+					cellX * pixelsPerCell * 2);
+				for (Int l = 0; l < pixelsPerCell; ++l)
+				{
+					*destination++ = static_cast<unsigned short>(0x8000 +
+						((source[2] >> 3) << 10) + ((source[1] >> 3) << 5) + (source[0] >> 3));
+					source += TILE_BYTES_PER_PIXEL;
+				}
+			}
+		}
+	}
+	surface->Unlock();
+	texture->Mark_Native_Surface_Dirty();
+	REF_PTR_RELEASE(surface);
+	return static_cast<Bool>(description.Height);
+}
 
 /******************************************************************************
 						TerrainTextureClass
@@ -95,6 +230,9 @@ TerrainTextureClass::TerrainTextureClass(int height, int width) :
 //=============================================================================
 int TerrainTextureClass::update(WorldHeightMap *htMap)
 {
+	if (NativeD3D12Renderer::Active() != NULL)
+		return UpdateTerrainSurfaceNative(this, htMap);
+
 	// D3DTexture is our texture;
 
 	IDirect3DSurface8 *surface_level;
@@ -194,7 +332,9 @@ int TerrainTextureClass::update(WorldHeightMap *htMap)
 	}
 	surface_level->UnlockRect();
 	surface_level->Release();
-	DX8_ErrorCode(D3DXFilterTexture(Peek_D3D_Texture(), NULL, 0, D3DX_FILTER_BOX));	
+	// Native D3D12 textures are uploaded with their complete mip chain.  The
+	// legacy helper only filtered the old D3D8 resource and is intentionally not
+	// part of the native renderer.
 	if (TheWritableGlobalData->m_textureReductionFactor) {
 		Peek_D3D_Texture()->SetLOD(TheWritableGlobalData->m_textureReductionFactor);
 	}
@@ -351,7 +491,8 @@ int TerrainTextureClass::update(WorldHeightMap *htMap)
 	}
 	surface_level->UnlockRect();
 	surface_level->Release();
-	DX8_ErrorCode(D3DXFilterTexture(D3DTexture, NULL, 0, D3DX_FILTER_BOX));	
+	// The native upload path owns mip generation; the old D3D8 texture helper
+	// is intentionally not linked into the renderer.
 	return(surface_desc.Height);
 }
 #endif
@@ -374,6 +515,9 @@ void TerrainTextureClass::setLOD(Int LOD)
 //=============================================================================
 Bool TerrainTextureClass::updateFlat(WorldHeightMap *htMap, Int xCell, Int yCell, Int cellWidth, Int pixelsPerCell)
 {
+	if (NativeD3D12Renderer::Active() != NULL)
+		return UpdateFlatSurfaceNative(this, htMap, xCell, yCell, cellWidth, pixelsPerCell);
+
 	// D3DTexture is our texture;
 
 	IDirect3DSurface8 *surface_level;
@@ -424,7 +568,7 @@ Bool TerrainTextureClass::updateFlat(WorldHeightMap *htMap, Int xCell, Int yCell
 
 	surface_level->UnlockRect();
 	surface_level->Release();
-	DX8_ErrorCode(D3DXFilterTexture(Peek_D3D_Texture(), NULL, 0, D3DX_FILTER_BOX));	
+	// Native D3D12 mip levels are supplied by the upload path.
 	return(surface_desc.Height);
 }
 
@@ -487,10 +631,21 @@ saving lots of texture memory, and preventing seams between blended tiles. */
 AlphaTerrainTextureClass::AlphaTerrainTextureClass( TextureClass *pBaseTex ): 
 	TextureClass(8, 8, 
 		WW3D_FORMAT_A1R5G5B5, MIP_LEVELS_1 )
-{ 
+{
+	m_baseTexture = pBaseTex;
+	if (m_baseTexture != NULL)
+		m_baseTexture->Add_Ref();
+	if (NativeD3D12Renderer::Active() != NULL)
+		return;
+
 	// Attach the base texture's d3d texture.
 	IDirect3DTexture8 * d3d_tex = pBaseTex->Peek_D3D_Texture();
 	Set_D3D_Base_Texture(d3d_tex);
+}
+
+AlphaTerrainTextureClass::~AlphaTerrainTextureClass()
+{
+	REF_PTR_RELEASE(m_baseTexture);
 }
 
 
@@ -506,6 +661,66 @@ set up the pipe so that we blend onto the base texture in stage 0.
 //=============================================================================
 void AlphaTerrainTextureClass::Apply(unsigned int stage)
 {
+	if (NativeD3D12Renderer::Active() != NULL)
+	{
+		// Keep this material bound while sharing the base atlas allocation.
+		// Rebinding Set_Texture during Apply used to replace the material being
+		// traversed and lose its blend/sampler settings at the end of the draw.
+		m_baseTexture->Init();
+		m_baseTexture->Upload_Native_Surface();
+		NativeD3D12Texture* base = m_baseTexture->Peek_Native_Texture();
+		if (!base) return;
+		if (!Peek_Native_Texture() || Peek_Native_Texture()->Resource() != base->Resource())
+		{
+			delete Peek_Native_Texture();
+			Set_Native_Texture(base->ShareResource());
+		}
+		TextureClass::Apply(stage);
+		const bool linear = TheGlobalData && (TheGlobalData->m_bilinearTerrainTex || TheGlobalData->m_trilinearTerrainTex);
+		DX8Wrapper::Set_DX8_Texture_Stage_State(stage,D3DTSS_MINFILTER,linear ? D3DTEXF_LINEAR : D3DTEXF_POINT);
+		DX8Wrapper::Set_DX8_Texture_Stage_State(stage,D3DTSS_MAGFILTER,linear ? D3DTEXF_LINEAR : D3DTEXF_POINT);
+		DX8Wrapper::Set_DX8_Texture_Stage_State(stage,D3DTSS_MIPFILTER,
+			TheGlobalData && TheGlobalData->m_trilinearTerrainTex ? D3DTEXF_LINEAR : D3DTEXF_POINT);
+		DX8Wrapper::Set_DX8_Texture_Stage_State(stage,D3DTSS_ADDRESSU,D3DTADDRESS_CLAMP);
+		DX8Wrapper::Set_DX8_Texture_Stage_State(stage,D3DTSS_ADDRESSV,D3DTADDRESS_CLAMP);
+		DX8Wrapper::Set_DX8_Texture_Stage_State(stage,D3DTSS_TEXCOORDINDEX,1);
+		DX8Wrapper::Set_DX8_Texture_Stage_State(stage,D3DTSS_TEXTURETRANSFORMFLAGS,D3DTTFF_DISABLE);
+		if (stage == 0)
+		{
+			DX8Wrapper::Set_DX8_Texture_Stage_State(0,D3DTSS_COLOROP,D3DTOP_MODULATE);
+			DX8Wrapper::Set_DX8_Texture_Stage_State(0,D3DTSS_COLORARG1,D3DTA_TEXTURE);
+			DX8Wrapper::Set_DX8_Texture_Stage_State(0,D3DTSS_COLORARG2,D3DTA_DIFFUSE);
+			DX8Wrapper::Set_DX8_Texture_Stage_State(0,D3DTSS_ALPHAOP,D3DTOP_MODULATE);
+			DX8Wrapper::Set_DX8_Texture_Stage_State(0,D3DTSS_ALPHAARG1,D3DTA_TEXTURE);
+			DX8Wrapper::Set_DX8_Texture_Stage_State(0,D3DTSS_ALPHAARG2,D3DTA_DIFFUSE);
+			DX8Wrapper::Set_DX8_Render_State(D3DRS_ALPHABLENDENABLE,TRUE);
+			DX8Wrapper::Set_DX8_Render_State(D3DRS_SRCBLEND,D3DBLEND_SRCALPHA);
+			DX8Wrapper::Set_DX8_Render_State(D3DRS_DESTBLEND,D3DBLEND_INVSRCALPHA);
+			DX8Wrapper::Set_DX8_Texture_Stage_State(1,D3DTSS_COLOROP,D3DTOP_DISABLE);
+			DX8Wrapper::Set_DX8_Texture_Stage_State(1,D3DTSS_ALPHAOP,D3DTOP_DISABLE);
+		}
+		else if (stage == 1)
+		{
+			// Native HLSL expresses atlas blending directly; no vendor-specific
+			// eight-stage driver trick. Apply diffuse lighting after the blend.
+			DX8Wrapper::Set_DX8_Texture_Stage_State(0,D3DTSS_COLOROP,D3DTOP_SELECTARG1);
+			DX8Wrapper::Set_DX8_Texture_Stage_State(0,D3DTSS_COLORARG1,D3DTA_TEXTURE);
+			DX8Wrapper::Set_DX8_Texture_Stage_State(0,D3DTSS_TEXCOORDINDEX,0);
+			DX8Wrapper::Set_DX8_Texture_Stage_State(1,D3DTSS_COLOROP,D3DTOP_BLENDDIFFUSEALPHA);
+			DX8Wrapper::Set_DX8_Texture_Stage_State(1,D3DTSS_COLORARG1,D3DTA_TEXTURE);
+			DX8Wrapper::Set_DX8_Texture_Stage_State(1,D3DTSS_COLORARG2,D3DTA_CURRENT);
+			DX8Wrapper::Set_DX8_Texture_Stage_State(1,D3DTSS_ALPHAOP,D3DTOP_SELECTARG1);
+			DX8Wrapper::Set_DX8_Texture_Stage_State(1,D3DTSS_ALPHAARG1,D3DTA_CURRENT);
+			DX8Wrapper::Set_DX8_Texture_Stage_State(2,D3DTSS_COLOROP,D3DTOP_MODULATE);
+			DX8Wrapper::Set_DX8_Texture_Stage_State(2,D3DTSS_COLORARG1,D3DTA_CURRENT);
+			DX8Wrapper::Set_DX8_Texture_Stage_State(2,D3DTSS_COLORARG2,D3DTA_DIFFUSE);
+			DX8Wrapper::Set_DX8_Texture_Stage_State(2,D3DTSS_ALPHAOP,D3DTOP_SELECTARG1);
+			DX8Wrapper::Set_DX8_Texture_Stage_State(2,D3DTSS_ALPHAARG1,D3DTA_CURRENT);
+			DX8Wrapper::Set_DX8_Texture_Stage_State(3,D3DTSS_COLOROP,D3DTOP_DISABLE);
+			DX8Wrapper::Set_DX8_Render_State(D3DRS_ALPHABLENDENABLE,FALSE);
+		}
+		return;
+	}
 	// Do the base apply.
 	TextureClass::Apply(stage);
 	
@@ -768,6 +983,88 @@ int AlphaEdgeTextureClass::update256(WorldHeightMap *htMap)
 
 int AlphaEdgeTextureClass::update(WorldHeightMap *htMap)
 {
+	if (NativeD3D12Renderer::Active() != NULL)
+	{
+		SurfaceClass *surface = Get_Surface_Level(0);
+		if (surface == NULL || htMap == NULL)
+		{
+			REF_PTR_RELEASE(surface);
+			return 0;
+		}
+
+		SurfaceClass::SurfaceDescription description;
+		surface->Get_Description(description);
+		if (description.Format != WW3D_FORMAT_A8R8G8B8)
+		{
+			REF_PTR_RELEASE(surface);
+			return 0;
+		}
+
+		int pitch = 0;
+		unsigned char *bits = static_cast<unsigned char *>(surface->Lock(&pitch));
+		if (bits == NULL || pitch <= 0)
+		{
+			REF_PTR_RELEASE(surface);
+			return 0;
+		}
+		memset(bits, 0, static_cast<size_t>(pitch) * description.Height);
+		for (unsigned int cellX = 0; cellX < description.Width; ++cellX)
+		{
+			for (unsigned int cellY = 0; cellY < description.Height; ++cellY)
+			{
+				unsigned char *pixel = bits + static_cast<size_t>(cellY) * pitch + cellX * 4;
+				pixel[2] = static_cast<unsigned char>(255 - cellY / 2);
+				pixel[0] = static_cast<unsigned char>(cellX / 2);
+				pixel[3] = 128;
+			}
+		}
+
+		const Int tilePixelExtent = TILE_PIXEL_EXTENT;
+		for (Int tileNdx = 0; tileNdx < htMap->m_numEdgeTiles; ++tileNdx)
+		{
+			TileData *tile = htMap->getEdgeTile(tileNdx);
+			if (tile == NULL)
+				continue;
+			const ICoord2D position = tile->m_tileLocationInTexture;
+			if (position.x <= 0)
+				continue;
+
+			for (Int j = 0; j < tilePixelExtent; ++j)
+			{
+				const Int row = position.y + j;
+				if (row < 0 || static_cast<unsigned>(row) >= description.Height)
+					continue;
+				unsigned char *source = tile->getRGBDataForWidth(tilePixelExtent) +
+					(tilePixelExtent - 1 - j) * TILE_BYTES_PER_PIXEL * tilePixelExtent;
+				for (Int i = 0; i < tilePixelExtent; ++i)
+				{
+					const Int column = position.x + i;
+					if (column >= 0 && static_cast<unsigned>(column) < description.Width)
+					{
+						unsigned char *destination = bits + static_cast<size_t>(row) * pitch +
+							static_cast<size_t>(column) * 4;
+						destination[0] = source[0];
+						destination[1] = source[1];
+						destination[2] = source[2];
+						if (source[0] == 0 && source[1] == 0 && source[2] == 0)
+							destination[3] = 0x80;
+						else if (source[0] == 0xff && source[1] == 0xff && source[2] == 0xff)
+							destination[3] = 0x00;
+						else
+							destination[3] = 0xff;
+					}
+					source += TILE_BYTES_PER_PIXEL;
+				}
+			}
+		}
+
+		surface->Unlock();
+		Mark_Native_Surface_Dirty();
+		const int result = static_cast<int>(description.Height);
+		REF_PTR_RELEASE(surface);
+		return result;
+	}
+
 	// D3DTexture is our texture;
 
 	IDirect3DSurface8 *surface_level;
@@ -836,7 +1133,7 @@ int AlphaEdgeTextureClass::update(WorldHeightMap *htMap)
 	}
 	surface_level->UnlockRect();
 	surface_level->Release();
-	DX8_ErrorCode(D3DXFilterTexture(Peek_D3D_Texture(), NULL, 0, D3DX_FILTER_BOX));
+	// Native D3D12 mip levels are supplied by the upload path.
 	return(surface_desc.Height);
 }
 

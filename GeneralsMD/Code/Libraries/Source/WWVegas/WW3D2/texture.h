@@ -55,6 +55,7 @@
 #include "wwstring.h"
 #include "vector3.h"
 #include "texturefilter.h"
+#include "native_d3d12_renderer.h"
 
 struct IDirect3DBaseTexture8;
 struct IDirect3DTexture8;
@@ -164,6 +165,8 @@ public:
 	// texture accessors (dx8)
 	IDirect3DBaseTexture8 *Peek_D3D_Base_Texture() const;
 	void Set_D3D_Base_Texture(IDirect3DBaseTexture8* tex);
+	NativeD3D12Texture *Peek_Native_Texture() const { return NativeTexture; }
+	void Set_Native_Texture(NativeD3D12Texture* texture) { NativeTexture = texture; }
 
 	PoolType Get_Pool() const { return Pool; }
 
@@ -210,6 +213,9 @@ protected:
 
 	void Load_Locked_Surface();
 	void Poke_Texture(IDirect3DBaseTexture8* tex) { D3DTexture = tex; }
+	SurfaceClass *NativeSurface;
+	bool NativeSurfaceNeedsUpload;
+	unsigned long long NativeUploadedRevision = 0;
 
 	bool Initialized;
 
@@ -237,6 +243,7 @@ private:
 
 	// Direct3D texture object
 	IDirect3DBaseTexture8 *D3DTexture;
+	NativeD3D12Texture *NativeTexture;
 
 	// Name
 	StringClass Name;
@@ -330,6 +337,8 @@ public:
 
 	// Get the surface of one of the mipmap levels (defaults to highest-resolution one)
 	SurfaceClass *Get_Surface_Level(unsigned int level = 0);
+	void Mark_Native_Surface_Dirty();
+	void Upload_Native_Surface();
 	IDirect3DSurface8 *Get_D3D_Surface_Level(unsigned int level = 0);
 	void Get_Level_Description( SurfaceClass::SurfaceDescription & desc, unsigned int level = 0 );
 	

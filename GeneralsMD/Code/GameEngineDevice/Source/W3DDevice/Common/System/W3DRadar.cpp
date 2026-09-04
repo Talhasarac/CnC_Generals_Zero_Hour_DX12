@@ -1242,9 +1242,8 @@ void W3DRadar::buildTerrainTexture( TerrainLogic *terrain )
 			// the sampling and interpolation algorithm for generating pretty looking terrain
 			// and water for the radar is just, well, expensive.
 			//
-			// That was measured against a 2003 driver writing straight to an AGP surface.  Here
-			// every LockRect crosses d3d8to9 into the Direct3D 9 runtime, so the lock is hoisted
-			// anyway - the sampling above is still the expensive half, and is untouched.
+			// The upload is kept outside the sampling loop because the native renderer owns
+			// resource transitions; the sampling above is still the expensive half.
 			surface->Draw_Pixel( x, y, GameMakeColor( color.red * 255,
 																							  color.green * 255,
 																							  color.blue * 255,

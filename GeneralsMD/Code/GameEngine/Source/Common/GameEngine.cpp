@@ -280,6 +280,32 @@ static AsciiString thePendingReplayFile;
  */
 static void startAutoSkirmish( void )
 {
+	// Renderer regression runs need a known faction (USA has radar immediately).
+	// This opt-in affects only the unattended local slot, just like choosing a
+	// faction in the lobby; ordinary launches and simulation rules are unchanged.
+	Int testPlayerTemplate = PLAYERTEMPLATE_RANDOM;
+	char testSide[128] = {};
+	const DWORD testSideLength = GetEnvironmentVariableA("GENERALS_D3D12_TEST_SIDE", testSide, sizeof(testSide));
+	if (testSideLength != 0)
+	{
+		if (testSideLength >= sizeof(testSide)) return;
+		for (Int i = 0; i < ThePlayerTemplateStore->getPlayerTemplateCount(); ++i)
+		{
+			const PlayerTemplate *candidate = ThePlayerTemplateStore->getNthPlayerTemplate(i);
+			if (candidate && candidate->isPlayableSide() &&
+				_stricmp(candidate->getSide().str(), testSide) == 0)
+			{
+				testPlayerTemplate = i;
+				break;
+			}
+		}
+		if (testPlayerTemplate == PLAYERTEMPLATE_RANDOM)
+		{
+			DEBUG_LOG(("-autoskirmish: unknown renderer test side '%s'\n", testSide));
+			return;
+		}
+		DEBUG_LOG(("-autoskirmish: renderer test side '%s'\n", testSide));
+	}
 	AsciiString mapName = TheGlobalData->m_mapName;
 	if (mapName.isEmpty())
 	{
@@ -330,7 +356,7 @@ static void startAutoSkirmish( void )
 		{
 			slot.setState( SLOT_PLAYER, localName );
 			slot.setName( localName );
-			slot.setPlayerTemplate( PLAYERTEMPLATE_RANDOM );
+			slot.setPlayerTemplate( testPlayerTemplate );
 		}
 		else
 		{

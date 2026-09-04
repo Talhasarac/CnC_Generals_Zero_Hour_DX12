@@ -49,11 +49,16 @@
  * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
 #include "surfaceclass.h"
+#include "surface_pixel_write.h"
 #include "formconv.h"
 #include "dx8wrapper.h"
 #include "vector2i.h"
 #include "colorspace.h"
 #include "bound.h"
+#include "bitmaphandler.h"
+#include "native_d3d12_renderer.h"
+#include "TARGA.H"
+#include <algorithm>
 #include <d3dx8.h>
 
 /***********************************************************************************************
@@ -214,24 +219,83 @@ void Convert_Pixel(unsigned char * pixel,const SurfaceClass::SurfaceDescription 
 *************************************************************************/
 SurfaceClass::SurfaceClass(unsigned width, unsigned height, WW3DFormat format):
 	D3DSurface(NULL),
-	SurfaceFormat(format)
+	SurfaceFormat(format),
+	NativeWidth(width),
+	NativeHeight(height),
+	NativePitch(0),
+	NativeLocked(false)
 {
 	WWASSERT(width);
 	WWASSERT(height);
-	D3DSurface = DX8Wrapper::_Create_DX8_Surface(width, height, format);
+	if (NativeD3D12Renderer::Active() != NULL)
+	{
+		SurfaceDescription desc = { format, width, height };
+		NativePitch = width * PixelSize(desc);
+		if (NativePitch != 0)
+			NativePixels.resize(static_cast<size_t>(NativePitch) * height);
+	}
+	else
+	{
+		D3DSurface = DX8Wrapper::_Create_DX8_Surface(width, height, format);
+	}
 }
 
 SurfaceClass::SurfaceClass(const char *filename):
-	D3DSurface(NULL)
+	D3DSurface(NULL),
+	SurfaceFormat(WW3D_FORMAT_UNKNOWN),
+	NativeWidth(0),
+	NativeHeight(0),
+	NativePitch(0),
+	NativeLocked(false)
 {
-	D3DSurface = DX8Wrapper::_Create_DX8_Surface(filename);
-	SurfaceDescription desc;
-	Get_Description(desc);
-	SurfaceFormat=desc.Format;
+	if (NativeD3D12Renderer::Active() != NULL)
+	{
+		Targa targa;
+		if (!TARGA_ERROR_HANDLER(targa.Open(filename, TGA_READMODE), filename))
+		{
+			targa.Header.ImageDescriptor ^= TGAIDF_YORIGIN;
+			char palette[256 * 4] = {};
+			targa.SetPalette(palette);
+			if (!TARGA_ERROR_HANDLER(targa.Load(filename, TGAF_IMAGE, false), filename))
+			{
+				WW3DFormat sourceFormat;
+				unsigned sourceBpp = 0;
+				Get_WW3D_Format(sourceFormat, sourceBpp, targa);
+				NativeWidth = static_cast<unsigned>(targa.Header.Width);
+				NativeHeight = static_cast<unsigned>(targa.Header.Height);
+				SurfaceFormat = sourceFormat;
+				SurfaceDescription desc = { SurfaceFormat, NativeWidth, NativeHeight };
+				NativePitch = NativeWidth * PixelSize(desc);
+				if (NativePitch != 0)
+				{
+					NativePixels.resize(static_cast<size_t>(NativePitch) * NativeHeight);
+					BitmapHandlerClass::Copy_Image(
+						NativePixels.data(), NativeWidth, NativeHeight, NativePitch,
+						SurfaceFormat,
+						reinterpret_cast<unsigned char *>(targa.GetImage()),
+						NativeWidth, NativeHeight, NativeWidth * sourceBpp,
+						sourceFormat, reinterpret_cast<unsigned char *>(targa.GetPalette()),
+						targa.Header.CMapDepth >> 3, false);
+				}
+			}
+		}
+	}
+	else
+	{
+		D3DSurface = DX8Wrapper::_Create_DX8_Surface(filename);
+		SurfaceDescription desc;
+		Get_Description(desc);
+		SurfaceFormat=desc.Format;
+	}
 }
 
 SurfaceClass::SurfaceClass(IDirect3DSurface8 *d3d_surface)	:
-	D3DSurface (NULL)
+	D3DSurface (NULL),
+	SurfaceFormat(WW3D_FORMAT_UNKNOWN),
+	NativeWidth(0),
+	NativeHeight(0),
+	NativePitch(0),
+	NativeLocked(false)
 {
 	Attach (d3d_surface);
 	SurfaceDescription desc;
@@ -249,6 +313,13 @@ SurfaceClass::~SurfaceClass(void)
 
 void SurfaceClass::Get_Description(SurfaceDescription &surface_desc)
 {
+	if (Is_Native())
+	{
+		surface_desc.Format = SurfaceFormat;
+		surface_desc.Width = NativeWidth;
+		surface_desc.Height = NativeHeight;
+		return;
+	}
 	D3DSURFACE_DESC d3d_desc;
 	::ZeroMemory(&d3d_desc, sizeof(D3DSURFACE_DESC));
 	DX8_ErrorCode(D3DSurface->GetDesc(&d3d_desc));
@@ -259,6 +330,13 @@ void SurfaceClass::Get_Description(SurfaceDescription &surface_desc)
 
 void * SurfaceClass::Lock(int * pitch)
 {
+	if (Is_Native())
+	{
+		if (pitch != NULL)
+			*pitch = static_cast<int>(NativePitch);
+		NativeLocked = true;
+		return NativePixels.data();
+	}
 	D3DLOCKED_RECT lock_rect;	
 	::ZeroMemory(&lock_rect, sizeof(D3DLOCKED_RECT));
 	DX8_ErrorCode(D3DSurface->LockRect(&lock_rect, 0, 0));
@@ -268,7 +346,44 @@ void * SurfaceClass::Lock(int * pitch)
 
 void SurfaceClass::Unlock(void)
 {
+	if (Is_Native())
+	{
+		++NativeRevision;
+		NativeLocked = false;
+		return;
+	}
 	DX8_ErrorCode(D3DSurface->UnlockRect());
+}
+
+void SurfaceClass::Build_Native_Bgra(std::vector<unsigned char> &pixels) const
+{
+	SurfaceDescription desc;
+	const_cast<SurfaceClass *>(this)->Get_Description(desc);
+	pixels.resize(static_cast<size_t>(desc.Width) * desc.Height * 4);
+	if (!Is_Native() || NativePitch == 0)
+	{
+		std::fill(pixels.begin(), pixels.end(), 0);
+		return;
+	}
+
+	const unsigned int sourceSize = PixelSize(desc);
+	if (sourceSize == 0)
+	{
+		std::fill(pixels.begin(), pixels.end(), 0);
+		return;
+	}
+	for (unsigned int y = 0; y < desc.Height; ++y)
+	{
+		const unsigned char *source = NativePixels.data() + static_cast<size_t>(y) * NativePitch;
+		unsigned char *destination = pixels.data() + static_cast<size_t>(y) * desc.Width * 4;
+		for (unsigned int x = 0; x < desc.Width; ++x)
+		{
+			BitmapHandlerClass::Read_B8G8R8A8(
+				destination + x * 4, source + x * sourceSize, desc.Format, NULL, 0);
+			// XRGB's unused byte is not alpha. It may contain zero in source files.
+			if (desc.Format == WW3D_FORMAT_X8R8G8B8) destination[x * 4 + 3] = 255;
+		}
+	}
 }
 
 /***********************************************************************************************
@@ -293,6 +408,12 @@ void SurfaceClass::Clear()
 
 	// size of each pixel in bytes
 	unsigned int size=PixelSize(sd);
+	if (Is_Native())
+	{
+		++NativeRevision;
+		std::fill(NativePixels.begin(), NativePixels.end(), 0);
+		return;
+	}
 
 	D3DLOCKED_RECT lock_rect;	
 	::ZeroMemory(&lock_rect, sizeof(D3DLOCKED_RECT));
@@ -332,6 +453,17 @@ void SurfaceClass::Copy(const unsigned char *other)
 
 	// size of each pixel in bytes
 	unsigned int size=PixelSize(sd);
+	if (Is_Native())
+	{
+		++NativeRevision;
+		if (other != NULL && size != 0)
+		{
+			for (unsigned int y = 0; y < sd.Height; ++y)
+				memcpy(NativePixels.data() + static_cast<size_t>(y) * NativePitch,
+					other + static_cast<size_t>(y) * sd.Width * size, sd.Width * size);
+		}
+		return;
+	}
 
 	D3DLOCKED_RECT lock_rect;	
 	::ZeroMemory(&lock_rect, sizeof(D3DLOCKED_RECT));
@@ -371,6 +503,26 @@ void SurfaceClass::Copy(Vector2i &min,Vector2i &max, const unsigned char *other)
 
 	// size of each pixel in bytes
 	unsigned int size=PixelSize(sd);
+	if (Is_Native())
+	{
+		++NativeRevision;
+		if (other != NULL && size != 0 && !NativePixels.empty())
+		{
+			const int left = MAX(0, min.I);
+			const int top = MAX(0, min.J);
+			const int right = MIN(static_cast<int>(sd.Width), max.I);
+			const int bottom = MIN(static_cast<int>(sd.Height), max.J);
+			if (left >= right || top >= bottom)
+				return;
+			const size_t copyWidth = static_cast<size_t>(right - left) * size;
+			for (int y = top; y < bottom; ++y)
+				memcpy(NativePixels.data() + static_cast<size_t>(y) * NativePitch +
+					static_cast<size_t>(left) * size,
+					other + (static_cast<size_t>(y) * sd.Width + left) * size,
+					copyWidth);
+		}
+		return;
+	}
 
 	D3DLOCKED_RECT lock_rect;	
 	::ZeroMemory(&lock_rect, sizeof(D3DLOCKED_RECT));
@@ -422,6 +574,17 @@ unsigned char *SurfaceClass::CreateCopy(int *width,int *height,int*size,bool fli
 	*size=mysize;
 
 	unsigned char *other=W3DNEWARRAY unsigned char [sd.Height*sd.Width*mysize];
+	if (Is_Native())
+	{
+		for (unsigned int i = 0; i < sd.Height; ++i)
+		{
+			const unsigned int destinationRow = flip ? sd.Height - i - 1 : i;
+			memcpy(other + static_cast<size_t>(destinationRow) * sd.Width * mysize,
+				NativePixels.data() + static_cast<size_t>(i) * NativePitch,
+				sd.Width * mysize);
+		}
+		return other;
+	}
 
 	D3DLOCKED_RECT lock_rect;	
 	::ZeroMemory(&lock_rect, sizeof(D3DLOCKED_RECT));
@@ -475,6 +638,41 @@ void SurfaceClass::Copy(
 	SurfaceDescription sd,osd;
 	Get_Description(sd);
 	const_cast <SurfaceClass*>(other)->Get_Description(osd);
+	if (Is_Native())
+	{
+		++NativeRevision;
+		if (!other->Is_Native())
+			return;
+		const unsigned int sourceSize = PixelSize(osd);
+		const unsigned int destinationSize = PixelSize(sd);
+		const unsigned int copyWidth = MIN(width, MIN(osd.Width > srcx ? osd.Width - srcx : 0,
+			sd.Width > dstx ? sd.Width - dstx : 0));
+		const unsigned int copyHeight = MIN(height, MIN(osd.Height > srcy ? osd.Height - srcy : 0,
+			sd.Height > dsty ? sd.Height - dsty : 0));
+		if (sourceSize == 0 || destinationSize == 0)
+			return;
+		for (unsigned int y = 0; y < copyHeight; ++y)
+		{
+			const unsigned char *source = other->NativePixels.data() +
+				static_cast<size_t>(srcy + y) * other->NativePitch + static_cast<size_t>(srcx) * sourceSize;
+			unsigned char *destination = NativePixels.data() +
+				static_cast<size_t>(dsty + y) * NativePitch + static_cast<size_t>(dstx) * destinationSize;
+			if (sd.Format == osd.Format)
+				memcpy(destination, source, static_cast<size_t>(copyWidth) * sourceSize);
+			else
+			{
+				for (unsigned int x = 0; x < copyWidth; ++x)
+				{
+					unsigned bgra = 0;
+					BitmapHandlerClass::Read_B8G8R8A8(bgra, source + x * sourceSize,
+						osd.Format, NULL, 0);
+					BitmapHandlerClass::Write_B8G8R8A8(destination + x * destinationSize,
+						sd.Format, bgra);
+				}
+			}
+		}
+		return;
+	}
 
 	RECT src;
 	src.left=srcx;
@@ -503,7 +701,8 @@ void SurfaceClass::Copy(
 		if (dest.right>int(sd.Width)) dest.right=int(sd.Width);
 		if (dest.bottom>int(sd.Height)) dest.bottom=int(sd.Height);
 
-		DX8_ErrorCode(D3DXLoadSurfaceFromSurface(D3DSurface,NULL,&dest,other->D3DSurface,NULL,&src,D3DX_FILTER_NONE,0));
+		// Native surfaces are copied by the CPU path above.  The old D3DX
+		// conversion helper is not part of the native renderer.
 	}
 }
 
@@ -532,6 +731,47 @@ void SurfaceClass::Stretch_Copy(
 	SurfaceDescription sd,osd;
 	Get_Description(sd);
 	const_cast <SurfaceClass*>(other)->Get_Description(osd);
+	if (Is_Native())
+	{
+		++NativeRevision;
+		if (!other->Is_Native())
+			return;
+		const unsigned int sourceSize = PixelSize(osd);
+		const unsigned int destinationSize = PixelSize(sd);
+		if (sourceSize == 0 || destinationSize == 0 || dstwidth == 0 || dstheight == 0 ||
+			srcwidth == 0 || srcheight == 0)
+			return;
+		if (dstx >= sd.Width || dsty >= sd.Height || srcx >= osd.Width || srcy >= osd.Height)
+			return;
+		const unsigned int safeDestinationWidth = MIN(dstwidth, sd.Width - dstx);
+		const unsigned int safeDestinationHeight = MIN(dstheight, sd.Height - dsty);
+		const unsigned int safeSourceWidth = MIN(srcwidth, osd.Width - srcx);
+		const unsigned int safeSourceHeight = MIN(srcheight, osd.Height - srcy);
+		if (safeDestinationWidth == 0 || safeDestinationHeight == 0 ||
+			safeSourceWidth == 0 || safeSourceHeight == 0)
+			return;
+		for (unsigned int y = 0; y < safeDestinationHeight; ++y)
+		{
+			const unsigned int sourceY = srcy + (y * safeSourceHeight) / safeDestinationHeight;
+			for (unsigned int x = 0; x < safeDestinationWidth; ++x)
+			{
+				const unsigned int sourceX = srcx + (x * safeSourceWidth) / safeDestinationWidth;
+				const unsigned char *source = other->NativePixels.data() +
+					static_cast<size_t>(sourceY) * other->NativePitch + sourceX * sourceSize;
+				unsigned char *destination = NativePixels.data() +
+					static_cast<size_t>(dsty + y) * NativePitch + (dstx + x) * destinationSize;
+				if (sd.Format == osd.Format)
+					memcpy(destination, source, destinationSize);
+				else
+				{
+					unsigned bgra = 0;
+					BitmapHandlerClass::Read_B8G8R8A8(bgra, source, osd.Format, NULL, 0);
+					BitmapHandlerClass::Write_B8G8R8A8(destination, sd.Format, bgra);
+				}
+			}
+		}
+		return;
+	}
 
 	RECT src;
 	src.left=srcx;
@@ -545,7 +785,7 @@ void SurfaceClass::Stretch_Copy(
 	dest.top=dsty;
 	dest.bottom=dsty+dstheight;
 
-	DX8_ErrorCode(D3DXLoadSurfaceFromSurface(D3DSurface,NULL,&dest,other->D3DSurface,NULL,&src,D3DX_FILTER_TRIANGLE ,0));
+	// Native surfaces are resized by the CPU path above; no D3DX helper is used.
 }
 
 /***********************************************************************************************
@@ -569,6 +809,38 @@ void SurfaceClass::FindBB(Vector2i *min,Vector2i*max)
 	Get_Description(sd);
 
 	WWASSERT(Has_Alpha(sd.Format));
+	if (Is_Native())
+	{
+		Vector2i realmin = *max;
+		Vector2i realmax = *min;
+		const unsigned int sourceSize = PixelSize(sd);
+		const int left = MAX(0, min->I);
+		const int top = MAX(0, min->J);
+		const int right = MIN(static_cast<int>(sd.Width), max->I);
+		const int bottom = MIN(static_cast<int>(sd.Height), max->J);
+		if (sourceSize == 0 || left >= right || top >= bottom)
+			return;
+		for (int y = top; y < bottom; ++y)
+		{
+			for (int x = left; x < right; ++x)
+			{
+				unsigned bgra = 0;
+				const unsigned char *pixel = NativePixels.data() + static_cast<size_t>(y) * NativePitch +
+					static_cast<size_t>(x) * sourceSize;
+				BitmapHandlerClass::Read_B8G8R8A8(bgra, pixel, sd.Format, NULL, 0);
+				if ((bgra >> 24) != 0)
+				{
+					realmin.I = MIN(realmin.I, x);
+					realmax.I = MAX(realmax.I, x);
+					realmin.J = MIN(realmin.J, y);
+					realmax.J = MAX(realmax.J, y);
+				}
+			}
+		}
+		*max = realmax;
+		*min = realmin;
+		return;
+	}
 
 	int alphabits=Alpha_Bits(sd.Format);
 	int mask=0;
@@ -645,6 +917,22 @@ bool SurfaceClass::Is_Transparent_Column(unsigned int column)
 
 	WWASSERT(column<sd.Width);
 	WWASSERT(Has_Alpha(sd.Format));
+	if (Is_Native())
+	{
+		const unsigned int sourceSize = PixelSize(sd);
+		if (sourceSize == 0)
+			return true;
+		for (unsigned int y = 0; y < sd.Height; ++y)
+		{
+			unsigned bgra = 0;
+			const unsigned char *pixel = NativePixels.data() + static_cast<size_t>(y) * NativePitch +
+				static_cast<size_t>(column) * sourceSize;
+			BitmapHandlerClass::Read_B8G8R8A8(bgra, pixel, sd.Format, NULL, 0);
+			if ((bgra >> 24) != 0)
+				return false;
+		}
+		return true;
+	}
 
 	int alphabits=Alpha_Bits(sd.Format);
 	int mask=0;
@@ -711,8 +999,15 @@ void SurfaceClass::Get_Pixel(Vector3 &rgb, int x,int y)
 	SurfaceDescription sd;
 	Get_Description(sd);
 
-	x = min(x,(int)sd.Width - 1);
-	y = min(y,(int)sd.Height - 1);
+	x = MAX(0, min(x,(int)sd.Width - 1));
+	y = MAX(0, min(y,(int)sd.Height - 1));
+	if (Is_Native())
+	{
+		const unsigned int sourceSize = PixelSize(sd);
+		Convert_Pixel(rgb, sd, NativePixels.data() + static_cast<size_t>(y) * NativePitch +
+			static_cast<size_t>(x) * sourceSize);
+		return;
+	}
 
 	D3DLOCKED_RECT lock_rect;
 	::ZeroMemory(&lock_rect, sizeof(D3DLOCKED_RECT));
@@ -809,6 +1104,13 @@ void SurfaceClass::DrawPixel(const unsigned int x,const unsigned int y, unsigned
 	Get_Description(sd);
 
 	unsigned int size=PixelSize(sd);
+	if (Is_Native())
+	{
+		++NativeRevision;
+		if (x < sd.Width && y < sd.Height)
+			Draw_Pixel(x, y, color, size, NativePixels.data(), static_cast<int>(NativePitch));
+		return;
+	}
 
 	D3DLOCKED_RECT lock_rect;
 	::ZeroMemory(&lock_rect, sizeof(D3DLOCKED_RECT));
@@ -876,19 +1178,7 @@ void SurfaceClass::Draw_Pixel(const unsigned int x, const unsigned int y, const 
 	const unsigned int bytes_per_pixel, void *bits, const int pitch)
 {
 	unsigned char *row = (unsigned char *)bits + y * pitch;
-
-	switch (bytes_per_pixel)
-	{
-	case 1:
-		*(unsigned char *)(row + x) = (unsigned char)(color & 0xFF);
-		break;
-	case 2:
-		*(unsigned short *)(row + x * 2) = (unsigned short)(color & 0xFFFF);
-		break;
-	case 4:
-		*(unsigned int *)(row + x * 4) = color;
-		break;
-	}
+	WritePackedSurfacePixel(row + x * bytes_per_pixel, color, bytes_per_pixel);
 }
 
 void SurfaceClass::Draw_H_Line(const unsigned int y, const unsigned int x1, const unsigned int x2,
@@ -906,6 +1196,16 @@ void SurfaceClass::DrawHLine(const unsigned int y,const unsigned int x1, const u
 	Get_Description(sd);
 
 	unsigned int size=PixelSize(sd);
+	if (Is_Native())
+	{
+		++NativeRevision;
+		if (y < sd.Height && x1 < sd.Width && x2 >= x1)
+		{
+			const unsigned int clippedX2 = MIN(x2, sd.Width - 1);
+			Draw_H_Line(y, x1, clippedX2, color, size, NativePixels.data(), static_cast<int>(NativePitch));
+		}
+		return;
+	}
 
 	D3DLOCKED_RECT lock_rect;
 	::ZeroMemory(&lock_rect, sizeof(D3DLOCKED_RECT));

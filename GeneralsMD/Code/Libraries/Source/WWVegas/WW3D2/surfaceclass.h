@@ -46,6 +46,8 @@
 #include "ww3dformat.h"
 #include "refcount.h"
 
+#include <vector>
+
 struct IDirect3DSurface8;
 class Vector2i;
 class Vector3;
@@ -82,6 +84,15 @@ class SurfaceClass : public W3DMPO, public RefCountClass
 
 		// Get surface description
 		 void Get_Description(SurfaceDescription &surface_desc);
+
+		// Native D3D12 mode keeps UI/font surfaces in CPU memory until they are
+		// converted to a sampled texture.  The legacy D3D surface is not present
+		// on this path.
+		bool Is_Native() const { return D3DSurface == NULL && !NativePixels.empty(); }
+		const void *Peek_Native_Pixels() const { return NativePixels.empty() ? NULL : NativePixels.data(); }
+		unsigned int Peek_Native_Pitch() const { return NativePitch; }
+		unsigned long long Native_Revision() const { return NativeRevision; }
+		void Build_Native_Bgra(std::vector<unsigned char> &pixels) const;
 
 		// Lock / unlock the surface
 		void * Lock(int * pitch);
@@ -157,8 +168,16 @@ class SurfaceClass : public W3DMPO, public RefCountClass
 		IDirect3DSurface8 *D3DSurface;
 
 		WW3DFormat SurfaceFormat;
+		std::vector<unsigned char> NativePixels;
+		unsigned int NativeWidth;
+		unsigned int NativeHeight;
+		unsigned int NativePitch;
+		bool NativeLocked;
+		unsigned long long NativeRevision = 0;
 	friend class TextureClass;	
 };
+
+unsigned int PixelSize(const SurfaceClass::SurfaceDescription &surface_desc);
 
 #endif
 

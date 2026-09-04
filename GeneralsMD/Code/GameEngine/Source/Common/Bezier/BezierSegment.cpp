@@ -28,6 +28,7 @@
 #include "Common/BezFwdIterator.h"
 
 #include <D3DX8Math.h>
+#include "WW3D2/native_matrix_math.h"
 
 //-------------------------------------------------------------------------------------------------
 BezierSegment::BezierSegment()
@@ -109,7 +110,7 @@ void BezierSegment::evaluateBezSegmentAtT(Real tValue, Coord3D *outResult) const
 	D3DXVECTOR4 zCoords(m_controlPoints[0].z, m_controlPoints[1].z, m_controlPoints[2].z, m_controlPoints[3].z);
 
 	D3DXVECTOR4 tResult;
-	D3DXVec4Transform(&tResult, &tVec, &BezierSegment::s_bezBasisMatrix);
+	NativeMatrixMath::Transform(&tResult, &tVec, &BezierSegment::s_bezBasisMatrix);
 	
 	outResult->x = D3DXVec4Dot(&xCoords, &tResult);
 	outResult->y = D3DXVec4Dot(&yCoords, &tResult);

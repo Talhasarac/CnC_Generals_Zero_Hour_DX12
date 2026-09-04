@@ -67,10 +67,12 @@ class AlphaTerrainTextureClass : public TextureClass
 {
 	W3DMPO_GLUE(AlphaTerrainTextureClass)
 protected:
+		TextureClass *m_baseTexture;
 		virtual void Apply(unsigned int stage);
 public:
 		// Create texture for a height map.
 		AlphaTerrainTextureClass(TextureClass *pBaseTex );
+		virtual ~AlphaTerrainTextureClass();
 
 		// just use default destructor. ~TerrainTextureClass(void);
 

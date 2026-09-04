@@ -185,11 +185,13 @@ static void drawButtonText( GameWindow *window, WinInstanceData *instData )
 
 // drawCountBadge =============================================================
 /** Draw a small number badge in the button's bottom right corner (queued unit
-	* counts, selection sizes).  One shared DisplayString serves every button. */
+ * counts, selection sizes). The button retains its own rendered label. */
 //=============================================================================
 static void drawCountBadge( GameWindow *window, Int count )
 {
-	static DisplayString *badge = NULL;
+	PushButtonData *data = (PushButtonData *)window->winGetUserData();
+	if (data == NULL) return;
+	DisplayString *&badge = data->countLabel;
 	ICoord2D origin, size, textPos;
 	Int width, height;
 
@@ -233,7 +235,9 @@ static void drawCountBadge( GameWindow *window, Int count )
 //=============================================================================
 static void drawSecondsBadge( GameWindow *window, Int seconds )
 {
-	static DisplayString *label = NULL;
+	PushButtonData *data = (PushButtonData *)window->winGetUserData();
+	if (data == NULL) return;
+	DisplayString *&label = data->secondsLabel;
 	ICoord2D origin, size, textPos;
 	Int width, height;
 
@@ -274,7 +278,9 @@ static void drawSecondsBadge( GameWindow *window, Int seconds )
 //=============================================================================
 static void drawCostBadge( GameWindow *window, Int cost )
 {
-	static DisplayString *label = NULL;
+	PushButtonData *data = (PushButtonData *)window->winGetUserData();
+	if (data == NULL) return;
+	DisplayString *&label = data->costLabel;
 	ICoord2D origin, size, textPos;
 	Int width, height;
 

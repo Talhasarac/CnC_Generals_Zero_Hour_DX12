@@ -41,45 +41,55 @@
 
 #include "dx8fvf.h"
 #include "wwstring.h"
-#include <D3dx8core.h>
 
-static unsigned Get_FVF_Vertex_Size(unsigned FVF)
+static constexpr unsigned PositionBytes(unsigned fvf)
 {
-	return D3DXGetFVFVertexSize(FVF);
-}
-
-FVFInfoClass::FVFInfoClass(unsigned FVF_, unsigned vertex_size) 
-	:
-	FVF(FVF_),
-	fvf_size(FVF!=0 ? Get_FVF_Vertex_Size(FVF) : vertex_size)
-{
-	location_offset=0;
-	blend_offset=location_offset;
-	
-	if ((FVF&D3DFVF_XYZ)==D3DFVF_XYZ) blend_offset+=3*sizeof(float);
-	normal_offset=blend_offset;
-
-	if ( ((FVF&D3DFVF_XYZB4)==D3DFVF_XYZB4) &&
-		  ((FVF&D3DFVF_LASTBETA_UBYTE4)==D3DFVF_LASTBETA_UBYTE4) ) normal_offset+=3*sizeof(float)+sizeof(DWORD);
-	diffuse_offset=normal_offset;
-
-	if ((FVF&D3DFVF_NORMAL)==D3DFVF_NORMAL) diffuse_offset+=3*sizeof(float);
-	specular_offset=diffuse_offset;
-
-	if ((FVF&D3DFVF_DIFFUSE)==D3DFVF_DIFFUSE) specular_offset+=sizeof(DWORD);
-	texcoord_offset[0]=specular_offset;
-
-	if ((FVF&D3DFVF_SPECULAR)==D3DFVF_SPECULAR) texcoord_offset[0]+=sizeof(DWORD);	
-
-	for (unsigned int i=1; i<D3DDP_MAXTEXCOORD; i++)
-	{
-		texcoord_offset[i]=texcoord_offset[i-1];
-
-		if ((int(FVF)&D3DFVF_TEXCOORDSIZE1(i-1))==D3DFVF_TEXCOORDSIZE1(i-1)) texcoord_offset[i]+=sizeof(float);
-		else if ((int(FVF)&D3DFVF_TEXCOORDSIZE2(i-1))==D3DFVF_TEXCOORDSIZE2(i-1)) texcoord_offset[i]+=2*sizeof(float);
-		else if ((int(FVF)&D3DFVF_TEXCOORDSIZE3(i-1))==D3DFVF_TEXCOORDSIZE3(i-1)) texcoord_offset[i]+=3*sizeof(float);
-		else if ((int(FVF)&D3DFVF_TEXCOORDSIZE4(i-1))==D3DFVF_TEXCOORDSIZE4(i-1)) texcoord_offset[i]+=4*sizeof(float);
+	switch (fvf & D3DFVF_POSITION_MASK) {
+	case D3DFVF_XYZ: return 12;
+	case D3DFVF_XYZRHW: return 16;
+	case D3DFVF_XYZB1: return 16;
+	case D3DFVF_XYZB2: return 20;
+	case D3DFVF_XYZB3: return 24;
+	case D3DFVF_XYZB4: return 28;
+	case D3DFVF_XYZB5: return 32;
+	default: return 0;
 	}
+}
+static constexpr unsigned TextureCoordinateBytes(unsigned fvf, unsigned stage)
+{
+	// The packed encoding is 0=2, 1=3, 2=4, 3=1 components, not 1..4.
+	const unsigned encoded = (fvf >> (16 + stage*2)) & 3;
+	return (encoded == 3 ? 1 : encoded + 2) * sizeof(float);
+}
+static constexpr unsigned Get_FVF_Vertex_Size(unsigned fvf)
+{
+	unsigned size = PositionBytes(fvf);
+	if (fvf & D3DFVF_NORMAL) size += 12;
+	if (fvf & D3DFVF_PSIZE) size += 4;
+	if (fvf & D3DFVF_DIFFUSE) size += 4;
+	if (fvf & D3DFVF_SPECULAR) size += 4;
+	const unsigned count = (fvf & D3DFVF_TEXCOUNT_MASK) >> D3DFVF_TEXCOUNT_SHIFT;
+	for (unsigned i=0;i<count;++i) size += TextureCoordinateBytes(fvf,i);
+	return size;
+}
+static_assert(Get_FVF_Vertex_Size(D3DFVF_XYZ|D3DFVF_DIFFUSE|D3DFVF_TEX1)==24, "UI vertex layout");
+static_assert(Get_FVF_Vertex_Size(D3DFVF_XYZ|D3DFVF_NORMAL|D3DFVF_DIFFUSE|D3DFVF_TEX2)==44, "sorting vertex layout");
+static_assert(Get_FVF_Vertex_Size(D3DFVF_XYZB4|D3DFVF_LASTBETA_UBYTE4|D3DFVF_NORMAL|D3DFVF_TEX1)==48, "skinned vertex layout");
+static_assert(TextureCoordinateBytes(D3DFVF_TEXCOORDSIZE1(0),0)==4, "one-component UV");
+static_assert(TextureCoordinateBytes(D3DFVF_TEXCOORDSIZE3(0),0)==12, "three-component UV");
+static_assert(TextureCoordinateBytes(D3DFVF_TEXCOORDSIZE4(0),0)==16, "four-component UV");
+
+FVFInfoClass::FVFInfoClass(unsigned FVF_, unsigned vertex_size)
+	: FVF(FVF_), fvf_size(FVF ? Get_FVF_Vertex_Size(FVF) : vertex_size)
+{
+	location_offset = 0;
+	blend_offset = 3*sizeof(float);
+	normal_offset = PositionBytes(FVF);
+	diffuse_offset = normal_offset + ((FVF&D3DFVF_NORMAL)?12:0) + ((FVF&D3DFVF_PSIZE)?4:0);
+	specular_offset = diffuse_offset + ((FVF&D3DFVF_DIFFUSE)?4:0);
+	texcoord_offset[0] = specular_offset + ((FVF&D3DFVF_SPECULAR)?4:0);
+	for (unsigned i=1;i<D3DDP_MAXTEXCOORD;++i)
+		texcoord_offset[i] = texcoord_offset[i-1]+TextureCoordinateBytes(FVF,i-1);
 }
 
 void FVFInfoClass::Get_FVF_Name(StringClass& fvfname) const

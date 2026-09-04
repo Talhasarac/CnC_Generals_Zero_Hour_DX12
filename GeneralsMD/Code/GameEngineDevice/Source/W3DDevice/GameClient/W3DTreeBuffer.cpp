@@ -84,10 +84,15 @@ enum
 #include "WW3D2/Camera.h"
 #include "WW3D2/DX8Wrapper.h"
 #include "WW3D2/DX8Renderer.h"
+#include "WW3D2/native_d3d12_renderer.h"
 #include "WW3D2/Matinfo.h"
 #include "WW3D2/Mesh.h"
 #include "WW3D2/MeshMdl.h"
 #include "d3dx8tex.h"
+#include "WW3D2/native_matrix_math.h"
+
+#define D3DXMatrixMultiply NativeMatrixMath::Multiply
+#define D3DXMatrixTranspose NativeMatrixMath::Transpose
 
 #ifdef _INTERNAL
 // for occasional debugging...
@@ -136,6 +141,61 @@ int W3DTreeBuffer::W3DTreeTextureClass::update(W3DTreeBuffer *buffer)
 	//Set to clamp.
 	Get_Filter().Set_U_Addr_Mode(TextureFilterClass::TEXTURE_ADDRESS_CLAMP);
 	Get_Filter().Set_V_Addr_Mode(TextureFilterClass::TEXTURE_ADDRESS_CLAMP);
+
+	if (NativeD3D12Renderer::Active() != NULL)
+	{
+		SurfaceClass *surface = Get_Surface_Level(0);
+		SurfaceClass::SurfaceDescription description;
+		if (surface == NULL || buffer == NULL)
+		{
+			REF_PTR_RELEASE(surface);
+			return 0;
+		}
+		surface->Get_Description(description);
+		int pitch = 0;
+		UnsignedByte *bits = static_cast<UnsignedByte *>(surface->Lock(&pitch));
+		if (bits == NULL || pitch < static_cast<int>(description.Width * 4) || PixelSize(description) != 4)
+		{
+			if (bits != NULL)
+				surface->Unlock();
+			REF_PTR_RELEASE(surface);
+			return 0;
+		}
+
+		const Int tilePixelExtent = TILE_PIXEL_EXTENT;
+		for (Int tileNdx = 0; tileNdx < buffer->getNumTiles(); ++tileNdx)
+		{
+			TileData *tile = buffer->getSourceTile(tileNdx);
+			if (tile == NULL || tile->m_tileLocationInTexture.x < 0)
+				continue;
+			const ICoord2D position = tile->m_tileLocationInTexture;
+			if (position.y < 0 ||
+				position.x + tilePixelExtent > static_cast<Int>(description.Width) ||
+				position.y + tilePixelExtent > static_cast<Int>(description.Height))
+				continue;
+			for (Int row = 0; row < tilePixelExtent; ++row)
+			{
+				const UnsignedByte *source = tile->getRGBDataForWidth(tilePixelExtent) +
+					(tilePixelExtent - 1 - row) * TILE_BYTES_PER_PIXEL * tilePixelExtent;
+				UnsignedByte *destination = bits + static_cast<size_t>(position.y + row) * pitch +
+					static_cast<size_t>(position.x) * 4;
+				for (Int column = 0; column < tilePixelExtent; ++column)
+				{
+					destination[0] = source[0];
+					destination[1] = source[1];
+					destination[2] = source[2];
+					destination[3] = source[3];
+					destination += 4;
+					source += TILE_BYTES_PER_PIXEL;
+				}
+			}
+		}
+		surface->Unlock();
+		Mark_Native_Surface_Dirty();
+		const Int height = static_cast<Int>(description.Height);
+		REF_PTR_RELEASE(surface);
+		return height;
+	}
 
 	IDirect3DSurface8 *surface_level;
 	D3DSURFACE_DESC surface_desc;
@@ -194,7 +254,7 @@ int W3DTreeBuffer::W3DTreeTextureClass::update(W3DTreeBuffer *buffer)
 	}
 	DX8_ErrorCode(surface_level->UnlockRect());
 	surface_level->Release();
-	DX8_ErrorCode(D3DXFilterTexture(Peek_D3D_Texture(), NULL, (UINT)0, D3DX_FILTER_BOX));	
+	// Native D3D12 texture uploads own mip generation; no D3DX helper is used.
 	if (TheWritableGlobalData->m_textureReductionFactor) {
 		DX8_ErrorCode(Peek_D3D_Texture()->SetLOD((DWORD)TheWritableGlobalData->m_textureReductionFactor));
 	}
@@ -1142,11 +1202,11 @@ void W3DTreeBuffer::freeTreeBuffers(void)
 		REF_PTR_RELEASE(m_indexTree[i]);
 	}
 	
-	if (m_dwTreePixelShader)
+	if (m_dwTreePixelShader && DX8Wrapper::_Get_D3D_Device8() != NULL)
 		DX8Wrapper::_Get_D3D_Device8()->DeletePixelShader(m_dwTreePixelShader);
 	m_dwTreePixelShader = 0;
 
-	if (m_dwTreeVertexShader)
+	if (m_dwTreeVertexShader && DX8Wrapper::_Get_D3D_Device8() != NULL)
 		DX8Wrapper::_Get_D3D_Device8()->DeleteVertexShader(m_dwTreeVertexShader);
 	m_dwTreeVertexShader = 0;
 }
@@ -1744,6 +1804,44 @@ void W3DTreeBuffer::drawTrees(CameraClass * camera, RefRenderObjListIterator *pD
 
 	DX8Wrapper::Draw_Triangles(	0,2, 0,	4);	//draw a quad, 2 triangles, 4 verts
 #endif
+
+	if (NativeD3D12Renderer::Active() != NULL)
+	{
+		if (m_curNumTreeIndices[0] == 0)
+			return;
+
+		// Cutout alpha and the shroud stage are part of the tree material;
+		// inheriting the preceding terrain pass produces opaque tree rectangles.
+		DX8Wrapper::Set_Shader(detailAlphaShader);
+		DX8Wrapper::Set_World_Identity();
+		DX8Wrapper::Set_Texture(0, m_treeTexture);
+		DX8Wrapper::Set_Texture(1, NULL);
+		DX8Wrapper::Apply_Render_State_Changes();
+		DX8Wrapper::Set_DX8_Texture_Stage_State(0, D3DTSS_TEXCOORDINDEX, 0);
+		DX8Wrapper::Set_DX8_Texture_Stage_State(0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_DISABLE);
+		W3DShaderManager::setShroudTex(1);
+		// Reuse the logic-timed breeze offsets, with slot zero keeping static
+		// vertices rooted. Deformation and push-aside shading run in native HLSL.
+		float nativeSway[MAX_SWAY_TYPES+1][4] = {};
+		for (Int sway=0;sway<MAX_SWAY_TYPES;++sway) {
+			nativeSway[sway+1][0] = swayFactor[sway].X;
+			nativeSway[sway+1][1] = swayFactor[sway].Y;
+			nativeSway[sway+1][2] = swayFactor[sway].Z;
+		}
+		NativeD3D12Renderer::Active()->SetTreeSway(nativeSway,MAX_SWAY_TYPES+1);
+		for (Int bufferIndex = 0; bufferIndex < MAX_BUFFERS; ++bufferIndex)
+		{
+			if (m_curNumTreeIndices[bufferIndex] == 0)
+				break;
+			DX8Wrapper::Set_Index_Buffer(m_indexTree[bufferIndex], 0);
+			DX8Wrapper::Set_Vertex_Buffer(m_vertexTree[bufferIndex]);
+			DX8Wrapper::Apply_Render_State_Changes();
+			DX8Wrapper::Draw_Triangles(0, m_curNumTreeIndices[bufferIndex] / 3, 0,
+				m_curNumTreeVertices[bufferIndex]);
+		}
+		NativeD3D12Renderer::Active()->SetTreeSway(NULL,0);
+		return;
+	}
 
 
 	if (m_curNumTreeIndices[0] == 0) {

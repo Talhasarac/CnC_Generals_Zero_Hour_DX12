@@ -24,6 +24,7 @@
 
 #include "PreRTS.h"
 #include "Common/BezFwdIterator.h"
+#include "WW3D2/native_matrix_math.h"
 
 //-------------------------------------------------------------------------------------------------
 BezFwdIterator::BezFwdIterator(): mStep(0), mStepsDesired(0)
@@ -66,9 +67,9 @@ void BezFwdIterator::start(void)
 	D3DXVECTOR4 pz(mBezSeg.m_controlPoints[0].z, mBezSeg.m_controlPoints[1].z, mBezSeg.m_controlPoints[2].z, mBezSeg.m_controlPoints[3].z);
 
 	D3DXVECTOR4 cVec[3];
-	D3DXVec4Transform(&cVec[0], &px, &BezierSegment::s_bezBasisMatrix);
-	D3DXVec4Transform(&cVec[1], &py, &BezierSegment::s_bezBasisMatrix);
-	D3DXVec4Transform(&cVec[2], &pz, &BezierSegment::s_bezBasisMatrix);
+	NativeMatrixMath::Transform(&cVec[0], &px, &BezierSegment::s_bezBasisMatrix);
+	NativeMatrixMath::Transform(&cVec[1], &py, &BezierSegment::s_bezBasisMatrix);
+	NativeMatrixMath::Transform(&cVec[2], &pz, &BezierSegment::s_bezBasisMatrix);
 
 	mCurrPoint = mBezSeg.m_controlPoints[0];
 

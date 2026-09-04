@@ -47,10 +47,10 @@
 #include "wwdebug.h"
 #include "refcount.h"
 #include "sphere.h"
+#include "native_d3d12_renderer.h"
 
 class DX8Wrapper;
 class SortingRendererClass;
-struct IDirect3DIndexBuffer8;
 class DX8IndexBufferClass;
 class SortingIndexBufferClass;
 
@@ -179,10 +179,11 @@ public:
 	void Copy(unsigned int* indices,unsigned start_index,unsigned index_count);
 	void Copy(unsigned short* indices,unsigned start_index,unsigned index_count);
 
-	inline IDirect3DIndexBuffer8* Get_DX8_Index_Buffer()	{ return index_buffer; }
+	inline NativeD3D12UploadBuffer* Get_Native_Index_Buffer()	{ return index_buffer; }
+	inline const NativeD3D12UploadBuffer* Get_Native_Index_Buffer() const	{ return index_buffer; }
 	
 private:
-	IDirect3DIndexBuffer8*	index_buffer;		// actual dx8 index buffer
+	NativeD3D12UploadBuffer*	index_buffer;		// CPU staging storage uploaded by the native D3D12 renderer
 };
 
 

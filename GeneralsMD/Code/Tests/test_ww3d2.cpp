@@ -1269,27 +1269,20 @@ TEST(fvf_offsets_of_absent_elements_alias_the_next_one)
 	}
 }
 
-TEST(fvf_texcoord_offsets_assume_two_floats_per_set)
+TEST(fvf_texcoord_offsets_follow_declared_dimensions)
 {
-	/* DEFECT: the loop tests (FVF & D3DFVF_TEXCOORDSIZE2(i)) == ... , and
-	   D3DFVF_TEXTUREFORMAT2 is 0, so that comparison is true for every FVF.
-	   The size-3 and size-4 arms below it are unreachable, and any coordinate
-	   set wider than two floats gets the wrong offset from there on.
-	   XYZNDUV1TG3 declares three size-3 sets, so it is affected. */
+	/* Size-2 has encoding zero, not a bit flag. The native FVF decoder must
+	   decode each two-bit field so generated 3D coordinates keep their stride. */
 	CHECK_EQ(unsigned(D3DFVF_TEXTUREFORMAT2), 0u);
 
 	FVFInfoClass tg3(DX8_FVF_XYZNDUV1TG3);
 	CHECK_EQ(tg3.Get_Tex_Offset(0), unsigned(offsetof(VertexFormatXYZNDUV1TG3, u1)));
 	CHECK_EQ(tg3.Get_Tex_Offset(1), unsigned(offsetof(VertexFormatXYZNDUV1TG3, Sx)));
 
-	/* From here the walk is 8 bytes per set instead of 12. */
-	CHECK_EQ(tg3.Get_Tex_Offset(2), 44u);
-	CHECK_EQ(unsigned(offsetof(VertexFormatXYZNDUV1TG3, Tx)), 48u);
-	CHECK_EQ(tg3.Get_Tex_Offset(3), 52u);
-	CHECK_EQ(unsigned(offsetof(VertexFormatXYZNDUV1TG3, SxTx)), 60u);
+	CHECK_EQ(tg3.Get_Tex_Offset(2), unsigned(offsetof(VertexFormatXYZNDUV1TG3, Tx)));
+	CHECK_EQ(tg3.Get_Tex_Offset(3), unsigned(offsetof(VertexFormatXYZNDUV1TG3, SxTx)));
 
-	/* D3DXGetFVFVertexSize does the arithmetic properly, so the size is right
-	   even though the offsets are not. */
+	/* Layout and total size must agree with the actual C++ vertex struct. */
 	CHECK_EQ(tg3.Get_FVF_Size(), 72u);
 }
 
@@ -1737,9 +1730,19 @@ TEST(surface_draw_pixel_truncates_the_colour_the_way_drawpixel_did)
 	SurfaceClass::Draw_Pixel( 5, 1, 0x11223344, 2, buf, 16 );
 	CHECK_EQ( *(unsigned short *)( buf + 16 + 5 * 2 ), 0x3344 );
 
-	/* an unsupported pixel size writes nothing at all, exactly as the switch used to */
+	/* BGR24 is used by radar terrain: write three bytes, preserving row padding. */
 	memset( buf, 0, sizeof( buf ) );
-	SurfaceClass::Draw_Pixel( 5, 1, 0x11223344, 3, buf, 16 );
+	SurfaceClass::Draw_Pixel( 4, 1, 0x11223344, 3, buf, 16 );
+	CHECK_EQ( buf[28], 0x44 );
+	CHECK_EQ( buf[29], 0x33 );
+	CHECK_EQ( buf[30], 0x22 );
+	CHECK_EQ( buf[27], 0 );
+	CHECK_EQ( buf[31], 0 );
+	CHECK_EQ( buf[32], 0 );
+
+	/* An actually unsupported pixel size still writes nothing. */
+	memset( buf, 0, sizeof( buf ) );
+	SurfaceClass::Draw_Pixel( 1, 1, 0x11223344, 5, buf, 16 );
 	unsigned int written = 0;
 	for( unsigned int i = 0; i < sizeof( buf ); ++i )
 		if( buf[ i ] != 0 ) ++written;

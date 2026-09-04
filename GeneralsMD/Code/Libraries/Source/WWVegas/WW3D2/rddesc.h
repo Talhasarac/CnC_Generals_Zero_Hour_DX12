@@ -115,6 +115,18 @@ public:
 
 private:
 
+	void set_native_description(const char *device_name, const char *driver_name)
+	{
+		set_device_name(device_name);
+		set_driver_name(driver_name);
+		set_driver_version("D3D12");
+		set_hardware_name(device_name);
+		reset_resolution_list();
+		add_resolution(640, 480, 32);
+		add_resolution(1280, 720, 32);
+		add_resolution(1920, 1080, 32);
+	}
+
 	void set_device_name(const char * name)		{ DeviceName=name; }
 	void set_device_vendor(const char * name)		{ DeviceVendor=name; }
 	void set_device_platform(const char * name)	{ DevicePlatform=name; }

@@ -60,8 +60,38 @@
 #include "formconv.h"
 #include "texturethumbnail.h"
 #include "ddsfile.h"
+#include "native_dds_layout.h"
+#include <string>
 #include "bitmaphandler.h"
 #include "wwprofile.h"
+#include <vector>
+#include <algorithm>
+
+namespace
+{
+	DXGI_FORMAT NativeTextureFormat(WW3DFormat format)
+	{
+		switch (format)
+		{
+		case WW3D_FORMAT_A8R8G8B8:
+			return DXGI_FORMAT_B8G8R8A8_UNORM;
+		case WW3D_FORMAT_X8R8G8B8: return DXGI_FORMAT_B8G8R8X8_UNORM;
+		case WW3D_FORMAT_R5G6B5: return DXGI_FORMAT_B5G6R5_UNORM;
+		case WW3D_FORMAT_A1R5G5B5: return DXGI_FORMAT_B5G5R5A1_UNORM;
+		case WW3D_FORMAT_A4R4G4B4: return DXGI_FORMAT_B4G4R4A4_UNORM;
+		case WW3D_FORMAT_A8: return DXGI_FORMAT_A8_UNORM;
+		case WW3D_FORMAT_L8: return DXGI_FORMAT_R8_UNORM;
+		case WW3D_FORMAT_DXT1: return DXGI_FORMAT_BC1_UNORM;
+		case WW3D_FORMAT_DXT2:
+		case WW3D_FORMAT_DXT3: return DXGI_FORMAT_BC2_UNORM;
+		case WW3D_FORMAT_DXT4:
+		case WW3D_FORMAT_DXT5: return DXGI_FORMAT_BC3_UNORM;
+		default: return DXGI_FORMAT_UNKNOWN;
+		}
+	}
+
+
+}
 
 //#pragma optimize("", off)
 //#pragma MESSAGE("************************************** WARNING, optimization disabled for debugging purposes")
@@ -326,6 +356,12 @@ static bool Is_Format_Compressed(WW3DFormat texture_format,bool allow_compressio
 void TextureLoader::Init()
 {
 	WWASSERT(!_TextureLoadThread.Is_Running());
+	if (NativeD3D12Renderer::Active() != nullptr)
+	{
+		// Native textures are loaded synchronously by TextureClass::Init().
+		// The legacy worker owns D3D8 surfaces and must not be started here.
+		return;
+	}
 
 	ThumbnailManagerClass::Init();
 
@@ -434,6 +470,131 @@ void TextureLoader::Validate_Texture_Size
 	width=poweroftwowidth;
 	height=poweroftwoheight;
 	depth=poweroftwodepth;
+}
+
+NativeD3D12Texture* TextureLoader::Load_Native_Texture(
+	const StringClass& filename,
+	WW3DFormat requested_format,
+	bool allow_compression,
+	unsigned& width,
+	unsigned& height,
+	WW3DFormat& format, unsigned requested_mips)
+{
+	width = 0;
+	height = 0;
+	format = WW3D_FORMAT_UNKNOWN;
+	NativeD3D12Renderer* renderer = NativeD3D12Renderer::Active();
+	if (renderer == nullptr)
+		return nullptr;
+
+	// Disallowing GPU compression must not skip DDS-only assets. Recolorable
+	// textures need decoded pixels, while ordinary textures retain native blocks.
+	// The legacy DDS utility assumes square mip chains and discards small
+	// levels. Read the native 2D BC layout explicitly; leave its other users alone.
+	std::string ddsName(static_cast<const char*>(filename));
+	const size_t extension=ddsName.find_last_of('.');
+	if (extension!=std::string::npos) ddsName.resize(extension);
+	ddsName += ".dds";
+	file_auto_ptr ddsFile(_TheFileFactory,ddsName.c_str());
+	const bool ddsAvailable=ddsFile->Is_Available();
+	if (ddsAvailable && ddsFile->Open())
+	{
+		unsigned char header[128] = {};
+		NativeDDSLayout layout;
+		const int fileSize=ddsFile->Size();
+		if (fileSize>=128 && ddsFile->Read(header,sizeof(header))==sizeof(header) &&
+			layout.Parse(header,sizeof(header),static_cast<size_t>(fileSize)))
+		{
+			std::vector<unsigned char> data(layout.dataBytes);
+			if (ddsFile->Read(data.data(),layout.dataBytes)==layout.dataBytes)
+			{
+				const WW3DFormat formats[] = {WW3D_FORMAT_UNKNOWN,WW3D_FORMAT_DXT1,
+					WW3D_FORMAT_DXT2,WW3D_FORMAT_DXT3,WW3D_FORMAT_DXT4,WW3D_FORMAT_DXT5};
+				format=formats[layout.dxt];
+				const DXGI_FORMAT nativeFormat=NativeTextureFormat(format);
+				const unsigned mipCount=requested_mips ? (std::min)(requested_mips,layout.count) : layout.count;
+				width=layout.levels[0].width; height=layout.levels[0].height;
+				NativeD3D12Texture* texture=renderer->CreateTexture2D(width,height,mipCount,
+					allow_compression ? nativeFormat : DXGI_FORMAT_B8G8R8A8_UNORM);
+				if (texture)
+				{
+					std::vector<NativeD3D12TextureLevel> levels(mipCount);
+					std::vector<std::vector<unsigned char>> decoded(mipCount);
+					bool valid=true;
+					for (unsigned mip=0;mip<mipCount;++mip) {
+						const auto& source=layout.levels[mip];
+						levels[mip]={data.data()+source.offset,source.rowPitch,source.size};
+						if (!allow_compression) {
+							if (!renderer->DecodeTextureBgra(nativeFormat,source.width,source.height,levels[mip],decoded[mip]))
+								{ valid=false; break; }
+							levels[mip]={decoded[mip].data(),source.width*4,source.width*source.height*4};
+						}
+					}
+					if (valid && renderer->UploadTexture2D(*texture,levels.data(),mipCount)) {
+						if (!allow_compression) format=WW3D_FORMAT_A8R8G8B8;
+						ddsFile->Close();
+						return texture;
+					}
+					delete texture;
+				}
+			}
+		}
+		ddsFile->Close();
+	}
+
+	// TGA is the uncompressed source format used by the original asset tools.
+	// Convert it into one stable native upload format; D3D12 does not need the
+	// old surface-lock intermediate used by the DX8 loader.
+	Targa targa;
+	if (!TARGA_ERROR_HANDLER(targa.Open(filename, TGA_READMODE), filename))
+	{
+		targa.Header.ImageDescriptor ^= TGAIDF_YORIGIN;
+		char palette[256 * 4] = {};
+		targa.SetPalette(palette);
+		if (!TARGA_ERROR_HANDLER(targa.Load(filename, TGAF_IMAGE, false), filename))
+		{
+			WW3DFormat source_format;
+			unsigned source_bpp = 0;
+			Get_WW3D_Format(source_format, source_bpp, targa);
+			width = static_cast<unsigned>(targa.Header.Width);
+			height = static_cast<unsigned>(targa.Header.Height);
+			format = requested_format == WW3D_FORMAT_UNKNOWN ?
+				WW3D_FORMAT_A8R8G8B8 : requested_format;
+			if (NativeTextureFormat(format) == DXGI_FORMAT_UNKNOWN ||
+				format == WW3D_FORMAT_DXT1 || format == WW3D_FORMAT_DXT2 ||
+				format == WW3D_FORMAT_DXT3 || format == WW3D_FORMAT_DXT4 ||
+				format == WW3D_FORMAT_DXT5)
+				format = WW3D_FORMAT_A8R8G8B8;
+			std::vector<unsigned char> pixels(width * height * 4);
+			BitmapHandlerClass::Copy_Image(pixels.data(), width, height, width * 4,
+				WW3D_FORMAT_A8R8G8B8, reinterpret_cast<unsigned char*>(targa.GetImage()),
+				width, height, width * source_bpp, source_format,
+				reinterpret_cast<unsigned char*>(targa.GetPalette()),
+				targa.Header.CMapDepth >> 3, false);
+			NativeD3D12Texture* texture = renderer->CreateTexture2D(width, height,
+				NativeD3D12Renderer::TextureMipCount(width,height,requested_mips),
+				DXGI_FORMAT_B8G8R8A8_UNORM);
+			NativeD3D12TextureLevel level = {pixels.data(), width * 4, width * height * 4};
+			if (texture != nullptr && renderer->UploadBgraTexture(*texture, level,
+				source_format == WW3D_FORMAT_X8R8G8B8))
+				return texture;
+			delete texture;
+		}
+	}
+
+	// Keep missing assets renderable in native mode. This also gives the game a
+	// deterministic diagnostic texture instead of failing a locked surface.
+	renderer->ReportMissingTexture(filename,ddsAvailable);
+	width = height = 2;
+	format = WW3D_FORMAT_A8R8G8B8;
+	const unsigned pixels[4] = {0xffff00ff, 0xff202020, 0xff202020, 0xffff00ff};
+	NativeD3D12Texture* texture = renderer->CreateTexture2D(width, height, 1,
+		DXGI_FORMAT_B8G8R8A8_UNORM);
+	NativeD3D12TextureLevel level = {pixels, 2 * sizeof(unsigned), sizeof(pixels)};
+	if (texture != nullptr && renderer->UploadTexture2D(*texture, &level, 1))
+		return texture;
+	delete texture;
+	return nullptr;
 }
 
 IDirect3DTexture8* TextureLoader::Load_Thumbnail(const StringClass& filename, const Vector3& hsv_shift)//,WW3DFormat texture_format)
@@ -653,6 +814,9 @@ IDirect3DSurface8* TextureLoader::Load_Surface_Immediate(
 
 void TextureLoader::Request_Thumbnail(TextureBaseClass *tc)
 {
+	if (NativeD3D12Renderer::Active() != nullptr)
+		return;
+
 	// Grab the foreground lock. This prevents the foreground thread
 	// from retiring any tasks related to this texture. It also
 	// serializes calls to Request_Thumbnail from multiple threads.
@@ -694,6 +858,9 @@ void TextureLoader::Request_Thumbnail(TextureBaseClass *tc)
 
 void TextureLoader::Request_Background_Loading(TextureBaseClass *tc)
 {
+	if (NativeD3D12Renderer::Active() != nullptr)
+		return;
+
 	WWPROFILE(("TextureLoader::Request_Background_Loading()"));
 	// Grab the foreground lock. This prevents the foreground thread
 	// from retiring any tasks related to this texture. It also 

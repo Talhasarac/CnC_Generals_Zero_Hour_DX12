@@ -61,6 +61,16 @@ public:
 	// Modify given texture size to nearest valid size on current hardware.
 	static void Validate_Texture_Size(unsigned& width, unsigned& height, unsigned& depth);
 
+	// Native path: decode the game image into CPU mip data and upload it to a
+	// D3D12 texture without creating or touching a legacy graphics object.
+	static NativeD3D12Texture* Load_Native_Texture(
+		const StringClass& filename,
+		WW3DFormat requested_format,
+		bool allow_compression,
+		unsigned& width,
+		unsigned& height,
+		WW3DFormat& format, unsigned requested_mips = 0);
+
 	static IDirect3DTexture8 * Load_Thumbnail(
 		const StringClass& filename,const Vector3& hsv_shift);
 //		WW3DFormat texture_format);	// Pass WW3D_FORMAT_UNKNOWN if you don't care

@@ -438,6 +438,11 @@ typedef struct _PushButtonData
 	Int drawCount;					///< when > 0, a small number badge drawn in the bottom right corner
 	Int drawSeconds;				///< when > 0, a seconds label drawn in the bottom left corner
 	Int drawCost;						///< when > 0, a price drawn in the top right corner
+	// Per-button rendering caches: sharing a mutable label across buttons rebuilds
+	// its sentence for every different value on every rendered frame.
+	DisplayString *countLabel;
+	DisplayString *secondsLabel;
+	DisplayString *costLabel;
 	Int barPercent;					///< when >= 0, a thin bar drawn along the bottom edge (experience)
 	Color barColor;					///< colour of that bar
 	void *userData;					///< random additional data we can set
