@@ -38,6 +38,7 @@
  * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
 #include "seglinerenderer.h"
+#include "native_effect_draw.h"
 #include "ww3d.h"
 #include "rinfo.h"
 #include "dx8wrapper.h"
@@ -223,11 +224,13 @@ void SegLineRendererClass::Render
 )
 {
 	Matrix4x4 view;
-	DX8Wrapper::Get_Transform(D3DTS_VIEW,view);
+	if (NativeD3D12Renderer::Active()) {
+		Matrix3D cameraView; rinfo.Camera.Get_View_Matrix(&cameraView); view=Matrix4x4(cameraView);
+	} else DX8Wrapper::Get_Transform(D3DTS_VIEW,view);
 
 	Matrix4x4 identity(true);
-	DX8Wrapper::Set_Transform(D3DTS_WORLD,identity);	
-	DX8Wrapper::Set_Transform(D3DTS_VIEW,identity);	
+	if (!NativeD3D12Renderer::Active()) DX8Wrapper::Set_Transform(D3DTS_WORLD,identity);
+	if (!NativeD3D12Renderer::Active()) DX8Wrapper::Set_Transform(D3DTS_VIEW,identity);
 
 	/* 
 	** Handle texture UV offset animation (done once for entire line).
@@ -1184,23 +1187,27 @@ void SegLineRendererClass::Render
 			}
 		}
 		
+		if (NativeD3D12Renderer::Active()) {
+			Submit_Native_Effect(rinfo.Camera,shader,Texture,Verts,ib_access.Peek_Source_Buffer(),ib_access.Get_Native_Index_Offset(),tidx,vnum,true,&obj_sphere);
+		} else {
 		DX8Wrapper::Set_Index_Buffer(ib_access,0);
 		DX8Wrapper::Set_Vertex_Buffer(Verts);				
-		DX8Wrapper::Set_Material(mat);		
-		DX8Wrapper::Set_Texture(0,Texture);
-		DX8Wrapper::Set_Shader(shader);
+		if (!NativeD3D12Renderer::Active()) DX8Wrapper::Set_Material(mat);
+		if (!NativeD3D12Renderer::Active()) DX8Wrapper::Set_Texture(0,Texture);
+		if (!NativeD3D12Renderer::Active()) DX8Wrapper::Set_Shader(shader);
 
 		if (sorting) {	
 			SortingRendererClass::Insert_Triangles(obj_sphere,0,tidx,0,vnum);
 		} else {
 			DX8Wrapper::Draw_Triangles(0,tidx,0,vnum);
 		}
+		}
 		
 		REF_PTR_RELEASE(mat);
 
 	}	// Chunking loop
 
-	DX8Wrapper::Set_Transform(D3DTS_VIEW,view);
+	if (!NativeD3D12Renderer::Active()) DX8Wrapper::Set_Transform(D3DTS_VIEW,view);
 
 }
 

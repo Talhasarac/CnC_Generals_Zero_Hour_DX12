@@ -76,7 +76,7 @@ public:
 	void	Reset(void);
 
 	// Render mesh
-	void	Render(RenderInfoClass & rinfo);
+	void	Render(RenderInfoClass & rinfo,const Matrix3D& world=Matrix3D::Identity,SceneClass* scene=nullptr);
 
 	// Set current polygon and vertex counts
 	void	Set_Counts(int pnum, int vnum)	{ DynamicMeshPNum = pnum;	DynamicMeshVNum = vnum;	}

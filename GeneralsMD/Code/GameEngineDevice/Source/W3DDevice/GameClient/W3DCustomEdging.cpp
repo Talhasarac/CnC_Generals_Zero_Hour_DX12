@@ -61,6 +61,9 @@
 #include "WW3D2/DX8Renderer.h"
 #include "WW3D2/Mesh.h"
 #include "WW3D2/MeshMdl.h"
+#include "W3DDevice/GameClient/NativeTerrainDraw.h"
+#include "WW3D2/native_pipeline_description.h"
+#include "W3DDevice/GameClient/W3DShaderManager.h"
 
 //-----------------------------------------------------------------------------
 //         Private Data                                                     
@@ -345,7 +348,7 @@ void W3DCustomEdging::clearAllEdging(void)
 //=============================================================================
 /** Draws the trees.  Uses camera to cull. */
 //=============================================================================
-void W3DCustomEdging::drawEdging(WorldHeightMap *pMap, Int minX, Int maxX, Int minY, Int maxY,  
+void W3DCustomEdging::drawEdging(CameraClass& camera, const Matrix3D& world, WorldHeightMap *pMap, Int minX, Int maxX, Int minY, Int maxY,
 		TextureClass * terrainTexture, TextureClass * cloudTexture, TextureClass * noiseTexture) 
 {
 	static Bool foo = false;
@@ -358,81 +361,74 @@ void W3DCustomEdging::drawEdging(WorldHeightMap *pMap, Int minX, Int maxX, Int m
 	if (m_curNumEdgingIndices == 0) {
 		return;
 	}
-	TextureClass *edgeTex = pMap->getEdgeTerrainTexture();
-	// Setup the vertex buffer, shader & texture.
-	DX8Wrapper::Set_Index_Buffer(m_indexEdging,0);
-	DX8Wrapper::Set_Vertex_Buffer(m_vertexEdging);
-	DX8Wrapper::Set_Shader(detailAlphaTestShader);
-#ifdef _DEBUG
-	//DX8Wrapper::Set_Shader(detailShader); // shows clipping.
-#endif	
-	
-	DX8Wrapper::Set_Texture(0,terrainTexture);
-	DX8Wrapper::Set_Texture(1,edgeTex);
-	DX8Wrapper::Apply_Render_State_Changes();
-
-	DX8Wrapper::Set_DX8_Render_State(D3DRS_ALPHAREF,0x7B);
-	DX8Wrapper::Set_DX8_Render_State(D3DRS_ALPHAFUNC,D3DCMP_LESSEQUAL);	//pass pixels who's alpha is not zero
-	DX8Wrapper::Set_DX8_Render_State(D3DRS_ALPHATESTENABLE, true);	//test pixels if transparent(clipped) before rendering.
-	DX8Wrapper::Draw_Triangles(	m_curEdgingIndexOffset, m_curNumEdgingIndices/3, 0,	m_curNumEdgingVertices);
-
-	DX8Wrapper::Set_Texture(0,edgeTex);
-	DX8Wrapper::Set_Texture(1, NULL);
-	// Draw the custom edge.
-	DX8Wrapper::Apply_Render_State_Changes();
-
-	DX8Wrapper::Set_DX8_Render_State(D3DRS_ALPHAREF,0x84);
-	DX8Wrapper::Set_DX8_Render_State(D3DRS_ALPHAFUNC,D3DCMP_GREATEREQUAL);	//pass pixels who's alpha is not zero
-	DX8Wrapper::Set_DX8_Render_State(D3DRS_ALPHATESTENABLE, true);	//test pixels if transparent(clipped) before rendering.
-	DX8Wrapper::Draw_Triangles(	m_curEdgingIndexOffset, m_curNumEdgingIndices/3, 0,	m_curNumEdgingVertices);
-
-#if 0 // Dumps out unmasked data.
-	DX8Wrapper::Set_DX8_Render_State(D3DRS_ALPHABLENDENABLE,false);
-	DX8Wrapper::Set_DX8_Render_State(D3DRS_ALPHATESTENABLE, false);	//test pixels if transparent(clipped) before rendering.
-	DX8Wrapper::Draw_Triangles(	m_curEdgingIndexOffset, m_curNumEdgingIndices/3, 0,	m_curNumEdgingVertices);
-#endif
-	DX8Wrapper::Set_Texture(1, NULL);
-	if (cloudTexture) {
-		DX8Wrapper::Set_Shader(detailOpaqueShader);
-		DX8Wrapper::Apply_Render_State_Changes();
-		DX8Wrapper::Set_Texture(1,edgeTex);
-		DX8Wrapper::Apply_Render_State_Changes();
-		DX8Wrapper::Set_Texture(0,cloudTexture);
-		DX8Wrapper::Apply_Render_State_Changes();
-#if 1
-		DX8Wrapper::Set_DX8_Texture_Stage_State( 0, D3DTSS_ALPHAARG1,   D3DTA_CURRENT );
-		DX8Wrapper::Set_DX8_Texture_Stage_State( 0, D3DTSS_ALPHAOP,   D3DTOP_SELECTARG1 );
-
-		DX8Wrapper::Set_DX8_Texture_Stage_State( 1, D3DTSS_COLORARG1, D3DTA_CURRENT );
-		DX8Wrapper::Set_DX8_Texture_Stage_State( 1, D3DTSS_COLORARG2, D3DTA_TEXTURE );
-		DX8Wrapper::Set_DX8_Texture_Stage_State( 1, D3DTSS_COLOROP,   D3DTOP_SELECTARG1 );
-		DX8Wrapper::Set_DX8_Texture_Stage_State( 1, D3DTSS_ALPHAARG1,   D3DTA_CURRENT );
-		DX8Wrapper::Set_DX8_Texture_Stage_State( 1, D3DTSS_ALPHAARG2,   D3DTA_TEXTURE );
-		DX8Wrapper::Set_DX8_Texture_Stage_State( 1, D3DTSS_ALPHAOP,   D3DTOP_SELECTARG2 );
-		DX8Wrapper::Set_DX8_Texture_Stage_State( 1, D3DTSS_TEXCOORDINDEX, 1 );
-#endif
-		DX8Wrapper::Set_DX8_Render_State(D3DRS_ALPHAREF,0x80);
-		DX8Wrapper::Set_DX8_Render_State(D3DRS_ALPHAFUNC,D3DCMP_NOTEQUAL);	//pass pixels who's alpha is not zero
-		DX8Wrapper::Set_DX8_Render_State(D3DRS_ALPHATESTENABLE, true);	//test pixels if transparent(clipped) before rendering.
-		DX8Wrapper::Set_DX8_Render_State(D3DRS_ALPHABLENDENABLE,true);
-		DX8Wrapper::Set_DX8_Render_State(D3DRS_SRCBLEND,D3DBLEND_DESTCOLOR);
-		DX8Wrapper::Set_DX8_Render_State(D3DRS_DESTBLEND,D3DBLEND_ZERO);
-		DX8Wrapper::Draw_Triangles(	m_curEdgingIndexOffset, m_curNumEdgingIndices/3, 0,	m_curNumEdgingVertices);
-	}
-	if (noiseTexture) {
-		DX8Wrapper::Set_Texture(1, NULL);
-		DX8Wrapper::Set_Texture(0,noiseTexture);
-		DX8Wrapper::Apply_Render_State_Changes();
-		DX8Wrapper::Set_Texture(1,edgeTex);
-		DX8Wrapper::Apply_Render_State_Changes();
-
-		DX8Wrapper::Set_DX8_Render_State(D3DRS_ALPHAREF,0x80);
-		DX8Wrapper::Set_DX8_Render_State(D3DRS_ALPHAFUNC,D3DCMP_NOTEQUAL);	//pass pixels who's alpha is not zero
-		DX8Wrapper::Set_DX8_Render_State(D3DRS_ALPHATESTENABLE, true);	//test pixels if transparent(clipped) before rendering.
-		DX8Wrapper::Set_DX8_Render_State(D3DRS_ALPHABLENDENABLE,true);
-		DX8Wrapper::Set_DX8_Render_State(D3DRS_SRCBLEND,D3DBLEND_DESTCOLOR);
-		DX8Wrapper::Set_DX8_Render_State(D3DRS_DESTBLEND,D3DBLEND_ZERO);
-		DX8Wrapper::Draw_Triangles(	m_curEdgingIndexOffset, m_curNumEdgingIndices/3, 0,	m_curNumEdgingVertices);
+	auto* native=NativeD3D12Renderer::Active();
+	TextureClass* edgeTex=pMap->getEdgeTerrainTexture();
+	if (!native || !terrainTexture || !edgeTex || !m_vertexEdging || !m_indexEdging) return;
+	const auto* vb=m_vertexEdging->Get_Native_Vertex_Buffer();
+	const auto* ib=m_indexEdging->Get_Native_Index_Buffer();
+	const auto layout=FVFInfoClass(DX8_FVF_XYZDUV2).Build_Native_Layout();
+	const size_t first=size_t(m_curEdgingIndexOffset)*2;
+	if (!vb || !ib || first>ib->Size() || size_t(m_curNumEdgingIndices)*2>ib->Size()-first ||
+		size_t(m_curNumEdgingVertices)*layout.stride>vb->Size()) return;
+	NativeD3D12ScopedState restore(*native);
+	NativeTerrainSetCameraMatrices(*native,&camera,world);
+	native->SetLighting(NativeLightingState()); native->SetTreeSway(nullptr,0);
+	native->SetVertexFog(0,0,1,0,0,false); native->SetDepthBias(0);
+	NativeDrawSubmission draw;
+	draw.vertices=vb->Data(); draw.vertexBytes=UINT(vb->Size()); draw.vertexStride=layout.stride;
+	draw.vertexCount=m_curNumEdgingVertices; draw.layout=layout;
+	draw.indices=reinterpret_cast<const unsigned short*>(static_cast<const unsigned char*>(ib->Data())+first);
+	draw.indexCount=m_curNumEdgingIndices; draw.vertexOwner=vb; draw.indexOwner=ib; draw.useMaterial=true;
+	const auto* edge=edgeTex->Prepare_Native_Texture();
+	const auto* terrain=terrainTexture->Prepare_Native_Texture();
+	if (!edge || !terrain) return;
+	const UINT uv0=layout.Find_Offset(NativeVertexSemantic::TexCoord);
+	const UINT uv1=layout.Find_Offset(NativeVertexSemantic::TexCoord,1);
+	const auto makeMaterial=[&](const NativeD3D12Texture* color,UINT uv,bool mask) {
+		auto material=detailAlphaTestShader.Get_Native_Texture_Material();
+		material.textures[0]=color; material.coordinates[0].offset=uv;
+		material.samplers[0]=terrainTexture->Get_Filter().Get_Native_Description();
+		// The edge texture encodes the two sides of the split around alpha 128.
+		material.stages[0].alphaOp=NativeMaterialOp::Select1;
+		material.stages[0].alphaArg1=UINT(NativeMaterialSource::Texture);
+		if (mask) {
+			material.textures[1]=edge; material.coordinates[1].offset=uv1;
+			material.samplers[1]=edgeTex->Get_Filter().Get_Native_Description();
+			material.stages[1].colorOp=NativeMaterialOp::Select1;
+			material.stages[1].colorArg1=UINT(NativeMaterialSource::Current);
+			material.stages[1].alphaOp=NativeMaterialOp::Select1;
+			material.stages[1].alphaArg1=UINT(NativeMaterialSource::Texture);
+		}
+		return material;
+	};
+	auto pipeline=detailAlphaTestShader.Get_Native_Pipeline();
+	pipeline.colorMask &= native->CaptureState().renderTargetWriteMask;
+	pipeline.Apply(*native);
+	draw.material=makeMaterial(terrain,uv0,true);
+	native->SetAlphaTestState(true,D3D12_COMPARISON_FUNC_LESS_EQUAL,0x7b);
+	Submit_Native_Draw(*native,draw);
+	draw.material=makeMaterial(edge,uv1,false);
+	draw.material.samplers[0]=edgeTex->Get_Filter().Get_Native_Description();
+	native->SetAlphaTestState(true,D3D12_COMPARISON_FUNC_GREATER_EQUAL,0x84);
+	Submit_Native_Draw(*native,draw);
+	// Modulation coordinates are authored explicitly, never inherited from the
+	// terrain's last sampler or mapper. Each optional pass is independent.
+	for (UINT pass=0;pass<2;++pass) {
+		TextureClass* texture=pass==0 ? cloudTexture : noiseTexture;
+		if (!texture) continue;
+		const auto* modulation=texture->Prepare_Native_Texture();
+		if (!modulation) continue;
+		draw.material=makeMaterial(modulation,UINT_MAX,true);
+		auto uv=pass==0 ? W3DShaderManager::nativeCloudCoordinates() : W3DShaderManager::nativeNoiseCoordinates();
+		Matrix4x4 projected; std::memcpy(&projected,uv.matrix.data(),sizeof(projected));
+		projected=Matrix4x4(world).Transpose()*projected;
+		std::memcpy(uv.matrix.data(),&projected,sizeof(projected));
+		draw.material.coordinates[0]=uv;
+		draw.material.samplers[0]=texture->Get_Filter().Get_Native_Description();
+		pipeline.blend=true; pipeline.source=D3D12_BLEND_DEST_COLOR; pipeline.destination=D3D12_BLEND_ZERO;
+		pipeline.depthWrite=false; pipeline.Apply(*native);
+		native->SetAlphaTestState(true,D3D12_COMPARISON_FUNC_NOT_EQUAL,0x80);
+		Submit_Native_Draw(*native,draw);
 	}
 }
 

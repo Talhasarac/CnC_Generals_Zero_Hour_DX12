@@ -68,6 +68,7 @@ class TextureClass;
 class VertexMaterialClass;
 struct VertexFormatXYZNDUV2;
 struct NativeDrawSubmission;
+class VertexBufferClass;
 class CameraClass;
 
 /**
@@ -93,7 +94,8 @@ public:
 	virtual int						Get_Num_Polys(void) const;
 	virtual void					Render(RenderInfoClass & rinfo);
 	void								Render_Material_Pass(MaterialPassClass * pass,IndexBufferClass * ib);
-	void Render_Native_Material_Pass(MaterialPassClass& pass, const NativeDrawSubmission& geometry, CameraClass& camera);
+	void Render_Native_Material_Pass(MaterialPassClass& pass, const NativeDrawSubmission& geometry, CameraClass& camera,
+		VertexBufferClass* sortingVertices=nullptr, IndexBufferClass* sortingIndices=nullptr, unsigned vertexOffset=0);
 	virtual void					Special_Render(SpecialRenderInfoClass & rinfo);
 
 	/////////////////////////////////////////////////////////////////////////////

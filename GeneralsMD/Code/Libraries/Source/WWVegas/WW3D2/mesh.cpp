@@ -825,7 +825,8 @@ void MeshClass::Render(RenderInfoClass & rinfo)
  *   3/4/2001   gth : Created.                                                                 *
  *=============================================================================================*/
 void MeshClass::Render_Native_Material_Pass(MaterialPassClass& pass,
-	const NativeDrawSubmission& geometry, CameraClass& camera)
+	const NativeDrawSubmission& geometry, CameraClass& camera,
+	VertexBufferClass* sortingVertices,IndexBufferClass* sortingIndices,unsigned vertexOffset)
 {
 	NativeD3D12Renderer* native = NativeD3D12Renderer::Active();
 	if (!native || !geometry.Is_Valid()) return;
@@ -900,16 +901,32 @@ void MeshClass::Render_Native_Material_Pass(MaterialPassClass& pass,
 	NativeDrawSubmission draw=geometry;
 	draw.material=description.material;
 	draw.useMaterial=true;
+	TextureClass* owners[4]={pass.Peek_Texture(0),pass.Peek_Texture(1),pass.Peek_Texture(2),pass.Peek_Texture(3)};
+	const SphereClass sphere=Get_Bounding_Sphere();
+	const auto submit=[&](const NativeDrawSubmission& range,IndexBufferClass* source) {
+		if (sortingVertices && WW3D::Is_Sorting_Enabled())
+			return SortingRendererClass::Insert_Native_Draw(range,native->CaptureState(),sortingVertices,source,
+				vertexOffset,owners,4,&sphere);
+		return Submit_Native_Draw(*native,range);
+	};
 	if (culled) {
 		draw.indices=indices.data(); draw.indexCount=static_cast<UINT>(indices.size()); draw.indexOwner=nullptr;
+		SortingIndexBufferClass* retainedIndices=nullptr;
+		if (sortingVertices && WW3D::Is_Sorting_Enabled()) {
+			if (indices.size()>0xffff) return;
+			retainedIndices=NEW_REF(SortingIndexBufferClass,(static_cast<unsigned short>(indices.size())));
+			retainedIndices->Copy(indices.data(),0,static_cast<unsigned>(indices.size()));
+			draw.indices=retainedIndices->Get_Index_Array();
+		}
 		if (Describe_Native_Indexed_Range(draw,0,draw.indexCount,firstVertex,minVertex,vertexRange,
-			D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST)) Submit_Native_Draw(*native,draw);
+			D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST)) submit(draw,retainedIndices);
+		REF_PTR_RELEASE(retainedIndices);
 	} else {
 		DX8PolygonRendererListIterator it(&Model->PolygonRendererList);
 		while (!it.Is_Done()) {
 			if (it.Peek_Obj()->Get_Pass()==0) {
 				auto range=draw;
-				if (it.Peek_Obj()->Describe_Native_Range(range,BaseVertexOffset)) Submit_Native_Draw(*native,range);
+				if (it.Peek_Obj()->Describe_Native_Range(range,BaseVertexOffset)) submit(range,sortingIndices);
 			}
 			it.Next();
 		}

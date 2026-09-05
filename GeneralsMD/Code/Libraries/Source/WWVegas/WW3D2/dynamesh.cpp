@@ -42,6 +42,11 @@
 #include "rinfo.h"
 #include "camera.h"
 #include "dx8fvf.h"
+#include "native_mesh_geometry.h"
+#include "native_light_environment.h"
+#include "native_pipeline_description.h"
+#include "mapper.h"
+#include "scene.h"
 
 
 
@@ -175,8 +180,10 @@ void DynamicMeshModel::Reset(void)
 	MatInfo = NEW_REF(MaterialInfoClass, ());
 }
 
-void DynamicMeshModel::Render(RenderInfoClass & rinfo)
+void DynamicMeshModel::Render(RenderInfoClass & rinfo,const Matrix3D& world,SceneClass* scene)
 {
+	auto* native=NativeD3D12Renderer::Active();
+	if (!native || !DynamicMeshVNum || !DynamicMeshPNum) return;
 	// Process texture reductions:
 //	MatInfo->Process_Texture_Reduction();
 
@@ -246,154 +253,77 @@ void DynamicMeshModel::Render(RenderInfoClass & rinfo)
 
 	} // end scope for lock
 
-	/*
-	** Set vertex and index buffers
-	*/
-	DX8Wrapper::Set_Vertex_Buffer(dynamic_vb);
-	DX8Wrapper::Set_Index_Buffer(dynamic_ib,0);
-
-	/*
-	** Draw dynamesh, one pass at a time
-	*/
-	unsigned int pass_count = Get_Pass_Count();
-	for (unsigned int pass = 0; pass < pass_count; pass++) {
-
-		/*
-		** Set current render states (texture, vertex material, shader). Scan triangles until one
-		** of these changes, and then draw.
-		*/
-
-		// The vertex index range used
-		unsigned short min_vert_idx = DynamicMeshVNum - 1;
-		unsigned short max_vert_idx = 0;
-		unsigned short start_tri_idx = 0;
-		unsigned short cur_tri_idx = 0;
-
-		bool done = false;
-		bool texture_changed = false;
-		bool texture1_changed = false;
-		bool material_changed = false;
-		bool shader_changed = false;
-
-		TextureClass **texture_array0 = NULL;
-		TexBufferClass * tex_buf = MatDesc->Get_Texture_Array(pass, 0, false);
-		if (tex_buf) {
-			texture_array0 = tex_buf->Get_Array();
-		} else {
-			texture_array0 = NULL;
-		}
-
-		TextureClass **texture_array1 = NULL;
-		TexBufferClass * tex_buf1 = MatDesc->Get_Texture_Array(pass, 1, false);
-		if (tex_buf1) {
-			texture_array1 = tex_buf1->Get_Array();
-		} else {
-			texture_array1 = NULL;
-		}
-		
-		VertexMaterialClass **material_array = NULL;
-		MatBufferClass * mat_buf = MatDesc->Get_Material_Array(pass, false);
-		if (mat_buf) {
-			material_array = mat_buf->Get_Array();
-		} else {
-			material_array = NULL;
-		}
-		ShaderClass *shader_array = MatDesc->Get_Shader_Array(pass, false);
-
-		// Set the DX8 state to the first triangle's state
-		if (texture_array0) {
-			DX8Wrapper::Set_Texture(0,texture_array0[0]);
-		} else {
-			DX8Wrapper::Set_Texture(0,MatDesc->Peek_Single_Texture(pass, 0));
-		}
-
-		if (texture_array1) {
-			DX8Wrapper::Set_Texture(1,texture_array1[0]);
-		} else {
-			DX8Wrapper::Set_Texture(1,MatDesc->Peek_Single_Texture(pass, 1));
-		}
-
-		if (material_array) {
-			DX8Wrapper::Set_Material(material_array[tris[0].I]);
-		} else {
-			DX8Wrapper::Set_Material(MatDesc->Peek_Single_Material(pass));
-		}
-		if (shader_array) {
-			DX8Wrapper::Set_Shader(shader_array[0]);
-		} else {
-			DX8Wrapper::Set_Shader(MatDesc->Get_Single_Shader(pass));
-		}
-
-		SphereClass sphere(Vector3(0.0f,0.0f,0.0f),0.0f);
-		Get_Bounding_Sphere(&sphere); 
-
-		// If no texture, shader or material arrays for this pass just draw and go to next pass
-		if (!texture_array0 && !texture_array1 && !material_array && !shader_array) {
-			if (buffer_type==BUFFER_TYPE_DYNAMIC_SORTING) {
-				SortingRendererClass::Insert_Triangles(sphere,0, DynamicMeshPNum, 0, DynamicMeshVNum);
-			}
-			else {
-				DX8Wrapper::Draw_Triangles(0, DynamicMeshPNum, 0, DynamicMeshVNum);
-			}
-			continue;
-		}
-
-		while (!done) {
-
-			// Add vertex indices of tri[cur_tri_idx] to min_vert_idx, max_vert_idx
-			const TriIndex &tri = tris[cur_tri_idx];
-			unsigned short min_idx = (unsigned short)MIN(MIN(tri.I, tri.J), tri.K);
-			unsigned short max_idx = (unsigned short)MAX(MAX(tri.I, tri.J), tri.K);
-			min_vert_idx = MIN(min_vert_idx, min_idx);
-			max_vert_idx = MAX(max_vert_idx, max_idx);
-
-			// Check the next triangle to see if the current run has ended.
-			unsigned short next_tri_idx = cur_tri_idx + 1;
-			done = next_tri_idx >= DynamicMeshPNum;
-			if (done) {
-				texture_changed = false;
-				texture1_changed = false;
-				material_changed = false;
-				shader_changed = false;
-			} else {
-				texture_changed = texture_array0 && texture_array0[cur_tri_idx] != texture_array0[next_tri_idx];
-				texture1_changed = texture_array1 && texture_array1[cur_tri_idx] != texture_array1[next_tri_idx];
-				material_changed = material_array && material_array[tris[cur_tri_idx].I] != material_array[tris[next_tri_idx].I];
-				shader_changed = shader_array && shader_array[cur_tri_idx] != shader_array[next_tri_idx];
-			}
-
-			// If run ends (mesh ends or state changes) draw, reset indices, set state for next run.
-			if (done || texture_changed || material_changed || shader_changed) {
-				if (buffer_type==BUFFER_TYPE_DYNAMIC_SORTING) {
-					SortingRendererClass::Insert_Triangles(
-						sphere,
-						(start_tri_idx * 3),
-						(1 + cur_tri_idx - start_tri_idx), 
-						min_vert_idx, 
-						1 + max_vert_idx - min_vert_idx);
+	const auto geometry=Describe_Native_Mesh_Geometry(dynamic_vb.Peek_Source_Buffer(),dynamic_ib.Peek_Source_Buffer(),
+		dynamic_vb.Get_Native_Vertex_Offset(),DynamicMeshVNum);
+	if (!geometry.Is_Valid()) return;
+	NativeD3D12ScopedState restore(*native);
+	const auto frame=native->CaptureState();
+	Matrix3D view; Matrix4x4 projection;
+	rinfo.Camera.Get_View_Matrix(&view); rinfo.Camera.Get_D3D_Projection_Matrix(&projection);
+	NativeMapperContext context={Matrix4x4(world).Transpose()*Matrix4x4(view).Transpose(),Matrix4x4(view),projection};
+	const Matrix4x4 wvp=context.worldView*projection.Transpose();
+	native->SetWorldView(reinterpret_cast<const float*>(&context.worldView));
+	native->SetWorldViewProjection(reinterpret_cast<const float*>(&wvp));
+	native->SetTreeSway(nullptr,0); native->SetDepthBias(0);
+	SphereClass sphere(Vector3(0,0,0),0); Get_Bounding_Sphere(&sphere);
+	for (unsigned pass=0;pass<Get_Pass_Count();++pass) {
+		auto* t0=MatDesc->Get_Texture_Array(pass,0,false);
+		auto* t1=MatDesc->Get_Texture_Array(pass,1,false);
+		auto* mats=MatDesc->Get_Material_Array(pass,false);
+		const ShaderClass* shaders=MatDesc->Get_Shader_Array(pass,false);
+		const auto textureAt=[&](unsigned stage,unsigned triangle) {
+			auto* array=stage ? t1 : t0;
+			return array ? array->Get_Array()[triangle] : MatDesc->Peek_Single_Texture(pass,stage);
+		};
+		const auto materialAt=[&](unsigned triangle) {
+			return mats ? mats->Get_Array()[tris[triangle].I] : MatDesc->Peek_Single_Material(pass);
+		};
+		const auto shaderAt=[&](unsigned triangle) { return shaders ? shaders[triangle] : MatDesc->Get_Single_Shader(pass); };
+		for (unsigned first=0;first<unsigned(DynamicMeshPNum);) {
+			TextureClass* owners[2]={textureAt(0,first),textureAt(1,first)};
+			VertexMaterialClass* vertexMaterial=materialAt(first);
+			const ShaderClass shader=shaderAt(first);
+			unsigned end=first+1;
+			// Both UV stages delimit a run; ignoring stage one merges unlike materials.
+			while (end<unsigned(DynamicMeshPNum) && textureAt(0,end)==owners[0] && textureAt(1,end)==owners[1] &&
+				materialAt(end)==vertexMaterial && shaderAt(end)==shader) ++end;
+			auto draw=geometry;
+			draw.material=shader.Get_Native_Texture_Material(); draw.useMaterial=true;
+			for (unsigned stage=0;stage<2;++stage) {
+				draw.material.coordinates[stage].offset=draw.layout.Find_Offset(NativeVertexSemantic::TexCoord,stage);
+				if (owners[stage] && WW3D::Is_Texturing_Enabled()) {
+					draw.material.textures[stage]=owners[stage]->Prepare_Native_Texture();
+					draw.material.samplers[stage]=owners[stage]->Get_Filter().Get_Native_Description();
 				}
-				else {
-					DX8Wrapper::Draw_Triangles(
-						(start_tri_idx * 3),
-						(1 + cur_tri_idx - start_tri_idx), 
-						min_vert_idx, 
-						1 + max_vert_idx - min_vert_idx);
-				}
-				start_tri_idx = next_tri_idx;
-				min_vert_idx = DynamicMeshVNum - 1;
-				max_vert_idx = 0;
-				if (texture_changed) DX8Wrapper::Set_Texture(0,texture_array0[next_tri_idx]);
-				if (texture1_changed) DX8Wrapper::Set_Texture(1,texture_array1[next_tri_idx]);
-				if (material_changed) DX8Wrapper::Set_Material(material_array[tris[next_tri_idx].I]);
-				if (shader_changed) DX8Wrapper::Set_Shader(shader_array[next_tri_idx]);
 			}
-
-			cur_tri_idx = next_tri_idx;
-
-		}	// while (!done)
-
-	}	// for (pass)
-
+			NativeLightingState lighting=frame.lighting;
+			if (rinfo.light_environment) Describe_Native_Light_Environment(*rinfo.light_environment,context.view,lighting);
+			if (vertexMaterial) vertexMaterial->Describe_Native_Lighting(lighting,WW3D::Is_Coloring_Enabled());
+			else lighting.flags[0]=0;
+			lighting.flags[1]=shader.Get_Secondary_Gradient()!=ShaderClass::SECONDARY_GRADIENT_DISABLE;
+			native->SetLighting(lighting);
+			auto pipeline=shader.Get_Native_Pipeline(ShaderClass::Is_Backface_Culling_Inverted());
+			pipeline.colorMask &= frame.renderTargetWriteMask; pipeline.Apply(*native);
+			if (scene && scene->Get_Fog_Enable() && shader.Get_Fog_Func()!=ShaderClass::FOG_DISABLE) {
+				float start,finish; scene->Get_Fog_Range(&start,&finish);
+				const Vector3& c=scene->Get_Fog_Color();
+				UINT32 fog=DX8Wrapper::Convert_Color_Clamp(Vector4(c.X,c.Y,c.Z,1));
+				if (shader.Get_Fog_Func()==ShaderClass::FOG_WHITE) fog=0xffffff;
+				if (shader.Get_Fog_Func()==ShaderClass::FOG_SCALE_FRAGMENT) fog=0;
+				native->SetVertexFog(3,start,finish,0,fog,frame.fogRange);
+			} else native->SetVertexFog(0,0,1,0,0,false);
+			const bool mapped=!vertexMaterial || vertexMaterial->Describe_Native_Mapping(context,draw.layout,draw.material);
+			if (mapped && Describe_Native_Indexed_Range(draw,dynamic_ib.Get_Native_Index_Offset()+first*3,
+				(end-first)*3,0,0,DynamicMeshVNum,D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST)) {
+				const bool submitted=buffer_type==BUFFER_TYPE_DYNAMIC_SORTING ?
+					SortingRendererClass::Insert_Native_Draw(draw,native->CaptureState(),dynamic_vb.Peek_Source_Buffer(),
+						dynamic_ib.Peek_Source_Buffer(),dynamic_vb.Get_Native_Vertex_Offset(),owners,2,&sphere) :
+					Submit_Native_Draw(*native,draw);
+				WWASSERT(submitted);
+			}
+			first=end;
+		}
+	}
 }
 
 void DynamicMeshModel::Initialize_Texture_Array(int pass, int stage, TextureClass *texture)
@@ -431,8 +361,7 @@ void DynamicMeshClass::Render(RenderInfoClass & rinfo)
 		const FrustumClass & frustum = rinfo.Camera.Get_Frustum();
 
 		if (CollisionMath::Overlap_Test(frustum, Get_Bounding_Box()) != CollisionMath::OUTSIDE) {
-			DX8Wrapper::Set_Transform(D3DTS_WORLD, Transform);
-			Model->Render(rinfo);
+			Model->Render(rinfo,Transform,Peek_Scene());
 		}
 	}
 }

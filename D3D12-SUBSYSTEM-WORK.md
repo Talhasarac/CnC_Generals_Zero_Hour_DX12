@@ -1,4 +1,40 @@
-# Native D3D12 integration status — 2026-09-05
+# Native D3D12 integration status — 2026-09-06
+
+## September 6 integrated producer batch
+
+- Transparent rigid/skinned texture categories now use the same native
+  material, mapping, lighting and pipeline authoring as immediate categories.
+  Sorted procedural/delayed material passes also receive explicit geometry.
+- Point/volume particles, line groups, segmented/streak trails, ring/sphere
+  effects and dynamic meshes submit native descriptions, including explicit
+  camera/world transforms. The shared triangle sorter retains geometry and
+  texture allocations until flush; it does not replay old material state for
+  these producers. Dynamic mesh batches now also split on UV-stage-one changes.
+- Custom terrain edging has explicit native base/edge alpha-mask passes and
+  independent cloud/noise modulation. The pre-existing TEST_CUSTOM_EDGING gate
+  remains disabled in the normal game build; this path is compile-validated,
+  not claimed to be covered by normal map playtests.
+- Projected-shadow render targets and decal staging buffers no longer use the
+  legacy resource factory/device fallback. Simple decals now check for the
+  native renderer and initialize all vertex colors. Existing native projected
+  mesh passes remain in use.
+- Dynamic upload-buffer allocation no longer queries D3D8 N-patch capabilities.
+- Release ww3d2 and generals builds pass using the existing build cache and
+  16 jobs. Renderer tests pass: 92 tests / 2,889 checks. These include a hidden
+  D3D12 pixel test of the actual shared sorting queue, nonzero vertex/index/base
+  offsets, depth ordering, post-enqueue state mutation, and source ownership.
+  The standalone D3D12 GPU smoke test also passes.
+- Two 20-second USA Winding River runtime checks remained alive and rendering:
+  ordinary water and forced reflective water. The latter logged a completed
+  1280x720 reflection pass and no D3D12 error/warning diagnostics in that session.
+  Test processes were stopped afterward; this is not a graceful-exit, combat,
+  or long-match certification. Only steamfiles/Generals.exe was staged, and its
+  SHA-256 matched the built executable. Retail files and game DLLs were untouched.
+
+Legacy entry points remain for other callers and dead-code cleanup; this batch
+does not certify every renderer feature or replace combat/long-match playtests.
+The older recovery narrative below records earlier stages, not current blockers
+for the subsystems listed above.
 
 The interrupted parallel run has been stopped. Integration and verification are
 now handled locally by the main agent, with no further delegation. The earlier
@@ -415,11 +451,11 @@ solution rebuild.
 
 | System | Main files | Remaining work |
 | --- | --- | --- |
-| Shared draw/material producers | WW3D2/dx8wrapper.cpp, shader.cpp, vertmaterial.cpp, matpass.cpp, mapper.cpp, matrixmapper.cpp, texturefilter.cpp | Replace producer-side mutable D3D8-style state with authored native pipeline/material/coordinate descriptions. The current builder still converts the old cache. |
-| Mesh and sorting submission | WW3D2/dx8renderer.cpp, dx8polygonrenderer.cpp, mesh.cpp, dynamesh.cpp, sortingrenderer.cpp, dx8fvf.cpp | Immediate rigid/skinned categories and non-sorted procedural/delayed passes now author native material/layout/pipeline descriptions. Migrate the transparent sorter and its pass path, dynamic mesh producers and remaining parent buffer-cache plumbing. Preserve shared triangle ordering. Mesh visual parity still needs verification. |
+| Shared draw/material producers | WW3D2/dx8wrapper.cpp, shader.cpp, vertmaterial.cpp, matpass.cpp, mapper.cpp, matrixmapper.cpp, texturefilter.cpp | Migrated consumers author native pipeline/material/coordinate values directly. Audit other optional callers of the retained legacy entry points and remove only proven inactive code. |
+| Mesh and sorting submission | WW3D2/dx8renderer.cpp, mesh.cpp, dynamesh.cpp, sortingrenderer.cpp, native_mesh_geometry.h | Native rigid/skinned categories, transparent sorting, procedural/delayed material passes and dynamic meshes are integrated. GPU sorting-order/range/ownership tests pass; combat-scene and multi-material visual parity still need playtesting. |
 | Full terrain materials | HeightMap.cpp, FlatHeightMap.cpp, BaseHeightMap.cpp, TerrainTex.cpp, W3DShaderManager.cpp, W3DTerrainBackground.cpp | Main HeightMap base/UV1/cloud/noise, third-texture overlays, shoreline alpha, additional shroud/mask/wireframe, and flat-terrain passes now use native descriptions and draws. Remaining parent cache plumbing and optional scorch/tree branches need audit. Terrain scene parity needs validation; obsolete terrain shader-manager implementations remain for cleanup. |
-| Edging and mesh decals | W3DCustomEdging.cpp, WW3D2/decalmsh.cpp | Custom edging still needs explicit pass descriptions. Rigid/skinned mesh decals now use native submissions, but combat-scene visual coverage remains. Roads, bridges and projected-manager shadow decals also need broader visual coverage. |
-| Remaining effects | Shadow/W3DProjectedShadow.cpp, Water/W3DWater.cpp, WW3D2/pointgr.cpp, linegrp.cpp, seglinerenderer.cpp, streakRender.cpp | Remove remaining active cached-state setup for object-projected shadows, main water, particles and lines. Particle sorting must be migrated together with sortingrenderer.cpp to preserve ordering with translucent meshes, not replaced with immediate draws. Native drawing already present is not full state-interface migration. |
+| Edging and mesh decals | W3DCustomEdging.cpp, WW3D2/decalmsh.cpp | Custom edging now has native pass descriptions but remains behind TEST_CUSTOM_EDGING; compile validation does not certify that optional feature visually. Mesh decals, roads and bridges need broader combat-scene coverage. |
+| Remaining effects | Shadow/W3DProjectedShadow.cpp, Water/W3DWater.cpp, WW3D2/pointgr.cpp, linegrp.cpp, seglinerenderer.cpp, streakRender.cpp, ringobj.cpp, sphereobj.cpp | Selected particle/trail/ring/sphere producers now queue native descriptions alongside transparent meshes. Projected-shadow resource/simple-decal device dependencies are removed. Approved water/tank-reflection appearance is retained. Broader effect/shadow visual testing remains. |
 | Camera/frame and resource APIs | WW3D2/camera.cpp, ww3d.cpp, texture.cpp, surfaceclass.cpp, dx8caps.cpp, formconv.cpp | Remaining old types/cache contracts and proven inactive resource/device branches; preserve asset formats. Native viewport/clear calls are already integrated. |
 | Indicators and optional features | W3DInGameUI.cpp, W3DDebugIcons.cpp, W3DGranny.cpp, W3DWebBrowser.cpp, WW3D2/dx8webbrowser.cpp | Audit active indicator paths separately from generic Render2D and the now-native status-circle/fade paths; unsupported historical browser/Granny features are not implemented by disabling their initialization. |
 | Coverage and distribution | renderer tests, runtime integration, documentation | Long matches, multiple factions/maps, large armies, resolution/minimize/restore, device/resource lifetime, clean-checkout packaging and visual comparison with stock. |

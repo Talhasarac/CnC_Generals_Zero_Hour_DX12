@@ -1,10 +1,11 @@
 /*
- * Device-free coverage for ww3d2.
+ * WW3D2 value/ownership tests plus a hidden-window native sorting GPU test.
  *
- * ww3d2 is the DX8 renderer, so most of it needs a live IDirect3DDevice8.
- * The pieces below are pure computation - format tables, the shader bitfield,
- * the FVF offset arithmetic and the w3d-file <-> runtime converters - and
- * every one of them is reachable without a device.  Anything that routes
+ * Most tests below are pure computation - format tables, the shader bitfield,
+ * the FVF offset arithmetic and the w3d-file <-> runtime converters -
+ * and are reachable without a device. The native_sorted_gpu test additionally
+ * requires D3D12 (hardware or WARP) to verify the real sorted upload/draw path.
+ * Anything that routes
  * through DX8Wrapper::Get_Current_Caps() (Get_Valid_Texture_Format,
  * ShaderClass::Apply) is deliberately not called here.
  *
@@ -34,6 +35,119 @@
 #include "dx8wrapper.h"
 #include "native_bump_pixels.h"
 #include "vertmaterial.h"
+#include "native_mesh_geometry.h"
+#include "sortingrenderer.h"
+#include "texture.h"
+
+TEST(native_sorted_mesh_geometry_validates_offsets_and_retains_sources)
+{
+	auto* vertices=new SortingVertexBufferClass(8);
+	auto* indices=new SortingIndexBufferClass(6);
+	unsigned short source[]={0,0,0,1,3,2};
+	indices->Copy(source,0,6);
+	auto geometry=Describe_Native_Mesh_Geometry(vertices,indices,2,6);
+	CHECK(geometry.Is_Valid());
+	CHECK_EQ(geometry.vertices,vertices->Get_Vertex_Array()+2);
+	CHECK_EQ(geometry.vertexCount,6u);
+	CHECK(!Describe_Native_Mesh_Geometry(vertices,indices,9,1).Is_Valid());
+	CHECK(!Describe_Native_Mesh_Geometry(vertices,indices,2,7).Is_Valid());
+	CHECK(Describe_Native_Indexed_Range(geometry,3,3,1,1,3,D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST));
+	NativeD3D12State state;
+	Matrix4x4 identity(true);
+	memcpy(state.worldView.data(),&identity,sizeof(identity));
+	memcpy(state.worldViewProjection.data(),&identity,sizeof(identity));
+	TextureClass* owners[2]={new TextureClass(1u,1u,MIP_LEVELS_1,TextureClass::POOL_MANAGED),nullptr};
+	CHECK_EQ(vertices->Num_Refs(),1);
+	// Three depths exercise empty, head and middle/tail insertion. A nonzero
+	// dynamic vertex offset, base vertex and index offset must remain independent.
+	for (float depth : {10.0f,30.0f,20.0f}) {
+		state.worldView[14]=depth;
+		CHECK(SortingRendererClass::Insert_Native_Draw(geometry,state,vertices,indices,2,owners,2));
+	}
+	CHECK_EQ(vertices->Num_Refs(),4);
+	CHECK_EQ(indices->Num_Refs(),4);
+	CHECK_EQ(owners[0]->Num_Refs(),4);
+	auto bad=geometry; bad.baseVertex=4;
+	CHECK(!SortingRendererClass::Insert_Native_Draw(bad,state,vertices,indices,2,owners,2));
+	bad=geometry; bad.indices=source;
+	CHECK(!SortingRendererClass::Insert_Native_Draw(bad,state,vertices,indices,2,owners,2));
+	bad=geometry; bad.topology=D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP;
+	CHECK(!SortingRendererClass::Insert_Native_Draw(bad,state,vertices,indices,2,owners,2));
+	CHECK(!SortingRendererClass::Insert_Native_Draw(geometry,state,vertices,indices,3,owners,2));
+	SortingRendererClass::Deinit(); // Also validates shutdown without a GPU/device.
+	CHECK_EQ(vertices->Num_Refs(),1);
+	CHECK_EQ(indices->Num_Refs(),1);
+	CHECK_EQ(owners[0]->Num_Refs(),1);
+	vertices->Release_Ref(); indices->Release_Ref(); owners[0]->Release_Ref();
+}
+
+TEST(native_sorted_gpu_pixels_preserve_depth_order_and_queued_state)
+{
+	// A hidden window exercises the actual WW3D sorting queue and native GPU
+	// upload path, not a mock of Submit_Native_Draw. D3D12 can use WARP if needed.
+	HWND window=CreateWindowExW(0,L"STATIC",L"Native sorting regression",WS_POPUP,
+		0,0,32,32,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);
+	CHECK(window!=nullptr);
+	if (!window) return;
+	NativeD3D12Renderer renderer;
+	const bool initialized=renderer.Initialize(window,32,32,true);
+	CHECK(initialized);
+	if (!initialized) { DestroyWindow(window); return; }
+	const float clear[4]={0,0,0,1};
+	CHECK(renderer.BeginFrame(clear));
+	renderer.SetFixedFunctionState(D3D12_CULL_MODE_NONE,false,false,D3D12_COMPARISON_FUNC_ALWAYS,
+		true,D3D12_BLEND_SRC_ALPHA,D3D12_BLEND_INV_SRC_ALPHA,D3D12_BLEND_OP_ADD,D3D12_COLOR_WRITE_ENABLE_ALL);
+	renderer.SetLighting(NativeLightingState());
+	renderer.SetAlphaTestState(false,D3D12_COMPARISON_FUNC_ALWAYS,0);
+	Matrix4x4 projection(true),view(true); view[2][2]=-1;
+	renderer.SetWorldView(reinterpret_cast<const float*>(&view));
+	renderer.SetWorldViewProjection(reinterpret_cast<const float*>(&projection));
+	auto* vertices=new SortingVertexBufferClass(8);
+	{
+		VertexBufferClass::WriteLockClass lock(vertices);
+		auto* v=static_cast<VertexFormatXYZNDUV2*>(lock.Get_Vertex_Array());
+		memset(v,0,sizeof(*v)*8);
+		for (unsigned triangle=0;triangle<2;++triangle) {
+			const unsigned first=2+triangle*3;
+			v[first].x=-1; v[first].y=-1;
+			v[first+1].x=1; v[first+1].y=-1;
+			v[first+2].x=0; v[first+2].y=1;
+			for (unsigned i=0;i<3;++i) {
+				v[first+i].z=triangle ? .8f : .2f;
+				v[first+i].diffuse=triangle ? 0x8000ff00 : 0x80ff0000;
+			}
+		}
+	}
+	auto* indices=new SortingIndexBufferClass(9);
+	unsigned short values[]={0,0,0,0,1,2,0,1,2};
+	indices->Copy(values,0,9);
+	ShaderClass shader=ShaderClass::_PresetAlphaShader;
+	shader.Set_Texturing(ShaderClass::TEXTURING_DISABLE);
+	for (unsigned triangle=0;triangle<2;++triangle) {
+		auto draw=Describe_Native_Mesh_Geometry(vertices,indices,2,6);
+		CHECK(Describe_Native_Indexed_Range(draw,3+triangle*3,3,triangle*3,0,3,D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST));
+		draw.material=shader.Get_Native_Texture_Material(); draw.useMaterial=true;
+		CHECK(SortingRendererClass::Insert_Native_Draw(draw,renderer.CaptureState(),vertices,indices,2,nullptr,0));
+	}
+	// Mutate the live state after enqueue; neither draw may inherit this mask.
+	renderer.SetFixedFunctionState(D3D12_CULL_MODE_NONE,false,false,D3D12_COMPARISON_FUNC_ALWAYS,
+		false,D3D12_BLEND_ONE,D3D12_BLEND_ZERO,D3D12_BLEND_OP_ADD,0);
+	SortingRendererClass::Flush();
+	std::vector<unsigned char> pixels;
+	CHECK(renderer.ReadbackFrame(pixels));
+	const size_t pixel=(16*32+16)*4;
+	CHECK(pixels.size()>pixel+3);
+	if (pixels.size()>pixel+3) {
+		CHECK_NEAR(pixels[pixel],128,3); // Near red over far green, despite insertion order.
+		CHECK_NEAR(pixels[pixel+1],64,3);
+		CHECK_NEAR(pixels[pixel+2],0,3);
+	}
+	CHECK_EQ(vertices->Num_Refs(),1); CHECK_EQ(indices->Num_Refs(),1);
+	vertices->Release_Ref(); indices->Release_Ref();
+	SortingRendererClass::Deinit();
+	DynamicVBAccessClass::_Deinit(); DynamicIBAccessClass::_Deinit();
+	renderer.Shutdown(); DestroyWindow(window);
+}
 
 TEST(native_bump_encoding_preserves_signed_zero_and_extremes)
 {

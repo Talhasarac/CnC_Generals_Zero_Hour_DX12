@@ -64,6 +64,7 @@
 #include "native_pipeline_description.h"
 #include "native_light_environment.h"
 #include "native_mesh_material.h"
+#include "native_mesh_geometry.h"
 #include "scene.h"
 
 static NativeDrawSubmission NativeMeshGeometry(const NativeD3D12UploadBuffer* vertices,
@@ -314,7 +315,8 @@ void DX8FVFCategoryContainer::Add_Visible_Material_Pass(MaterialPassClass * pass
 	AnythingToRender=true;
 }
 
-void DX8FVFCategoryContainer::Render_Procedural_Material_Passes(const NativeDrawSubmission* geometry)
+void DX8FVFCategoryContainer::Render_Procedural_Material_Passes(const NativeDrawSubmission* geometry,
+	VertexBufferClass* sortingVertices,unsigned vertexOffset)
 {
 	// additional passes
 	MatPassTaskClass * mpr = visible_matpass_head;
@@ -335,8 +337,8 @@ void DX8FVFCategoryContainer::Render_Procedural_Material_Passes(const NativeDraw
    		}
 	
 		if (geometry && TheDX8MeshRenderer.Peek_Camera())
-			mesh->Render_Native_Material_Pass(*mpr->Peek_Material_Pass(),*geometry,*TheDX8MeshRenderer.Peek_Camera());
-		else mesh->Render_Material_Pass(mpr->Peek_Material_Pass(),index_buffer);
+			mesh->Render_Native_Material_Pass(*mpr->Peek_Material_Pass(),*geometry,*TheDX8MeshRenderer.Peek_Camera(),
+				sortingVertices,sortingVertices ? index_buffer : nullptr,vertexOffset);
 		MatPassTaskClass * next_mpr = mpr->Get_Next_Visible();
 		
 		// remove from list, then delete
@@ -374,23 +376,17 @@ void DX8RigidFVFCategoryContainer::Render_Delayed_Procedural_Material_Passes(voi
 	if (!Any_Delayed_Passes_To_Render()) return;
 	AnyDelayedPassesToRender=false;
 
-	DX8Wrapper::Set_Vertex_Buffer(vertex_buffer);
-	DX8Wrapper::Set_Index_Buffer(index_buffer,0);
 
 	SNAPSHOT_SAY(("DX8RigidFVFCategoryContainer::Render_Delayed_Procedural_Material_Passes()\n"));
 
 	// additional passes
 	MatPassTaskClass * mpr = delayed_matpass_head;
-	NativeDrawSubmission geometry;
-	if (!sorting) geometry = NativeMeshGeometry(
-		static_cast<DX8VertexBufferClass*>(vertex_buffer)->Get_Native_Vertex_Buffer(),
-		static_cast<DX8IndexBufferClass*>(index_buffer)->Get_Native_Index_Buffer(),
-		vertex_buffer->FVF_Info(),0,vertex_buffer->Get_Vertex_Count());
+	const auto geometry=Describe_Native_Mesh_Geometry(vertex_buffer,index_buffer,0,vertex_buffer->Get_Vertex_Count());
 	while (mpr != NULL) {
 	
-		if (!sorting && TheDX8MeshRenderer.Peek_Camera())
-			mpr->Peek_Mesh()->Render_Native_Material_Pass(*mpr->Peek_Material_Pass(),geometry,*TheDX8MeshRenderer.Peek_Camera());
-		else mpr->Peek_Mesh()->Render_Material_Pass(mpr->Peek_Material_Pass(),index_buffer);
+		if (TheDX8MeshRenderer.Peek_Camera())
+			mpr->Peek_Mesh()->Render_Native_Material_Pass(*mpr->Peek_Material_Pass(),geometry,*TheDX8MeshRenderer.Peek_Camera(),
+				sorting ? vertex_buffer : nullptr,sorting ? index_buffer : nullptr);
 		MatPassTaskClass * next_mpr = mpr->Get_Next_Visible();
 		
 		delete mpr;
@@ -839,9 +835,6 @@ void DX8RigidFVFCategoryContainer::Render(void)
 	if (!Anything_To_Render()) return;
 	AnythingToRender=false;
 
-	DX8Wrapper::Set_Vertex_Buffer(vertex_buffer);
-
-	DX8Wrapper::Set_Index_Buffer(index_buffer,0);
 
 	SNAPSHOT_SAY(("DX8RigidFVFCategoryContainer::Render()\n"));
 	// The Z-biasing was causing more problems than they solved.
@@ -851,25 +844,16 @@ void DX8RigidFVFCategoryContainer::Render(void)
 	for (unsigned p=0;p<passes;++p) {
 		SNAPSHOT_SAY(("Pass: %d\n",p));
 		while (DX8TextureCategoryClass * tex = visible_texture_category_list[p].Remove_Head()) {
-			if (sorting) tex->Render();
-			else tex->Render_Native(NativeMeshGeometry(
-				static_cast<DX8VertexBufferClass*>(vertex_buffer)->Get_Native_Vertex_Buffer(),
-				static_cast<DX8IndexBufferClass*>(index_buffer)->Get_Native_Index_Buffer(),
-				vertex_buffer->FVF_Info(),0,vertex_buffer->Get_Vertex_Count()));
+			tex->Render_Native(Describe_Native_Mesh_Geometry(vertex_buffer,index_buffer,0,vertex_buffer->Get_Vertex_Count()),
+				sorting ? vertex_buffer : nullptr,sorting ? index_buffer : nullptr);
 		}
 		//zbias++;
 		//if (zbias>15) zbias=15;
 		//DX8Wrapper::Set_DX8_ZBias(zbias);
 	}
 
-	if (sorting) Render_Procedural_Material_Passes();
-	else {
-		const auto geometry = NativeMeshGeometry(
-			static_cast<DX8VertexBufferClass*>(vertex_buffer)->Get_Native_Vertex_Buffer(),
-			static_cast<DX8IndexBufferClass*>(index_buffer)->Get_Native_Index_Buffer(),
-			vertex_buffer->FVF_Info(),0,vertex_buffer->Get_Vertex_Count());
-		Render_Procedural_Material_Passes(&geometry);
-	}
+	const auto geometry=Describe_Native_Mesh_Geometry(vertex_buffer,index_buffer,0,vertex_buffer->Get_Vertex_Count());
+	Render_Procedural_Material_Passes(&geometry,sorting ? vertex_buffer : nullptr);
 
 	//DX8Wrapper::Set_DX8_ZBias(0);
 }
@@ -1455,8 +1439,6 @@ void DX8SkinFVFCategoryContainer::Render(void)
 
 		SNAPSHOT_SAY(("Set vb: %x ib: %x\n",vb,index_buffer));
 
-		DX8Wrapper::Set_Vertex_Buffer(vb);
-		DX8Wrapper::Set_Index_Buffer(index_buffer,0);
 
 		//Flush the meshes which fit in the vertex buffer, applying all texture variations
 		for (unsigned pass=0;pass<passes;++pass) {
@@ -1464,21 +1446,16 @@ void DX8SkinFVFCategoryContainer::Render(void)
 
 			TextureCategoryListIterator it(&visible_texture_category_list[pass]);
 			while (!it.Is_Done()) {
-				if (sorting) it.Peek_Obj()->Render();
-				else it.Peek_Obj()->Render_Native(NativeMeshGeometry(vb.Get_Native_Vertex_Buffer(),
-					static_cast<DX8IndexBufferClass*>(index_buffer)->Get_Native_Index_Buffer(),
-					vb.FVF_Info(),vb.Get_Native_Vertex_Offset(),vb.Get_Vertex_Count()));
+				it.Peek_Obj()->Render_Native(Describe_Native_Mesh_Geometry(vb.Peek_Source_Buffer(),index_buffer,
+					vb.Get_Native_Vertex_Offset(),vb.Get_Vertex_Count()),sorting ? vb.Peek_Source_Buffer() : nullptr,
+					sorting ? index_buffer : nullptr,vb.Get_Native_Vertex_Offset());
 				it.Next();
 			}
 		}
 
-		if (sorting) Render_Procedural_Material_Passes();
-		else {
-			const auto geometry = NativeMeshGeometry(vb.Get_Native_Vertex_Buffer(),
-				static_cast<DX8IndexBufferClass*>(index_buffer)->Get_Native_Index_Buffer(),
-				vb.FVF_Info(),vb.Get_Native_Vertex_Offset(),vb.Get_Vertex_Count());
-			Render_Procedural_Material_Passes(&geometry);
-		}
+		const auto geometry=Describe_Native_Mesh_Geometry(vb.Peek_Source_Buffer(),index_buffer,
+			vb.Get_Native_Vertex_Offset(),vb.Get_Vertex_Count());
+		Render_Procedural_Material_Passes(&geometry,sorting ? vb.Peek_Source_Buffer() : nullptr,vb.Get_Native_Vertex_Offset());
 	}//while
 
 	//remove all the rendered data from queues
@@ -1740,7 +1717,8 @@ unsigned DX8TextureCategoryClass::Add_Mesh(
 
 // ----------------------------------------------------------------------------
 
-void DX8TextureCategoryClass::Render_Native(const NativeDrawSubmission& geometry)
+void DX8TextureCategoryClass::Render_Native(const NativeDrawSubmission& geometry,
+	VertexBufferClass* sortingVertices,IndexBufferClass* sortingIndices,unsigned vertexOffset)
 {
 	NativeD3D12Renderer* native = NativeD3D12Renderer::Active();
 	CameraClass* camera = TheDX8MeshRenderer.Peek_Camera();
@@ -1838,8 +1816,10 @@ void DX8TextureCategoryClass::Render_Native(const NativeDrawSubmission& geometry
 			Describe_Native_Mesh_Opacity(lighting,alpha,mesh->Is_Additive());
 			lighting.flags[1] = shader.Get_Secondary_Gradient()!=ShaderClass::SECONDARY_GRADIENT_DISABLE;
 			native->SetLighting(lighting);
-			Describe_Native_Mesh_Pipeline(shader,alpha,mesh->Is_Additive(),m_gForceMultiply,
-				ShaderClass::Is_Backface_Culling_Inverted()).Apply(*native);
+			auto pipeline=Describe_Native_Mesh_Pipeline(shader,alpha,mesh->Is_Additive(),m_gForceMultiply,
+				ShaderClass::Is_Backface_Culling_Inverted());
+			pipeline.colorMask &= frame.renderTargetWriteMask;
+			pipeline.Apply(*native);
 			SceneClass* scene = mesh->Peek_Scene();
 			if (scene && scene->Get_Fog_Enable() && shader.Get_Fog_Func()!=ShaderClass::FOG_DISABLE) {
 				float start,end;
@@ -1852,7 +1832,11 @@ void DX8TextureCategoryClass::Render_Native(const NativeDrawSubmission& geometry
 				native->SetVertexFog(3,start,end,0,color,frame.fogRange);
 			} else native->SetVertexFog(0,0,1,0,0,false);
 			const bool valid = mapped && task->Peek_Polygon_Renderer()->Describe_Native_Range(draw,mesh->Get_Base_Vertex_Offset());
-			if (!valid || !Submit_Native_Draw(*native,draw))
+			const bool queued = sortingVertices && WW3D::Is_Sorting_Enabled() && mesh->Peek_Model()->Get_Flag(MeshGeometryClass::SORT);
+			const SphereClass sphere=mesh->Get_Bounding_Sphere();
+			const bool submitted=valid && (queued ? SortingRendererClass::Insert_Native_Draw(draw,native->CaptureState(),
+				sortingVertices,sortingIndices,vertexOffset,textures,MeshMatDescClass::MAX_TEX_STAGES,&sphere) : Submit_Native_Draw(*native,draw));
+			if (!submitted)
 				WWDEBUG_SAY(("Native mesh submission failed: %s\n",mesh->Get_Name()));
 		}
 		PolyRenderTaskClass* next = task->Get_Next_Visible();

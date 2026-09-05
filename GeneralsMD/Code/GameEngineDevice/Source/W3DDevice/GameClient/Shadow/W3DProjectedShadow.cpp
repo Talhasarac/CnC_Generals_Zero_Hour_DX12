@@ -116,8 +116,6 @@ struct SHADOW_DECAL_VERTEX	//vertex structure passed to D3D
 
 #define SHADOW_DECAL_FVF	D3DFVF_XYZ|D3DFVF_TEX1|D3DFVF_DIFFUSE
 
-LPDIRECT3DVERTEXBUFFER8 shadowDecalVertexBufferD3D=NULL;		///<D3D vertex buffer
-LPDIRECT3DINDEXBUFFER8	shadowDecalIndexBufferD3D=NULL;	///<D3D index buffer
 NativeD3D12UploadBuffer* shadowDecalVertexBufferNative=NULL;	///<native D3D12 staging buffer
 NativeD3D12UploadBuffer* shadowDecalIndexBufferNative=NULL;	///<native D3D12 staging buffer
 int nShadowDecalVertsInBuf=0;	//model vetices in vertex buffer
@@ -134,60 +132,29 @@ int	nShadowDecalVertsInBatch=0;
 int SHADOW_DECAL_VERTEX_SIZE=32768;
 int SHADOW_DECAL_INDEX_SIZE=65536;
 
-static bool LockShadowDecalVertices(size_t offset, size_t size, SHADOW_DECAL_VERTEX** vertices, DWORD flags)
+static bool LockShadowDecalVertices(size_t offset,size_t size,SHADOW_DECAL_VERTEX** vertices)
 {
-	if (NativeD3D12Renderer::Active() != nullptr)
-	{
-		if (shadowDecalVertexBufferNative == nullptr || vertices == nullptr)
-			return false;
-		void* data = nullptr;
-		if (FAILED(shadowDecalVertexBufferNative->Lock(offset, size, &data)))
-			return false;
-		*vertices = static_cast<SHADOW_DECAL_VERTEX*>(data);
-		return true;
-	}
-	return shadowDecalVertexBufferD3D != nullptr &&
-		shadowDecalVertexBufferD3D->Lock(offset, size,
-			reinterpret_cast<unsigned char**>(vertices), flags) == D3D_OK;
+	if (!shadowDecalVertexBufferNative || !vertices) return false;
+	void* data=nullptr;
+	if (FAILED(shadowDecalVertexBufferNative->Lock(offset,size,&data))) return false;
+	*vertices=static_cast<SHADOW_DECAL_VERTEX*>(data);
+	return true;
 }
-
 static void UnlockShadowDecalVertices()
 {
-	if (NativeD3D12Renderer::Active() != nullptr)
-	{
-		if (shadowDecalVertexBufferNative != nullptr)
-			shadowDecalVertexBufferNative->Unlock();
-	}
-	else if (shadowDecalVertexBufferD3D != nullptr)
-		shadowDecalVertexBufferD3D->Unlock();
+	if (shadowDecalVertexBufferNative) shadowDecalVertexBufferNative->Unlock();
 }
-
-static bool LockShadowDecalIndices(size_t offset, size_t size, UnsignedShort** indices, DWORD flags)
+static bool LockShadowDecalIndices(size_t offset,size_t size,UnsignedShort** indices)
 {
-	if (NativeD3D12Renderer::Active() != nullptr)
-	{
-		if (shadowDecalIndexBufferNative == nullptr || indices == nullptr)
-			return false;
-		void* data = nullptr;
-		if (FAILED(shadowDecalIndexBufferNative->Lock(offset, size, &data)))
-			return false;
-		*indices = static_cast<UnsignedShort*>(data);
-		return true;
-	}
-	return shadowDecalIndexBufferD3D != nullptr &&
-		shadowDecalIndexBufferD3D->Lock(offset, size,
-			reinterpret_cast<unsigned char**>(indices), flags) == D3D_OK;
+	if (!shadowDecalIndexBufferNative || !indices) return false;
+	void* data=nullptr;
+	if (FAILED(shadowDecalIndexBufferNative->Lock(offset,size,&data))) return false;
+	*indices=static_cast<UnsignedShort*>(data);
+	return true;
 }
-
 static void UnlockShadowDecalIndices()
 {
-	if (NativeD3D12Renderer::Active() != nullptr)
-	{
-		if (shadowDecalIndexBufferNative != nullptr)
-			shadowDecalIndexBufferNative->Unlock();
-	}
-	else if (shadowDecalIndexBufferD3D != nullptr)
-		shadowDecalIndexBufferD3D->Unlock();
+	if (shadowDecalIndexBufferNative) shadowDecalIndexBufferNative->Unlock();
 }
 
 
@@ -331,63 +298,17 @@ Bool W3DProjectedShadowManager::init( void )
 
 Bool W3DProjectedShadowManager::ReAcquireResources(void)
 {
-	//grab assets which don't survive a device reset and need
-	//to be present for duration of game.
-
-	///@todo: We should allocate our render target pool here.
-
-	DEBUG_ASSERTCRASH(m_dynamicRenderTarget == NULL, ("Acquire of existing shadow render target"));
-	if (NativeD3D12Renderer::Active() != NULL)
-	{
-		m_renderTargetHasAlpha = TRUE;
-		m_dynamicRenderTarget = DX8Wrapper::Create_Render_Target(
-			DEFAULT_RENDER_TARGET_WIDTH, DEFAULT_RENDER_TARGET_HEIGHT, WW3D_FORMAT_A8R8G8B8);
-		shadowDecalVertexBufferNative = new NativeD3D12UploadBuffer(
-			static_cast<size_t>(SHADOW_DECAL_VERTEX_SIZE) * sizeof(SHADOW_DECAL_VERTEX));
-		shadowDecalIndexBufferNative = new NativeD3D12UploadBuffer(
-			static_cast<size_t>(SHADOW_DECAL_INDEX_SIZE) * sizeof(UnsignedShort));
-		return m_dynamicRenderTarget != NULL;
-	}
-
+	DEBUG_ASSERTCRASH(m_dynamicRenderTarget==NULL,("Acquire of existing shadow render target"));
+	if (!NativeD3D12Renderer::Active()) return FALSE;
 	m_renderTargetHasAlpha=TRUE;
-	if ((m_dynamicRenderTarget=DX8Wrapper::Create_Render_Target (DEFAULT_RENDER_TARGET_WIDTH, DEFAULT_RENDER_TARGET_HEIGHT, WW3D_FORMAT_A8R8G8B8)) == NULL)
-	{
-			m_renderTargetHasAlpha=FALSE;
-
-			//failed to get a render target with alpha.
-			//try again without.
-			m_dynamicRenderTarget=DX8Wrapper::Create_Render_Target (DEFAULT_RENDER_TARGET_WIDTH, DEFAULT_RENDER_TARGET_HEIGHT);
-	}
-
-	LPDIRECT3DDEVICE8 m_pDev=DX8Wrapper::_Get_D3D_Device8();
-
-	DEBUG_ASSERTCRASH(m_pDev, ("Trying to ReAquireResources on W3DProjectedShadowManager without device"));
-	DEBUG_ASSERTCRASH(shadowDecalIndexBufferD3D == NULL && shadowDecalIndexBufferD3D == NULL, ("ReAquireResources not released in W3DProjectedShadowManager"));
-
-	if (FAILED(m_pDev->CreateIndexBuffer
-	(
-		SHADOW_DECAL_INDEX_SIZE*sizeof(WORD), 
-		D3DUSAGE_WRITEONLY|D3DUSAGE_DYNAMIC, 
-		D3DFMT_INDEX16, 
-		D3DPOOL_DEFAULT, 
-		&shadowDecalIndexBufferD3D
-	)))
+	m_dynamicRenderTarget=NEW_REF(TextureClass,(unsigned(DEFAULT_RENDER_TARGET_WIDTH),unsigned(DEFAULT_RENDER_TARGET_HEIGHT),
+		WW3D_FORMAT_A8R8G8B8,MIP_LEVELS_1,TextureClass::POOL_DEFAULT,true));
+	if (!m_dynamicRenderTarget->Prepare_Native_Texture()) {
+		REF_PTR_RELEASE(m_dynamicRenderTarget);
 		return FALSE;
-
-	if (shadowDecalVertexBufferD3D == NULL)
-	{	// Create vertex buffer
-
-		if (FAILED(m_pDev->CreateVertexBuffer
-		(
-			SHADOW_DECAL_VERTEX_SIZE*sizeof(SHADOW_DECAL_VERTEX),
-			D3DUSAGE_WRITEONLY|D3DUSAGE_DYNAMIC, 
-			0,
-			D3DPOOL_DEFAULT, 
-			&shadowDecalVertexBufferD3D
-		)))
-			return FALSE;
 	}
-
+	shadowDecalVertexBufferNative=new NativeD3D12UploadBuffer(size_t(SHADOW_DECAL_VERTEX_SIZE)*sizeof(SHADOW_DECAL_VERTEX));
+	shadowDecalIndexBufferNative=new NativeD3D12UploadBuffer(size_t(SHADOW_DECAL_INDEX_SIZE)*sizeof(UnsignedShort));
 	return TRUE;
 }
 
@@ -399,12 +320,6 @@ void W3DProjectedShadowManager::ReleaseResources(void)
 	delete shadowDecalIndexBufferNative;
 	shadowDecalVertexBufferNative = NULL;
 	shadowDecalIndexBufferNative = NULL;
-	if (shadowDecalIndexBufferD3D)
-		shadowDecalIndexBufferD3D->Release();
-	if (shadowDecalVertexBufferD3D)
-		shadowDecalVertexBufferD3D->Release();
-	shadowDecalIndexBufferD3D=NULL;
-	shadowDecalVertexBufferD3D=NULL;
 }
 
 void W3DProjectedShadowManager::invalidateCachedLightPositions(void)
@@ -849,8 +764,7 @@ void W3DProjectedShadowManager::queueDecal(W3DProjectedShadow *shadow)
 
 	if (TheTerrainRenderObject)
 	{
-		LPDIRECT3DDEVICE8 m_pDev=DX8Wrapper::_Get_D3D_Device8();
-		if (NativeD3D12Renderer::Active() == nullptr && !m_pDev)	return;	//no render device to render
+		if (!NativeD3D12Renderer::Active()) return;
 
 		WorldHeightMap *hmap=TheTerrainRenderObject->getMap();
 		borderSize=hmap->getBorderSizeInline();
@@ -1034,7 +948,7 @@ void W3DProjectedShadowManager::queueDecal(W3DProjectedShadow *shadow)
 		if (nShadowDecalVertsInBuf > (SHADOW_DECAL_VERTEX_SIZE-numVerts))	//check if room for model verts
 		{	//flush the buffer by drawing the contents and re-locking again
 			flushDecals(shadow->m_shadowTexture[0], shadow->m_type);
-			if (!LockShadowDecalVertices(0,numVerts*sizeof(SHADOW_DECAL_VERTEX),&pvVertices,D3DLOCK_DISCARD))
+			if (!LockShadowDecalVertices(0,numVerts*sizeof(SHADOW_DECAL_VERTEX),&pvVertices))
 				return;
 
 			nShadowDecalStartBatchVertex=0;
@@ -1043,7 +957,7 @@ void W3DProjectedShadowManager::queueDecal(W3DProjectedShadow *shadow)
 			nShadowDecalVertsInBuf=0;
 		}
 		else
-		{	if (!LockShadowDecalVertices(nShadowDecalVertsInBuf*sizeof(SHADOW_DECAL_VERTEX),numVerts*sizeof(SHADOW_DECAL_VERTEX),&pvVertices,D3DLOCK_NOOVERWRITE))
+		{	if (!LockShadowDecalVertices(nShadowDecalVertsInBuf*sizeof(SHADOW_DECAL_VERTEX),numVerts*sizeof(SHADOW_DECAL_VERTEX),&pvVertices))
 				return;
 		}
 
@@ -1107,7 +1021,7 @@ void W3DProjectedShadowManager::queueDecal(W3DProjectedShadow *shadow)
 		{	//flush the buffer by drawing the contents and re-locking again
 			flushDecals(shadow->m_shadowTexture[0], shadow->m_type);
 
-			if (!LockShadowDecalIndices(0,numIndex*sizeof(short),&pvIndices,D3DLOCK_DISCARD))
+			if (!LockShadowDecalIndices(0,numIndex*sizeof(short),&pvIndices))
 				return;
 
 			nShadowDecalStartBatchIndex=0;
@@ -1116,7 +1030,7 @@ void W3DProjectedShadowManager::queueDecal(W3DProjectedShadow *shadow)
 			nShadowDecalIndicesInBuf=0;
 		}
 		else
-		{	if (!LockShadowDecalIndices(nShadowDecalIndicesInBuf*sizeof(short),numIndex*sizeof(short),&pvIndices,D3DLOCK_NOOVERWRITE))
+		{	if (!LockShadowDecalIndices(nShadowDecalIndicesInBuf*sizeof(short),numIndex*sizeof(short),&pvIndices))
 				return;
 		}
 
@@ -1183,9 +1097,7 @@ void W3DProjectedShadowManager::queueSimpleDecal(W3DProjectedShadow *shadow)
 
 	if (TheTerrainRenderObject)
 	{
-		LPDIRECT3DDEVICE8 m_pDev=DX8Wrapper::_Get_D3D_Device8();
-
-		if (!m_pDev)	return;	//no D3D Device to render
+		if (!NativeD3D12Renderer::Active() || !shadow->m_robj) return;
 
 		objPos=shadow->m_robj->Get_Position();
 		objXform=shadow->m_robj->Get_Transform();
@@ -1210,7 +1122,7 @@ void W3DProjectedShadowManager::queueSimpleDecal(W3DProjectedShadow *shadow)
 		if (nShadowDecalVertsInBuf > (SHADOW_DECAL_VERTEX_SIZE-numVerts))	//check if room for model verts
 		{	//flush the buffer by drawing the contents and re-locking again
 			flushDecals(shadow->m_shadowTexture[0], shadow->m_type);
-			if (!LockShadowDecalVertices(0,numVerts*sizeof(SHADOW_DECAL_VERTEX),&pvVertices,D3DLOCK_DISCARD))
+			if (!LockShadowDecalVertices(0,numVerts*sizeof(SHADOW_DECAL_VERTEX),&pvVertices))
 				return;
 
 			nShadowDecalStartBatchVertex=0;
@@ -1219,7 +1131,7 @@ void W3DProjectedShadowManager::queueSimpleDecal(W3DProjectedShadow *shadow)
 			nShadowDecalVertsInBuf=0;
 		}
 		else
-		{	if (!LockShadowDecalVertices(nShadowDecalVertsInBuf*sizeof(SHADOW_DECAL_VERTEX),numVerts*sizeof(SHADOW_DECAL_VERTEX),&pvVertices,D3DLOCK_NOOVERWRITE))
+		{	if (!LockShadowDecalVertices(nShadowDecalVertsInBuf*sizeof(SHADOW_DECAL_VERTEX),numVerts*sizeof(SHADOW_DECAL_VERTEX),&pvVertices))
 				return;
 		}
 
@@ -1230,6 +1142,9 @@ void W3DProjectedShadowManager::queueSimpleDecal(W3DProjectedShadow *shadow)
 		if(pvVertices)
 		{
 			//Top-left
+			// Native decal shaders consume diffuse alpha; initialize all four
+			// vertices instead of reusing unrelated data from the upload ring.
+			for (int i=0;i<4;++i) pvVertices[i].diffuse=shadow->m_diffuse;
 			vertex = objPos + vVector * shadow->m_decalSizeY * -0.5f - uVector * shadow->m_decalSizeX * 0.5f;
 			pvVertices->x=vertex.X;
 			pvVertices->y=vertex.Y;
@@ -1272,7 +1187,7 @@ void W3DProjectedShadowManager::queueSimpleDecal(W3DProjectedShadow *shadow)
 		{	//flush the buffer by drawing the contents and re-locking again
 			flushDecals(shadow->m_shadowTexture[0],shadow->m_type);
 
-			if (!LockShadowDecalIndices(0,numIndex*sizeof(short),&pvIndices,D3DLOCK_DISCARD))
+			if (!LockShadowDecalIndices(0,numIndex*sizeof(short),&pvIndices))
 				return;
 
 			nShadowDecalStartBatchIndex=0;
@@ -1281,7 +1196,7 @@ void W3DProjectedShadowManager::queueSimpleDecal(W3DProjectedShadow *shadow)
 			nShadowDecalIndicesInBuf=0;
 		}
 		else
-		{	if (!LockShadowDecalIndices(nShadowDecalIndicesInBuf*sizeof(short),numIndex*sizeof(short),&pvIndices,D3DLOCK_NOOVERWRITE))
+		{	if (!LockShadowDecalIndices(nShadowDecalIndicesInBuf*sizeof(short),numIndex*sizeof(short),&pvIndices))
 				return;
 		}
 

@@ -2,6 +2,30 @@
 
 This is a development build, not a feature-complete renderer release.
 
+## September 6 integrated transparency/mesh/shadow batch
+
+The staged build includes native queued descriptions for transparent meshes,
+particles, line groups, segmented/streak trails, ring/sphere effects, dynamic
+meshes, and sorted procedural material passes. They retain the existing shared
+far-to-near triangle ordering rather than rendering particles immediately.
+Projected-shadow resources and simple decals no longer require a D3D8 device.
+
+For this batch, play USA on Winding River, then a larger map:
+
+- Build Missile Defenders/Humvees and attack: watch missile trails, smoke,
+  explosions, and transparent effects overlapping vehicles/buildings.
+- Pan/rotate/zoom while effects overlap. Look for wrong-depth blending,
+  flickering, solid rectangles, disappearing ribbons, or displaced effects.
+- Check shadows, scorch marks and decals on slopes and around bridges.
+- Check transparent/animated meshes, material overlays, and vehicles reflected
+  in water. The approved water appearance and tank reflections are unchanged.
+- Save/load and start a second match to exercise queued resource cleanup.
+
+Optional custom terrain edging has native texture/mask/modulation passes, but
+its caller is still gated by the existing `TEST_CUSTOM_EDGING` build switch.
+Ordinary skirmishes do not validate that optional feature; it is not enabled
+silently as part of this migration.
+
 ## Run the staged game
 
 From the repository root in PowerShell:

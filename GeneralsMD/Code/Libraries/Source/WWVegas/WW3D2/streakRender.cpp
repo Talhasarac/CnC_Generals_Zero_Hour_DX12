@@ -26,6 +26,7 @@
 
 
 #include "streakrender.h"
+#include "native_effect_draw.h"
 #include "ww3d.h"
 #include "rinfo.h"
 #include "dx8wrapper.h"
@@ -317,11 +318,13 @@ void StreakRendererClass::RenderStreak
 )
 {
 	Matrix4x4 view;
-	DX8Wrapper::Get_Transform(D3DTS_VIEW,view);
+	if (NativeD3D12Renderer::Active()) {
+		Matrix3D cameraView; rinfo.Camera.Get_View_Matrix(&cameraView); view=Matrix4x4(cameraView);
+	} else DX8Wrapper::Get_Transform(D3DTS_VIEW,view);
 
 	Matrix4x4 identity(true);
-	DX8Wrapper::Set_Transform(D3DTS_WORLD,identity);	
-	DX8Wrapper::Set_Transform(D3DTS_VIEW,identity);	
+	if (!NativeD3D12Renderer::Active()) DX8Wrapper::Set_Transform(D3DTS_WORLD,identity);
+	if (!NativeD3D12Renderer::Active()) DX8Wrapper::Set_Transform(D3DTS_VIEW,identity);
 
 	/* 
 	** Handle texture UV offset animation (done once for entire line).
@@ -1309,7 +1312,7 @@ void StreakRendererClass::RenderStreak
 
 		VertexMaterialClass *mat;		
 		mat=VertexMaterialClass::Get_Preset(VertexMaterialClass::PRELIT_DIFFUSE);
-		DX8Wrapper::Set_Material(mat);
+		if (!NativeD3D12Renderer::Active()) DX8Wrapper::Set_Material(mat);
 		REF_PTR_RELEASE(mat);
 
 		// If Texture is non-NULL enable texturing in shader - otherwise disable.
@@ -1391,10 +1394,13 @@ void StreakRendererClass::RenderStreak
 		}
 
 	
+		if (NativeD3D12Renderer::Active()) {
+			Submit_Native_Effect(rinfo.Camera,shader,Texture,Verts,ib_access.Peek_Source_Buffer(),ib_access.Get_Native_Index_Offset(),triangleIndex,vnum,true,&obj_sphere);
+		} else {
 		DX8Wrapper::Set_Index_Buffer(ib_access,0);
 		DX8Wrapper::Set_Vertex_Buffer(Verts);				
-		DX8Wrapper::Set_Texture(0,Texture);
-		DX8Wrapper::Set_Shader(shader);
+		if (!NativeD3D12Renderer::Active()) DX8Wrapper::Set_Texture(0,Texture);
+		if (!NativeD3D12Renderer::Active()) DX8Wrapper::Set_Shader(shader);
 
 		if (sorting) 
 		{	
@@ -1404,10 +1410,11 @@ void StreakRendererClass::RenderStreak
 		{
 			DX8Wrapper::Draw_Triangles(0,triangleIndex,0,vnum);
 		}
+		}
 		
 	}	// Chunking loop
 
-	DX8Wrapper::Set_Transform(D3DTS_VIEW,view);
+	if (!NativeD3D12Renderer::Active()) DX8Wrapper::Set_Transform(D3DTS_VIEW,view);
 
 }
 

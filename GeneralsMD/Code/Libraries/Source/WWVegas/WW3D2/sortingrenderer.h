@@ -27,6 +27,14 @@
 
 class SortingNodeStruct;
 class SphereClass;
+class DynamicVBAccessClass;
+class IndexBufferClass;
+class VertexBufferClass;
+class TextureClass;
+struct NativeDrawSubmission;
+class TextureBaseClass;
+struct NativeD3D12State;
+struct NativeMaterialDescription;
 
 class SortingRendererClass
 {
@@ -36,6 +44,14 @@ class SortingRendererClass
 	static void Insert_To_Sorting_Pool(SortingNodeStruct* state);
 
 public:
+	// Retains the CPU geometry and all source textures until the shared sorted flush.
+	static bool Insert_Native_Draw(const NativeDrawSubmission& draw, const NativeD3D12State& state,
+		VertexBufferClass* vertices, IndexBufferClass* indices, unsigned vertexOffset,
+		TextureClass* const* textures, unsigned textureCount, const SphereClass* sphere=nullptr);
+	static void Insert_Native_Triangles(const DynamicVBAccessClass& vertices, IndexBufferClass* indices,
+		unsigned short firstIndex, unsigned short polygonCount, unsigned short vertexCount,
+		const NativeD3D12State& state, const NativeMaterialDescription& material, TextureBaseClass* textureOwner,
+		const SphereClass* sphere=nullptr);
 	static void Insert_Triangles(
 		const SphereClass& bounding_sphere,
 		unsigned short start_index, 

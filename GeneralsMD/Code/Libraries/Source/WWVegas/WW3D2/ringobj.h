@@ -250,7 +250,7 @@ protected:
 	RingScaleChannelClass		OuterScaleChannel;
 
 	void						 		update_mesh_data(const Vector3 & center,const Vector3 & extent);
-	void						 		render_ring(RenderInfoClass & rinfo,const Vector3 & center,const Vector3 & extent);
+	void render_ring(RenderInfoClass& rinfo,const Matrix3D& world);
 	void						 		vis_render_ring(SpecialRenderInfoClass & rinfo,const Vector3 & center,const Vector3 & extent);
 
 	char						 		Name[2*W3D_NAME_LEN];

@@ -165,6 +165,7 @@ public:
 	unsigned short Get_Vertex_Count() const { return VertexCount; }
 	const NativeD3D12UploadBuffer* Get_Native_Vertex_Buffer() const;
 	unsigned short Get_Native_Vertex_Offset() const { return VertexBufferOffset; }
+	VertexBufferClass* Peek_Source_Buffer() const { return VertexBuffer; }
 
 	// Call at the end of the execution, or at whatever time you wish to release
 	// the recycled dynamic vertex buffer.
@@ -262,6 +263,7 @@ protected:
 	~SortingVertexBufferClass();
 public:
 	SortingVertexBufferClass(unsigned short VertexCount);
+	const VertexFormatXYZNDUV2* Get_Vertex_Array() const { return VertexBuffer; }
 };
 
 

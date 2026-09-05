@@ -85,7 +85,7 @@ public:
 	/// Empties the tree buffer.
 	void clearAllEdging(void);
 	/// Draws the trees.  Uses camera for culling.
-	void drawEdging( WorldHeightMap *pMap, Int minX, Int maxX, Int minY, Int maxY, 
+	void drawEdging(CameraClass& camera, const Matrix3D& world, WorldHeightMap *pMap, Int minX, Int maxX, Int minY, Int maxY,
 		TextureClass * terrainTexture, TextureClass * cloudTexture, TextureClass * noiseTexture );
 	/// Called when the view changes, and sort key needs to be recalculated.
 	/// Normally sortKey gets calculated when a tree becomes visible.

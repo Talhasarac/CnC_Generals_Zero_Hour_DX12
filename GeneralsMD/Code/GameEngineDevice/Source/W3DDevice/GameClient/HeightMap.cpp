@@ -2031,10 +2031,8 @@ void HeightMapRenderObjClass::Render(RenderInfoClass & rinfo)
 		Int xCoordMax = m_x+m_map->getDrawOrgX()-1;	
 	#ifdef TEST_CUSTOM_EDGING
 		// Draw edging just before last pass.
-		DX8Wrapper::Set_Texture(0,NULL);
-		DX8Wrapper::Set_Texture(1,NULL);
 		m_stageTwoTexture->restore();
-		m_customEdging->drawEdging(m_map, xCoordMin, xCoordMax, yCoordMin, yCoordMax, 
+		m_customEdging->drawEdging(rinfo.Camera,Transform,m_map, xCoordMin, xCoordMax, yCoordMin, yCoordMax,
 			m_stageZeroTexture, doCloud?m_stageTwoTexture:NULL, TheGlobalData->m_useLightMap?m_stageThreeTexture:NULL);
 	#endif
 	#ifdef DO_ROADS

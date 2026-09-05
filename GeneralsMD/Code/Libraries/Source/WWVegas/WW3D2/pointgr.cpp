@@ -87,6 +87,8 @@
 #include "camera.h"
 #include "dx8fvf.h"
 #include "sortingrenderer.h"
+#include "dx8renderer.h"
+#include "native_effect_draw.h"
 
 // Upgraded to DX8 2/2/01 HY
 
@@ -879,7 +881,10 @@ void PointGroupClass::Render(RenderInfoClass &rinfo)
 
 	// Get the world and view matrices
 	Matrix4x4 view;
-	DX8Wrapper::Get_Transform(D3DTS_VIEW,view);
+	if (NativeD3D12Renderer::Active() && TheDX8MeshRenderer.Peek_Camera()) {
+		Matrix3D cameraView; TheDX8MeshRenderer.Peek_Camera()->Get_View_Matrix(&cameraView);
+		view=Matrix4x4(cameraView);
+	} else DX8Wrapper::Get_Transform(D3DTS_VIEW,view);
 
 	// Transform the point locations from worldspace to camera space if needed
 	// (i.e. if they are not already in camera space):
@@ -917,6 +922,7 @@ void PointGroupClass::Render(RenderInfoClass &rinfo)
 	// the locations are now in view space
 	// so set world and view matrices to identity and render
 	
+	if (!NativeD3D12Renderer::Active()) {
 	Matrix4x4 identity(true);
 	DX8Wrapper::Set_Transform(D3DTS_WORLD,identity);	
 	DX8Wrapper::Set_Transform(D3DTS_VIEW,identity);	
@@ -924,6 +930,7 @@ void PointGroupClass::Render(RenderInfoClass &rinfo)
 	DX8Wrapper::Set_Material(PointMaterial);
 	DX8Wrapper::Set_Shader(Shader);
 	DX8Wrapper::Set_Texture(0,Texture);
+	}
 
 	// Enable sorting if the primitives are translucent and alpha testing is not enabled.
 	const bool sort = (Shader.Get_Dst_Blend_Func() != ShaderClass::DSTBLEND_ZERO) && (Shader.Get_Alpha_Test() == ShaderClass::ALPHATEST_DISABLE) && (WW3D::Is_Sorting_Enabled());
@@ -974,6 +981,10 @@ void PointGroupClass::Render(RenderInfoClass &rinfo)
 			}			
 		} // copy
 
+		if (NativeD3D12Renderer::Active()) {
+			if (auto* camera=TheDX8MeshRenderer.Peek_Camera())
+				Submit_Native_Effect(*camera,Shader,Texture,PointVerts,indexbuffer,0,delta/verticesperprimitive,delta,true);
+		} else {
 		DX8Wrapper::Set_Index_Buffer (indexbuffer, 0);
 		DX8Wrapper::Set_Vertex_Buffer (PointVerts);
 		
@@ -985,12 +996,13 @@ void PointGroupClass::Render(RenderInfoClass &rinfo)
 		{
 			DX8Wrapper::Draw_Triangles (0, delta / verticesperprimitive, 0, delta);
 		}
+		}
 		
 		current+=delta;
 	} // loop while (current<vnum)							  
 
 	// restore the matrices
-	DX8Wrapper::Set_Transform(D3DTS_VIEW,view);
+	if (!NativeD3D12Renderer::Active()) DX8Wrapper::Set_Transform(D3DTS_VIEW,view);
 }
 
 
@@ -1202,7 +1214,10 @@ void PointGroupClass::Update_Arrays(
 				Matrix4x4 view;
 				Vector4 result;
 				if (!Billboard) {
-					DX8Wrapper::Get_Transform(D3DTS_VIEW,view);
+					if (NativeD3D12Renderer::Active() && TheDX8MeshRenderer.Peek_Camera()) {
+						Matrix3D cameraView; TheDX8MeshRenderer.Peek_Camera()->Get_View_Matrix(&cameraView);
+						view=Matrix4x4(cameraView);
+					} else DX8Wrapper::Get_Transform(D3DTS_VIEW,view);
 				}
 
 				// Scale vertex offsets and add them to point locations to get vertex locations
@@ -1693,7 +1708,10 @@ void PointGroupClass::RenderVolumeParticle(RenderInfoClass &rinfo, unsigned int 
 
 		// Get the world and view matrices
 		Matrix4x4 view;
-		DX8Wrapper::Get_Transform(D3DTS_VIEW,view);
+		if (NativeD3D12Renderer::Active() && TheDX8MeshRenderer.Peek_Camera()) {
+			Matrix3D cameraView; TheDX8MeshRenderer.Peek_Camera()->Get_View_Matrix(&cameraView);
+			view=Matrix4x4(cameraView);
+		} else DX8Wrapper::Get_Transform(D3DTS_VIEW,view);
 
 
 
@@ -1830,6 +1848,7 @@ void PointGroupClass::RenderVolumeParticle(RenderInfoClass &rinfo, unsigned int 
 		// the locations are now in view space
 		// so set world and view matrices to identity and render
 		
+		if (!NativeD3D12Renderer::Active()) {
 		Matrix4x4 identity(true);
 		DX8Wrapper::Set_Transform(D3DTS_WORLD,identity);	
 		DX8Wrapper::Set_Transform(D3DTS_VIEW,identity);	
@@ -1837,6 +1856,7 @@ void PointGroupClass::RenderVolumeParticle(RenderInfoClass &rinfo, unsigned int 
 		DX8Wrapper::Set_Material(PointMaterial);
 		DX8Wrapper::Set_Shader(Shader);
 		DX8Wrapper::Set_Texture(0,Texture);
+		}
 
 		// Enable sorting if the primitives are translucent and alpha testing is not enabled.
 		const bool sort = (Shader.Get_Dst_Blend_Func() != ShaderClass::DSTBLEND_ZERO) && (Shader.Get_Alpha_Test() == ShaderClass::ALPHATEST_DISABLE) && (WW3D::Is_Sorting_Enabled());
@@ -1892,6 +1912,10 @@ void PointGroupClass::RenderVolumeParticle(RenderInfoClass &rinfo, unsigned int 
 				}			
 			} // copy
 
+			if (NativeD3D12Renderer::Active()) {
+				if (auto* camera=TheDX8MeshRenderer.Peek_Camera())
+					Submit_Native_Effect(*camera,Shader,Texture,PointVerts,indexbuffer,0,delta/verticesperprimitive,delta,true);
+			} else {
 			DX8Wrapper::Set_Index_Buffer (indexbuffer, 0);
 			DX8Wrapper::Set_Vertex_Buffer (PointVerts);
 			
@@ -1902,6 +1926,7 @@ void PointGroupClass::RenderVolumeParticle(RenderInfoClass &rinfo, unsigned int 
 					SortingRendererClass::Insert_Triangles (0, delta / verticesperprimitive, 0, delta);
 			else
 				DX8Wrapper::Draw_Triangles (0, delta / verticesperprimitive, 0, delta);
+			}
 			
 
 			current+=delta;
@@ -1915,5 +1940,5 @@ void PointGroupClass::RenderVolumeParticle(RenderInfoClass &rinfo, unsigned int 
 
 
 	// restore the matrices
-	DX8Wrapper::Set_Transform(D3DTS_VIEW,view);
+	if (!NativeD3D12Renderer::Active()) DX8Wrapper::Set_Transform(D3DTS_VIEW,view);
 }

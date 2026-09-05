@@ -44,6 +44,8 @@
 #include "dx8wrapper.h"
 #include "vertmaterial.h"
 #include "texture.h"
+#include "native_draw_state.h"
+#include "native_mesh_geometry.h"
 #include "d3d8.h"
 #include "statistics.h"
 #include <wwprofile.h>
@@ -160,6 +162,18 @@ class SortingNodeStruct : public DLNodeClass<SortingNodeStruct>
 
 public:
 	RenderStateStruct sorting_state;
+	NativeD3D12State native_state;
+	NativeMaterialDescription native_material;
+	bool has_native_state=false;
+	void Capture_Native(const NativeD3D12State& state,const NativeMaterialDescription& material) {
+		native_state=state; native_material=material; has_native_state=true;
+		// TextureClass can replace its native allocation before a delayed flush.
+		// Keep the exact allocation described by this draw, not just its asset owner.
+		for (unsigned stage=0;stage<4;++stage) {
+			native_state.materialTextures[stage].reset(material.textures[stage] ? material.textures[stage]->ShareResource() : nullptr);
+			native_material.textures[stage]=native_state.materialTextures[stage].get();
+		}
+	}
 
 	SphereClass bounding_sphere;
 
@@ -184,6 +198,72 @@ static SortingNodeStruct* Get_Sorting_Struct()
 	}
 	state=W3DNEW SortingNodeStruct();
 	return state;
+}
+
+bool SortingRendererClass::Insert_Native_Draw(const NativeDrawSubmission& draw,const NativeD3D12State& nativeState,
+	VertexBufferClass* vertices,IndexBufferClass* indices,unsigned vertexOffset,
+	TextureClass* const* textures,unsigned textureCount,const SphereClass* sphere)
+{
+	if (!draw.Is_Valid() || !vertices || !indices || vertices->Type()!=BUFFER_TYPE_SORTING ||
+		indices->Type()!=BUFFER_TYPE_SORTING || draw.topology!=D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST ||
+		draw.indexCount%3 || textureCount>4 || (textureCount && !textures) ||
+		draw.vertexStride!=sizeof(VertexFormatXYZNDUV2) ||
+		vertexOffset>vertices->Get_Vertex_Count() || draw.vertexCount>vertices->Get_Vertex_Count()-vertexOffset) return false;
+	const auto* source=static_cast<SortingIndexBufferClass*>(indices)->Get_Index_Array();
+	const uintptr_t address=reinterpret_cast<uintptr_t>(draw.indices),begin=reinterpret_cast<uintptr_t>(source);
+	if (address<begin || (address-begin)%sizeof(unsigned short)) return false;
+	const size_t first=(address-begin)/sizeof(unsigned short);
+	if (first>indices->Get_Index_Count() || draw.indexCount>indices->Get_Index_Count()-first) return false;
+	if (draw.vertices!=static_cast<SortingVertexBufferClass*>(vertices)->Get_Vertex_Array()+vertexOffset) return false;
+	unsigned minVertex=draw.vertexCount,maxVertex=0;
+	for (unsigned i=0;i<draw.indexCount;++i) {
+		const unsigned index=draw.indices[i];
+		if (index>=draw.vertexCount-draw.baseVertex) return false;
+		minVertex=(std::min)(minVertex,index); maxVertex=(std::max)(maxVertex,index);
+	}
+	auto* node=Get_Sorting_Struct();
+	REF_PTR_SET(node->sorting_state.vertex_buffers[0],vertices);
+	REF_PTR_SET(node->sorting_state.index_buffer,indices);
+	for (unsigned i=0;i<textureCount;++i) REF_PTR_SET(node->sorting_state.Textures[i],textures[i]);
+	node->sorting_state.vertex_buffer_types[0]=BUFFER_TYPE_SORTING;
+	node->sorting_state.index_buffer_type=BUFFER_TYPE_SORTING;
+	node->sorting_state.vba_offset=vertexOffset; node->sorting_state.vba_count=draw.vertexCount;
+	node->sorting_state.iba_offset=0; node->sorting_state.index_base_offset=draw.baseVertex;
+	std::memcpy(&node->sorting_state.world,nativeState.worldView.data(),sizeof(Matrix4x4));
+	node->sorting_state.view=Matrix4x4(true);
+	node->Capture_Native(nativeState,draw.material);
+	node->bounding_sphere=sphere ? *sphere : SphereClass(Vector3(0,0,0),0);
+	// Match the existing row-vector depth convention used by triangle sorting.
+	const Matrix4x4& m=node->sorting_state.world;
+	const Vector3& c=node->bounding_sphere.Center;
+	node->transformed_center=Vector3(c.X*m[0][0]+c.Y*m[1][0]+c.Z*m[2][0]+m[3][0],
+		c.X*m[0][1]+c.Y*m[1][1]+c.Z*m[2][1]+m[3][1],
+		c.X*m[0][2]+c.Y*m[1][2]+c.Z*m[2][2]+m[3][2]);
+	node->start_index=static_cast<unsigned short>(first); node->polygon_count=draw.indexCount/3;
+	node->min_vertex_index=minVertex; node->vertex_count=maxVertex-minVertex+1;
+	SortingNodeStruct* next=sorted_list.Head();
+	while (next && node->transformed_center.Z<=next->transformed_center.Z) next=next->Succ();
+	if (next) {
+		if (sorted_list.Head()==sorted_list.Tail()) sorted_list.Add_Head(node);
+		else node->Insert_Before(next);
+	} else sorted_list.Add_Tail(node);
+	return true;
+}
+
+void SortingRendererClass::Insert_Native_Triangles(const DynamicVBAccessClass& vertices,
+	IndexBufferClass* indices,unsigned short firstIndex,unsigned short polygonCount,unsigned short vertexCount,
+	const NativeD3D12State& state,const NativeMaterialDescription& material,TextureBaseClass* textureOwner,
+	const SphereClass* sphere)
+{
+	auto draw=Describe_Native_Mesh_Geometry(vertices.Peek_Source_Buffer(),indices,
+		vertices.Get_Native_Vertex_Offset(),vertexCount);
+	if (!Describe_Native_Indexed_Range(draw,firstIndex,unsigned(polygonCount)*3,0,0,vertexCount,
+		D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST)) { WWASSERT(false); return; }
+	draw.material=material; draw.useMaterial=true;
+	TextureClass* texture=static_cast<TextureClass*>(textureOwner);
+	const bool inserted=Insert_Native_Draw(draw,state,vertices.Peek_Source_Buffer(),indices,
+		vertices.Get_Native_Vertex_Offset(),&texture,1,sphere);
+	WWASSERT(inserted);
 }
 
 // ----------------------------------------------------------------------------
@@ -234,6 +314,15 @@ void SortingRendererClass::Insert_Triangles(
 	SortingNodeStruct* state=Get_Sorting_Struct();
 
 	DX8Wrapper::Get_Render_State(state->sorting_state);
+	state->has_native_state=false;
+	if (auto* native=NativeD3D12Renderer::Active()) {
+		// Freeze rendering inputs when queued, before another object can alter
+		// mapper, projection, lighting, or material state. Geometry refs above
+		// continue to own the source buffers/textures through the sorted flush.
+		DX8Wrapper::Apply_Render_State_Changes();
+		DX8Wrapper::Apply_Native_Lighting();
+		state->Capture_Native(native->CaptureState(),DX8Wrapper::Build_Native_Material_Description(FVFInfoClass(dynamic_fvf_type)));
+	}
 
  	WWASSERT(
 		((state->sorting_state.index_buffer_type==BUFFER_TYPE_SORTING || state->sorting_state.index_buffer_type==BUFFER_TYPE_DYNAMIC_SORTING) &&
@@ -321,10 +410,13 @@ void Release_Refs(SortingNodeStruct* state)
 	}
 	REF_PTR_RELEASE(state->sorting_state.index_buffer);
 	REF_PTR_RELEASE(state->sorting_state.material);
-	for (i=0;i<DX8Wrapper::Get_Current_Caps()->Get_Max_Textures_Per_Pass();++i) 
+	for (i=0;i<MAX_TEXTURE_STAGES;++i)
 	{
 		REF_PTR_RELEASE(state->sorting_state.Textures[i]);
 	}
+	state->native_material=NativeMaterialDescription();
+	state->native_state=NativeD3D12State();
+	state->has_native_state=false;
 }
 
 static unsigned overlapping_node_count;
@@ -549,10 +641,39 @@ void SortingRendererClass::Flush_Sorting_Pool()
 
 	// Set index buffer and render!
 
-	DX8Wrapper::Set_Index_Buffer(dyn_ib_access,0); // Override with this buffer (do something to prevent need for this!)
-	DX8Wrapper::Set_Vertex_Buffer(dyn_vb_access); // Override with this buffer (do something to prevent need for this!)
-
-	DX8Wrapper::Apply_Render_State_Changes();
+	auto* native=NativeD3D12Renderer::Active();
+	if (!native) {
+		DX8Wrapper::Set_Index_Buffer(dyn_ib_access,0);
+		DX8Wrapper::Set_Vertex_Buffer(dyn_vb_access);
+		DX8Wrapper::Apply_Render_State_Changes();
+	}
+	const auto renderRun=[&](SortingNodeStruct* state,unsigned first,unsigned count) {
+		if (!native || !state->has_native_state) {
+			Apply_Render_State(state->sorting_state);
+			DX8Wrapper::Draw_Triangles(first*3,count,state->min_vertex_index,state->vertex_count);
+			return;
+		}
+		if (!_EnableTriangleDraw) return;
+		const auto* vb=dyn_vb_access.Get_Native_Vertex_Buffer();
+		const auto* ib=dyn_ib_access.Get_Native_Index_Buffer();
+		const size_t vo=size_t(dyn_vb_access.Get_Native_Vertex_Offset())*sizeof(VertexFormatXYZNDUV2);
+		const size_t io=(size_t(dyn_ib_access.Get_Native_Index_Offset())+first*3)*sizeof(unsigned short);
+		const size_t bytes=size_t(overlapping_vertex_count)*sizeof(VertexFormatXYZNDUV2);
+		if (!vb || !ib || vo>vb->Size() || bytes>vb->Size()-vo || io>ib->Size() ||
+			size_t(count)*6>ib->Size()-io) { WWASSERT(false); return; }
+		NativeD3D12ScopedState restore(*native);
+		native->RestoreState(state->native_state);
+		NativeDrawSubmission draw;
+		draw.vertices=static_cast<const unsigned char*>(vb->Data())+vo;
+		draw.vertexBytes=UINT(bytes); draw.vertexStride=sizeof(VertexFormatXYZNDUV2);
+		draw.vertexCount=overlapping_vertex_count;
+		draw.indices=reinterpret_cast<const unsigned short*>(static_cast<const unsigned char*>(ib->Data())+io);
+		draw.indexCount=count*3;
+		draw.layout=FVFInfoClass(dynamic_fvf_type).Build_Native_Layout();
+		draw.material=state->native_material; draw.useMaterial=true;
+		draw.vertexOwner=vb; draw.indexOwner=ib;
+		Submit_Native_Draw(*native,draw);
+	};
 
 	unsigned count_to_render=1;
 	unsigned start_index=0;
@@ -560,13 +681,7 @@ void SortingRendererClass::Flush_Sorting_Pool()
 	for (unsigned i=1;i<overlapping_polygon_count;++i) {
 		if (node_id!=tis[i].idx) {
 			SortingNodeStruct* state=overlapping_nodes[node_id];
-			Apply_Render_State(state->sorting_state);
-
-			DX8Wrapper::Draw_Triangles(
-				start_index*3,
-				count_to_render,
-				state->min_vertex_index,
-				state->vertex_count);
+			renderRun(state,start_index,count_to_render);
 
 			count_to_render=0;
 			start_index=i;
@@ -578,13 +693,7 @@ void SortingRendererClass::Flush_Sorting_Pool()
 	// Render any remaining polygons...
 	if (count_to_render) {
 		SortingNodeStruct* state=overlapping_nodes[node_id];
-		Apply_Render_State(state->sorting_state);
-
-		DX8Wrapper::Draw_Triangles(
-			start_index*3,
-			count_to_render,
-			state->min_vertex_index,
-			state->vertex_count);
+		renderRun(state,start_index,count_to_render);
 	}
 
 	// Release all references and return nodes back to the clean list for the frame...

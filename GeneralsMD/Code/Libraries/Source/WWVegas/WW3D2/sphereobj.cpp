@@ -69,6 +69,7 @@
 
 
 #include "sphereobj.h"
+#include "native_effect_draw.h"
 #include "w3d_util.h"
 #include "wwdebug.h"
 #include "vertmaterial.h"
@@ -455,7 +456,7 @@ void SphereRenderObjClass::Set_Name(const char * name)
  *   3/01/00    jga : Created.                                                                 *
  *   2/19/01    HY  : upgraded to DX8                                                          *
  *=============================================================================================*/
-void SphereRenderObjClass::render_sphere()
+void SphereRenderObjClass::render_sphere(RenderInfoClass& rinfo,const Matrix3D& world,bool viewSpace)
 {
 	// Should never get here with NULL LOD
 	if (CurrentLOD == 0) {
@@ -470,9 +471,6 @@ void SphereRenderObjClass::render_sphere()
 	} else {
 		SphereShader.Set_Texturing (ShaderClass::TEXTURING_DISABLE);
 	}
-	DX8Wrapper::Set_Shader(SphereShader);
-	DX8Wrapper::Set_Texture(0,SphereTexture);
-	DX8Wrapper::Set_Material(SphereMaterial);	
 
 	// Enable sorting if the primitive is translucent, alpha testing is not enabled, and sorting is enabled globally.
 	const bool sort = (SphereShader.Get_Dst_Blend_Func() != ShaderClass::DSTBLEND_ZERO) && (SphereShader.Get_Alpha_Test() == ShaderClass::ALPHATEST_DISABLE) && (WW3D::Is_Sorting_Enabled());
@@ -519,14 +517,9 @@ void SphereRenderObjClass::render_sphere()
 		}
 	}	
 
-	DX8Wrapper::Set_Vertex_Buffer(vb);
-	DX8Wrapper::Set_Index_Buffer(ib,0);
-
-	if (sort) {
-		SortingRendererClass::Insert_Triangles(Get_Bounding_Sphere(), 0, mesh.face_ct, 0, mesh.Vertex_ct);
-	} else {
-		DX8Wrapper::Draw_Triangles(0,mesh.face_ct,0,mesh.Vertex_ct);
-	}
+	const SphereClass bounds=Get_Bounding_Sphere();
+	Submit_Native_Effect(rinfo.Camera,SphereShader,SphereTexture,vb,ib.Peek_Source_Buffer(),ib.Get_Native_Index_Offset(),
+		mesh.face_ct,mesh.Vertex_ct,viewSpace,&bounds,&world,SphereMaterial);
 
 } // render_sphere
 
@@ -660,8 +653,8 @@ void SphereRenderObjClass::Render(RenderInfoClass & rinfo)
 
 		// Camera Align
 		if (Flags & USE_CAMERA_ALIGN) {
-			Matrix4x4 view,ident(true);
-			DX8Wrapper::Get_Transform(D3DTS_VIEW,view);
+			Matrix3D cameraView; rinfo.Camera.Get_View_Matrix(&cameraView);
+			const Matrix4x4 view(cameraView);
 
 			Vector4 wpos(Transform[0][3],Transform[1][3],Transform[2][3],1);
 			Vector4 cpos;
@@ -672,13 +665,9 @@ void SphereRenderObjClass::Render(RenderInfoClass & rinfo)
 							1.0f, 0.0f, 0.0f, cpos.Z);
 
 			tm.Scale(real_scale);
-			DX8Wrapper::Set_Transform(D3DTS_WORLD,ident);
-			DX8Wrapper::Set_Transform(D3DTS_VIEW,tm); 
-			render_sphere();
-			DX8Wrapper::Set_Transform(D3DTS_VIEW,view);
+			render_sphere(rinfo,tm,true);
 		} else {
-			DX8Wrapper::Set_Transform(D3DTS_WORLD,temp);	
-			render_sphere();
+			render_sphere(rinfo,temp,false);
 		}		
 	}
 }

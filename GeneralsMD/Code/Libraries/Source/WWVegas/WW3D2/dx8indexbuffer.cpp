@@ -453,9 +453,7 @@ void DynamicIBAccessClass::Allocate_DX8_Dynamic_Buffer()
 	// Create a new vb if one doesn't exist currently
 	if (!_DynamicDX8IndexBuffer) {
 		unsigned usage=DX8IndexBufferClass::USAGE_DYNAMIC;
-		if (DX8Wrapper::Get_Current_Caps()->Support_NPatches()) {
-			usage|=DX8IndexBufferClass::USAGE_NPATCHES;
-		}
+		// Native uploads have no fixed-function N-patch device capability.
 
 		_DynamicDX8IndexBuffer=NEW_REF(DX8IndexBufferClass,(
 			_DynamicDX8IndexBufferSize,

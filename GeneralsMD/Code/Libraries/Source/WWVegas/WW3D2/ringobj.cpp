@@ -72,6 +72,7 @@
 
 
 #include "ringobj.h"
+#include "native_effect_draw.h"
 #include "w3d_util.h"
 #include "wwdebug.h"
 #include "vertmaterial.h"
@@ -518,7 +519,7 @@ void RingRenderObjClass::Set_Name(const char * name)
  * HISTORY:                                                                                    *
  *   1/19/00    gth : Created.                                                                 *
  *=============================================================================================*/
-void RingRenderObjClass::render_ring(RenderInfoClass & rinfo,const Vector3 & center,const Vector3 & extent)
+void RingRenderObjClass::render_ring(RenderInfoClass & rinfo,const Matrix3D& world)
 {
 	// Should never get here with NULL LOD
 	if (CurrentLOD == 0) {
@@ -533,9 +534,6 @@ void RingRenderObjClass::render_ring(RenderInfoClass & rinfo,const Vector3 & cen
 	} else {
 		RingShader.Set_Texturing (ShaderClass::TEXTURING_DISABLE);
 	}
-	DX8Wrapper::Set_Shader(RingShader);
-	DX8Wrapper::Set_Texture(0,RingTexture);
-	DX8Wrapper::Set_Material(RingMaterial);	
 
 	// Enable sorting if the primitive is translucent, alpha testing is not enabled, and sorting is enabled globally.
 	const bool sort = (RingShader.Get_Dst_Blend_Func() != ShaderClass::DSTBLEND_ZERO) && (RingShader.Get_Alpha_Test() == ShaderClass::ALPHATEST_DISABLE) && (WW3D::Is_Sorting_Enabled());
@@ -588,14 +586,9 @@ void RingRenderObjClass::render_ring(RenderInfoClass & rinfo,const Vector3 & cen
 		}
 	}	
 
-	DX8Wrapper::Set_Vertex_Buffer(vb);
-	DX8Wrapper::Set_Index_Buffer(ib,0);
-	
-	if (sort) {
-		SortingRendererClass::Insert_Triangles(Get_Bounding_Sphere(), 0, ring.face_ct, 0, ring.Vertex_ct);
-	} else {
-		DX8Wrapper::Draw_Triangles(0, ring.face_ct, 0, ring.Vertex_ct);
-	}
+	const SphereClass bounds=Get_Bounding_Sphere();
+	Submit_Native_Effect(rinfo.Camera,RingShader,RingTexture,vb,ib.Peek_Source_Buffer(),ib.Get_Native_Index_Offset(),
+		ring.face_ct,ring.Vertex_ct,false,&bounds,&world,RingMaterial);
 
 } // render_ring
 
@@ -715,6 +708,7 @@ void RingRenderObjClass::Render(RenderInfoClass & rinfo)
 		//	Should we force the ring to be camera aligned?
 		// (this will cause the ring to be parallel to the screen)
 		//
+		Matrix3D world=Transform;
 		if (Flags & USE_CAMERA_ALIGN) {
 			Vector3 obj_position;
 			Vector3 camera_z_vector;
@@ -724,15 +718,13 @@ void RingRenderObjClass::Render(RenderInfoClass & rinfo)
 
 			Matrix3D temp;
 			temp.Look_At(obj_position, obj_position + camera_z_vector, 0.0f);
-			DX8Wrapper::Set_Transform(D3DTS_WORLD, temp);	
-		} else {
-			DX8Wrapper::Set_Transform(D3DTS_WORLD, Transform);	
+			world=temp;
 		}
 
 		//
 		//	Pass the geometry on to DX8
 		//
-		render_ring (rinfo, ObjSpaceCenter, ObjSpaceExtent);
+		render_ring(rinfo,world);
 	}
 }	// Render
 

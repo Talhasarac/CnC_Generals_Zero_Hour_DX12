@@ -732,9 +732,7 @@ void DynamicVBAccessClass::Allocate_DX8_Dynamic_Buffer()
 	// Create a new vb if one doesn't exist currently
 	if (!_DynamicDX8VertexBuffer) {
 		unsigned usage=DX8VertexBufferClass::USAGE_DYNAMIC;
-		if (DX8Wrapper::Get_Current_Caps()->Support_NPatches()) {
-			usage|=DX8VertexBufferClass::USAGE_NPATCHES;
-		}
+		// Native uploads have no fixed-function N-patch device capability.
 
 		_DynamicDX8VertexBuffer=NEW_REF(DX8VertexBufferClass,(
 			dynamic_fvf_type, 

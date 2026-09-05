@@ -38,6 +38,7 @@
  * - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
 #include "sharebuf.h"
+#include "native_effect_draw.h"
 #include "linegrp.h"
 #include "texture.h"
 #include "vertmaterial.h"
@@ -257,9 +258,9 @@ void	LineGroupClass::Render(RenderInfoClass &rinfo)
 	}
 
 	VertexMaterialClass * linemat = VertexMaterialClass::Get_Preset(VertexMaterialClass::PRELIT_DIFFUSE);
-	DX8Wrapper::Set_Material(linemat);
-	DX8Wrapper::Set_Shader(Shader);
-	DX8Wrapper::Set_Texture(0, Texture);
+	if (!NativeD3D12Renderer::Active()) DX8Wrapper::Set_Material(linemat);
+	if (!NativeD3D12Renderer::Active()) DX8Wrapper::Set_Shader(Shader);
+	if (!NativeD3D12Renderer::Active()) DX8Wrapper::Set_Texture(0, Texture);
 	REF_PTR_RELEASE(linemat);
 
 	WWASSERT(StartLineLoc && StartLineLoc->Get_Array());
@@ -281,10 +282,12 @@ void	LineGroupClass::Render(RenderInfoClass &rinfo)
 
 	// Save off the view matrix
 	Matrix4x4 view;
-	DX8Wrapper::Get_Transform(D3DTS_VIEW, view);
+	if (NativeD3D12Renderer::Active()) {
+		Matrix3D cameraView; rinfo.Camera.Get_View_Matrix(&cameraView); view=Matrix4x4(cameraView);
+	} else DX8Wrapper::Get_Transform(D3DTS_VIEW,view);
 
 	Matrix4x4 identity(true);
-	DX8Wrapper::Set_Transform(D3DTS_WORLD, identity);	
+	if (!NativeD3D12Renderer::Active()) DX8Wrapper::Set_Transform(D3DTS_WORLD, identity);
 
 	// if the points are in world space, transform the offsets
 	if (Get_Flag(TRANSFORM)) {
@@ -296,7 +299,7 @@ void	LineGroupClass::Render(RenderInfoClass &rinfo)
 			Matrix3D::Transform_Vector(xform_mat, offset[i], &offset[i]);
 		}
 	} else {
-		DX8Wrapper::Set_Transform(D3DTS_VIEW, identity);
+		if (!NativeD3D12Renderer::Active()) DX8Wrapper::Set_Transform(D3DTS_VIEW, identity);
 	}
 	
 	int num_tris=0;
@@ -470,6 +473,9 @@ void	LineGroupClass::Render(RenderInfoClass &rinfo)
 		}
 	} // writing to vb
 
+		if (NativeD3D12Renderer::Active()) {
+			Submit_Native_Effect(rinfo.Camera,Shader,Texture,vba,iba.Peek_Source_Buffer(),iba.Get_Native_Index_Offset(),num_tris,num_vertices,!Get_Flag(TRANSFORM));
+		} else {
 	DX8Wrapper::Set_Index_Buffer(iba, 0);
 	DX8Wrapper::Set_Vertex_Buffer(vba);
 	
@@ -477,10 +483,11 @@ void	LineGroupClass::Render(RenderInfoClass &rinfo)
 		SortingRendererClass::Insert_Triangles(0, num_tris, 0, num_vertices);
 	} else {
 		DX8Wrapper::Draw_Triangles(0, num_tris, 0, num_vertices);
-	}		
+	}
+		}
 	
 	// restore the matrices
-	DX8Wrapper::Set_Transform(D3DTS_VIEW, view);
+	if (!NativeD3D12Renderer::Active()) DX8Wrapper::Set_Transform(D3DTS_VIEW, view);
 }
 
 int LineGroupClass::Get_Polygon_Count(void)

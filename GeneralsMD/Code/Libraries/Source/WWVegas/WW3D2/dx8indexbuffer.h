@@ -134,6 +134,8 @@ public:
 	unsigned short Get_Index_Count() const { return IndexCount; }
 	const NativeD3D12UploadBuffer* Get_Native_Index_Buffer() const;
 	unsigned short Get_Native_Index_Offset() const { return IndexBufferOffset; }
+	// Non-owning source; native queued draws retain it until the sorted flush.
+	IndexBufferClass* Peek_Source_Buffer() const { return IndexBuffer; }
 
 	// Call at the end of the execution, or at whatever time you wish to release
 	// the recycled dynamic index buffer.
@@ -201,6 +203,7 @@ class SortingIndexBufferClass : public IndexBufferClass
 	friend DynamicIBAccessClass::WriteLockClass;
 public:
 	SortingIndexBufferClass(unsigned short index_count);
+	const unsigned short* Get_Index_Array() const { return index_buffer; }
 	~SortingIndexBufferClass();
 
 protected:

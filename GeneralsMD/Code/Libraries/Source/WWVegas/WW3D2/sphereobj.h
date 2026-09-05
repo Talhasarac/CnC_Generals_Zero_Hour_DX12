@@ -370,7 +370,7 @@ protected:
 	SphereVectorChannelClass	VectorChannel;
 
 	void						 		update_mesh_data(const Vector3 & center,const Vector3 & extent);
-	void						 		render_sphere();
+	void render_sphere(RenderInfoClass& rinfo,const Matrix3D& world,bool viewSpace);
 	void						 		vis_render_sphere(SpecialRenderInfoClass & rinfo,const Vector3 & center,const Vector3 & extent);
 
 	char						 		Name[2*W3D_NAME_LEN];

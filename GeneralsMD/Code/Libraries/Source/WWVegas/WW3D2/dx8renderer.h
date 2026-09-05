@@ -101,7 +101,8 @@ public:
 	void									Add_Render_Task(DX8PolygonRendererClass * p_renderer,MeshClass * p_mesh);
 
 	void									Render(void);
-	void Render_Native(const NativeDrawSubmission& geometry);
+	void Render_Native(const NativeDrawSubmission& geometry, VertexBufferClass* sortingVertices=nullptr,
+		IndexBufferClass* sortingIndices=nullptr, unsigned vertexOffset=0);
 	bool									Anything_To_Render() { return (render_task_head != NULL); }
 	void									Clear_Render_List() { render_task_head = NULL; }
 
@@ -171,7 +172,8 @@ protected:
 	inline bool Anything_To_Render()					{ return AnythingToRender; }
 	inline bool Any_Delayed_Passes_To_Render()	{ return AnyDelayedPassesToRender; }
 
-	void Render_Procedural_Material_Passes(const NativeDrawSubmission* geometry = nullptr);
+	void Render_Procedural_Material_Passes(const NativeDrawSubmission* geometry = nullptr,
+		VertexBufferClass* sortingVertices=nullptr, unsigned vertexOffset=0);
 
 	DX8TextureCategoryClass* Find_Matching_Texture_Category(
 		TextureClass* texture,
