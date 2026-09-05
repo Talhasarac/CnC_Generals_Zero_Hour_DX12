@@ -2,10 +2,9 @@
 ** Command & Conquer Generals Zero Hour(tm)
 ** Native Direct3D 12 renderer device layer.
 **
-** This is deliberately a small, explicit D3D12 layer.  It does not expose
-** Direct3D 8/9 interfaces and it does not load or proxy a graphics DLL.  The
-** higher renderer owns draw-state recording; this class only owns the
-** native D3D12 objects needed to submit a frame safely.
+** Native D3D12 coordinator: device/presentation, frame submission and draw state.
+** Pipeline/shader caches and fence-indexed resource lifetimes are composed
+** modules. No Direct3D 8/9 interfaces, proxy DLLs or translated runtimes.
 */
 
 #pragma once
@@ -21,197 +20,14 @@
 #include <vector>
 #include <memory>
 #include <map>
-#include "native_d3d12_lighting.h"
-
-struct NativeD3D12DescriptorPool
-{
-	std::vector<UINT> freeSrv, freeRtv;
-	UINT nextSrv = 0, nextRtv = 0;
-};
-
-struct NativeD3D12BufferVersion {
-	Microsoft::WRL::ComPtr<ID3D12Resource> resource;
-	std::weak_ptr<NativeD3D12DescriptorPool> deviceIdentity;
-	UINT64 revision = 0;
-	D3D12_RESOURCE_STATES state = D3D12_RESOURCE_STATE_COMMON;
-};
-
-// CPU authoring storage with revisioned, GPU-resident snapshots. Submitted
-// frames retain snapshots until their fence retires; writes cannot overwrite them.
-class NativeD3D12UploadBuffer final
-{
-public:
-	NativeD3D12UploadBuffer() = default;
-	explicit NativeD3D12UploadBuffer(std::size_t size, bool streaming = false) : m_bytes(size), m_streaming(streaming) {}
-
-	HRESULT Lock(std::size_t offset, std::size_t size, void** data)
-	{
-		if (data == nullptr || offset > m_bytes.size() || size > m_bytes.size() - offset)
-			return E_INVALIDARG;
-		++m_revision;
-		++m_locks;
-		*data = m_bytes.data() + offset;
-		return S_OK;
-	}
-	HRESULT Lock(std::size_t offset, std::size_t size, unsigned char** data, DWORD)
-	{
-		return Lock(offset, size, reinterpret_cast<void**>(data));
-	}
-	HRESULT Unlock() { if (m_locks) --m_locks; ++m_revision; return S_OK; }
-	const void* Data() const { return m_bytes.data(); }
-	void* MutableData() { ++m_revision; return m_bytes.data(); }
-	std::size_t Size() const { return m_bytes.size(); }
-
-private:
-	friend class NativeD3D12Renderer;
-	std::vector<unsigned char> m_bytes;
-	UINT64 m_revision = 1;
-	UINT m_locks = 0;
-	bool m_streaming = false;
-	mutable std::vector<std::shared_ptr<NativeD3D12BufferVersion>> m_gpuVersions;
-	mutable UINT64 m_indexRangesRevision = 0;
-	mutable std::map<std::pair<size_t,UINT>,std::pair<UINT,UINT>> m_indexRanges;
-};
-
-// A renderer-owned sampled texture. This is an engine resource, not a
-// compatibility object: it exposes only native D3D12 resources and handles.
-struct NativeD3D12TextureLevel
-{
-	const void* data = nullptr;
-	UINT rowPitch = 0;
-	UINT slicePitch = 0;
-};
-
-enum class NativeD3D12FilterMode : UINT8
-{
-	Point,
-	Linear,
-	Anisotropic
-};
-
-struct NativeD3D12TextureStorage
-{
-	Microsoft::WRL::ComPtr<ID3D12Resource> m_resource;
-	D3D12_CPU_DESCRIPTOR_HANDLE m_srvCpu = {};
-	D3D12_GPU_DESCRIPTOR_HANDLE m_srvGpu = {};
-	D3D12_CPU_DESCRIPTOR_HANDLE m_rtvCpu = {};
-	bool m_hasRtv = false;
-	UINT m_width = 0;
-	UINT m_height = 0;
-	UINT m_mipLevels = 0;
-	DXGI_FORMAT m_format = DXGI_FORMAT_UNKNOWN;
-	D3D12_RESOURCE_STATES m_state = D3D12_RESOURCE_STATE_COMMON;
-	std::shared_ptr<NativeD3D12DescriptorPool> pool;
-	UINT srvIndex = UINT_MAX, rtvIndex = UINT_MAX;
-	~NativeD3D12TextureStorage()
-	{
-		if (pool && srvIndex != UINT_MAX) pool->freeSrv.push_back(srvIndex);
-		if (pool && rtvIndex != UINT_MAX) pool->freeRtv.push_back(rtvIndex);
-	}
-};
-
-class NativeD3D12Texture final
-{
-public:
-	NativeD3D12Texture() = default;
-	NativeD3D12Texture(const NativeD3D12Texture&) = delete;
-	NativeD3D12Texture& operator=(const NativeD3D12Texture&) = delete;
-
-	ID3D12Resource* Resource() const { return m_storage->m_resource.Get(); }
-	D3D12_CPU_DESCRIPTOR_HANDLE SrvCpuHandle() const { return m_storage->m_srvCpu; }
-	D3D12_GPU_DESCRIPTOR_HANDLE SrvGpuHandle() const { return m_storage->m_srvGpu; }
-	D3D12_CPU_DESCRIPTOR_HANDLE RtvCpuHandle() const { return m_storage->m_rtvCpu; }
-	bool HasRenderTargetView() const { return m_storage->m_hasRtv; }
-	UINT Width() const { return m_storage->m_width; }
-	UINT Height() const { return m_storage->m_height; }
-	UINT MipLevels() const { return m_storage->m_mipLevels; }
-	DXGI_FORMAT Format() const { return m_storage->m_format; }
-	bool IsValid() const { return m_storage->m_resource != nullptr; }
-	// Distinct engine texture settings can reference the same GPU allocation.
-	// Each reference participates in the existing fence-retired storage lifetime.
-	NativeD3D12Texture* ShareResource() const {
-		auto* reference = new NativeD3D12Texture;
-		reference->m_storage = m_storage;
-		return reference;
-	}
-
-private:
-	friend class NativeD3D12Renderer;
-	std::shared_ptr<NativeD3D12TextureStorage> m_storage = std::make_shared<NativeD3D12TextureStorage>();
-};
-
-// Engine material data compiled into native HLSL. No legacy API objects or bytecode.
-enum class NativeMaterialOp : UINT { Disable, Select1, Select2, Modulate, Modulate2X, Modulate4X, Add, AddSigned, AddSigned2X, Subtract, AddSmooth, BlendDiffuseAlpha, BlendTextureAlpha, BlendFactorAlpha, BlendCurrentAlpha, BlendTextureAlphaPremultiplied, ModulateAlphaAddColor, ModulateColorAddAlpha, ModulateInvAlphaAddColor, ModulateInvColorAddAlpha, Dot3, MultiplyAdd, Lerp, BumpEnvironment, BumpEnvironmentLuminance };
-enum class NativeMaterialSource : UINT { Diffuse, Current, Texture, Factor, Specular, Temporary };
-struct NativeMaterialStage {
-	NativeMaterialOp colorOp = NativeMaterialOp::Disable;
-	UINT colorArg1 = UINT(NativeMaterialSource::Texture), colorArg2 = UINT(NativeMaterialSource::Current);
-	UINT colorArg0 = UINT(NativeMaterialSource::Current);
-	NativeMaterialOp alphaOp = NativeMaterialOp::Select1;
-	UINT alphaArg1 = UINT(NativeMaterialSource::Current), alphaArg2 = UINT(NativeMaterialSource::Texture);
-	UINT alphaArg0 = UINT(NativeMaterialSource::Current);
-	std::array<UINT,4> resultFlags = {}; // x: write the temporary register instead of current.
-	std::array<float,4> bumpMatrix = {1,0,0,1}; // m00, m01, m10, m11.
-	// Luminance scale/offset; signed UV sample decode scale/offset.
-	std::array<float,4> bumpParameters = {1,0,1,0};
-};
-enum class NativeEnvironmentCoordinates : UINT { None, CameraNormal, CameraReflection };
-struct NativeMaterialCoordinates {
-	UINT offset = UINT_MAX;
-	bool position = false, transform = false, projected = false;
-	NativeEnvironmentCoordinates environment = NativeEnvironmentCoordinates::None;
-	std::array<float, 16> matrix = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
-};
-// Complete native draw settings for a scoped pass. Texture references stay alive
-// while captured. Targets, command-list lifetime and resource transitions remain
-// explicit; a snapshot must be restored within the same renderer/device lifetime.
-struct NativeD3D12State
-{
-	D3D12_CULL_MODE cullMode = D3D12_CULL_MODE_NONE;
-	bool depthEnable = true, depthWrite = true;
-	D3D12_COMPARISON_FUNC depthFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
-	INT depthBias = 0;
-	D3D12_FILL_MODE fillMode = D3D12_FILL_MODE_SOLID;
-	bool blendEnable = false;
-	D3D12_BLEND sourceBlend = D3D12_BLEND_ONE, destinationBlend = D3D12_BLEND_ZERO;
-	D3D12_BLEND_OP blendOp = D3D12_BLEND_OP_ADD;
-	UINT8 renderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
-	bool alphaTestEnable = false;
-	D3D12_COMPARISON_FUNC alphaTestFunc = D3D12_COMPARISON_FUNC_ALWAYS;
-	UINT8 alphaTestRef = 0;
-	bool grayscale = false;
-	UINT32 grayscaleTint = 0xffffffff;
-	float grayscaleAmount = 1.0f;
-	bool materialEnabled = false;
-	std::array<std::array<float,4>,11> treeSway = {};
-	UINT treeSwayOffset = UINT_MAX;
-	UINT fogMode = 0;
-	bool fogRange = false;
-	std::array<float,4> fogParameters = {}, fogColor = {};
-	std::array<float,16> worldView = {}, worldViewProjection = {};
-	NativeLightingState lighting;
-	std::array<NativeMaterialStage,4> materialStages;
-	std::array<NativeMaterialCoordinates,4> materialCoordinates;
-	std::array<std::shared_ptr<NativeD3D12Texture>,4> materialTextures;
-	std::array<D3D12_GPU_DESCRIPTOR_HANDLE,4> materialSamplers = {};
-	std::array<float,4> materialFactor = {1,1,1,1};
-	bool textureColorTexture = true, textureColorVertex = true;
-	bool textureAlphaTexture = true, textureAlphaVertex = true;
-	bool stencilEnable = false;
-	D3D12_COMPARISON_FUNC stencilFunc = D3D12_COMPARISON_FUNC_ALWAYS;
-	UINT8 stencilRef = 0, stencilReadMask = 0xff, stencilWriteMask = 0xff;
-	D3D12_STENCIL_OP stencilFail = D3D12_STENCIL_OP_KEEP;
-	D3D12_STENCIL_OP stencilDepthFail = D3D12_STENCIL_OP_KEEP;
-	D3D12_STENCIL_OP stencilPass = D3D12_STENCIL_OP_KEEP;
-	D3D12_GPU_DESCRIPTOR_HANDLE currentSamplerGpu = {};
-	D3D12_VIEWPORT viewport = {};
-	D3D12_RECT scissor = {};
-};
+#include "native_d3d12_state.h"
+#include "native_d3d12_pipeline_cache.h"
+#include "native_d3d12_frame_resources.h"
 
 class NativeD3D12Renderer final
 {
 public:
-	static constexpr UINT FrameCount = 2;
+	static constexpr UINT FrameCount = NativeD3D12FrameResources::FrameCount;
 
 	NativeD3D12Renderer() = default;
 	NativeD3D12Renderer(const NativeD3D12Renderer&) = delete;
@@ -353,8 +169,7 @@ private:
 	bool CreateBasicPipeline(UINT colorOffset, UINT normalOffset = UINT_MAX, UINT specularOffset = UINT_MAX);
 	bool CreateTexturedPipeline(const std::array<UINT,4>& texcoordOffsets, UINT colorOffset,
 		UINT normalOffset, UINT specularOffset);
-	using PipelineKey = std::array<UINT, 30>;
-	PipelineKey GetPipelineKey(bool textured) const;
+	NativeD3D12PipelineSettings PipelineSettings() const;
 	bool UploadGeometry(const void* source, UINT size, D3D12_GPU_VIRTUAL_ADDRESS& address,
 		ID3D12Resource** uploadResource = nullptr, UINT64* uploadOffset = nullptr);
 	bool AllocateFrameUpload(UINT size, UINT alignment, ID3D12Resource*& resource,
@@ -401,12 +216,7 @@ private:
 	std::array<Microsoft::WRL::ComPtr<ID3D12CommandAllocator>, FrameCount> m_commandAllocators;
 	Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_commandList;
 	Microsoft::WRL::ComPtr<ID3D12Fence> m_fence;
-	Microsoft::WRL::ComPtr<ID3D12RootSignature> m_rootSignature;
-	Microsoft::WRL::ComPtr<ID3D12PipelineState> m_basicPipeline;
-	Microsoft::WRL::ComPtr<ID3D12PipelineState> m_texturedPipeline;
-	UINT m_basicColorOffset = UINT_MAX;
-	UINT m_texturedTexcoordOffset = UINT_MAX;
-	UINT m_texturedColorOffset = UINT_MAX;
+	NativeD3D12PipelineCache m_pipelines;
 	D3D12_CULL_MODE m_cullMode = D3D12_CULL_MODE_NONE;
 	bool m_depthEnable = true;
 	bool m_depthWrite = true;
@@ -450,25 +260,14 @@ private:
 	D3D12_STENCIL_OP m_stencilFail = D3D12_STENCIL_OP_KEEP;
 	D3D12_STENCIL_OP m_stencilDepthFail = D3D12_STENCIL_OP_KEEP;
 	D3D12_STENCIL_OP m_stencilPass = D3D12_STENCIL_OP_KEEP;
-	std::map<PipelineKey, Microsoft::WRL::ComPtr<ID3D12PipelineState>> m_pipelineCache;
-	std::array<Microsoft::WRL::ComPtr<ID3DBlob>, 4> m_shaderCache;
-	std::array<Microsoft::WRL::ComPtr<ID3DBlob>, 6> m_materialPixelShaders;
 	DXGI_FORMAT m_targetFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
 	bool m_useDefaultDepth = true;
 	UINT64 m_nextFenceValue = 0;
 	std::array<UINT64, FrameCount> m_fenceValues = {};
 	HANDLE m_fenceEvent = nullptr;
-	std::array<std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>>, FrameCount> m_uploadResources;
 	std::array<float, 16> m_worldViewProjection = {};
 	std::shared_ptr<NativeD3D12Texture> m_currentRenderTarget;
-	std::array<std::vector<std::shared_ptr<NativeD3D12TextureStorage>>, FrameCount> m_textureReferences;
-	struct UploadPage {
-		Microsoft::WRL::ComPtr<ID3D12Resource> resource;
-		unsigned char* mapped = nullptr;
-		UINT size = 0, used = 0;
-	};
-	std::array<std::vector<UploadPage>, FrameCount> m_uploadPages;
-	std::array<std::vector<std::shared_ptr<NativeD3D12BufferVersion>>, FrameCount> m_bufferReferences;
+	NativeD3D12FrameResources m_frameResources;
 	D3D12_VIEWPORT m_viewport = {};
 	D3D12_RECT m_scissor = {};
 	UINT m_samplerDescriptorSize = 0;

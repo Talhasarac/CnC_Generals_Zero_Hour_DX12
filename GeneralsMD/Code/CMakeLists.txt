@@ -16,10 +16,28 @@ option(NATIVE_D3D12_SMOKE_ONLY "Configure only the native D3D12 smoke test" OFF)
 
 add_compile_definitions(WIN32 _WINDOWS _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_WARNINGS)
 
+# Keep game and SDK-only smoke builds on the exact same native implementation.
+set(NATIVE_D3D12_SOURCES
+  ${WW}/WW3D2/native_d3d12_resources.h
+  ${WW}/WW3D2/native_d3d12_state.h
+  ${WW}/WW3D2/native_d3d12_diagnostics.h
+  ${WW}/WW3D2/native_d3d12_diagnostics.cpp
+  ${WW}/WW3D2/native_d3d12_shaders.h
+  ${WW}/WW3D2/native_d3d12_shaders.cpp
+  ${WW}/WW3D2/native_d3d12_pipeline_cache.h
+  ${WW}/WW3D2/native_d3d12_pipeline_cache.cpp
+  ${WW}/WW3D2/native_d3d12_frame_resources.h
+  ${WW}/WW3D2/native_d3d12_frame_resources.cpp
+  ${WW}/WW3D2/native_d3d12_texture_codec.h
+  ${WW}/WW3D2/native_d3d12_texture_codec.cpp
+  ${WW}/WW3D2/native_d3d12_draw.cpp
+  ${WW}/WW3D2/native_d3d12_textures.cpp
+  ${WW}/WW3D2/native_d3d12_renderer.cpp
+  ${WW}/WW3D2/native_d3d12_renderer.h
+)
+
 if(NATIVE_D3D12_SMOKE_ONLY)
-  add_library(native_d3d12 STATIC
-    ${WW}/WW3D2/native_d3d12_renderer.cpp
-    ${WW}/WW3D2/native_d3d12_renderer.h)
+  add_library(native_d3d12 STATIC ${NATIVE_D3D12_SOURCES})
   target_include_directories(native_d3d12 PUBLIC ${WW}/WW3D2)
   target_link_libraries(native_d3d12 PUBLIC d3d12 dxgi d3dcompiler)
 
@@ -202,9 +220,7 @@ target_link_libraries(wwsaveload PRIVATE wwdebug wwlib wwmath)
 # ---- native D3D12 device layer ---------------------------------------------
 # The port creates and submits D3D12 command lists directly.  No proxy DLL or
 # legacy translated runtime is part of this target.
-add_library(native_d3d12 STATIC
-  ${WW}/WW3D2/native_d3d12_renderer.cpp
-  ${WW}/WW3D2/native_d3d12_renderer.h)
+add_library(native_d3d12 STATIC ${NATIVE_D3D12_SOURCES})
 target_include_directories(native_d3d12 PUBLIC ${WW}/WW3D2)
 target_link_libraries(native_d3d12 PUBLIC d3d12 dxgi d3dcompiler)
 

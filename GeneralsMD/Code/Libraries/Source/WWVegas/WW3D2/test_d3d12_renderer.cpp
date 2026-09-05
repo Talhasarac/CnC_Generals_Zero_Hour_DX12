@@ -45,6 +45,92 @@ void State(NativeD3D12Renderer& r, bool blend = false)
 
 #define REQUIRE(expr) do { if (!(expr)) { std::fprintf(stderr, "FAIL line %d: %s\n", __LINE__, #expr); return false; } } while (0)
 
+// These modules must work without the active renderer, engine headers or a
+// command list. No work is submitted, so their allocations can retire directly.
+bool TestNativeModules(ID3D12Device* device)
+{
+	NativeD3D12PipelineCache pipelines;
+	NativeD3D12PipelineSettings settings;
+	REQUIRE(!pipelines.CreateBasic(nullptr, settings, UINT_MAX));
+	REQUIRE(pipelines.CreateBasic(device, settings, UINT_MAX));
+	auto* basic = pipelines.Basic();
+	auto* root = pipelines.RootSignature();
+	REQUIRE(basic && root && pipelines.Size() == 1);
+	REQUIRE(pipelines.CreateBasic(device, settings, UINT_MAX));
+	REQUIRE(pipelines.Basic() == basic && pipelines.Size() == 1);
+	settings.fillMode = D3D12_FILL_MODE_WIREFRAME;
+	REQUIRE(pipelines.CreateBasic(device, settings, UINT_MAX));
+	REQUIRE(pipelines.Basic() != basic && pipelines.Size() == 2);
+	settings.fillMode = D3D12_FILL_MODE_SOLID;
+	REQUIRE(pipelines.CreateBasic(device, settings, UINT_MAX));
+	REQUIRE(pipelines.Basic() == basic && pipelines.RootSignature() == root);
+	const std::array<UINT,4> uv = {12,12,12,12};
+	REQUIRE(!pipelines.CreateTextured(device, settings, uv, UINT_MAX, UINT_MAX, UINT_MAX, 6, UINT_MAX));
+	REQUIRE(pipelines.Size() == 2);
+	REQUIRE(pipelines.CreateTextured(device, settings, uv, UINT_MAX, UINT_MAX, UINT_MAX, 0, UINT_MAX));
+	auto* textured = pipelines.Textured();
+	REQUIRE(textured && pipelines.Size() == 3);
+	REQUIRE(pipelines.CreateTextured(device, settings, uv, UINT_MAX, UINT_MAX, UINT_MAX, 0, UINT_MAX));
+	REQUIRE(pipelines.Textured() == textured && pipelines.Size() == 3);
+	Microsoft::WRL::ComPtr<ID3D12Device> otherDevice;
+	Microsoft::WRL::ComPtr<IDXGIFactory4> factory;
+	Microsoft::WRL::ComPtr<IDXGIAdapter1> warp;
+	REQUIRE(SUCCEEDED(CreateDXGIFactory2(0, IID_PPV_ARGS(&factory))));
+	REQUIRE(SUCCEEDED(factory->EnumWarpAdapter(IID_PPV_ARGS(&warp))));
+	REQUIRE(SUCCEEDED(D3D12CreateDevice(warp.Get(), D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&otherDevice))));
+	// D3D12 devices are per-adapter singletons. A WARP-only test host may
+	// already be using this device, in which case only the reset is exercised.
+	if (otherDevice.Get() != device)
+		REQUIRE(!pipelines.CreateBasic(otherDevice.Get(), settings, UINT_MAX));
+	REQUIRE(pipelines.Size() == 3);
+	pipelines.Reset();
+	REQUIRE(pipelines.Size() == 0 && !pipelines.RootSignature() && !pipelines.Basic() && !pipelines.Textured());
+	// A textured-first caller must get the shared root signature too, and reset
+	// must drop the old device identity rather than reusing its PSOs.
+	REQUIRE(pipelines.CreateTextured(otherDevice.Get(), settings, uv, UINT_MAX, UINT_MAX, UINT_MAX, 0, UINT_MAX));
+	REQUIRE(pipelines.RootSignature() && pipelines.Textured());
+	pipelines.Reset();
+
+	NativeD3D12FrameResources frames;
+	ID3D12Resource* upload = nullptr;
+	UINT64 offset = 0;
+	unsigned char* mapped = nullptr;
+	REQUIRE(!frames.Allocate(device, 0, 0, 256, upload, offset, mapped));
+	REQUIRE(!frames.Allocate(device, 0, 16, 3, upload, offset, mapped));
+	REQUIRE(!frames.Allocate(device, NativeD3D12FrameResources::FrameCount, 16, 256, upload, offset, mapped));
+	REQUIRE(!frames.Allocate(device, 0, UINT_MAX, 256, upload, offset, mapped));
+	REQUIRE(frames.Allocate(device, 0, 16, 256, upload, offset, mapped));
+	REQUIRE(offset == 0 && mapped && upload);
+	auto* firstPage = upload;
+	auto* firstBytes = mapped;
+	std::memset(mapped, 0x5a, 16);
+	REQUIRE(frames.Allocate(device, 0, 16, 256, upload, offset, mapped));
+	REQUIRE(upload == firstPage && offset == 256 && mapped == firstBytes + 256);
+	REQUIRE(frames.Allocate(device, 1, 16, 256, upload, offset, mapped));
+	REQUIRE(upload != firstPage && offset == 0 && firstBytes[0] == 0x5a);
+	auto buffer = std::make_shared<NativeD3D12BufferVersion>();
+	auto texture = std::make_shared<NativeD3D12TextureStorage>();
+	std::weak_ptr<NativeD3D12BufferVersion> bufferLife = buffer;
+	std::weak_ptr<NativeD3D12TextureStorage> textureLife = texture;
+	frames.RetainBuffer(0, buffer);
+	frames.RetainBuffer(1, buffer);
+	frames.RetainTexture(0, texture);
+	buffer.reset(); texture.reset();
+	REQUIRE(!bufferLife.expired() && !textureLife.expired());
+	frames.Retire(0);
+	REQUIRE(!bufferLife.expired() && textureLife.expired());
+	REQUIRE(frames.Allocate(device, 0, 16, 256, upload, offset, mapped));
+	REQUIRE(upload == firstPage && offset == 0 && mapped == firstBytes);
+	frames.Retire(1);
+	REQUIRE(bufferLife.expired());
+	frames.Release();
+	REQUIRE(frames.Allocate(device, 0, 16, 256, upload, offset, mapped));
+	REQUIRE(offset == 0 && upload && mapped);
+	frames.Release();
+	std::printf("PASS native module ownership, pipeline reuse/device reset and fence-slot upload retirement\n");
+	return true;
+}
+
 bool Run(NativeD3D12Renderer& r, HWND window)
 {
 	REQUIRE(NativeReflectionDrawableVisible(false,true,false,false,false,false));
@@ -135,6 +221,7 @@ bool Run(NativeD3D12Renderer& r, HWND window)
 	REQUIRE(!ddsLayout.Parse(ddsHeader.data(),128,2888));
 	std::printf("PASS native rectangular DDS mip sizes, complete chains and malformed bounds\n");
 	REQUIRE(r.Initialize(window, 64, 64, true));
+	REQUIRE(TestNativeModules(r.Device()));
 	Microsoft::WRL::ComPtr<ID3D12InfoQueue> messages;
 	r.Device()->QueryInterface(IID_PPV_ARGS(&messages));
 	std::printf("D3D12 debug validation: %s\n", messages ? "enabled" : "unavailable");
