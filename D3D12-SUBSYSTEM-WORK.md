@@ -323,6 +323,46 @@ assignments were scope proposals, not completed migrations.
   frame 1440 without early exit or logged D3D12 errors/warnings. The owned process
   was stopped afterward. This was a nonvisual runtime check.
 
+## Integrated native water rendering
+
+- capture2.rdc pixel history at (450,355) identifies why forced sea looked opaque:
+  EID 34846 outputs reflected color with alpha 0.50196, but fails depth testing
+  (water depth 0.99254739 versus existing depth 0.99246550). The visible surface
+  is terrain, not an opaque water shader. Reflection target 738 is populated and
+  bound correctly. The forced test used ocean Z=7 rather than river Z=27.
+  Diagnostic reflection modes now prefer the nearest river's upper authored
+  height, falling back to a water polygon, and keep reflection/mesh/culling levels
+  consistent. Normal map settings and depth testing are unchanged. Runtime logs
+  confirm the corrected level 27 and native sea draws. User visual retest pending.
+
+- Deforming-grid water now receives an explicit camera and uses scoped native
+  pipeline/material/geometry submission, without DX8Wrapper state or sampler
+  replay. CPU height/velocity simulation and grid vertex generation are preserved.
+  Native index ranges are checked; transient vertices retain no resident owner.
+- Reflection modes 1 and 2 now create native reflection targets, render mirrored
+  scene/sky, restore camera/viewport/target state, and submit tiled XY sea patches
+  with projected reflection coordinates. Targets resize with the framebuffer.
+  Mode 2 lazily caches all 32 caustic gradient textures for animated distortion;
+  mode 1 samples the reflection without distortion. Sea shroud is a native pass.
+  Sky plane and sky-body draws now author native geometry/material/pipeline state.
+  Grid Y-only resizing, low-opacity underflow, neutral bump decoding and degenerate
+  sky billboard directions are corrected. Reflection clears match the resource's
+  optimized clear color to avoid repeated D3D12 performance warnings.
+- Renderer/game builds, 90 CPU tests / 2855 checks and GPU smoke pass. Smoke also
+  checks wrapped gradient generation and perspective reflection-coordinate math.
+  The updated executable is deployed to steamfiles; no game DLLs were replaced.
+- Nonvisual USA/Winding River regression runs exercise reflective modes 1 and 2
+  and an opt-in deforming grid. Logs confirm reflection frames, sea submissions,
+  all 32 bump uploads, and a 4225-vertex/8446-index grid submission.
+  GENERALS_D3D12_TEST_WATER_TYPE and GENERALS_D3D12_TEST_WATER_EXTENT are optional
+  process-local test overrides; type 3 creates a diagnostic grid when absent.
+  Normal launches use map/game settings, not these test overrides.
+- Visual parity is still pending user playtesting. Historical mirror-plane
+  clipping of intersecting objects and sorted sun behavior remain limitations;
+  no claim is made for long-match/device-loss or every scripted water variant.
+- User visually confirmed river water looked correct before this batch. This is
+  not evidence for reflective sea or deforming-grid water.
+
 ## Verified
 
 Existing build directories reused, Release configuration, exactly 16 parallel

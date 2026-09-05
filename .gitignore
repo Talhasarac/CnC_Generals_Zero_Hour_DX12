@@ -30,3 +30,10 @@ CLAUDE.md
 # Layouts pulled out of WindowZH.big to feed Tools/optionsmenu_layout.py. That is game data and
 # does not belong in the repo; re-extract it with Tools/bigfile.py when a layout has to be redone.
 **/Tools/wnd/
+analysis_water_capture.py
+
+# Local RenderDoc captures and water capture-analysis exports
+*.rdc
+/renderdoc-water-events.txt
+/water_capture*_analysis.json
+/water_capture*_analysis_*.png

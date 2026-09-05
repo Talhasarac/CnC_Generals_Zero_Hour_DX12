@@ -3,6 +3,7 @@
 #include "native_draw_state.h"
 #include "native_terrain_material.h"
 #include "native_water_material.h"
+#include "native_water_math.h"
 #include "native_shadow_state.h"
 #include "surface_pixel_write.h"
 #include "native_dds_layout.h"
@@ -45,6 +46,16 @@ void State(NativeD3D12Renderer& r, bool blend = false)
 
 bool Run(NativeD3D12Renderer& r, HWND window)
 {
+	std::vector<unsigned char> heights={0,0,0,255, 128,128,128,255, 255,255,255,255};
+	std::vector<unsigned char> gradients;
+	REQUIRE(Build_Native_Sea_Gradients(heights,3,1,gradients));
+	REQUIRE(gradients[0]==191 && gradients[4]==1 && gradients[8]==192);
+	REQUIRE(gradients[1]==128 && gradients[5]==128 && gradients[9]==128);
+	const auto validGradients=gradients;
+	REQUIRE(!Build_Native_Sea_Gradients(heights,0,1,gradients) && gradients==validGradients);
+	const auto projectedSea=Describe_Native_Sea_Projection({1,0,0,0,0,1,0,0,0,0,1,1,0,0,0,1});
+	REQUIRE(projectedSea.projected && projectedSea.matrix[10]==1 && projectedSea.matrix[14]==1);
+	REQUIRE(projectedSea.matrix[0]==0.5f && projectedSea.matrix[5]==-0.5f && projectedSea.matrix[8]==0.5f);
 	// Radar chooses BGR24 first. Its bulk pixel writer previously omitted this
 	// format entirely, leaving the terrain black despite successful GPU uploads.
 	for (unsigned int size = 1; size <= 4; ++size) {

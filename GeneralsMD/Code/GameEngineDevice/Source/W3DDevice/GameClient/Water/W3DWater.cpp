@@ -37,6 +37,7 @@
 #include "W3DDevice/GameClient/NativeTerrainDraw.h"
 #include "W3DDevice/GameClient/NativeWorldMaterial.h"
 #include "WW3D2/native_water_material.h"
+#include "WW3D2/native_water_math.h"
 #include "WW3D2/native_material_pass.h"
 #include "W3DDevice/GameClient/heightmap.h"
 #include "W3DDevice/GameClient/W3DShroud.h"
@@ -374,8 +375,8 @@ HRESULT WaterRenderObjClass::generateVertexBuffer( Int sizeX, Int sizeY, Int ver
 			for (x=0; x<sizeX; x++)
 			{
 				pVertices->x=(float)x;
-				pVertices->y=m_level;
-				pVertices->z=(float)z;
+				pVertices->y=(float)z;
+				pVertices->z=m_level;
 				pVertices->tu=(float)x*PATCH_UV_SCALE;
 				pVertices->tv=(float)z*PATCH_UV_SCALE;
 				pVertices->c=setting->transparentWaterDiffuse;
@@ -434,7 +435,10 @@ void WaterRenderObjClass::ReleaseResources(void)
 
 	REF_PTR_RELEASE(m_indexBuffer);
 
-	REF_PTR_RELEASE(m_pReflectionTexture);
+	delete m_pReflectionTexture;
+	m_pReflectionTexture=nullptr;
+	m_reflectionReady=false;
+	for (auto& bump : m_nativeSeaBumps) bump.reset();
 	delete m_vertexBufferNative;
 	delete m_indexBufferNative;
 	m_vertexBufferNative = NULL;
@@ -474,7 +478,7 @@ void WaterRenderObjClass::ReAcquireResources(void)
 
 	//We're using the same grid for either 3D Water Mesh or Pixel/Vertex shader.  Just
 	//allocate the right size depending on usage
-	if (m_meshData)
+	if (m_meshData && m_waterType!=WATER_TYPE_2_PVSHADER && m_waterType!=WATER_TYPE_1_FB_REFLECTION)
 	{
 		//Create new grid data
 		if (FAILED(generateIndexBuffer(m_gridCellsX+1,m_gridCellsY+1)))
@@ -483,7 +487,7 @@ void WaterRenderObjClass::ReAcquireResources(void)
 			return;
 	}
 	else
-	if (m_waterType == WATER_TYPE_2_PVSHADER)
+	if (m_waterType == WATER_TYPE_2_PVSHADER || m_waterType == WATER_TYPE_1_FB_REFLECTION)
 	{	//pixel/vertex shader based water assets.
 		if (FAILED(hr=generateIndexBuffer(PATCH_SIZE,PATCH_SIZE)))
 			return;
@@ -491,9 +495,10 @@ void WaterRenderObjClass::ReAcquireResources(void)
 		if (FAILED(hr=generateVertexBuffer(PATCH_SIZE,PATCH_SIZE,sizeof(SEA_PATCH_VERTEX),true)))
 			return;
 
-		// Native reflected-sea resources still need integration. Preserve the
-		// previous early exit without trying to load obsolete assembly shaders.
-		return;
+		m_reflectionReady=false;
+		delete m_pReflectionTexture;
+		auto* native=NativeD3D12Renderer::Active();
+		m_pReflectionTexture=native ? native->CreateTexture2D(native->Width(),native->Height(),1,DXGI_FORMAT_R8G8B8A8_UNORM,true) : nullptr;
 	}
 
 	if (m_waterTrackSystem)
@@ -550,6 +555,21 @@ Int WaterRenderObjClass::init(Real waterLevel, Real dx, Real dy, SceneClass *par
 
 	m_parentScene=parentScene;
 	m_waterType = type;
+	m_testReflectionLevelReady=false;
+	// Opt-in test selection exercises normally map-specific water modes without
+	// changing the map, retail assets, or the player's saved configuration.
+	char testType[8]={};
+	if (GetEnvironmentVariableA("GENERALS_D3D12_TEST_WATER_TYPE",testType,sizeof(testType))==1 &&
+		testType[0]>='0' && testType[0]<='3') m_waterType=static_cast<WaterType>(testType[0]-'0');
+	char testExtent[32]={};
+	if (testType[0] && GetEnvironmentVariableA("GENERALS_D3D12_TEST_WATER_EXTENT",testExtent,sizeof(testExtent))) {
+		const float extent=static_cast<float>(atof(testExtent));
+		if (extent>0 && extent<=65536) m_dx=m_dy=extent;
+	}
+	if (GetEnvironmentVariableA("GENERALS_D3D12_DIAGNOSTICS",nullptr,0)) {
+		FILE* log=fopen("NativeWater.log","a");
+		if (log) { fprintf(log,"Initialize water type=%d level=%g extent=%g,%g\n",int(m_waterType),m_level,m_dx,m_dy); fclose(log); }
+	}
 
 	/// Hack for now
 	//m_waterType = WATER_TYPE_0_TRANSLUCENT;
@@ -915,7 +935,7 @@ void WaterRenderObjClass::replaceSkyboxTexture(const AsciiString& oldTexName, co
 void WaterRenderObjClass::setTimeOfDay(TimeOfDay tod)
 {
 	m_tod=tod;
-	if (m_waterType == WATER_TYPE_2_PVSHADER)
+	if (m_waterType == WATER_TYPE_2_PVSHADER || m_waterType == WATER_TYPE_1_FB_REFLECTION)
 		generateVertexBuffer(PATCH_SIZE,PATCH_SIZE,sizeof(SEA_PATCH_VERTEX),true);	//update the water mesh with new lighting/alpha
 }
 
@@ -987,7 +1007,48 @@ void WaterRenderObjClass::loadSetting( Setting *setting, TimeOfDay timeOfDay )
 //-------------------------------------------------------------------------------------------------
 void WaterRenderObjClass::updateRenderTargetTextures(CameraClass *cam)
 {
-	if (m_waterType == WATER_TYPE_2_PVSHADER && getClippedWaterPlane(cam, NULL) &&
+	if (!cam || !TheTerrainRenderObject || !TheTerrainRenderObject->getMap()) return;
+	if (!m_testReflectionLevelReady &&
+		(m_waterType == WATER_TYPE_2_PVSHADER || m_waterType == WATER_TYPE_1_FB_REFLECTION))
+	{
+		char testType[8]={};
+		if (GetEnvironmentVariableA("GENERALS_D3D12_TEST_WATER_TYPE",testType,sizeof(testType))==1 &&
+			(testType[0]=='1' || testType[0]=='2'))
+		{
+			// A forced sea is not the map's normal water mode. The default ocean
+			// height can lie below its riverbed: capture2's water fragments failed
+			// depth testing there. Prefer the nearest authored river over unrelated
+			// flat water areas, keeping mesh, reflection and culling heights equal.
+			const Vector3 eye=cam->Get_Position();
+			const PolygonTrigger* nearest=nullptr;
+			float nearestDistance=FLT_MAX;
+			for (PolygonTrigger* p=PolygonTrigger::getFirstPolygonTrigger();p;p=p->getNext())
+				if (p->isWaterArea() && p->getNumPoints()>0)
+					for (int i=0;i<p->getNumPoints();++i) {
+						const ICoord3D* point=p->getPoint(i);
+						const float dx=eye.X-point->x,dy=eye.Y-point->y;
+						const float distance=dx*dx+dy*dy;
+						if (!nearest || (p->isRiver() && !nearest->isRiver()) ||
+							(p->isRiver()==nearest->isRiver() && distance<nearestDistance))
+							{ nearestDistance=distance; nearest=p; }
+					}
+			if (nearest) {
+				m_level=static_cast<Real>(nearest->getPoint(0)->z);
+				// Rivers can slope. A flat diagnostic sea must clear the upper end,
+				// rather than taking the first (potentially downstream) point's height.
+				for (int i=1;i<nearest->getNumPoints();++i)
+					m_level=(std::max)(m_level,static_cast<Real>(nearest->getPoint(i)->z));
+				m_planeDistance=m_level;
+				if (FAILED(generateVertexBuffer(PATCH_SIZE,PATCH_SIZE,sizeof(SEA_PATCH_VERTEX),true))) return;
+				m_testReflectionLevelReady=true;
+				if (GetEnvironmentVariableA("GENERALS_D3D12_DIAGNOSTICS",nullptr,0)) {
+					FILE* log=fopen("NativeWater.log","a");
+					if (log) { fprintf(log,"Test reflection aligned to authored water height=%g\n",m_level); fclose(log); }
+				}
+			}
+		} else m_testReflectionLevelReady=true;
+	}
+	if ((m_waterType == WATER_TYPE_2_PVSHADER || m_waterType == WATER_TYPE_1_FB_REFLECTION) && getClippedWaterPlane(cam, NULL) &&
 		TheTerrainRenderObject && TheTerrainRenderObject->getMap())
 		renderMirror(cam);	//generate texture containing reflected scene
 }
@@ -1000,8 +1061,13 @@ void WaterRenderObjClass::renderMirror(CameraClass *cam)
 	NativeD3D12Renderer* native = NativeD3D12Renderer::Active();
 	// Reflection is an offscreen frame before the main scene, never a nested
 	// BeginFrame. Do not mutate camera state when resources are unavailable.
-	if (!native || !m_pReflectionTexture || !m_pReflectionTexture->Peek_Native_Texture())
-		return;
+	if (!native || !cam || !m_parentScene || native->IsRecording()) return;
+	m_reflectionReady=false;
+	if (!m_pReflectionTexture || m_pReflectionTexture->Width()!=native->Width() || m_pReflectionTexture->Height()!=native->Height()) {
+		delete m_pReflectionTexture;
+		m_pReflectionTexture=native->CreateTexture2D(native->Width(),native->Height(),1,DXGI_FORMAT_R8G8B8A8_UNORM,true);
+	}
+	if (!m_pReflectionTexture) return;
 #ifdef EXTENDED_STATS
 	if (DX8Wrapper::stats.m_disableWater) {
 		return;
@@ -1039,12 +1105,13 @@ void WaterRenderObjClass::renderMirror(CameraClass *cam)
 	if (native) {
 		// Native target transitions and clears require an open command list.
 		if (WW3D::Begin_Render(false,false,Vector3(0,0,0)) != WW3D_ERROR_OK) return;
-		if (!native->SetRenderTarget(m_pReflectionTexture->Peek_Native_Texture(),true)) {
+		if (!native->SetRenderTarget(m_pReflectionTexture,true)) {
 			WW3D::End_Render(false);
 			return;
 		}
 		// Clear color too: missing sky assets must not expose a prior frame.
-		DX8Wrapper::Clear(true,true,Vector3(0,0,0));
+		const float clear[]={0,0,0,1};
+		native->Clear(clear);
 	}
 
 	cam->Set_Transform( reflectedTransform );
@@ -1062,9 +1129,14 @@ void WaterRenderObjClass::renderMirror(CameraClass *cam)
 	ShaderClass::Invert_Backface_Culling(true);
 
 	// Render the scene
-	renderSky();
+	Matrix3D reflectedView;
+	Matrix4x4 reflectedProjection;
+	cam->Get_View_Matrix(&reflectedView);
+	cam->Get_D3D_Projection_Matrix(&reflectedProjection);
+	m_reflectionViewProjection=Matrix4x4(reflectedView).Transpose()*reflectedProjection.Transpose();
+	renderSky(*cam);
 	if (m_tod == TIME_OF_DAY_NIGHT)
-		renderSkyBody(&reflectedTransform);
+		renderSkyBody(&reflectedTransform,*cam);
 
 	WW3D::Render(m_parentScene,cam);
 
@@ -1077,7 +1149,13 @@ void WaterRenderObjClass::renderMirror(CameraClass *cam)
 
 	ShaderClass::Invert_Backface_Culling(false);
 
-	WW3D::End_Render(false);
+	m_reflectionReady=WW3D::End_Render(false)==WW3D_ERROR_OK;
+	static bool reportedReflection=false;
+	if (m_reflectionReady && !reportedReflection && GetEnvironmentVariableA("GENERALS_D3D12_DIAGNOSTICS",nullptr,0)) {
+		FILE* log=fopen("NativeWater.log","a");
+		if (log) { fprintf(log,"Reflection frame rendered %ux%u\n",native->Width(),native->Height()); fclose(log); }
+		reportedReflection=true;
+	}
 
 }
 
@@ -1128,10 +1206,23 @@ void WaterRenderObjClass::Render(RenderInfoClass & rinfo)
 	{
 		case WATER_TYPE_0_TRANSLUCENT:
 		case WATER_TYPE_3_GRIDMESH:
+			// Opt-in regression scene: ordinary maps need not contain a scripted grid.
+			if (m_waterType == WATER_TYPE_3_GRIDMESH && !m_doWaterGrid)
+			{
+				char testType[8] = {};
+				if (GetEnvironmentVariableA("GENERALS_D3D12_TEST_WATER_TYPE",testType,sizeof(testType)) == 1 && testType[0] == '3')
+				{
+					const Vector3 position = rinfo.Camera.Get_Position();
+					setGridResolution(64,64,16);
+					setGridTransform(0,position.X-512,position.Y-512,m_level);
+					enableWaterGrid(true);
+					addVelocity(position.X,position.Y,1.0f,m_level);
+				}
+			}
 			//Draw the water surface as a bunch of alpha blended tiles covering areas where water is visible
 			renderWater(rinfo.Camera);
 			if (!m_drawingRiver || m_disableRiver) {
-				renderWaterMesh();	//Draw water surface as 3D deforming mesh if it's enabled on this map.
+				renderWaterMesh(rinfo.Camera);	//Draw water surface as 3D deforming mesh if it's enabled on this map.
 			}
 			break;
 
@@ -1142,10 +1233,9 @@ void WaterRenderObjClass::Render(RenderInfoClass & rinfo)
 
 		case WATER_TYPE_1_FB_REFLECTION:
 			{
-				// Preserve this serialized type's existing translucent rendering.
-				ShaderClass::Invert_Backface_Culling(false);
-				ShaderClass::Invalidate();
-				renderWater(rinfo.Camera);
+				// Serialized framebuffer-reflection mode uses a native offscreen
+				// reflection too; it no longer depends on a disabled pre-pass scene.
+				drawSea(rinfo);
 			}	//WATER_TYPE_1
 			break;
 
@@ -1153,7 +1243,7 @@ void WaterRenderObjClass::Render(RenderInfoClass & rinfo)
 			break;
 	}//switch
 
-	if (TheGlobalData && TheGlobalData->m_drawSkyBox)
+	if (TheGlobalData && TheGlobalData->m_drawSkyBox && m_skyBox)
 	{	//center skybox around camera
 		Vector3 pos=rinfo.Camera.Get_Position();
 		pos.Z = TheGlobalData->m_skyBoxPositionZ;
@@ -1161,10 +1251,6 @@ void WaterRenderObjClass::Render(RenderInfoClass & rinfo)
 		m_skyBox->Render(rinfo);
 	}
 
-	//Clean up after any pixel shaders.
-	//Force render state apply so that the "NULL" texture gets applied to D3D, thus releasing shroud reference count.
-	DX8Wrapper::Apply_Render_State_Changes();
-	DX8Wrapper::Invalidate_Cached_Render_States();
 
 	if (m_waterTrackSystem)
 		m_waterTrackSystem->flush(rinfo);
@@ -1217,43 +1303,120 @@ Bool WaterRenderObjClass::getClippedWaterPlane(CameraClass *cam, AABoxClass *box
 /** Draws the water surface using a custom D3D vertex/pixel shader and a
 	* reflection texture.  Only tested to work on GeForce3. */
 //-------------------------------------------------------------------------------------------------
-void WaterRenderObjClass::drawSea(RenderInfoClass & rinfo)
+const NativeD3D12Texture* WaterRenderObjClass::prepareSeaBump()
 {
-	AABoxClass	seaBox;
+	auto* native=NativeD3D12Renderer::Active();
+	if (!native) return nullptr;
+	auto& cached=m_nativeSeaBumps[m_iBumpFrame%NUM_BUMP_FRAMES];
+	if (cached) return cached.get();
+	char name[32];
+	sprintf(name,"caust%.2d.tga",m_iBumpFrame%NUM_BUMP_FRAMES);
+	TextureClass* source=WW3DAssetManager::Get_Instance()->Get_Texture(name);
+	if (!source) return nullptr;
+	source->Init();
+	SurfaceClass* surface=source->Get_Surface_Level();
+	REF_PTR_RELEASE(source);
+	if (!surface) return nullptr;
+	SurfaceClass::SurfaceDescription description;
+	surface->Get_Description(description);
+	std::vector<unsigned char> pixels;
+	surface->Build_Native_Bgra(pixels);
+	REF_PTR_RELEASE(surface);
+	const UINT w=description.Width,h=description.Height;
+	std::vector<unsigned char> gradients;
+	if (!Build_Native_Sea_Gradients(pixels,w,h,gradients)) return nullptr;
+	std::unique_ptr<NativeD3D12Texture> texture(native->CreateTexture2D(w,h,1,DXGI_FORMAT_R8G8B8A8_UNORM));
+	const NativeD3D12TextureLevel level={gradients.data(),w*4,w*h*4};
+	if (!texture || !native->UploadTexture2D(*texture,&level,1)) return nullptr;
+	cached=std::move(texture);
+	if (GetEnvironmentVariableA("GENERALS_D3D12_DIAGNOSTICS",nullptr,0)) {
+		FILE* log=fopen("NativeWater.log","a");
+		if (log) { fprintf(log,"Bump frame %s uploaded %ux%u\n",name,w,h); fclose(log); }
+	}
+	return cached.get();
+}
 
-	if (!getClippedWaterPlane(&rinfo.Camera,&seaBox))
-		return;	//the sea is not visible
-
-	if (NativeD3D12Renderer* native = NativeD3D12Renderer::Active())
-	{
-		if (m_vertexBufferNative == NULL || m_indexBufferNative == NULL ||
-			m_numVertices <= 0 || m_numIndices <= 0)
-			return;
-		TextureClass *waterTexture = m_settings[m_tod].waterTexture;
-		DX8Wrapper::Set_Transform(D3DTS_WORLD, Transform);
-		DX8Wrapper::Set_Shader(ShaderClass::_PresetAlphaShader);
-		DX8Wrapper::Set_Texture(0, waterTexture);
-		DX8Wrapper::Apply_Render_State_Changes();
-		DX8Wrapper::Apply_Native_Texture_Sampler(waterTexture);
-		const NativeD3D12Texture *nativeTexture = waterTexture != NULL ?
-			waterTexture->Peek_Native_Texture() : NULL;
-		const bool previousMaterial = native->MaterialEnabled();
-		native->SetMaterialEnabled(false);
-		native->SetTextureCombine(true, true, true, true);
-		const unsigned short *indices = static_cast<const unsigned short*>(m_indexBufferNative->Data());
-		if (nativeTexture != NULL)
-			native->DrawIndexedTextured(m_vertexBufferNative->Data(),
-				static_cast<UINT>(m_vertexBufferNative->Size()), sizeof(SEA_PATCH_VERTEX),
-				static_cast<UINT>(m_numVertices), static_cast<UINT>(offsetof(SEA_PATCH_VERTEX, tu)),
-				indices, static_cast<UINT>(m_numIndices), D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP,
-				nativeTexture, offsetof(SEA_PATCH_VERTEX, c), m_vertexBufferNative, m_indexBufferNative);
-		else
-			native->DrawIndexed(m_vertexBufferNative->Data(),
-				static_cast<UINT>(m_vertexBufferNative->Size()), sizeof(SEA_PATCH_VERTEX),
-				static_cast<UINT>(m_numVertices), indices, static_cast<UINT>(m_numIndices),
-				0, 0, D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP, offsetof(SEA_PATCH_VERTEX, c));
-		native->SetMaterialEnabled(previousMaterial);
-		return;
+void WaterRenderObjClass::drawSea(RenderInfoClass& rinfo)
+{
+	auto* native=NativeD3D12Renderer::Active();
+	AABoxClass seaBox;
+	const bool visible=getClippedWaterPlane(&rinfo.Camera,&seaBox);
+	const UINT status=(!m_reflectionReady ? 1u : 0u) | (!m_pReflectionTexture ? 2u : 0u) |
+		(!m_vertexBufferNative ? 4u : 0u) | (!m_indexBufferNative ? 8u : 0u) | (!visible ? 16u : 0u);
+	static UINT lastStatus=UINT_MAX;
+	if (status!=lastStatus && GetEnvironmentVariableA("GENERALS_D3D12_DIAGNOSTICS",nullptr,0)) {
+		FILE* log=fopen("NativeWater.log","a");
+		if (log) { fprintf(log,"Sea draw status=%u vertices=%d indices=%d\n",status,m_numVertices,m_numIndices); fclose(log); }
+		lastStatus=status;
+	}
+	if (!native || status) return;
+	if (m_numVertices<=0 || m_numIndices<=0 || size_t(m_numIndices)*2>m_indexBufferNative->Size()) return;
+	NativeD3D12ScopedState restore(*native);
+	const auto frame=native->CaptureState();
+	const auto* bump=m_waterType==WATER_TYPE_2_PVSHADER ? prepareSeaBump() : nullptr;
+	native->SetTreeSway(nullptr,0); native->SetLighting(NativeLightingState());
+	native->SetVertexFog(0,0,1,0,0,false); native->SetDepthBias(0);
+	auto pipeline=ShaderClass::_PresetAlphaShader.Get_Native_Pipeline();
+	pipeline.cull=D3D12_CULL_MODE_NONE; pipeline.depthWrite=false;
+	pipeline.colorMask &= frame.renderTargetWriteMask;
+	const auto shroud=NativeWorldModulatedMaterial(nullptr,UINT_MAX,
+		TheTerrainRenderObject ? TheTerrainRenderObject->getShroud() : nullptr);
+	const float span=PATCH_WIDTH*PATCH_SCALE;
+	const int x0=int(floor((std::max)(0.0f,seaBox.Center.X-seaBox.Extent.X)/span));
+	const int y0=int(floor((std::max)(0.0f,seaBox.Center.Y-seaBox.Extent.Y)/span));
+	const float xmax=(std::min)(m_dx,seaBox.Center.X+seaBox.Extent.X);
+	const float ymax=(std::min)(m_dy,seaBox.Center.Y+seaBox.Extent.Y);
+	for (int y=y0;y*span<ymax;++y) for (int x=x0;x*span<xmax;++x) {
+		Matrix3D world(true);
+		world[0][0]=(std::min)(span,m_dx-x*span)/PATCH_WIDTH;
+		world[1][1]=(std::min)(span,m_dy-y*span)/PATCH_WIDTH;
+		world.Set_Translation(Vector3(x*span,y*span,0));
+		NativeTerrainSetCameraMatrices(*native,&rinfo.Camera,world);
+		NativeDrawSubmission draw;
+		draw.vertices=m_vertexBufferNative->Data(); draw.vertexBytes=UINT(m_vertexBufferNative->Size());
+		draw.vertexStride=sizeof(SEA_PATCH_VERTEX); draw.vertexCount=m_numVertices;
+		draw.indices=static_cast<const unsigned short*>(m_indexBufferNative->Data()); draw.indexCount=m_numIndices;
+		draw.topology=D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP;
+		draw.vertexOwner=m_vertexBufferNative; draw.indexOwner=m_indexBufferNative;
+		draw.layout.stride=draw.vertexStride;
+		draw.layout.Add(NativeVertexSemantic::Position,0,DXGI_FORMAT_R32G32B32_FLOAT,0);
+		draw.layout.Add(NativeVertexSemantic::Color,0,DXGI_FORMAT_R8G8B8A8_UNORM,offsetof(SEA_PATCH_VERTEX,c));
+		draw.layout.Add(NativeVertexSemantic::TexCoord,0,DXGI_FORMAT_R32G32_FLOAT,offsetof(SEA_PATCH_VERTEX,tu));
+		draw.useMaterial=true; draw.material.enabled=true;
+		const UINT reflectionStage=bump ? 1 : 0;
+		if (bump) {
+			draw.material.textures[0]=bump;
+			draw.material.coordinates[0].offset=offsetof(SEA_PATCH_VERTEX,tu);
+			draw.material.stages[0].colorOp=NativeMaterialOp::BumpEnvironment;
+			draw.material.stages[0].bumpParameters={1,0,2,-256.0f/255.0f};
+			draw.material.stages[0].bumpMatrix={m_fBumpScale,0,0,m_fBumpScale};
+			draw.material.samplers[0]={NativeD3D12FilterMode::Linear,NativeD3D12FilterMode::Linear,NativeD3D12FilterMode::Point,false,false,1};
+		}
+		const auto projection=Matrix4x4(world).Transpose()*m_reflectionViewProjection;
+		std::array<float,16> matrix;
+		std::memcpy(matrix.data(),&projection,sizeof(projection));
+		draw.material.coordinates[reflectionStage]=Describe_Native_Sea_Projection(matrix);
+		draw.material.textures[reflectionStage]=m_pReflectionTexture;
+		auto& reflection=draw.material.stages[reflectionStage];
+		reflection.colorOp=NativeMaterialOp::Modulate;
+		reflection.colorArg1=UINT(NativeMaterialSource::Texture); reflection.colorArg2=UINT(NativeMaterialSource::Diffuse);
+		reflection.alphaOp=NativeMaterialOp::Select2; reflection.alphaArg2=UINT(NativeMaterialSource::Diffuse);
+		draw.material.samplers[reflectionStage]={NativeD3D12FilterMode::Linear,NativeD3D12FilterMode::Linear,NativeD3D12FilterMode::Point,true,true,1};
+		pipeline.blend=true; pipeline.source=D3D12_BLEND_SRC_ALPHA; pipeline.destination=D3D12_BLEND_INV_SRC_ALPHA;
+		pipeline.Apply(*native);
+		Submit_Native_Draw(*native,draw);
+		if (shroud.textures[1]) {
+			draw.material=NativeMaterialDescription(); draw.material.enabled=true;
+			draw.material.textures[0]=shroud.textures[1]; draw.material.samplers[0]=shroud.samplers[1];
+			draw.material.coordinates[0]=shroud.coordinates[1];
+			Matrix4x4 mask;
+			std::memcpy(&mask,shroud.coordinates[1].matrix.data(),sizeof(mask));
+			mask=Matrix4x4(world).Transpose()*mask;
+			std::memcpy(draw.material.coordinates[0].matrix.data(),&mask,sizeof(mask));
+			draw.material.stages[0].colorOp=NativeMaterialOp::Select1;
+			pipeline.source=D3D12_BLEND_DEST_COLOR; pipeline.destination=D3D12_BLEND_ZERO;
+			pipeline.Apply(*native); Submit_Native_Draw(*native,draw);
+		}
 	}
 }
 
@@ -1312,7 +1475,38 @@ void WaterRenderObjClass::renderWater(CameraClass& camera)
 /** Renders (draws) the sky plane.  Will apply current time-of-day settings including
 	* some simple UV scrolling animation. */
 //-------------------------------------------------------------------------------------------------
-void WaterRenderObjClass::renderSky(void)
+void WaterRenderObjClass::submitSky(CameraClass& camera, const DynamicVBAccessClass& vb,
+	const Matrix3D& world, const ShaderClass& shader, TextureClass* texture, UINT uv)
+{
+	auto* native=NativeD3D12Renderer::Active();
+	if (!native || !texture || !m_indexBuffer) return;
+	const auto* vertices=vb.Get_Native_Vertex_Buffer();
+	const auto* indices=m_indexBuffer->Get_Native_Index_Buffer();
+	if (!vertices || !indices || indices->Size()<12) return;
+	NativeD3D12ScopedState restore(*native);
+	NativeTerrainSetCameraMatrices(*native,&camera,world);
+	native->SetTreeSway(nullptr,0); native->SetLighting(NativeLightingState());
+	native->SetVertexFog(0,0,1,0,0,false); native->SetDepthBias(0);
+	auto pipeline=shader.Get_Native_Pipeline();
+	pipeline.colorMask=D3D12_COLOR_WRITE_ENABLE_ALL;
+	pipeline.Apply(*native);
+	NativeDrawSubmission draw;
+	draw.layout=FVFInfoClass(dynamic_fvf_type).Build_Native_Layout();
+	const size_t offset=size_t(vb.Get_Native_Vertex_Offset())*draw.layout.stride;
+	draw.vertexStride=draw.layout.stride; draw.vertexBytes=4*draw.vertexStride; draw.vertexCount=4;
+	if (offset>vertices->Size() || draw.vertexBytes>vertices->Size()-offset) return;
+	draw.vertices=static_cast<const unsigned char*>(vertices->Data())+offset;
+	draw.indices=static_cast<const unsigned short*>(indices->Data()); draw.indexCount=6;
+	draw.vertexOwner=vertices; draw.indexOwner=indices;
+	draw.material=shader.Get_Native_Texture_Material(); draw.useMaterial=true;
+	draw.material.textures[0]=texture->Prepare_Native_Texture();
+	if (!draw.material.textures[0]) return;
+	draw.material.coordinates[0].offset=uv;
+	draw.material.samplers[0]=texture->Get_Filter().Get_Native_Description();
+	Submit_Native_Draw(*native,draw);
+}
+
+void WaterRenderObjClass::renderSky(CameraClass& camera)
 {
 	Int timeNow,timeDiff;
 	Real fu,fv;
@@ -1335,18 +1529,13 @@ void WaterRenderObjClass::renderSky(void)
 	fv= m_vOffset + (SKYPLANE_SIZE * 2) * setting->skyTexelsPerUnit;
 
 
-	VertexMaterialClass *vmat=VertexMaterialClass::Get_Preset(VertexMaterialClass::PRELIT_DIFFUSE);
-	DX8Wrapper::Set_Material(vmat);
-	REF_PTR_RELEASE(vmat);
 
 	ShaderClass m_shader2=ShaderClass::_PresetOpaqueShader;
 	m_shader2.Set_Cull_Mode(ShaderClass::CULL_MODE_DISABLE);
 	m_shader2.Set_Depth_Compare(ShaderClass::PASS_ALWAYS);	//no need to check against z-buffer, sky always rendered first.
 	m_shader2.Set_Depth_Mask(ShaderClass::DEPTH_WRITE_DISABLE);	//sky is always behind everything so no need to update z-buffer
 
-	DX8Wrapper::Set_Shader(m_shader2);
 
-	DX8Wrapper::Set_Texture(0,setting->skyTexture);
 
 	//draw an infinite sky plane
 	DynamicVBAccessClass vb_access(BUFFER_TYPE_DYNAMIC_DX8,dynamic_fvf_type,4);
@@ -1385,14 +1574,11 @@ void WaterRenderObjClass::renderSky(void)
 		}
 	}
 
-	DX8Wrapper::Set_Index_Buffer(m_indexBuffer,0);
-	DX8Wrapper::Set_Vertex_Buffer(vb_access);
 
 	Matrix3D tm(1);
 	tm.Set_Translation(Vector3(0,0,0));
-	DX8Wrapper::Set_Transform(D3DTS_WORLD,tm);
 
-	DX8Wrapper::Draw_Triangles(	0,2, 0,	4);	//draw a quad, 2 triangles, 4 verts
+	submitSky(camera,vb_access,tm,m_shader2,setting->skyTexture,offsetof(VertexFormatXYZNDUV2,u1));
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -1401,7 +1587,7 @@ void WaterRenderObjClass::renderSky(void)
 	* it's a flat image. */
 //-------------------------------------------------------------------------------------------------
 ///	@todo: Add code to render properly sorted sun sky body.
-void WaterRenderObjClass::renderSkyBody(Matrix3D *mat)
+void WaterRenderObjClass::renderSkyBody(Matrix3D *mat, CameraClass& camera)
 {	
 	Vector3 cPos;
 
@@ -1410,21 +1596,20 @@ void WaterRenderObjClass::renderSkyBody(Matrix3D *mat)
 	mat->Get_Translation(&cPos);
 
 	pView=cPos-pPos;	//billboard to camera
+	if (pView.Length2() < 1.0e-12f) return;
 	pView.Normalize();	//particle view direction
 
 	Vector3 WorldUp(0,0,-1);	///@todo: hacked so only works for reflections across xy plane
 
-#ifdef ALLOW_TEMPORARIES
-	Vector3 rotAxis=Vector3::Cross_Product(WorldUp,pView);	//get axis of rotation.
-	rotAxis.Normalize();
-#else
 	Vector3 rotAxis;
-	Vector3::Normalized_Cross_Product(WorldUp, pView, &rotAxis);	
-#endif
+	Vector3::Cross_Product(WorldUp,pView,&rotAxis);
+	// Parallel views have no unique rotation axis; choose a stable perpendicular.
+	if (rotAxis.Length2() < 1.0e-12f) rotAxis.Set(1,0,0);
+	else rotAxis.Normalize();
 
 	Real angle=Vector3::Dot_Product(WorldUp,pView);
 
-	angle = acos(angle);
+	angle = acos((std::max)(-1.0f,(std::min)(1.0f,angle)));
 
 
 	Matrix3D tm(1);
@@ -1432,25 +1617,17 @@ void WaterRenderObjClass::renderSkyBody(Matrix3D *mat)
 	tm.Adjust_Translation(Vector3(SKYBODY_X,SKYBODY_Y,SKYBODY_HEIGHT));
 
 
-	DX8Wrapper::Set_Transform(D3DTS_WORLD,tm);
 
 
-	VertexMaterialClass *vmat=VertexMaterialClass::Get_Preset(VertexMaterialClass::PRELIT_DIFFUSE);
-	DX8Wrapper::Set_Material(vmat);
-	REF_PTR_RELEASE(vmat);
 
 	ShaderClass m_shader2=ShaderClass::_PresetAlphaShader;
 	m_shader2.Set_Cull_Mode(ShaderClass::CULL_MODE_DISABLE);
 	m_shader2.Set_Depth_Compare(ShaderClass::PASS_ALWAYS);	//no need to check against z-buffer, sky always rendered first.
 	m_shader2.Set_Depth_Mask(ShaderClass::DEPTH_WRITE_DISABLE);	//sky is always behind everything so no need to update z-buffer
 
-	DX8Wrapper::Set_Shader(m_shader2);
 
 
-//	DX8Wrapper::Set_Shader(ShaderClass::/*_PresetAdditiveShader*//*_PresetOpaqueShader*/_PresetAlphaShader);
-//	DX8Wrapper::Set_Texture(0,setting->skyBodyTexture);
-
-	DX8Wrapper::Set_Texture(0,m_alphaClippingTexture);
+////
 
 	//draw an infinite sky plane
 	DynamicVBAccessClass vb_access(BUFFER_TYPE_DYNAMIC_DX8,dynamic_fvf_type,4);
@@ -1489,10 +1666,8 @@ void WaterRenderObjClass::renderSkyBody(Matrix3D *mat)
 		}
 	}
 
-	DX8Wrapper::Set_Index_Buffer(m_indexBuffer,0);
-	DX8Wrapper::Set_Vertex_Buffer(vb_access);
 
-	DX8Wrapper::Draw_Triangles(	0,2, 0,	4);	//draw a quad, 2 triangles, 4 verts
+	submitSky(camera,vb_access,tm,m_shader2,m_alphaClippingTexture,offsetof(VertexFormatXYZNDUV2,u2));
 }
 
 //Defines for procedural water animation.
@@ -1504,7 +1679,7 @@ void WaterRenderObjClass::renderSkyBody(Matrix3D *mat)
 /** Renders (draws) the water surface mesh geometry.
 	*	This is a work-in-progress!  Do not use this code! */
 //-------------------------------------------------------------------------------------------------
-void WaterRenderObjClass::renderWaterMesh(void)
+void WaterRenderObjClass::renderWaterMesh(CameraClass& camera)
 {
 	if (NativeD3D12Renderer* native = NativeD3D12Renderer::Active())
 	{
@@ -1519,7 +1694,7 @@ void WaterRenderObjClass::renderWaterMesh(void)
 		const Real uScale = setting->waterRepeatCount / 128.0f * m_gridCellSize / 10.0f * 0.2f;
 		const Real vScale = setting->waterRepeatCount / 128.0f * m_gridCellSize / 10.0f * 0.2f;
 		const Int diffuse = setting->waterDiffuse & 0x00ffffff;
-		const Int alpha = ((setting->waterDiffuse >> 24) - 0x20) & 0xff;
+		const Int alpha = (std::max)(0,Int((UINT32(setting->waterDiffuse)>>24)&0xff)-0x20);
 		const DWORD meshDiffuse = diffuse | (alpha << 24);
 		for (Int y = 0; y < my; ++y)
 		{
@@ -1543,32 +1718,40 @@ void WaterRenderObjClass::renderWaterMesh(void)
 			}
 		}
 
-		DX8Wrapper::Set_Transform(D3DTS_WORLD, Transform);
-		DX8Wrapper::Set_Material(m_meshVertexMaterialClass);
-		DX8Wrapper::Set_Shader(m_shaderClass);
-		DX8Wrapper::Set_Texture(0, setting->waterTexture);
-		DX8Wrapper::Apply_Render_State_Changes();
-		DX8Wrapper::Apply_Native_Texture_Sampler(setting->waterTexture);
-		const bool previousMaterial = native->MaterialEnabled();
-		native->SetMaterialEnabled(false);
-		native->SetTextureCombine(true, true, true, true);
-		const NativeD3D12Texture *nativeTexture = setting->waterTexture != NULL ?
-			setting->waterTexture->Peek_Native_Texture() : NULL;
-		const unsigned short *indices = static_cast<const unsigned short*>(m_indexBufferNative->Data());
-		if (nativeTexture != NULL)
-			native->DrawIndexedTextured(vertices.data(),
-				static_cast<UINT>(vertices.size() * sizeof(MaterMeshVertexFormat)),
-				static_cast<UINT>(sizeof(MaterMeshVertexFormat)), static_cast<UINT>(vertices.size()),
-				static_cast<UINT>(offsetof(MaterMeshVertexFormat, u1)), indices,
-				static_cast<UINT>(m_numIndices), D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP, nativeTexture,
-				offsetof(MaterMeshVertexFormat, diffuse), NULL, m_indexBufferNative);
-		else
-			native->DrawIndexed(vertices.data(),
-				static_cast<UINT>(vertices.size() * sizeof(MaterMeshVertexFormat)),
-				static_cast<UINT>(sizeof(MaterMeshVertexFormat)), static_cast<UINT>(vertices.size()),
-				indices, static_cast<UINT>(m_numIndices), 0, 0,
-				D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP, offsetof(MaterMeshVertexFormat, diffuse));
-		native->SetMaterialEnabled(previousMaterial);
+		NativeD3D12ScopedState restore(*native);
+		const auto frame=native->CaptureState();
+		NativeTerrainSetCameraMatrices(*native,&camera,Transform);
+		native->SetTreeSway(nullptr,0);
+		native->SetLighting(NativeLightingState());
+		native->SetVertexFog(0,0,1,0,0,false);
+		native->SetDepthBias(0);
+		auto pipeline=m_shaderClass.Get_Native_Pipeline(ShaderClass::Is_Backface_Culling_Inverted());
+		pipeline.colorMask &= frame.renderTargetWriteMask;
+		pipeline.Apply(*native);
+		if (size_t(m_numIndices)*sizeof(unsigned short)>m_indexBufferNative->Size()) return;
+		NativeDrawSubmission draw;
+		draw.vertices=vertices.data(); draw.vertexBytes=UINT(vertices.size()*sizeof(MaterMeshVertexFormat));
+		draw.vertexStride=sizeof(MaterMeshVertexFormat); draw.vertexCount=UINT(vertices.size());
+		draw.indices=static_cast<const unsigned short*>(m_indexBufferNative->Data());
+		draw.indexCount=m_numIndices; draw.indexOwner=m_indexBufferNative;
+		draw.topology=D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP;
+		draw.layout.stride=draw.vertexStride;
+		draw.layout.Add(NativeVertexSemantic::Position,0,DXGI_FORMAT_R32G32B32_FLOAT,0);
+		draw.layout.Add(NativeVertexSemantic::Color,0,DXGI_FORMAT_R8G8B8A8_UNORM,offsetof(MaterMeshVertexFormat,diffuse));
+		draw.layout.Add(NativeVertexSemantic::TexCoord,0,DXGI_FORMAT_R32G32_FLOAT,offsetof(MaterMeshVertexFormat,u1));
+		draw.layout.Add(NativeVertexSemantic::TexCoord,1,DXGI_FORMAT_R32G32_FLOAT,offsetof(MaterMeshVertexFormat,u2));
+		draw.material=NativeWorldModulatedMaterial(setting->waterTexture,offsetof(MaterMeshVertexFormat,u1),nullptr);
+		draw.useMaterial=true;
+		if (Submit_Native_Draw(*native,draw))
+		{
+			static bool loggedGrid = false;
+			if (!loggedGrid && GetEnvironmentVariableA("GENERALS_D3D12_DIAGNOSTICS",nullptr,0))
+			{
+				FILE* log=fopen("NativeWater.log","a");
+				if (log) { fprintf(log,"Deforming grid submitted vertices=%u indices=%u\n",draw.vertexCount,draw.indexCount); fclose(log); }
+				loggedGrid = true;
+			}
+		}
 		return;
 	}
 }
@@ -1747,7 +1930,7 @@ void WaterRenderObjClass::setGridResolution(Real gridCellsX, Real gridCellsY, Re
 {
 	m_gridCellSize=cellSize;
 
-	if (m_gridCellsX != gridCellsX || m_gridCellsY != m_gridCellsY)
+	if (m_gridCellsX != gridCellsX || m_gridCellsY != gridCellsY)
 	{	//resolutoin has changed
 		m_gridCellsX=gridCellsX;
 		m_gridCellsY=gridCellsY;
@@ -1829,7 +2012,6 @@ Real WaterRenderObjClass::getWaterHeight(Real x, Real y)
 //-------------------------------------------------------------------------------------------------
 void WaterRenderObjClass::drawRiverWater(PolygonTrigger *pTrig, CameraClass& camera)
 {
-	DX8Wrapper::Invalidate_Cached_Render_States();	///@todo: Figure out why rivers don't draw without reset of all states.
 
 	Int rectangleCount = pTrig->getNumPoints()/2;
 	rectangleCount--;

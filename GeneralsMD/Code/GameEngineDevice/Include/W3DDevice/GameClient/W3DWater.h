@@ -162,7 +162,12 @@ protected:
 	Int					m_iBumpFrame;	///<current animation frame
 	Real				m_bumpFrameAccum;	///<fractional carry, so the flipbook can run slower than one frame per tick
 	Real				m_fBumpScale;	///<scales bump map uv perturbation
-	TextureClass * m_pReflectionTexture;	///<render target for reflection
+	NativeD3D12Texture* m_pReflectionTexture;	///<native reflection target
+	std::array<std::unique_ptr<NativeD3D12Texture>,NUM_BUMP_FRAMES> m_nativeSeaBumps;
+	Matrix4x4 m_reflectionViewProjection;
+	bool m_reflectionReady=false;
+	bool m_testReflectionLevelReady=false;
+	const NativeD3D12Texture* prepareSeaBump();
 	RenderObjClass	*m_skyBox;		///<box around level
 	WaterTracksRenderSystem *m_waterTrackSystem;	///<object responsible for rendering water wakes
 
@@ -231,10 +236,12 @@ protected:
 	void drawRiverWater(PolygonTrigger *pTrig, CameraClass& camera);
 	void drawTrapezoidWater(Vector3 points[4], CameraClass& camera);
 	void loadSetting ( Setting *skySetting, TimeOfDay timeOfDay );	///<init sky/water settings from GDF
-	void renderSky(void);	///<draw the sky layer (clouds, stars, etc.)
+	void renderSky(CameraClass& camera);	///<draw the sky layer
 	void testCurvedWater(void);	///<draw the sky layer (clouds, stars, etc.)
-	void renderSkyBody(Matrix3D *mat);	///<draw the sky body (sun, moon, etc.)
-	void renderWaterMesh(void);			///<draw the water surface mesh (deformed 3d mesh).
+	void renderSkyBody(Matrix3D *mat, CameraClass& camera);	///<draw the sky body
+	void submitSky(CameraClass& camera, const DynamicVBAccessClass& vb,
+		const Matrix3D& world, const ShaderClass& shader, TextureClass* texture, UINT uv);
+	void renderWaterMesh(CameraClass& camera);	///<draw the water surface mesh (deformed 3d mesh).
 	void renderMirror(CameraClass *cam);	///< Draw reflected scene into texture
 	void drawSea(RenderInfoClass & rinfo);	///< Draw the surface of the water
 	///bounding box of frustum clipped polygon plane

@@ -1945,7 +1945,9 @@ AGAIN:
                                            //-LORENZEN
 
 
-			if (TheWaterRenderObj && TheGlobalData->m_waterType == 2)
+			// The water object owns the selected mode (including native mode 1
+			// and diagnostic overrides) and decides whether reflection is needed.
+			if (TheWaterRenderObj)
 				TheWaterRenderObj->updateRenderTargetTextures(primaryW3DView->get3DCamera());	//do a render into each texture
 
 			//Can't render into textures while rendering to screen so these textures need to be updated
