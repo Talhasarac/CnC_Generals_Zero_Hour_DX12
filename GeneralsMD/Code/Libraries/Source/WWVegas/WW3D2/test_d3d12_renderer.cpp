@@ -4,6 +4,7 @@
 #include "native_terrain_material.h"
 #include "native_water_material.h"
 #include "native_water_math.h"
+#include "native_reflection_policy.h"
 #include "native_shadow_state.h"
 #include "surface_pixel_write.h"
 #include "native_dds_layout.h"
@@ -46,6 +47,18 @@ void State(NativeD3D12Renderer& r, bool blend = false)
 
 bool Run(NativeD3D12Renderer& r, HWND window)
 {
+	REQUIRE(NativeReflectionDrawableVisible(false,true,false,false,false,false));
+	REQUIRE(NativeReflectionDrawableVisible(true,false,false,false,false,false));
+	REQUIRE(!NativeReflectionDrawableVisible(false,false,false,false,false,false));
+	REQUIRE(!NativeReflectionDrawableVisible(false,true,true,false,true,false));
+	REQUIRE(!NativeReflectionDrawableVisible(false,true,false,true,true,false));
+	REQUIRE(!NativeReflectionDrawableVisible(false,true,false,false,false,true));
+	REQUIRE(NativeReflectionDrawableVisible(false,true,false,false,true,true));
+	const auto riverReflection=Describe_Native_Water_Reflection(nullptr,nullptr,nullptr,12,20,NativeMaterialCoordinates());
+	REQUIRE(riverReflection.factor==0x2effffff);
+	REQUIRE(riverReflection.stages[0].alphaOp==NativeMaterialOp::Modulate);
+	REQUIRE(riverReflection.stages[1].alphaArg2==UINT(NativeMaterialSource::Factor));
+	REQUIRE(riverReflection.stages[2].colorOp==NativeMaterialOp::Disable);
 	std::vector<unsigned char> heights={0,0,0,255, 128,128,128,255, 255,255,255,255};
 	std::vector<unsigned char> gradients;
 	REQUIRE(Build_Native_Sea_Gradients(heights,3,1,gradients));

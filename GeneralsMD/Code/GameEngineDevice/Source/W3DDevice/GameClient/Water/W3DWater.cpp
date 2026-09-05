@@ -1227,15 +1227,15 @@ void WaterRenderObjClass::Render(RenderInfoClass & rinfo)
 			break;
 
 		case WATER_TYPE_2_PVSHADER:
-			//Pixel/Vertex Shader based water which uses an off-screen rendered reflection texture
-			drawSea(rinfo);	//draw water surface
-			break;
-
 		case WATER_TYPE_1_FB_REFLECTION:
 			{
-				// Serialized framebuffer-reflection mode uses a native offscreen
-				// reflection too; it no longer depends on a disabled pre-pass scene.
-				drawSea(rinfo);
+				// Authored rivers keep their geometry and material. A flat ocean
+				// replacement loses flow/shore feathering and floods lower banks.
+				bool authoredWater=false;
+				for (PolygonTrigger* p=PolygonTrigger::getFirstPolygonTrigger();p;p=p->getNext())
+					if (p->isWaterArea() && p->getNumPoints()>2) { authoredWater=true; break; }
+				if (authoredWater) renderWater(rinfo.Camera);
+				else drawSea(rinfo);
 			}	//WATER_TYPE_1
 			break;
 
@@ -2235,6 +2235,31 @@ void WaterRenderObjClass::submitNativeWater(CameraClass& camera,
 	if (river && additive) pipeline.source=D3D12_BLEND_SRC_ALPHA;
 	pipeline.Apply(*native);
 	if (!NativeTerrainDrawDynamic(*native,vb,ib,vertexCount,indexCount,layout,material)) return;
+	if (m_reflectionReady && m_pReflectionTexture &&
+		(m_waterType==WATER_TYPE_1_FB_REFLECTION || m_waterType==WATER_TYPE_2_PVSHADER)) {
+		// River vertices are already in world space. Reflection is a low-weight
+		// alpha layer, not an additive sky wash or a replacement base texture.
+		std::array<float,16> reflectedMatrix;
+		std::memcpy(reflectedMatrix.data(),&m_reflectionViewProjection,sizeof(m_reflectionViewProjection));
+		auto reflected=Describe_Native_Water_Reflection(base,river ? prepare(m_riverAlphaEdge) : nullptr,
+			m_pReflectionTexture,layout.Find_Offset(NativeVertexSemantic::TexCoord),
+			layout.Find_Offset(NativeVertexSemantic::TexCoord,1),Describe_Native_Sea_Projection(reflectedMatrix));
+		// Flat water already applied shroud to its base, so mask only the new
+		// reflected color here. Rivers apply one shared shroud pass below.
+		if (!river && hasShroud) {
+			reflected.textures[2]=shroudDescription.textures[1];
+			reflected.coordinates[2]=shroudDescription.coordinates[1];
+			reflected.samplers[2]=shroudDescription.samplers[1];
+			reflected.stages[2]=shroudDescription.stages[1];
+			reflected.stages[2].alphaOp=NativeMaterialOp::Select1;
+			reflected.stages[2].alphaArg1=UINT(NativeMaterialSource::Current);
+		}
+		pipeline.depthWrite=false;
+		pipeline.depthCompare=D3D12_COMPARISON_FUNC_LESS_EQUAL;
+		pipeline.blend=true; pipeline.source=D3D12_BLEND_SRC_ALPHA; pipeline.destination=D3D12_BLEND_INV_SRC_ALPHA;
+		pipeline.Apply(*native);
+		NativeTerrainDrawDynamic(*native,vb,ib,vertexCount,indexCount,layout,reflected);
+	}
 	if (river && hasShroud) {
 		// River edge + sparkle/noise occupies all four stages. Its shroud is
 		// a separate multiply; no river stage or temporary register may leak.

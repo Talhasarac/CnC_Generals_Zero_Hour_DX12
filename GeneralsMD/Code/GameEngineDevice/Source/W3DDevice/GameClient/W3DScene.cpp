@@ -64,6 +64,7 @@
 #include "WW3D2/DX8Caps.h"
 #include "WW3D2/colorspace.h"
 #include "WW3D2/native_d3d12_renderer.h"
+#include "WW3D2/native_reflection_policy.h"
 
 #include "WW3D2/shdlib.h"
 #ifdef _INTERNAL
@@ -433,6 +434,18 @@ void RTS3DScene::Visibility_Check(CameraClass * camera)
 
 			if( draw )
 			{
+				if (NativeD3D12Renderer::Active()) {
+					// Main-view occlusion queues are reset above and are not rebuilt
+					// for a mirror. Stale delayed flags would silently drop units.
+					drawInfo->m_flags = DrawableInfo::ERF_IS_NORMAL;
+					const bool unit=draw->isKindOf(KINDOF_VEHICLE) ||
+						draw->isKindOf(KINDOF_INFANTRY) || draw->isKindOf(KINDOF_AIRCRAFT);
+					robj->Set_Visible(NativeReflectionDrawableVisible(draw->getDrawsInMirror(),unit,
+						robj->Is_Hidden() || draw->isDrawableEffectivelyHidden(),
+						draw->getFullyObscuredByShroud(),robj->Is_Force_Visible(),
+						camera->Cull_Sphere(robj->Get_Bounding_Sphere())));
+					continue;
+				}
 				if (robj->Is_Force_Visible()) {
 					robj->Set_Visible(true);
 				} else {

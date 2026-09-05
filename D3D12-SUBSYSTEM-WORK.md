@@ -325,6 +325,24 @@ assignments were scope proposals, not completed migrations.
 
 ## Integrated native water rendering
 
+- Reflection modes now retain authored water polygon geometry and the original
+  river base/edge/sparkle/noise material instead of substituting a flat bright sea.
+  A separate projected reflection layer uses approximately 18% maximum opacity,
+  multiplied by base texture, drawable and shoreline alpha. River shroud applies
+  once to the combined result; flat water masks only its new reflection layer.
+  Native unit reflection eligibility is unchanged. Maps with no authored water
+  polygons retain the tiled-sea fallback. This restores original material inputs,
+  not a verified pixel match to stock; visual tuning remains user-tested.
+
+- Native mirror visibility now includes vehicles, infantry and aircraft without
+  requiring the historical CAN_CAST_REFLECTIONS asset opt-in. Authored reflection
+  objects remain supported. Hidden/shrouded drawables stay excluded and mirrored
+  frustum culling remains enabled. Per-drawable main-view delayed/occlusion flags
+  are reset for the mirror, whose corresponding queues are empty. Rendering uses
+  the normal object/material path; the existing no-second-On_Frame_Update rule
+  is preserved. Visibility policy regression checks are in d3d12_smoke. Moving
+  unit visual validation and reflection-plane clipping remain separate checks.
+
 - capture2.rdc pixel history at (450,355) identifies why forced sea looked opaque:
   EID 34846 outputs reflected color with alpha 0.50196, but fails depth testing
   (water depth 0.99254739 versus existing depth 0.99246550). The visible surface
