@@ -430,7 +430,7 @@ bool NativeD3D12Renderer::CreateBasicPipeline(UINT colorOffset, UINT normalOffse
 	if (cached != m_pipelineCache.end()) { m_basicPipeline = cached->second; return true; }
 	static const std::string shaderSource = std::string(NativeLightingHlsl) + R"(
 cbuffer Transform : register(b0) { row_major float4x4 worldViewProjection; uint4 vertexFlags; row_major float4x4 textureMatrices[4]; uint4 textureFlags; float4 treeSway[11]; row_major float4x4 worldView; float4 fogParameters; float4 fogColor; LightingState lighting; };
-cbuffer AlphaTest : register(b1) { uint alphaTestEnable; uint alphaTestFunction; uint alphaTestReference; uint alphaTestPadding; uint grayscaleEnabled; uint textureColorTexture; uint textureColorVertex; uint textureAlphaTexture; uint textureAlphaVertex; };
+cbuffer AlphaTest : register(b1) { uint alphaTestEnable; uint alphaTestFunction; uint alphaTestReference; uint alphaTestPadding; uint grayscaleEnabled; uint textureColorTexture; uint textureColorVertex; uint textureAlphaTexture; uint textureAlphaVertex; uint grayscaleTint; float grayscaleAmount; };
 struct VSInput { float3 position : POSITION; float4 color : COLOR0; float3 normal : NORMAL; float4 secondary : COLOR1; };
 struct VSOutput { float4 position : SV_POSITION; float4 color : COLOR0; float4 fog : COLOR1; float4 specular : COLOR2; };
 VSOutput mainVS(VSInput input)
@@ -470,7 +470,8 @@ float4 mainPS(VSOutput input) : SV_TARGET
     color.rgb = lerp(input.fog.rgb,saturate(color.rgb+input.specular.rgb),input.fog.a);
     if (grayscaleEnabled != 0)
     {
-        color.rgb = dot(color.rgb, float3(0.299f, 0.587f, 0.114f)).xxx;
+        float3 tint = float3((grayscaleTint >> 16) & 255, (grayscaleTint >> 8) & 255, grayscaleTint & 255) / 255.0f;
+        color.rgb = lerp(color.rgb, dot(color.rgb, float3(0.299f, 0.587f, 0.114f)).xxx * tint, saturate(grayscaleAmount));
     }
     return color;
 }
@@ -529,7 +530,7 @@ float4 mainPS(VSOutput input) : SV_TARGET
 		rootParameters[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 		rootParameters[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
 		rootParameters[2].Constants.ShaderRegister = 1;
-		rootParameters[2].Constants.Num32BitValues = 9;
+		rootParameters[2].Constants.Num32BitValues = 11;
 		rootParameters[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 		rootParameters[3].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
 		rootParameters[3].DescriptorTable.NumDescriptorRanges = 1;
@@ -701,7 +702,7 @@ bool NativeD3D12Renderer::CreateTexturedPipeline(const std::array<UINT,4>& texco
 	if (cached != m_pipelineCache.end()) { m_texturedPipeline = cached->second; return true; }
 	static const std::string shaderSource = std::string(NativeLightingHlsl) + R"(
 cbuffer Transform : register(b0) { row_major float4x4 worldViewProjection; uint4 vertexFlags; row_major float4x4 textureMatrices[4]; uint4 textureFlags; float4 treeSway[11]; row_major float4x4 worldView; float4 fogParameters; float4 fogColor; LightingState lighting; };
-cbuffer AlphaTest : register(b1) { uint alphaTestEnable; uint alphaTestFunction; uint alphaTestReference; uint alphaTestPadding; uint grayscaleEnabled; uint textureColorTexture; uint textureColorVertex; uint textureAlphaTexture; uint textureAlphaVertex; };
+cbuffer AlphaTest : register(b1) { uint alphaTestEnable; uint alphaTestFunction; uint alphaTestReference; uint alphaTestPadding; uint grayscaleEnabled; uint textureColorTexture; uint textureColorVertex; uint textureAlphaTexture; uint textureAlphaVertex; uint grayscaleTint; float grayscaleAmount; };
 struct MaterialStage { uint colorOp; uint colorArg1; uint colorArg2; uint colorArg0; uint alphaOp; uint alphaArg1; uint alphaArg2; uint alphaArg0; uint4 resultFlags; };
 cbuffer Material : register(b2) { MaterialStage stages[4]; float4 materialFactor; };
 Texture2D texture0 : register(t0);
@@ -827,7 +828,8 @@ float4 mainPS(VSOutput input) : SV_TARGET
     color.rgb = lerp(input.fog.rgb,saturate(color.rgb+input.specular.rgb),input.fog.a);
     if (grayscaleEnabled != 0)
     {
-        color.rgb = dot(color.rgb, float3(0.299f, 0.587f, 0.114f)).xxx;
+        float3 tint = float3((grayscaleTint >> 16) & 255, (grayscaleTint >> 8) & 255, grayscaleTint & 255) / 255.0f;
+        color.rgb = lerp(color.rgb, dot(color.rgb, float3(0.299f, 0.587f, 0.114f)).xxx * tint, saturate(grayscaleAmount));
     }
     if (alphaTestEnable != 0)
     {
@@ -980,9 +982,11 @@ void NativeD3D12Renderer::SetAlphaTestState(bool enable, D3D12_COMPARISON_FUNC f
 	m_alphaTestRef = reference;
 }
 
-void NativeD3D12Renderer::SetGrayscale(bool enable)
+void NativeD3D12Renderer::SetGrayscale(bool enable, UINT32 tint, float amount)
 {
 	m_grayscale = enable;
+	m_grayscaleTint = tint;
+	m_grayscaleAmount = amount;
 }
 
 void NativeD3D12Renderer::SetTreeSway(const float (*offsets)[4], UINT count, UINT vertexOffset)
@@ -1503,12 +1507,13 @@ bool NativeD3D12Renderer::DrawIndexed(const void* vertices, UINT vertexBytes, UI
 
 	m_commandList->SetGraphicsRootSignature(m_rootSignature.Get());
 	m_commandList->SetGraphicsRootConstantBufferView(0, transformAddress);
-	const UINT alphaTestConstants[9] = {
+	UINT alphaTestConstants[11] = {
 		m_alphaTestEnable ? 1u : 0u, static_cast<UINT>(m_alphaTestFunc), m_alphaTestRef, 0u,
 		m_grayscale ? 1u : 0u, m_textureColorTexture ? 1u : 0u,
 		m_textureColorVertex ? 1u : 0u, m_textureAlphaTexture ? 1u : 0u,
-		m_textureAlphaVertex ? 1u : 0u};
-	m_commandList->SetGraphicsRoot32BitConstants(2, 9, alphaTestConstants, 0);
+		m_textureAlphaVertex ? 1u : 0u, m_grayscaleTint, 0};
+	std::memcpy(&alphaTestConstants[10], &m_grayscaleAmount, sizeof(float));
+	m_commandList->SetGraphicsRoot32BitConstants(2, 11, alphaTestConstants, 0);
 	m_commandList->SetPipelineState(m_basicPipeline.Get());
 	m_commandList->IASetPrimitiveTopology(topology);
 	m_commandList->IASetVertexBuffers(0, 1, &vertexView);
@@ -1603,12 +1608,13 @@ bool NativeD3D12Renderer::DrawIndexedTextured(const void* vertices, UINT vertexB
 	m_commandList->SetDescriptorHeaps(2, heaps);
 	m_commandList->SetGraphicsRootSignature(m_rootSignature.Get());
 	m_commandList->SetGraphicsRootConstantBufferView(0, transformAddress);
-	const UINT alphaTestConstants[9] = {
+	UINT alphaTestConstants[11] = {
 		m_alphaTestEnable ? 1u : 0u, static_cast<UINT>(m_alphaTestFunc), m_alphaTestRef, m_materialEnabled ? 1u : 0u,
 		m_grayscale ? 1u : 0u, m_textureColorTexture ? 1u : 0u,
 		m_textureColorVertex ? 1u : 0u, m_textureAlphaTexture ? 1u : 0u,
-		m_textureAlphaVertex ? 1u : 0u};
-	m_commandList->SetGraphicsRoot32BitConstants(2, 9, alphaTestConstants, 0);
+		m_textureAlphaVertex ? 1u : 0u, m_grayscaleTint, 0};
+	std::memcpy(&alphaTestConstants[10], &m_grayscaleAmount, sizeof(float));
+	m_commandList->SetGraphicsRoot32BitConstants(2, 11, alphaTestConstants, 0);
 	struct MaterialConstants {
 		std::array<NativeMaterialStage, 4> stages;
 		std::array<float,4> factor;
@@ -1678,7 +1684,7 @@ bool NativeD3D12Renderer::DrawScreenQuad(FLOAT x, FLOAT y, FLOAT width, FLOAT he
 
 bool NativeD3D12Renderer::DrawTexturedScreenQuad(FLOAT x, FLOAT y, FLOAT width,
 	FLOAT height, FLOAT u0, FLOAT v0, FLOAT u1, FLOAT v1, UINT32 color,
-	const NativeD3D12Texture* texture)
+	const NativeD3D12Texture* texture, bool useMaterial)
 {
 	if (!m_recording || texture == nullptr || !texture->IsValid() || width <= 0.0f ||
 		height <= 0.0f || m_viewport.Width <= 0.0f || m_viewport.Height <= 0.0f)
@@ -1708,7 +1714,7 @@ bool NativeD3D12Renderer::DrawTexturedScreenQuad(FLOAT x, FLOAT y, FLOAT width,
 	const UINT savedFog = m_fogMode, savedSway = m_treeSwayOffset;
 	m_fogMode = 0;
 	m_treeSwayOffset = UINT_MAX;
-	m_materialEnabled = false;
+	m_materialEnabled = useMaterial;
 	const bool result = DrawIndexedTextured(vertices, sizeof(vertices), sizeof(ScreenVertex),
 		4, sizeof(float) * 3 + sizeof(DWORD), indices, 6,
 		D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, texture, sizeof(float) * 3);
@@ -1716,6 +1722,49 @@ bool NativeD3D12Renderer::DrawTexturedScreenQuad(FLOAT x, FLOAT y, FLOAT width,
 	m_treeSwayOffset = savedSway;
 	m_worldViewProjection = savedTransform;
 	m_materialEnabled = savedMaterial;
+	return result;
+}
+
+bool NativeD3D12Renderer::DrawMaskedScreenQuad(FLOAT x, FLOAT y, FLOAT width,
+	FLOAT height, FLOAT u0, FLOAT v0, FLOAT u1, FLOAT v1,
+	const NativeD3D12Texture* texture, const NativeD3D12Texture* mask, FLOAT radius)
+{
+	if (!texture || !mask || u1 == u0 || v1 == v0 || radius <= 0.0f) return false;
+	const auto stages = m_materialStages;
+	const auto coordinates = m_materialCoordinates;
+	const auto textures = m_materialTextures;
+	const auto samplers = m_materialSamplers;
+	const bool materialEnabled = m_materialEnabled;
+	NativeMaterialStage scene;
+	scene.colorOp = NativeMaterialOp::Select1;
+	scene.alphaOp = NativeMaterialOp::Select1;
+	scene.alphaArg1 = UINT(NativeMaterialSource::Texture);
+	NativeMaterialCoordinates uv;
+	uv.offset = sizeof(float) * 3 + sizeof(DWORD);
+	SetMaterialStage(0, scene, uv, texture);
+	SetMaterialSampler(0);
+	NativeMaterialStage masked;
+	masked.colorOp = masked.alphaOp = NativeMaterialOp::Modulate;
+	masked.alphaArg1 = UINT(NativeMaterialSource::Texture);
+	masked.alphaArg2 = UINT(NativeMaterialSource::Current);
+	uv.transform = true;
+	uv.matrix[0] = 2.0f * radius / (u1 - u0);
+	uv.matrix[5] = 2.0f * radius / (v1 - v0);
+	// Authored two-component UV transforms multiply (u,v,1,0), unlike
+	// position-generated transforms which multiply (x,y,z,1).
+	uv.matrix[8] = 0.5f - radius - u0 * uv.matrix[0];
+	uv.matrix[9] = 0.5f - radius - v0 * uv.matrix[5];
+	SetMaterialStage(1, masked, uv, mask);
+	SetMaterialSampler(1);
+	SetMaterialStage(2, NativeMaterialStage(), NativeMaterialCoordinates(), nullptr);
+	SetMaterialStage(3, NativeMaterialStage(), NativeMaterialCoordinates(), nullptr);
+	const bool result = DrawTexturedScreenQuad(x, y, width, height, u0, v0, u1, v1,
+		0xffffffff, texture, true);
+	m_materialStages = stages;
+	m_materialCoordinates = coordinates;
+	m_materialTextures = textures;
+	m_materialSamplers = samplers;
+	m_materialEnabled = materialEnabled;
 	return result;
 }
 

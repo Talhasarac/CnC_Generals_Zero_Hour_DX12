@@ -3408,6 +3408,14 @@ void DX8Wrapper::Compute_Caps(WW3DFormat display_format)
 		native_caps.DevCaps = D3DDEVCAPS_HWTRANSFORMANDLIGHT;
 		native_caps.RasterCaps = D3DPRASTERCAPS_FOGRANGE;
 		native_caps.TextureCaps = 0;
+		// TextureFilterClass derives DEFAULT/BEST from these caps. Leaving them
+		// zero silently selects point sampling, including for the shroud atlas.
+		native_caps.TextureFilterCaps = D3DPTFILTERCAPS_MINFPOINT |
+			D3DPTFILTERCAPS_MINFLINEAR | D3DPTFILTERCAPS_MINFANISOTROPIC |
+			D3DPTFILTERCAPS_MAGFPOINT | D3DPTFILTERCAPS_MAGFLINEAR |
+			D3DPTFILTERCAPS_MAGFANISOTROPIC | D3DPTFILTERCAPS_MIPFPOINT |
+			D3DPTFILTERCAPS_MIPFLINEAR;
+		native_caps.MaxAnisotropy = 16;
 		native_caps.MaxTextureWidth = 16384;
 		native_caps.MaxTextureHeight = 16384;
 		native_caps.MaxSimultaneousTextures = MAX_TEXTURE_STAGES;

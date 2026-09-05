@@ -227,6 +227,40 @@ bool Run(NativeD3D12Renderer& r, HWND window)
 	const unsigned char whiteData[] = {255,255,255,255};
 	level = {whiteData,4,4};
 	REQUIRE(white && r.UploadTexture2D(*white,&level,1));
+	// Crossfade masks use tactical-view-relative UVs, not full-display UVs.
+	std::unique_ptr<NativeD3D12Texture> fadeMask(r.CreateTexture2D(2,1,1,DXGI_FORMAT_R8G8B8A8_UNORM));
+	const unsigned char maskData[] = {255,255,255,0, 255,255,255,255};
+	level = {maskData,8,8};
+	REQUIRE(fadeMask && r.UploadTexture2D(*fadeMask,&level,1));
+	REQUIRE(r.BeginFrame(black));
+	State(r, true);
+	r.SetSamplerState(NativeD3D12FilterMode::Point,NativeD3D12FilterMode::Point,
+		NativeD3D12FilterMode::Point,true,true);
+	REQUIRE(r.DrawMaskedScreenQuad(0,0,64,64,.25f,.25f,.75f,.75f,
+		white.get(),fadeMask.get(),.5f));
+	REQUIRE(r.ReadbackFrame(pixels));
+	REQUIRE(Pixel(pixels,64,16,32,0,0,0,"crossfade transparent mask with cropped scene UVs"));
+	REQUIRE(Pixel(pixels,64,48,32,255,255,255,"crossfade opaque mask with cropped scene UVs"));
+	// Blur taps must use vertex opacity even when scene alpha is zero.
+	const unsigned char transparentRed[] = {255,0,0,0};
+	std::unique_ptr<NativeD3D12Texture> blurScene(r.CreateTexture2D(1,1,1,DXGI_FORMAT_R8G8B8A8_UNORM));
+	level = {transparentRed,4,4};
+	REQUIRE(blurScene && r.UploadTexture2D(*blurScene,&level,1));
+	REQUIRE(r.BeginFrame(black));
+	State(r, true);
+	r.SetTextureCombine(true,false,false,true);
+	REQUIRE(r.DrawTexturedScreenQuad(0,0,64,64,0,0,1,1,0x80ffffff,blurScene.get()));
+	REQUIRE(r.ReadbackFrame(pixels));
+	REQUIRE(Pixel(pixels,64,32,32,128,0,0,"motion blur tap ignores captured scene alpha"));
+	State(r);
+	REQUIRE(r.BeginFrame(black));
+	r.SetGrayscale(true,0xff00ff00,.5f);
+	REQUIRE(r.DrawTexturedScreenQuad(0,0,32,64,0,0,1,1,0xffff0000,white.get()));
+	REQUIRE(r.DrawScreenQuad(32,0,32,64,0xffff0000));
+	REQUIRE(r.ReadbackFrame(pixels));
+	REQUIRE(Pixel(pixels,64,16,32,128,38,0,"textured monochrome tint and half fade"));
+	REQUIRE(Pixel(pixels,64,48,32,128,38,0,"solid monochrome tint and half fade"));
+	State(r);
 	REQUIRE(r.BeginFrame(black));
 	r.SetAlphaTestState(true,D3D12_COMPARISON_FUNC_GREATER_EQUAL,128);
 	REQUIRE(r.DrawTexturedScreenQuad(0,0,32,64,0,0,1,1,0x40ffffff,white.get()));
@@ -317,6 +351,26 @@ bool Run(NativeD3D12Renderer& r, HWND window)
 		quadIndices,6,D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST,layers[0].get(),12));
 	REQUIRE(r.ReadbackFrame(pixels));
 	REQUIRE(Pixel(pixels,64,32,32,16,4,0,"water base plus sparkle-noise product then shroud"));
+	std::unique_ptr<NativeD3D12Texture> riverEdge(r.CreateTexture2D(1,1,1,DXGI_FORMAT_R8G8B8A8_UNORM));
+	const unsigned char edgePixel[] = {0,64,0,128};
+	level = {edgePixel,4,4};
+	REQUIRE(riverEdge && r.UploadTexture2D(*riverEdge,&level,1));
+	NativeMaterialStage edge;
+	edge.colorOp = NativeMaterialOp::Add;
+	edge.alphaOp = NativeMaterialOp::Modulate;
+	edge.alphaArg1 = UINT(NativeMaterialSource::Texture);
+	edge.alphaArg2 = UINT(NativeMaterialSource::Current);
+	r.SetMaterialStage(0,atlasBase,atlasUV,layers[0].get());
+	r.SetMaterialStage(1,edge,atlasUV,riverEdge.get());
+	r.SetMaterialStage(2,sparkle,atlasUV,layers[2].get());
+	r.SetMaterialStage(3,noise,atlasUV,layers[3].get());
+	REQUIRE(r.BeginFrame(black));
+	State(r,true);
+	REQUIRE(r.DrawIndexedTextured(quad,sizeof(quad),sizeof(MaterialVertex),4,16,
+		quadIndices,6,D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST,layers[0].get(),12));
+	REQUIRE(r.ReadbackFrame(pixels));
+	REQUIRE(Pixel(pixels,64,32,32,32,32,8,"river edge opacity survives sparkle-noise temporary register"));
+	State(r);
 	for (UINT stage=0;stage<4;++stage) r.SetMaterialStage(stage,disabled,coords,nullptr);
 	r.SetMaterialEnabled(false);
 	const float translated[] = {0.25f,0,0,0, 0,0.25f,0,0, 0,0,1,0, 0.5f,0,0,1};

@@ -220,7 +220,7 @@ public:
 		D3D12_BLEND sourceBlend, D3D12_BLEND destinationBlend,
 		D3D12_BLEND_OP blendOp, UINT8 renderTargetWriteMask);
 	void SetAlphaTestState(bool enable, D3D12_COMPARISON_FUNC function, UINT8 reference);
-	void SetGrayscale(bool enable);
+	void SetGrayscale(bool enable, UINT32 tint = 0xffffffff, float amount = 1.0f);
 	// Tree vertices store sway index, push-aside darkening and base height in
 	// their former normal field. Null data disables this scoped vertex effect.
 	void SetTreeSway(const float (*offsets)[4], UINT count, UINT vertexOffset = 12);
@@ -231,6 +231,7 @@ public:
 	void SetMaterialStage(UINT stage, const NativeMaterialStage& operation,
 		const NativeMaterialCoordinates& coordinates, const NativeD3D12Texture* texture);
 	void SetMaterialEnabled(bool enabled) { m_materialEnabled = enabled; }
+	bool MaterialEnabled() const { return m_materialEnabled; }
 	void SetMaterialFactor(UINT32 color);
 	void SetMaterialSampler(UINT stage);
 	void SetTextureCombine(bool textureColor, bool vertexColor,
@@ -241,7 +242,10 @@ public:
 	bool DrawScreenQuad(FLOAT x, FLOAT y, FLOAT width, FLOAT height, UINT32 color);
 	bool DrawTexturedScreenQuad(FLOAT x, FLOAT y, FLOAT width, FLOAT height,
 		FLOAT u0, FLOAT v0, FLOAT u1, FLOAT v1, UINT32 color,
-		const NativeD3D12Texture* texture);
+		const NativeD3D12Texture* texture, bool useMaterial = false);
+	bool DrawMaskedScreenQuad(FLOAT x, FLOAT y, FLOAT width, FLOAT height,
+		FLOAT u0, FLOAT v0, FLOAT u1, FLOAT v1,
+		const NativeD3D12Texture* texture, const NativeD3D12Texture* mask, FLOAT radius);
 	bool DrawIndexedTextured(const void* vertices, UINT vertexBytes, UINT vertexStride,
 		UINT vertexCount, UINT texcoordOffset, const unsigned short* indices,
 		UINT indexCount, D3D12_PRIMITIVE_TOPOLOGY topology,
@@ -350,6 +354,8 @@ private:
 	D3D12_COMPARISON_FUNC m_alphaTestFunc = D3D12_COMPARISON_FUNC_ALWAYS;
 	UINT8 m_alphaTestRef = 0;
 	bool m_grayscale = false;
+	UINT32 m_grayscaleTint = 0xffffffff;
+	float m_grayscaleAmount = 1.0f;
 	bool m_materialEnabled = false;
 	std::array<std::array<float,4>,11> m_treeSway = {};
 	UINT m_treeSwayOffset = UINT_MAX;

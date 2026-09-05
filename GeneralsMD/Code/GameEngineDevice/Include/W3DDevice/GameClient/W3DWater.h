@@ -258,7 +258,7 @@ protected:
 	///bounding box of frustum clipped polygon plane
 	Bool getClippedWaterPlane(CameraClass *cam, AABoxClass *box);
 
-	void setupFlatWaterShader(void);
+	void setupFlatWaterShader(bool river = false);
 	void setupJbaWaterShader(void);
 	void cleanupJbaWaterShader(void);
 

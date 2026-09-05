@@ -29,6 +29,32 @@
 #include "vector4.h"
 #include "quat.h"
 #include "render2dsentence.h"
+#include "dx8wrapper.h"
+
+TEST(projection_survives_screen_space_pass_without_a_legacy_device)
+{
+	Matrix4x4 original(true);
+	original[0][0] = 2.25f;
+	original[1][1] = 3.5f;
+	original[2][2] = -1.01f;
+	original[2][3] = -10.1f;
+	original[3][2] = -1.0f;
+	original[3][3] = 0.0f;
+	Matrix4x4 previous;
+	DX8Wrapper::Get_Transform(D3DTS_PROJECTION, previous);
+	DX8Wrapper::Set_Transform(D3DTS_PROJECTION, original);
+	Matrix4x4 saved, identity(true), restored;
+	DX8Wrapper::Get_Transform(D3DTS_PROJECTION, saved);
+	DX8Wrapper::Set_Transform(D3DTS_PROJECTION, identity);
+	DX8Wrapper::Set_Transform(D3DTS_PROJECTION, saved);
+	DX8Wrapper::Get_Transform(D3DTS_PROJECTION, restored);
+	for (int row=0; row<4; ++row)
+		for (int column=0; column<4; ++column) {
+			CHECK_EQ(saved[row][column], original[row][column]);
+			CHECK_EQ(restored[row][column], original[row][column]);
+		}
+	DX8Wrapper::Set_Transform(D3DTS_PROJECTION, previous);
+}
 
 /*
  * W3DMPO_GLUE gives every pooled class an operator new that routes through

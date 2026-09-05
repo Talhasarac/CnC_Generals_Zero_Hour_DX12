@@ -809,7 +809,11 @@ WWINLINE void DX8Wrapper::_Set_DX8_Transform(D3DTRANSFORMSTATETYPE transform,con
 
 WWINLINE void DX8Wrapper::_Get_DX8_Transform(D3DTRANSFORMSTATETYPE transform, Matrix4x4& m)
 {
-	if (NativeD3D12Renderer::Active()) { m = DX8Transforms[transform]; return; }
+	if (NativeD3D12Renderer::Active()) {
+		// Projection setters maintain ProjectionMatrix, not DX8Transforms.
+		m = transform == D3DTS_PROJECTION ? ProjectionMatrix : DX8Transforms[transform];
+		return;
+	}
 	DX8CALL(GetTransform(transform,(D3DMATRIX*)&m));
 }
 
@@ -1321,7 +1325,9 @@ WWINLINE void DX8Wrapper::Set_Transform(D3DTRANSFORMSTATETYPE transform,const Ma
 			render_state_changed |= WORLD_CHANGED;
 			ZFar=0.0f;
 			ZNear=0.0f;
-			DX8CALL(SetTransform(D3DTS_PROJECTION,(D3DMATRIX*)&ProjectionMatrix));
+			// Like world/view, projection state can be set before a device exists.
+			if (_Get_D3D_Device8())
+				DX8CALL(SetTransform(D3DTS_PROJECTION,(D3DMATRIX*)&ProjectionMatrix));
 		}
 		break;
 	default:
@@ -1391,7 +1397,17 @@ WWINLINE void DX8Wrapper::Get_Transform(D3DTRANSFORMSTATETYPE transform, Matrix4
 		if (render_state_changed&VIEW_IDENTITY) m.Make_Identity();
 		else m=render_state.view.Transpose();
 		break;
+	case D3DTS_PROJECTION:
+		// Screen-space passes save/restore this matrix before water rendering.
+		// The native backend has no D3D8 device to fill a GetTransform output;
+		// reading that stack variable restored garbage as the camera projection.
+		m=ProjectionMatrix.Transpose();
+		break;
 	default:
+		if (NativeD3D12Renderer::Active()) {
+			m=DX8Transforms[transform].Transpose();
+			break;
+		}
 		DX8CALL(GetTransform(transform,&mat));
 		m=*(Matrix4x4*)&mat;
 		m=m.Transpose();

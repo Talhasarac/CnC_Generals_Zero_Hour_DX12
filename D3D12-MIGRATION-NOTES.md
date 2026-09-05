@@ -3,6 +3,69 @@
 The game reaches a rendered skirmish with the native backend. The port is **not
 feature-complete or visually equivalent** to the original renderer.
 
+## River left-edge wall fix — 2026-09-05
+
+The reported vertical water streak was reproduced in a USA Winding River match.
+The stencil-shadow composite saved its projection with `Get_Transform`, whose
+native projection path read an uninitialized output from an inactive legacy call.
+Restoring that value corrupted subsequent water geometry; diagnostic changes
+merely changed the garbage matrix and sometimes moved the water offscreen.
+
+Both projection getters now use the maintained projection state in the proper
+matrix convention. Projection state can also be assigned without a device, like
+world/view state. A device-free regression verifies projection save, identity
+override and restore (67 CPU tests / 2215 checks pass).
+
+Correct geometry also exposed leftover river sparkle/noise stages in the separate
+shroud pass. That single-texture pass now explicitly terminates stages 1–3,
+preventing black river polygons without disabling water or its shroud.
+
+Incremental Release renderer/game builds used 16 jobs with no reconfiguration.
+GPU smoke passed (1/1, 3.67 seconds). In-game USA checks at 1280x720 verified the
+bridge and downstream huts: textured water remains visible, without the vertical
+wall or black shroud-pass polygons. All temporary probes were removed. The staged
+`steamfiles/Generals.exe` contains this fix. Shoreline blending, reflections and
+the other unfinished migration items below remain separate work.
+
+## Filtering, river and screen-effect follow-up — 2026-09-05
+
+This follow-up supersedes the screen-filter and river status below:
+
+- Native capability reporting now advertises supported point/linear/mip and
+  anisotropic filtering. Previously DEFAULT/BEST resolved to point sampling,
+  including the shroud texture. This fixes that concrete cause of blocky edges,
+  not every terrain/depth artifact.
+- River materials now combine base water, edge RGB/opacity, and animated
+  sparkle-times-noise using native material stages, then apply the original
+  separate shroud pass. Flat water explicitly selects a prelit material. Direct
+  sea/grid draws isolate material state and use their actual vertex-color offsets;
+  sea texture lookup occurs after initialization and resident geometry is reused.
+- Motion blur uses GPU-resident scene capture and native quad taps. Crossfades
+  have native masked compositing with tactical-view-relative UVs. Monochrome,
+  red/green tint and fade amount are wired into the game's filter path, not merely
+  supported by a standalone renderer API. Pixel root constants now have 11 words.
+- Capture targets are recreated after display resize, previous capture color is
+  preserved for blur/crossfade, and depth is cleared for the new scene pass.
+  Filter selection is recorded before capture setup. End-pan blur guards zero
+  scroll length. Default compositing establishes its depth/blend state explicitly.
+
+Incremental Release ww3d2 and generals builds passed with 16 jobs; no configure,
+clean or build-directory recreation was performed. GPU smoke passed with debug
+validation (1/1, 3.61 seconds), including new cropped-UV crossfade, blur-opacity,
+river-edge-opacity and tinted-monochrome fade pixel tests. The final CPU suite also
+passed 66 tests / 2183 checks.
+
+USA runtime checks used Seaside Mutiny and Winding River at 1280x720. The computer-
+use skill was used to inspect the latter's base, minimap, bridge and river views.
+The visual check found a vertical streak along the left side in some river views;
+the later fix above addresses it. These short runs do not certify long-match stability,
+all factions, campaign filter sequences, or visual parity.
+
+Still unfinished: specialized reflected/bump water and other
+remaining terrain/material artifacts, legacy source/header cleanup, long-match
+and full effect coverage, and a clean-machine full-game distribution verification.
+See [D3D12-PLAYTEST.md](D3D12-PLAYTEST.md) for launch and playtest instructions.
+
 ## Published source checkpoint — 2026-09-05
 
 This section supersedes the older progress summaries below. Native model lighting

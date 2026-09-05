@@ -30,8 +30,10 @@ directly and does not use D3D9On12, DXVK, or another translation, interception, 
 wrapper layer. The migration includes native GPU resources, embedded HLSL shaders, mesh lighting,
 textures, UI, terrain, fog, tree animation, water basics, and D3D12 regression tests.
 
-The renderer port is an active work in progress. Specialized water reflections, some screen filters,
+The renderer port is an active work in progress. Specialized water reflections,
 terrain/shroud visual cleanup, broader effect parity, and legacy renderer source cleanup remain.
+Native motion blur, masked crossfades and monochrome tint/fades are implemented;
+campaign-level validation is still needed. See [the playtest guide](D3D12-PLAYTEST.md).
 
 You need to own the game; no game data ships here. Nothing changes unit stats, weapons or balance.
 

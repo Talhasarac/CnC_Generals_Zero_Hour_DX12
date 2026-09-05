@@ -385,6 +385,7 @@ Bool ScreenDefaultFilter::postRender(enum FilterModes mode, Coord2D &scrollDelta
 		NativeD3D12Texture *texture = W3DShaderManager::endNativeRenderToTexture();
 		if (texture == NULL)
 			return false;
+		if (!set(mode)) return false;
 		Int xpos, ypos, width, height;
 		TheTacticalView->getOrigin(&xpos, &ypos);
 		width = TheTacticalView->getWidth();
@@ -404,6 +405,7 @@ Bool ScreenDefaultFilter::postRender(enum FilterModes mode, Coord2D &scrollDelta
 			static_cast<FLOAT>(ypos + height) / displayHeight,
 			0xffffffff, texture);
 		native->SetTextureCombine(true, true, true, true);
+		reset();
 		return result;
 	}
 	IDirect3DTexture8 * tex =	W3DShaderManager::endRenderToTexture();
@@ -483,7 +485,8 @@ Int ScreenDefaultFilter::set(enum FilterModes mode)
 
 void ScreenDefaultFilter::reset(void)
 {
-	DX8Wrapper::_Get_D3D_Device8()->SetTexture(0,NULL);	//previously rendered frame inside this texture
+	if (NativeD3D12Renderer::Active() == NULL)
+		DX8Wrapper::_Get_D3D_Device8()->SetTexture(0,NULL);
 	DX8Wrapper::Invalidate_Cached_Render_States();
 }
 
@@ -556,6 +559,22 @@ Bool ScreenBWFilter::preRender(Bool &skipRender, CustomScenePassModes &scenePass
 
 Bool ScreenBWFilter::postRender(enum FilterModes mode, Coord2D &scrollDelta,Bool &doExtraRender)
 {
+	if (NativeD3D12Renderer *native = NativeD3D12Renderer::Active()) {
+		NativeD3D12Texture *texture = W3DShaderManager::endNativeRenderToTexture();
+		if (texture == NULL || !set(mode)) return false;
+		Int x, y;
+		TheTacticalView->getOrigin(&x, &y);
+		const FLOAT w = static_cast<FLOAT>(TheTacticalView->getWidth());
+		const FLOAT h = static_cast<FLOAT>(TheTacticalView->getHeight());
+		native->SetSamplerState(NativeD3D12FilterMode::Linear,
+			NativeD3D12FilterMode::Linear, NativeD3D12FilterMode::Point, true, true);
+		native->SetTextureCombine(true, false, true, false);
+		const bool result = native->DrawTexturedScreenQuad(static_cast<FLOAT>(x), static_cast<FLOAT>(y),
+			w, h, x / static_cast<FLOAT>(texture->Width()), y / static_cast<FLOAT>(texture->Height()),
+			(x + w) / texture->Width(), (y + h) / texture->Height(), 0xffffffff, texture);
+		reset();
+		return result;
+	}
 	IDirect3DTexture8 * tex =	W3DShaderManager::endRenderToTexture();
 	DEBUG_ASSERTCRASH(tex, ("Require rendered texture."));
 	if (!tex) return false;
@@ -656,6 +675,12 @@ Int ScreenBWFilter::set(enum FilterModes mode)
 		DX8Wrapper::Set_DX8_Render_State(D3DRS_ZWRITEENABLE,FALSE);
 		DX8Wrapper::Apply_Render_State_Changes();	//force update of view and projection matrices
 
+		if (NativeD3D12Renderer *native = NativeD3D12Renderer::Active()) {
+			const UINT32 tint = mode == FM_VIEW_BW_RED_AND_WHITE ? 0xffff0000 :
+				(mode == FM_VIEW_BW_GREEN_AND_WHITE ? 0xff00ff00 : 0xffffffff);
+			native->SetGrayscale(true, tint, m_curFadeValue);
+			return true;
+		}
 		hr=DX8Wrapper::_Get_D3D_Device8()->SetPixelShader(m_dwBWPixelShader);
 		DX8Wrapper::_Get_D3D_Device8()->SetPixelShaderConstant(0,   D3DXVECTOR4(0.3f, 0.59f, 0.11f, 1.0f), 1);
 
@@ -701,6 +726,12 @@ Int ScreenBWFilter::set(enum FilterModes mode)
 
 void ScreenBWFilter::reset(void)
 {
+	if (NativeD3D12Renderer *native = NativeD3D12Renderer::Active()) {
+		native->SetGrayscale(false);
+		native->SetTextureCombine(true, true, true, true);
+		DX8Wrapper::Invalidate_Cached_Render_States();
+		return;
+	}
 	DX8Wrapper::_Get_D3D_Device8()->SetTexture(0,NULL);	//previously rendered frame inside this texture
 	DX8Wrapper::_Get_D3D_Device8()->SetPixelShader(0);	//turn off pixel shader
 	DX8Wrapper::Invalidate_Cached_Render_States();
@@ -994,6 +1025,43 @@ Bool ScreenCrossFadeFilter::preRender(Bool &skipRender, CustomScenePassModes &sc
 
 Bool ScreenCrossFadeFilter::postRender(enum FilterModes mode, Coord2D &scrollDelta,Bool &doExtraRender)
 {
+	if (NativeD3D12Renderer *native = NativeD3D12Renderer::Active()) {
+		if (m_skipRender) {
+			m_skipRender = false;
+			doExtraRender = TRUE;
+			return W3DShaderManager::endNativeRenderToTexture() != NULL;
+		}
+		NativeD3D12Texture *texture = W3DShaderManager::getNativeRenderTexture();
+		if (texture == NULL || !set(mode)) return false;
+		DX8Wrapper::Apply_Render_State_Changes();
+		native->SetSamplerState(NativeD3D12FilterMode::Linear,
+			NativeD3D12FilterMode::Linear, NativeD3D12FilterMode::Point, true, true);
+		native->SetTextureCombine(true, false, true, false);
+		native->SetGrayscale(false);
+		Int x, y;
+		TheTacticalView->getOrigin(&x, &y);
+		const FLOAT w = static_cast<FLOAT>(TheTacticalView->getWidth());
+		const FLOAT h = static_cast<FLOAT>(TheTacticalView->getHeight());
+		const FLOAT u0 = x / static_cast<FLOAT>(texture->Width());
+		const FLOAT v0 = y / static_cast<FLOAT>(texture->Height());
+		const FLOAT u1 = (x + w) / texture->Width();
+		const FLOAT v1 = (y + h) / texture->Height();
+		bool result;
+		if (mode == FM_VIEW_CROSSFADE_CIRCLE && m_fadePatternTexture != NULL) {
+			if (!m_fadePatternTexture->Is_Initialized()) m_fadePatternTexture->Init();
+			m_fadePatternTexture->Upload_Native_Surface();
+			FLOAT radius = (1.0f - m_curFadeValue) * 2.0f;
+			if (radius <= 0.0f) radius = 0.01f;
+			result = native->DrawMaskedScreenQuad(static_cast<FLOAT>(x), static_cast<FLOAT>(y),
+				w, h, u0, v0, u1, v1, texture,
+				m_fadePatternTexture->Peek_Native_Texture(), 0.5f / radius);
+		} else {
+			result = native->DrawTexturedScreenQuad(static_cast<FLOAT>(x), static_cast<FLOAT>(y),
+				w, h, u0, v0, u1, v1, 0xffffffff, texture);
+		}
+		reset();
+		return result;
+	}
 	IDirect3DTexture8 * tex;
 
 	if (m_skipRender)
@@ -1124,7 +1192,10 @@ void ScreenCrossFadeFilter::reset(void)
 {
 	DX8Wrapper::Set_DX8_Texture_Stage_State( 1, D3DTSS_COLOROP,   D3DTOP_DISABLE );
 	DX8Wrapper::Set_DX8_Texture_Stage_State( 1, D3DTSS_ALPHAOP,   D3DTOP_DISABLE );
-	DX8Wrapper::_Get_D3D_Device8()->SetTexture(0,NULL);	//previously rendered frame inside this texture
+	if (NativeD3D12Renderer *native = NativeD3D12Renderer::Active())
+		native->SetTextureCombine(true, true, true, true);
+	else
+		DX8Wrapper::_Get_D3D_Device8()->SetTexture(0,NULL);
 	DX8Wrapper::Invalidate_Cached_Render_States();
 }
 
@@ -1176,9 +1247,10 @@ Bool ScreenMotionBlurFilter::preRender(Bool &skipRender, CustomScenePassModes &s
 
 Bool ScreenMotionBlurFilter::postRender(enum FilterModes mode, Coord2D &scrollDelta,Bool &doExtraRender)
 {
-	IDirect3DTexture8 * tex =	W3DShaderManager::endRenderToTexture();
-	DEBUG_ASSERTCRASH(tex, ("Require rendered texture."));
-	if (!tex) return false;
+	NativeD3D12Renderer *native = NativeD3D12Renderer::Active();
+	NativeD3D12Texture *nativeTexture = native ? W3DShaderManager::endNativeRenderToTexture() : NULL;
+	IDirect3DTexture8 *tex = native ? NULL : W3DShaderManager::endRenderToTexture();
+	if (native ? nativeTexture == NULL : tex == NULL) return false;
 	if (!set(mode)) return false;
 
 	LPDIRECT3DDEVICE8 pDev=DX8Wrapper::_Get_D3D_Device8();
@@ -1193,7 +1265,7 @@ Bool ScreenMotionBlurFilter::postRender(enum FilterModes mode, Coord2D &scrollDe
 
 	Int xpos, ypos, width, height;
 
-	DX8Wrapper::_Get_D3D_Device8()->SetTexture(0,tex);	//previously rendered frame inside this texture
+	if (!native) pDev->SetTexture(0,tex);
 	TheTacticalView->getOrigin(&xpos,&ypos);
 	width=TheTacticalView->getWidth();
 	height=TheTacticalView->getHeight();
@@ -1227,7 +1299,22 @@ Bool ScreenMotionBlurFilter::postRender(enum FilterModes mode, Coord2D &scrollDe
 	//draw polygons like this is very inefficient but for only 2 triangles, it's
 	//not worth bothering with index/vertex buffers.
 	DX8Wrapper::Apply_Render_State_Changes();
-	pDev->SetVertexShader(D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1);
+	if (!native) pDev->SetVertexShader(D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1);
+	// Preserve the original effect timing/UV progression; only its draw path
+	// changes. The captured scene stays on the GPU for every blur tap.
+	const auto drawBlurTap = [&]() {
+		if (native) {
+			native->SetSamplerState(NativeD3D12FilterMode::Linear,
+				NativeD3D12FilterMode::Linear, NativeD3D12FilterMode::Point, true, true);
+			native->SetTextureCombine(true, false, false, true);
+			native->SetGrayscale(false);
+			native->DrawTexturedScreenQuad(static_cast<FLOAT>(xpos), static_cast<FLOAT>(ypos),
+				static_cast<FLOAT>(width), static_cast<FLOAT>(height),
+				v[3].u, v[3].v, v[0].u, v[0].v, v[0].color, nativeTexture);
+		} else {
+			pDev->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, v, sizeof(_TRANS_LIT_TEX_VERTEX));
+		}
+	};
 
 	Coord2D center;
 	center.x = 0.5f;
@@ -1247,8 +1334,10 @@ Bool ScreenMotionBlurFilter::postRender(enum FilterModes mode, Coord2D &scrollDe
 		m_priorDelta = scrollDelta;
 	} else if (mode == FM_VIEW_MB_END_PAN_ALPHA) {
 		Real len = sqrt(m_priorDelta.x*m_priorDelta.x + m_priorDelta.y*m_priorDelta.y);
-		center.x += 0.5f * (m_priorDelta.x/len);
-		center.y -= 0.5f * (m_priorDelta.y/len);
+		if (len > 0.000001f) {
+			center.x += 0.5f * (m_priorDelta.x/len);
+			center.y -= 0.5f * (m_priorDelta.y/len);
+		}
 		m_decrement = false;
 		m_maxCount--;
 		if (m_maxCount<2) {
@@ -1291,10 +1380,12 @@ Bool ScreenMotionBlurFilter::postRender(enum FilterModes mode, Coord2D &scrollDe
 			v[i].v = ((v[i].v-center.y)*factor) + center.y;
 		}
 	}
-	pDev->SetTextureStageState(0,D3DTSS_ALPHAARG1, D3DTA_CURRENT);
-	pDev->SetTextureStageState(0,D3DTSS_ALPHAARG2, D3DTA_TEXTURE);
-	pDev->SetTextureStageState(0,D3DTSS_ALPHAOP, D3DTOP_SELECTARG1);
-	pDev->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, v, sizeof(_TRANS_LIT_TEX_VERTEX));
+	if (!native) {
+		pDev->SetTextureStageState(0,D3DTSS_ALPHAARG1, D3DTA_CURRENT);
+		pDev->SetTextureStageState(0,D3DTSS_ALPHAARG2, D3DTA_TEXTURE);
+		pDev->SetTextureStageState(0,D3DTSS_ALPHAOP, D3DTOP_SELECTARG1);
+	}
+	drawBlurTap();
 	DX8Wrapper::Set_DX8_Render_State(D3DRS_ALPHABLENDENABLE,true);
 
 	DX8Wrapper::Apply_Render_State_Changes();
@@ -1322,7 +1413,7 @@ Bool ScreenMotionBlurFilter::postRender(enum FilterModes mode, Coord2D &scrollDe
 					v[i].v = ((v[i].v-center.y)*factor) + center.y;
 				}
 			}
-			pDev->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, v, sizeof(_TRANS_LIT_TEX_VERTEX));
+			drawBlurTap();
 
 		}
 	}
@@ -1394,7 +1485,10 @@ Int ScreenMotionBlurFilter::set(enum FilterModes mode)
 
 void ScreenMotionBlurFilter::reset(void)
 {
-	DX8Wrapper::_Get_D3D_Device8()->SetTexture(0,NULL);	//previously rendered frame inside this texture
+	if (NativeD3D12Renderer *native = NativeD3D12Renderer::Active())
+		native->SetTextureCombine(true, true, true, true);
+	else
+		DX8Wrapper::_Get_D3D_Device8()->SetTexture(0,NULL);
 	DX8Wrapper::Invalidate_Cached_Render_States();
 }
 
@@ -2876,6 +2970,8 @@ void W3DShaderManager::init(void)
 		{
 			W3DFilters[FT_VIEW_DEFAULT] = &screenDefaultFilter;
 			W3DFilters[FT_VIEW_BW_FILTER] = &screenBWFilter;
+			W3DFilters[FT_VIEW_MOTION_BLUR_FILTER] = &screenMotionBlurFilter;
+			screenCrossFadeFilter.init();
 		}
 		m_currentChipset = DC_GENERIC_PIXEL_SHADER_2_0;
 		DEBUG_LOG(("ShaderManager: native D3D12 shader state active\n"));
@@ -3033,9 +3129,12 @@ void W3DShaderManager::resetShader(ShaderTypes shader)
 Bool W3DShaderManager::filterPreRender(FilterTypes filter, Bool &skipRender, CustomScenePassModes &scenePassMode)
 {
 	if (W3DFilters[filter])
-	{	Bool result=W3DFilters[filter]->preRender(skipRender,scenePassMode);
-		if (result)
-			m_currentFilter = filter;
+	{	const FilterTypes previousFilter = m_currentFilter;
+		// Capture preservation depends on the filter being entered, not the
+		// filter from the previous frame.
+		m_currentFilter = filter;
+		Bool result=W3DFilters[filter]->preRender(skipRender,scenePassMode);
+		if (!result) m_currentFilter = previousFilter;
 		return result;
 	}
 	return FALSE;
@@ -3139,13 +3238,27 @@ void W3DShaderManager::startRenderToTexture(void)
 {	
 	if (NativeD3D12Renderer *native = NativeD3D12Renderer::Active())
 	{
-		if (m_renderingToTexture || m_renderTextureNative == NULL)
+		if (m_renderingToTexture)
 			return;
+		bool newCapture = false;
+		if (m_renderTextureNative == NULL || m_renderTextureNative->Width() != native->Width() ||
+			m_renderTextureNative->Height() != native->Height()) {
+			// Submitted frames retain shared resource/descriptor ownership, so the
+			// old texture can retire without stalling the queue during a resize.
+			NativeD3D12Texture *replacement = native->CreateTexture2D(native->Width(),
+				native->Height(), 1, DXGI_FORMAT_R8G8B8A8_UNORM, true);
+			if (replacement == NULL) return;
+			delete m_renderTextureNative;
+			m_renderTextureNative = replacement;
+			newCapture = true;
+		}
 		if (native->SetRenderTarget(m_renderTextureNative, true))
 		{
 			m_renderingToTexture = true;
 			const FLOAT clear[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-			native->Clear(clear, 1.0f, 0, true, false);
+			const bool preserveCapture = m_currentFilter == FT_VIEW_MOTION_BLUR_FILTER ||
+				m_currentFilter == FT_VIEW_CROSSFADE;
+			native->Clear(clear, 1.0f, 0, newCapture || !preserveCapture, true);
 		}
 		return;
 	}

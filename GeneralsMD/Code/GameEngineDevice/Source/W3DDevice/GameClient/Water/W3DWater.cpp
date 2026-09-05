@@ -202,16 +202,12 @@ void doSkyBoxSet(Bool startDraw)
 					
 static Bool wireframeForDebug = 0;
 
+
 void WaterRenderObjClass::setupJbaWaterShader(void) 
 {
 	if (NativeD3D12Renderer::Active() != NULL)
 	{
-		if (!TheWaterTransparency->m_additiveBlend)
-			DX8Wrapper::Set_Shader(ShaderClass::_PresetAlphaShader);
-		else
-			DX8Wrapper::Set_Shader(ShaderClass::_PresetAdditiveShader);
-		DX8Wrapper::Set_Texture(0, m_riverTexture);
-		DX8Wrapper::Apply_Render_State_Changes();
+		setupFlatWaterShader(true);
 		return;
 	}
 
@@ -997,9 +993,9 @@ void WaterRenderObjClass::ReAcquireResources(void)
 	if (m_waterTrackSystem)
 		m_waterTrackSystem->ReAcquireResources();
 
-	// Native D3D12 water uses the direct textured/mesh paths above.  The old
-	// ps.1.1 assembly below has no native equivalent and must not touch a null
-	// D3D8 device during resource reacquisition.
+	// Native river/flat-water materials are configured in setupFlatWaterShader.
+	// Keep the old assembly compilation disabled: native rendering must never
+	// create legacy shader handles or touch a null D3D8 device.
 #if 0
 	if (W3DShaderManager::getChipset() >= DC_GENERIC_PIXEL_SHADER_1_1)
 	{
@@ -1947,25 +1943,29 @@ void WaterRenderObjClass::drawSea(RenderInfoClass & rinfo)
 			m_numVertices <= 0 || m_numIndices <= 0)
 			return;
 		TextureClass *waterTexture = m_settings[m_tod].waterTexture;
-		const NativeD3D12Texture *nativeTexture = waterTexture != NULL ?
-			waterTexture->Peek_Native_Texture() : NULL;
 		DX8Wrapper::Set_Transform(D3DTS_WORLD, Transform);
 		DX8Wrapper::Set_Shader(ShaderClass::_PresetAlphaShader);
 		DX8Wrapper::Set_Texture(0, waterTexture);
 		DX8Wrapper::Apply_Render_State_Changes();
 		DX8Wrapper::Apply_Native_Texture_Sampler(waterTexture);
+		const NativeD3D12Texture *nativeTexture = waterTexture != NULL ?
+			waterTexture->Peek_Native_Texture() : NULL;
+		const bool previousMaterial = native->MaterialEnabled();
+		native->SetMaterialEnabled(false);
+		native->SetTextureCombine(true, true, true, true);
 		const unsigned short *indices = static_cast<const unsigned short*>(m_indexBufferNative->Data());
 		if (nativeTexture != NULL)
 			native->DrawIndexedTextured(m_vertexBufferNative->Data(),
 				static_cast<UINT>(m_vertexBufferNative->Size()), sizeof(SEA_PATCH_VERTEX),
 				static_cast<UINT>(m_numVertices), static_cast<UINT>(offsetof(SEA_PATCH_VERTEX, tu)),
 				indices, static_cast<UINT>(m_numIndices), D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP,
-				nativeTexture);
+				nativeTexture, offsetof(SEA_PATCH_VERTEX, c), m_vertexBufferNative, m_indexBufferNative);
 		else
 			native->DrawIndexed(m_vertexBufferNative->Data(),
 				static_cast<UINT>(m_vertexBufferNative->Size()), sizeof(SEA_PATCH_VERTEX),
 				static_cast<UINT>(m_numVertices), indices, static_cast<UINT>(m_numIndices),
-				0, 0, D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+				0, 0, D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP, offsetof(SEA_PATCH_VERTEX, c));
+		native->SetMaterialEnabled(previousMaterial);
 		return;
 	}
 
@@ -2459,6 +2459,9 @@ void WaterRenderObjClass::renderWaterMesh(void)
 		DX8Wrapper::Set_Texture(0, setting->waterTexture);
 		DX8Wrapper::Apply_Render_State_Changes();
 		DX8Wrapper::Apply_Native_Texture_Sampler(setting->waterTexture);
+		const bool previousMaterial = native->MaterialEnabled();
+		native->SetMaterialEnabled(false);
+		native->SetTextureCombine(true, true, true, true);
 		const NativeD3D12Texture *nativeTexture = setting->waterTexture != NULL ?
 			setting->waterTexture->Peek_Native_Texture() : NULL;
 		const unsigned short *indices = static_cast<const unsigned short*>(m_indexBufferNative->Data());
@@ -2467,13 +2470,15 @@ void WaterRenderObjClass::renderWaterMesh(void)
 				static_cast<UINT>(vertices.size() * sizeof(MaterMeshVertexFormat)),
 				static_cast<UINT>(sizeof(MaterMeshVertexFormat)), static_cast<UINT>(vertices.size()),
 				static_cast<UINT>(offsetof(MaterMeshVertexFormat, u1)), indices,
-				static_cast<UINT>(m_numIndices), D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP, nativeTexture);
+				static_cast<UINT>(m_numIndices), D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP, nativeTexture,
+				offsetof(MaterMeshVertexFormat, diffuse), NULL, m_indexBufferNative);
 		else
 			native->DrawIndexed(vertices.data(),
 				static_cast<UINT>(vertices.size() * sizeof(MaterMeshVertexFormat)),
 				static_cast<UINT>(sizeof(MaterMeshVertexFormat)), static_cast<UINT>(vertices.size()),
 				indices, static_cast<UINT>(m_numIndices), 0, 0,
-				D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+				D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP, offsetof(MaterMeshVertexFormat, diffuse));
+		native->SetMaterialEnabled(previousMaterial);
 		return;
 	}
 
@@ -3137,7 +3142,33 @@ void WaterRenderObjClass::drawRiverWater(PolygonTrigger *pTrig)
 	setupJbaWaterShader();
 	if (NativeD3D12Renderer::Active() != NULL)
 	{
+		const unsigned previousCull = DX8Wrapper::Get_DX8_Render_State(D3DRS_CULLMODE);
+		DX8Wrapper::Set_DX8_Render_State(D3DRS_CULLMODE, D3DCULL_NONE);
+		if (TheWaterTransparency->m_additiveBlend)
+			DX8Wrapper::Set_DX8_Render_State(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
 		DX8Wrapper::Draw_Triangles(0, rectangleCount * 2, 0, (rectangleCount + 1) * 2);
+		DX8Wrapper::Set_DX8_Texture_Stage_State(2, D3DTSS_RESULTARG, D3DTA_CURRENT);
+		// The river uses all four material stages. Preserve the original
+		// multiplicative shroud pass, including its non-depth-writing compare.
+		if (TheTerrainRenderObject && TheTerrainRenderObject->getShroud()) {
+			W3DShaderManager::setTexture(0, TheTerrainRenderObject->getShroud()->getShroudTexture());
+			W3DShaderManager::setShader(W3DShaderManager::ST_SHROUD_TEXTURE, 0);
+			// The shroud is a single-texture pass. The general shader cache only
+			// owns the first two stages; explicitly terminate the four-stage river
+			// material so its sparkle/noise stages cannot replace the shroud color.
+			for (unsigned stage = 1; stage < 4; ++stage) {
+				DX8Wrapper::Set_DX8_Texture_Stage_State(stage, D3DTSS_COLOROP, D3DTOP_DISABLE);
+				DX8Wrapper::Set_DX8_Texture_Stage_State(stage, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
+				DX8Wrapper::Set_DX8_Texture_Stage_State(stage, D3DTSS_RESULTARG, D3DTA_CURRENT);
+			}
+			DX8Wrapper::Set_DX8_Render_State(D3DRS_CULLMODE, D3DCULL_NONE);
+			DX8Wrapper::Set_DX8_Render_State(D3DRS_ZFUNC, D3DCMP_LESSEQUAL);
+			DX8Wrapper::Draw_Triangles(0, rectangleCount * 2, 0, (rectangleCount + 1) * 2);
+			W3DShaderManager::resetShader(W3DShaderManager::ST_SHROUD_TEXTURE);
+		}
+		DX8Wrapper::Set_DX8_Render_State(D3DRS_CULLMODE, previousCull);
+		if (TheWaterTransparency->m_additiveBlend)
+			DX8Wrapper::Set_DX8_Render_State(D3DRS_SRCBLEND, D3DBLEND_ONE);
 		return;
 	}
 
@@ -3187,15 +3218,21 @@ void WaterRenderObjClass::drawRiverWater(PolygonTrigger *pTrig)
 
 }
 
-void WaterRenderObjClass::setupFlatWaterShader(void) 
+void WaterRenderObjClass::setupFlatWaterShader(bool river)
 {
 	if (NativeD3D12Renderer::Active() != NULL)
 	{
 		const bool highlights = m_waterSparklesTexture && m_waterNoiseTexture;
+		const unsigned sparkleStage = river ? 2 : 1;
+		const unsigned noiseStage = river ? 3 : 2;
 		DX8Wrapper::Set_Texture(0, m_riverTexture);
-		DX8Wrapper::Set_Texture(1, highlights ? m_waterSparklesTexture : NULL);
-		DX8Wrapper::Set_Texture(2, highlights ? m_waterNoiseTexture : NULL);
+		DX8Wrapper::Set_Texture(1, river ? m_riverAlphaEdge : NULL);
 		DX8Wrapper::Set_Texture(3, NULL);
+		DX8Wrapper::Set_Texture(sparkleStage, highlights ? m_waterSparklesTexture : NULL);
+		DX8Wrapper::Set_Texture(noiseStage, highlights ? m_waterNoiseTexture : NULL);
+		VertexMaterialClass *vmat = VertexMaterialClass::Get_Preset(VertexMaterialClass::PRELIT_DIFFUSE);
+		DX8Wrapper::Set_Material(vmat);
+		REF_PTR_RELEASE(vmat);
 		if (!TheWaterTransparency->m_additiveBlend)
 			DX8Wrapper::Set_Shader(ShaderClass::_PresetAlphaShader);
 		else
@@ -3219,17 +3256,26 @@ void WaterRenderObjClass::setupFlatWaterShader(void)
 		DX8Wrapper::Set_DX8_Texture_Stage_State(0,D3DTSS_ALPHAOP,D3DTOP_MODULATE);
 		DX8Wrapper::Set_DX8_Texture_Stage_State(0,D3DTSS_ALPHAARG1,D3DTA_TEXTURE);
 		DX8Wrapper::Set_DX8_Texture_Stage_State(0,D3DTSS_ALPHAARG2,D3DTA_DIFFUSE);
+		if (river && m_riverAlphaEdge) {
+			DX8Wrapper::Set_DX8_Texture_Stage_State(1,D3DTSS_TEXCOORDINDEX,1);
+			DX8Wrapper::Set_DX8_Texture_Stage_State(1,D3DTSS_COLOROP,D3DTOP_ADD);
+			DX8Wrapper::Set_DX8_Texture_Stage_State(1,D3DTSS_COLORARG1,D3DTA_TEXTURE);
+			DX8Wrapper::Set_DX8_Texture_Stage_State(1,D3DTSS_COLORARG2,D3DTA_CURRENT);
+			DX8Wrapper::Set_DX8_Texture_Stage_State(1,D3DTSS_ALPHAOP,D3DTOP_MODULATE);
+			DX8Wrapper::Set_DX8_Texture_Stage_State(1,D3DTSS_ALPHAARG1,D3DTA_TEXTURE);
+			DX8Wrapper::Set_DX8_Texture_Stage_State(1,D3DTSS_ALPHAARG2,D3DTA_CURRENT);
+		}
 		if (highlights) {
 			// Preserve the base water color while evaluating sparkle * noise.
-			DX8Wrapper::Set_DX8_Texture_Stage_State(1,D3DTSS_COLOROP,D3DTOP_SELECTARG1);
-			DX8Wrapper::Set_DX8_Texture_Stage_State(1,D3DTSS_COLORARG1,D3DTA_TEXTURE);
-			DX8Wrapper::Set_DX8_Texture_Stage_State(1,D3DTSS_RESULTARG,D3DTA_TEMP);
-			DX8Wrapper::Set_DX8_Texture_Stage_State(2,D3DTSS_COLOROP,D3DTOP_MULTIPLYADD);
-			DX8Wrapper::Set_DX8_Texture_Stage_State(2,D3DTSS_COLORARG0,D3DTA_CURRENT);
-			DX8Wrapper::Set_DX8_Texture_Stage_State(2,D3DTSS_COLORARG1,D3DTA_TEMP);
-			DX8Wrapper::Set_DX8_Texture_Stage_State(2,D3DTSS_COLORARG2,D3DTA_TEXTURE);
-			DX8Wrapper::Set_DX8_Texture_Stage_State(2,D3DTSS_TEXCOORDINDEX,D3DTSS_TCI_CAMERASPACEPOSITION);
-			DX8Wrapper::Set_DX8_Texture_Stage_State(2,D3DTSS_TEXTURETRANSFORMFLAGS,D3DTTFF_COUNT2);
+			DX8Wrapper::Set_DX8_Texture_Stage_State(sparkleStage,D3DTSS_COLOROP,D3DTOP_SELECTARG1);
+			DX8Wrapper::Set_DX8_Texture_Stage_State(sparkleStage,D3DTSS_COLORARG1,D3DTA_TEXTURE);
+			DX8Wrapper::Set_DX8_Texture_Stage_State(sparkleStage,D3DTSS_RESULTARG,D3DTA_TEMP);
+			DX8Wrapper::Set_DX8_Texture_Stage_State(noiseStage,D3DTSS_COLOROP,D3DTOP_MULTIPLYADD);
+			DX8Wrapper::Set_DX8_Texture_Stage_State(noiseStage,D3DTSS_COLORARG0,D3DTA_CURRENT);
+			DX8Wrapper::Set_DX8_Texture_Stage_State(noiseStage,D3DTSS_COLORARG1,D3DTA_TEMP);
+			DX8Wrapper::Set_DX8_Texture_Stage_State(noiseStage,D3DTSS_COLORARG2,D3DTA_TEXTURE);
+			DX8Wrapper::Set_DX8_Texture_Stage_State(noiseStage,D3DTSS_TEXCOORDINDEX,D3DTSS_TCI_CAMERASPACEPOSITION);
+			DX8Wrapper::Set_DX8_Texture_Stage_State(noiseStage,D3DTSS_TEXTURETRANSFORMFLAGS,D3DTTFF_COUNT2);
 			Matrix4x4 view;
 			DX8Wrapper::_Get_DX8_Transform(D3DTS_VIEW,view);
 			D3DXMATRIX inverse, scale, offset;
@@ -3239,10 +3285,11 @@ void WaterRenderObjClass::setupFlatWaterShader(void)
 			D3DXMatrixTranslation(&offset,m_riverVOrigin,m_riverVOrigin,0);
 			D3DXMATRIX matrix = NativeMatrixMath::MultiplyValue(inverse,scale);
 			matrix = NativeMatrixMath::MultiplyValue(matrix,offset);
-			DX8Wrapper::_Set_DX8_Transform(D3DTS_TEXTURE2,*reinterpret_cast<Matrix4x4*>(&matrix));
+			DX8Wrapper::_Set_DX8_Transform(static_cast<D3DTRANSFORMSTATETYPE>(D3DTS_TEXTURE0 + noiseStage),
+				*reinterpret_cast<Matrix4x4*>(&matrix));
 		}
 		const unsigned shroudStage = highlights ? 3 : 1;
-		if (TheTerrainRenderObject && W3DShaderManager::setShroudTex(shroudStage)) {
+		if (!river && TheTerrainRenderObject && W3DShaderManager::setShroudTex(shroudStage)) {
 			DX8Wrapper::Set_DX8_Texture_Stage_State(shroudStage,D3DTSS_ADDRESSU,D3DTADDRESS_CLAMP);
 			DX8Wrapper::Set_DX8_Texture_Stage_State(shroudStage,D3DTSS_ADDRESSV,D3DTADDRESS_CLAMP);
 		}
