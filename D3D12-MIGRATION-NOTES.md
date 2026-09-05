@@ -3,6 +3,29 @@
 The game reaches a rendered skirmish with the native backend. The port is **not
 feature-complete or visually equivalent** to the original renderer.
 
+## Surface readback/recolor crash fix — 2026-09-05
+
+The Steam crash stack reached SurfaceClass::Get_Description through texture
+recoloring after rendering had failed. Failed Get_Level_Description previously
+left its output uninitialized; recoloring then allocated from that description
+and tried another readback. Empty surfaces fell through to a null D3D8 pointer.
+
+Description failures now return UNKNOWN/zero dimensions. Empty surfaces safely
+reject locks and copies. CPU surface allocation is independent of a live GPU.
+Recoloring acquires its source once, validates dimensions/format, and retains the
+original texture if no usable source exists; no invalid recolor enters the cache.
+
+Incremental Release ww3d2/game builds passed with 16 jobs; CPU tests passed
+(71 tests, 2255 checks), including three new surface regression cases. GPU smoke
+passed (1/1). The updated Steam installation completed a 900-simulation-frame
+USA Air Force Winding River run with debug layer off and profiling on, exit 0.
+Both Steam and steamfiles executables were updated; the prior Steam executable
+is backed up in _NativeD3D12_SurfaceFix_20260905-040236.
+
+The animated-menu reproduction was not verified: unattended startup stayed in
+intro movies and was stopped. The preceding intermittent GPU/device-loss trigger
+and device recovery remain separate unresolved issues, not fixed by these guards.
+
 ## Inactive water renderer and header cleanup — 2026-09-05
 
 Removed the D3D8 water draw fallbacks, vertex/index-buffer allocation and locks,

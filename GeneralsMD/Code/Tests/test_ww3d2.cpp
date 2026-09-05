@@ -1748,6 +1748,54 @@ TEST(fontchars_returns_its_glyph_buffers_to_the_pool)
 // ---------------------------------------------------------------------------------------------
 #include "surfaceclass.h"
 
+TEST(surface_missing_storage_reports_empty_and_locks_safely)
+{
+	SurfaceClass *surface = new SurfaceClass(static_cast<IDirect3DSurface8*>(NULL));
+	SurfaceClass::SurfaceDescription desc = { WW3D_FORMAT_A8R8G8B8, 123, 456 };
+	surface->Get_Description(desc);
+	CHECK_EQ(desc.Format, WW3D_FORMAT_UNKNOWN);
+	CHECK_EQ(desc.Width, 0u);
+	CHECK_EQ(desc.Height, 0u);
+	int pitch = 123;
+	CHECK(surface->Lock(&pitch) == NULL);
+	CHECK_EQ(pitch, 0);
+	surface->Unlock();
+	surface->Copy(0,0,0,0,1,1,surface);
+	surface->Copy(0,0,0,0,1,1,NULL);
+	surface->Release_Ref();
+}
+
+TEST(surface_cpu_copy_does_not_require_a_gpu_device)
+{
+	SurfaceClass *source = new SurfaceClass(2,2,WW3D_FORMAT_A8R8G8B8);
+	SurfaceClass *target = new SurfaceClass(2,2,WW3D_FORMAT_A8R8G8B8);
+	CHECK(source->Is_Native());
+	CHECK(target->Is_Native());
+	int pitch = 0;
+	unsigned char *pixels = static_cast<unsigned char*>(source->Lock(&pitch));
+	CHECK_EQ(pitch, 8);
+	pixels[0]=17; pixels[1]=34; pixels[2]=51; pixels[3]=68;
+	source->Unlock();
+	target->Copy(0,0,0,0,2,2,source);
+	pixels = static_cast<unsigned char*>(target->Lock(&pitch));
+	CHECK_EQ(pixels[0],17); CHECK_EQ(pixels[1],34);
+	CHECK_EQ(pixels[2],51); CHECK_EQ(pixels[3],68);
+	target->Unlock();
+	target->Release_Ref(); source->Release_Ref();
+}
+
+TEST(surface_unsupported_format_does_not_fall_back_to_d3d8)
+{
+	SurfaceClass *surface = new SurfaceClass(4,4,WW3D_FORMAT_UNKNOWN);
+	SurfaceClass::SurfaceDescription desc = {};
+	surface->Get_Description(desc);
+	CHECK_EQ(desc.Width,0u); CHECK_EQ(desc.Height,0u);
+	CHECK(surface->Peek_D3D_Surface() == NULL);
+	CHECK(surface->Lock(NULL) == NULL);
+	surface->Unlock();
+	surface->Release_Ref();
+}
+
 TEST(surface_draw_pixel_lands_where_the_pitch_says)
 {
 	const int pitch = 40;		/* deliberately wider than 8 pixels * 4 bytes */

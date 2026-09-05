@@ -227,16 +227,15 @@ SurfaceClass::SurfaceClass(unsigned width, unsigned height, WW3DFormat format):
 {
 	WWASSERT(width);
 	WWASSERT(height);
-	if (NativeD3D12Renderer::Active() != NULL)
+	// CPU surfaces must not depend on GPU availability (including device loss).
+	// Unsupported formats remain empty, never an implicit legacy surface.
+	SurfaceDescription desc = { format, width, height };
+	const unsigned bytes = PixelSize(desc);
+	if (bytes && width <= UINT_MAX / bytes && height &&
+		static_cast<size_t>(width) * bytes <= SIZE_MAX / height)
 	{
-		SurfaceDescription desc = { format, width, height };
-		NativePitch = width * PixelSize(desc);
-		if (NativePitch != 0)
-			NativePixels.resize(static_cast<size_t>(NativePitch) * height);
-	}
-	else
-	{
-		D3DSurface = DX8Wrapper::_Create_DX8_Surface(width, height, format);
+		NativePitch = width * bytes;
+		NativePixels.resize(static_cast<size_t>(NativePitch) * height);
 	}
 }
 
@@ -313,6 +312,7 @@ SurfaceClass::~SurfaceClass(void)
 
 void SurfaceClass::Get_Description(SurfaceDescription &surface_desc)
 {
+	surface_desc = { WW3D_FORMAT_UNKNOWN, 0, 0 };
 	if (Is_Native())
 	{
 		surface_desc.Format = SurfaceFormat;
@@ -320,6 +320,7 @@ void SurfaceClass::Get_Description(SurfaceDescription &surface_desc)
 		surface_desc.Height = NativeHeight;
 		return;
 	}
+	if (!D3DSurface) return;
 	D3DSURFACE_DESC d3d_desc;
 	::ZeroMemory(&d3d_desc, sizeof(D3DSURFACE_DESC));
 	DX8_ErrorCode(D3DSurface->GetDesc(&d3d_desc));
@@ -330,6 +331,7 @@ void SurfaceClass::Get_Description(SurfaceDescription &surface_desc)
 
 void * SurfaceClass::Lock(int * pitch)
 {
+	if (pitch) *pitch = 0;
 	if (Is_Native())
 	{
 		if (pitch != NULL)
@@ -337,10 +339,11 @@ void * SurfaceClass::Lock(int * pitch)
 		NativeLocked = true;
 		return NativePixels.data();
 	}
+	if (!D3DSurface) return NULL;
 	D3DLOCKED_RECT lock_rect;	
 	::ZeroMemory(&lock_rect, sizeof(D3DLOCKED_RECT));
 	DX8_ErrorCode(D3DSurface->LockRect(&lock_rect, 0, 0));
-	*pitch = lock_rect.Pitch;
+	if (pitch) *pitch = lock_rect.Pitch;
 	return (void *)lock_rect.pBits;
 }
 
@@ -352,7 +355,7 @@ void SurfaceClass::Unlock(void)
 		NativeLocked = false;
 		return;
 	}
-	DX8_ErrorCode(D3DSurface->UnlockRect());
+	if (D3DSurface) DX8_ErrorCode(D3DSurface->UnlockRect());
 }
 
 void SurfaceClass::Build_Native_Bgra(std::vector<unsigned char> &pixels) const
@@ -632,13 +635,13 @@ void SurfaceClass::Copy(
 	unsigned int width, unsigned int height,
 	const SurfaceClass *other)
 {
-	WWASSERT(other);
-	WWASSERT(width);
-	WWASSERT(height);
+	// A failed texture readback has no source. Never copy or recolor garbage.
+	if (!other || !width || !height) return;
 
 	SurfaceDescription sd,osd;
 	Get_Description(sd);
 	const_cast <SurfaceClass*>(other)->Get_Description(osd);
+	if (!sd.Width || !sd.Height || !osd.Width || !osd.Height) return;
 	if (Is_Native())
 	{
 		++NativeRevision;

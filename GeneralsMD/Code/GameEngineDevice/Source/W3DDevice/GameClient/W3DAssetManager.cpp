@@ -663,7 +663,9 @@ void W3DAssetManager::Remap_Palette(SurfaceClass *surface, const int color, Bool
 //---------------------------------------------------------------------
 TextureClass * W3DAssetManager::Recolor_Texture_One_Time(TextureClass *texture, const int color)
 {
+	if (!texture) return NULL;
 	const char *name=texture->Get_Texture_Name();	
+	if (!name || strlen(name) < 4) return NULL;
 
 	// if texture is procedural return NULL
 	if (name && name[0]=='!') return NULL;
@@ -672,15 +674,19 @@ TextureClass * W3DAssetManager::Recolor_Texture_One_Time(TextureClass *texture, 
 	if (!texture->Is_Initialized())	
 		TextureLoader::Request_Foreground_Loading(texture);
 
-	SurfaceClass::SurfaceDescription desc;
-	SurfaceClass *newsurf, *oldsurf;
-	texture->Get_Level_Description(desc);		
-
-	Int psize;
-	psize=PixelSize(desc);
-	DEBUG_ASSERTCRASH( psize == 2 || psize == 4, ("Can't Recolor Texture %s", name) );
-
-	oldsurf=texture->Get_Surface_Level();
+	// Acquire once: a failed GPU readback must not become an uninitialized
+	// description followed by a second readback and a legacy null dereference.
+	SurfaceClass *oldsurf=texture->Get_Surface_Level();
+	if (!oldsurf) return NULL; // Caller keeps the original material on failure.
+	SurfaceClass::SurfaceDescription desc = {};
+	oldsurf->Get_Description(desc);
+	const Int psize=PixelSize(desc);
+	if (!desc.Width || !desc.Height || (psize != 2 && psize != 4))
+	{
+		REF_PTR_RELEASE(oldsurf);
+		return NULL;
+	}
+	SurfaceClass *newsurf;
 
 	newsurf=NEW_REF(SurfaceClass,(desc.Width,desc.Height,desc.Format));
 	newsurf->Copy(0,0,0,0,desc.Width,desc.Height,oldsurf);

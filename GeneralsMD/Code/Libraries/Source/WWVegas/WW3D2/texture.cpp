@@ -1151,6 +1151,8 @@ void TextureClass::Mark_Native_Surface_Dirty()
 */
 void TextureClass::Get_Level_Description( SurfaceClass::SurfaceDescription & desc, unsigned int level )
 {
+	// Readback can fail after device loss; do not leave caller stack data intact.
+	desc = { WW3D_FORMAT_UNKNOWN, 0, 0 };
 	SurfaceClass * surf = Get_Surface_Level(level);
 	if (surf != NULL) {
 		surf->Get_Description(desc);
