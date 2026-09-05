@@ -1569,6 +1569,13 @@ void DX8Wrapper::Get_Device_Resolution(int & set_w,int & set_h,int & set_bits,bo
 void DX8Wrapper::Get_Render_Target_Resolution(int & set_w,int & set_h,int & set_bits,bool & set_windowed)
 {
 	WWASSERT(IsInitted);
+	if (NativeD3D12Renderer* native = NativeRenderer.Active()) {
+		set_w = native->RenderTargetWidth();
+		set_h = native->RenderTargetHeight();
+		set_bits = 32;
+		set_windowed = IsWindowed;
+		return;
+	}
 
 	if (CurrentRenderTarget != NULL) {
 		D3DSURFACE_DESC info;
@@ -3645,8 +3652,6 @@ TextureClass *
 DX8Wrapper::Create_Render_Target (int width, int height, WW3DFormat format)
 {
 	DX8_THREAD_ASSERT();
-	DX8_Assert();
-	number_of_DX8_calls++;
 	if (NativeD3D12Renderer::Active() != NULL)
 	{
 		if (format == WW3D_FORMAT_UNKNOWN)
@@ -3654,6 +3659,8 @@ DX8Wrapper::Create_Render_Target (int width, int height, WW3DFormat format)
 		return NEW_REF(TextureClass,(static_cast<unsigned>(width), static_cast<unsigned>(height),
 			format, MIP_LEVELS_1, TextureClass::POOL_DEFAULT, true));
 	}
+	DX8_Assert();
+	number_of_DX8_calls++;
 
 	// Use the current display format if format isn't specified
 	if (format==WW3D_FORMAT_UNKNOWN) {
@@ -5057,6 +5064,8 @@ void DX8Wrapper::Apply_Native_Material(const FVFInfoClass& fvf)
 		case D3DTOP_DOTPRODUCT3: return NativeMaterialOp::Dot3;
 		case D3DTOP_MULTIPLYADD: return NativeMaterialOp::MultiplyAdd;
 		case D3DTOP_LERP: return NativeMaterialOp::Lerp;
+		case D3DTOP_BUMPENVMAP: return NativeMaterialOp::BumpEnvironment;
+		case D3DTOP_BUMPENVMAPLUMINANCE: return NativeMaterialOp::BumpEnvironmentLuminance;
 		default: return NativeMaterialOp::Disable;
 		}
 	};
@@ -5089,6 +5098,15 @@ void DX8Wrapper::Apply_Native_Material(const FVFInfoClass& fvf)
 		settings.alphaArg2 = argument(states[D3DTSS_ALPHAARG2]);
 		settings.alphaArg0 = argument(states[D3DTSS_ALPHAARG0]);
 		settings.resultFlags[0] = states[D3DTSS_RESULTARG] == D3DTA_TEMP;
+		const auto floatState = [states](unsigned index) {
+			float value;
+			std::memcpy(&value, &states[index], sizeof(value));
+			return value;
+		};
+		settings.bumpMatrix = {floatState(D3DTSS_BUMPENVMAT00),floatState(D3DTSS_BUMPENVMAT01),
+			floatState(D3DTSS_BUMPENVMAT10),floatState(D3DTSS_BUMPENVMAT11)};
+		settings.bumpParameters = {floatState(D3DTSS_BUMPENVLSCALE),floatState(D3DTSS_BUMPENVLOFFSET),
+			255.0f/127.0f,-128.0f/127.0f};
 		terminated = terminated || settings.colorOp == NativeMaterialOp::Disable;
 		NativeMaterialCoordinates coords;
 		const UINT index = states[D3DTSS_TEXCOORDINDEX] & 0xffff;

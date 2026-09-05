@@ -141,7 +141,7 @@ private:
 };
 
 // Engine material data compiled into native HLSL. No legacy API objects or bytecode.
-enum class NativeMaterialOp : UINT { Disable, Select1, Select2, Modulate, Modulate2X, Modulate4X, Add, AddSigned, AddSigned2X, Subtract, AddSmooth, BlendDiffuseAlpha, BlendTextureAlpha, BlendFactorAlpha, BlendCurrentAlpha, BlendTextureAlphaPremultiplied, ModulateAlphaAddColor, ModulateColorAddAlpha, ModulateInvAlphaAddColor, ModulateInvColorAddAlpha, Dot3, MultiplyAdd, Lerp };
+enum class NativeMaterialOp : UINT { Disable, Select1, Select2, Modulate, Modulate2X, Modulate4X, Add, AddSigned, AddSigned2X, Subtract, AddSmooth, BlendDiffuseAlpha, BlendTextureAlpha, BlendFactorAlpha, BlendCurrentAlpha, BlendTextureAlphaPremultiplied, ModulateAlphaAddColor, ModulateColorAddAlpha, ModulateInvAlphaAddColor, ModulateInvColorAddAlpha, Dot3, MultiplyAdd, Lerp, BumpEnvironment, BumpEnvironmentLuminance };
 enum class NativeMaterialSource : UINT { Diffuse, Current, Texture, Factor, Specular, Temporary };
 struct NativeMaterialStage {
 	NativeMaterialOp colorOp = NativeMaterialOp::Disable;
@@ -151,6 +151,9 @@ struct NativeMaterialStage {
 	UINT alphaArg1 = UINT(NativeMaterialSource::Current), alphaArg2 = UINT(NativeMaterialSource::Texture);
 	UINT alphaArg0 = UINT(NativeMaterialSource::Current);
 	std::array<UINT,4> resultFlags = {}; // x: write the temporary register instead of current.
+	std::array<float,4> bumpMatrix = {1,0,0,1}; // m00, m01, m10, m11.
+	// Luminance scale/offset; signed UV sample decode scale/offset.
+	std::array<float,4> bumpParameters = {1,0,1,0};
 };
 struct NativeMaterialCoordinates {
 	UINT offset = UINT_MAX;
@@ -215,6 +218,8 @@ public:
 	void SetSamplerState(NativeD3D12FilterMode minFilter, NativeD3D12FilterMode magFilter,
 		NativeD3D12FilterMode mipFilter, bool clampU, bool clampV, UINT maxAnisotropy = 1);
 	bool SetRenderTarget(const NativeD3D12Texture* texture, bool useDefaultDepth = true);
+	UINT RenderTargetWidth() const { return m_currentRenderTarget ? m_currentRenderTarget->Width() : m_width; }
+	UINT RenderTargetHeight() const { return m_currentRenderTarget ? m_currentRenderTarget->Height() : m_height; }
 	void SetFixedFunctionState(D3D12_CULL_MODE cullMode, bool depthEnable,
 		bool depthWrite, D3D12_COMPARISON_FUNC depthFunc, bool blendEnable,
 		D3D12_BLEND sourceBlend, D3D12_BLEND destinationBlend,

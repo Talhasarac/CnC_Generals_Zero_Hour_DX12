@@ -371,6 +371,41 @@ bool Run(NativeD3D12Renderer& r, HWND window)
 	REQUIRE(r.ReadbackFrame(pixels));
 	REQUIRE(Pixel(pixels,64,32,32,32,32,8,"river edge opacity survives sparkle-noise temporary register"));
 	State(r);
+	// A signed bump vector perturbs the next sample, never the base color.
+	std::unique_ptr<NativeD3D12Texture> bumpTexture(r.CreateTexture2D(1,1,1,DXGI_FORMAT_R8G8B8A8_UNORM));
+	std::unique_ptr<NativeD3D12Texture> environment(r.CreateTexture2D(2,2,1,DXGI_FORMAT_R8G8B8A8_UNORM));
+	const unsigned char environmentPixels[] = {255,0,0,255, 0,255,0,255, 0,0,255,255, 255,255,255,255};
+	level = {environmentPixels,8,16};
+	REQUIRE(environment && bumpTexture && r.UploadTexture2D(*environment,&level,1));
+	NativeMaterialStage bump;
+	bump.colorOp = NativeMaterialOp::BumpEnvironment;
+	bump.bumpMatrix = {.5f,0,0,.5f};
+	bump.bumpParameters = {.5f,.25f,255.f/127.f,-128.f/127.f};
+	MaterialVertex bumpQuad[4];
+	std::memcpy(bumpQuad,quad,sizeof(quad));
+	for (auto& v : bumpQuad) { v.uv[0][0]=.25f; v.uv[0][1]=.25f; }
+	for (UINT stage=0;stage<4;++stage) {
+		r.SetSamplerState(NativeD3D12FilterMode::Point,NativeD3D12FilterMode::Point,NativeD3D12FilterMode::Point,true,true);
+		r.SetMaterialSampler(stage);
+		r.SetMaterialStage(stage,disabled,coords,nullptr);
+	}
+	r.SetMaterialStage(1,atlasBase,atlasUV,environment.get());
+	for (unsigned variant=0;variant<5;++variant) {
+		const unsigned char bumpPixel[] = {static_cast<unsigned char>(variant == 3 ? 1 : (variant == 4 ? 128 : 255)),128,128,0};
+		level = {bumpPixel,4,4};
+		REQUIRE(r.UploadTexture2D(*bumpTexture,&level,1));
+		bump.colorOp = variant == 2 ? NativeMaterialOp::BumpEnvironmentLuminance : NativeMaterialOp::BumpEnvironment;
+		bump.bumpMatrix = variant == 1 ? std::array<float,4>{0,0,.5f,0} : std::array<float,4>{.5f,0,0,.5f};
+		for (auto& v : bumpQuad) v.uv[0][0] = variant == 3 ? .75f : .25f;
+		r.SetMaterialStage(0,bump,atlasUV,bumpTexture.get());
+		REQUIRE(r.BeginFrame(black));
+		REQUIRE(r.DrawIndexedTextured(bumpQuad,sizeof(bumpQuad),sizeof(MaterialVertex),4,16,
+			quadIndices,6,D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST,bumpTexture.get(),12));
+		REQUIRE(r.ReadbackFrame(pixels));
+		const int expected[][3] = {{0,255,0},{0,0,255},{0,128,0},{255,0,0},{255,0,0}};
+		REQUIRE(Pixel(pixels,64,32,32,expected[variant][0],expected[variant][1],expected[variant][2],
+			"native bump: positive, off-diagonal, luminance, negative and zero gradients"));
+	}
 	for (UINT stage=0;stage<4;++stage) r.SetMaterialStage(stage,disabled,coords,nullptr);
 	r.SetMaterialEnabled(false);
 	const float translated[] = {0.25f,0,0,0, 0,0.25f,0,0, 0,0,1,0, 0.5f,0,0,1};
@@ -707,6 +742,22 @@ bool Run(NativeD3D12Renderer& r, HWND window)
 		REQUIRE(transient != nullptr);
 	}
 	std::printf("PASS descriptor recycling beyond heap capacity\n");
+	// Reflection cameras must use the capture dimensions, not the window's.
+	std::unique_ptr<NativeD3D12Texture> reflection(r.CreateTexture2D(16,8,1,DXGI_FORMAT_B8G8R8A8_UNORM,true));
+	REQUIRE(reflection && r.BeginFrame(black));
+	REQUIRE(r.SetRenderTarget(reflection.get(),true));
+	REQUIRE(r.RenderTargetWidth()==16 && r.RenderTargetHeight()==8);
+	r.SetViewport(0,0,float(r.RenderTargetWidth()),float(r.RenderTargetHeight()),0,1);
+	REQUIRE(r.DrawScreenQuad(0,0,16,8,0xff00ffff));
+	REQUIRE(r.SetRenderTarget(nullptr));
+	REQUIRE(r.RenderTargetWidth()==64 && r.RenderTargetHeight()==64);
+	REQUIRE(r.EndFrame(0,false));
+	// The reflection must survive an offscreen submission and a new main frame.
+	REQUIRE(r.BeginFrame(black));
+	REQUIRE(r.DrawTexturedScreenQuad(0,0,64,64,0,0,1,1,0xffffffff,reflection.get()));
+	REQUIRE(r.ReadbackFrame(pixels));
+	REQUIRE(Pixel(pixels,64,2,2,0,255,255,"reflection capture top-left survives separate frame"));
+	REQUIRE(Pixel(pixels,64,61,61,0,255,255,"reflection capture covers full small target"));
 	for (UINT frame=0;frame<64;++frame) {
 		REQUIRE(r.BeginFrame(black));
 		REQUIRE(r.DrawScreenQuad(0,0,64,64,frame&1?0xff00ff00:0xffff0000));

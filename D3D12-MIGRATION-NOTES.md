@@ -3,6 +3,71 @@
 The game reaches a rendered skirmish with the native backend. The port is **not
 feature-complete or visually equivalent** to the original renderer.
 
+## Inactive water renderer and header cleanup — 2026-09-05
+
+Removed the D3D8 water draw fallbacks, vertex/index-buffer allocation and locks,
+device/resource members, shader handles, disabled assembly-shader compilation,
+and disabled bump-texture conversion/loading. The native draw implementations
+and serialized water-type values are retained. The unfinished reflected-sea
+resource path retains its previous early exit; this cleanup does not enable it.
+The water header no longer declares D3D8 COM resources or shader registers and
+uses a forward declaration for the still-active engine index-buffer class.
+
+Removed unused D3DX8 includes from water, flat/base terrain, camera shake,
+asset management, vertex buffers, missing textures, textures and surfaces.
+This is not repository-wide removal: active legacy state/type dependencies,
+other inactive renderer branches and the historical project sources remain.
+In particular, native_matrix_math.h still uses D3DX matrix data types.
+
+Validation: incremental Release ww3d2 and generals builds with 16 jobs; 68 CPU
+tests / 2239 checks passed; native GPU smoke passed (1/1). The rebuilt executable
+was staged in steamfiles and completed a 900-simulation-frame USA Winding River
+skirmish with exit code 0 and no ERROR/WARNING/CORRUPTION/failed entries in that
+session's native renderer diagnostics. No visual parity claim is made by this
+automated run. Existing build directories and configuration were reused.
+
+## Reflection capture lifecycle batch — 2026-09-05
+
+Native render-target resolution queries now report the bound texture dimensions,
+so `CameraClass::Apply` no longer constructs a window-sized viewport for a small
+reflection/shadow target. Native target creation bypasses legacy device assertions.
+The mirror pass begins recording before binding/clearing, checks missing targets
+and bind failure, clears stale capture color, and restores the backbuffer before
+restoring the camera viewport. This does not yet enable the unfinished specialized
+sea resource/material path; reflection imagery still needs to be consumed there.
+
+Incremental Release ww3d2/game builds passed with 16 jobs. CPU tests: 68 / 2239
+checks. GPU smoke: 1/1 (3.75 seconds), including a 16x8 offscreen capture,
+target-dimension changes, non-presenting submission, and corner pixel checks when
+sampling that capture in a subsequent 64x64 frame. This is capture-lifecycle
+evidence, not visual certification of game-world reflections.
+
+## Native bump material batch — 2026-09-05
+
+Native HLSL now evaluates environment bump and bump-with-luminance operations
+instead of terminating those material chains. Texture samples are evaluated in
+stage order: the signed gradient and 2x2 matrix affect only the next sample, while
+its RGB is modulated by luminance scale/offset. Bump stages preserve accumulated
+surface color/alpha. The formulas follow Microsoft's
+[bump mapping specification](https://learn.microsoft.com/en-us/windows/win32/direct3d9/bump-mapping-formulas);
+no legacy graphics API or shader bytecode executes this work.
+
+CPU-authored U8V8, X8L8V8U8 and L6V5U5 surfaces encode signed gradients into
+filterable native BGRA textures, with an exact encoded zero and separate luminance.
+Material constants grew from 48 to 80 bytes per stage, with matching HLSL packing.
+
+Release renderer/game builds succeeded incrementally with 16 jobs. CPU tests:
+68 tests / 2239 checks. GPU smoke: 1/1 passed (3.98 seconds), including positive,
+negative, neutral, off-diagonal and luminance bump pixel checks. A 900-simulation-
+frame USA Winding River skirmish exited normally with the D3D12 debug layer enabled.
+This was an integration/crash check, not a visual or large-battle certification.
+
+Still required: replace the specialized sea's legacy bump-frame generation and
+reflection-target initialization, integrate native reflected-scene rendering and
+sea patch placement, verify authored bump assets through their complete loading
+paths, then continue terrain/material, long-match, cleanup and distribution work.
+The bump-material tests alone do not prove the reflected-water feature finished.
+
 ## River left-edge wall fix — 2026-09-05
 
 The reported vertical water streak was reproduced in a USA Winding River match.

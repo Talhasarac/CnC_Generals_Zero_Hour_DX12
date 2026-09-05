@@ -30,6 +30,28 @@
 #include "quat.h"
 #include "render2dsentence.h"
 #include "dx8wrapper.h"
+#include "native_bump_pixels.h"
+
+TEST(native_bump_encoding_preserves_signed_zero_and_extremes)
+{
+	unsigned char result[4];
+	const unsigned char uv[] = {0,0, 127,128, 129,1};
+	for (int i=0;i<3;++i) {
+		CHECK(EncodeNativeBumpPixel(result,uv+i*2,WW3D_FORMAT_U8V8));
+		CHECK_EQ(result[0],255);
+		CHECK_EQ(result[3],255);
+		CHECK_EQ(result[2],(unsigned(uv[i*2])+128)%256);
+		CHECK_EQ(result[1],(unsigned(uv[i*2+1])+128)%256);
+	}
+	const unsigned char lum[] = {0,255,64,0};
+	CHECK(EncodeNativeBumpPixel(result,lum,WW3D_FORMAT_X8L8V8U8));
+	CHECK_EQ(result[0],64); CHECK_EQ(result[1],127); CHECK_EQ(result[2],128);
+	const unsigned short packed = 15 | (16<<5) | (63<<10);
+	const unsigned char packedPixel[] = {static_cast<unsigned char>(packed),static_cast<unsigned char>(packed>>8)};
+	CHECK(EncodeNativeBumpPixel(result,packedPixel,WW3D_FORMAT_L6V5U5));
+	CHECK_EQ(result[0],255); CHECK_EQ(result[1],0); CHECK_EQ(result[2],255);
+	CHECK(!EncodeNativeBumpPixel(result,lum,WW3D_FORMAT_A8R8G8B8));
+}
 
 TEST(projection_survives_screen_space_pass_without_a_legacy_device)
 {

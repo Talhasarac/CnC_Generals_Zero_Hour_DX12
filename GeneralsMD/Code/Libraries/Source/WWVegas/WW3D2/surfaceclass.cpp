@@ -50,6 +50,7 @@
 
 #include "surfaceclass.h"
 #include "surface_pixel_write.h"
+#include "native_bump_pixels.h"
 #include "formconv.h"
 #include "dx8wrapper.h"
 #include "vector2i.h"
@@ -59,7 +60,6 @@
 #include "native_d3d12_renderer.h"
 #include "TARGA.H"
 #include <algorithm>
-#include <d3dx8.h>
 
 /***********************************************************************************************
  * PixelSize -- Helper Function to find the size in bytes of a pixel                           *
@@ -378,6 +378,7 @@ void SurfaceClass::Build_Native_Bgra(std::vector<unsigned char> &pixels) const
 		unsigned char *destination = pixels.data() + static_cast<size_t>(y) * desc.Width * 4;
 		for (unsigned int x = 0; x < desc.Width; ++x)
 		{
+			if (EncodeNativeBumpPixel(destination + x*4,source + x*sourceSize,desc.Format)) continue;
 			BitmapHandlerClass::Read_B8G8R8A8(
 				destination + x * 4, source + x * sourceSize, desc.Format, NULL, 0);
 			// XRGB's unused byte is not alpha. It may contain zero in source files.

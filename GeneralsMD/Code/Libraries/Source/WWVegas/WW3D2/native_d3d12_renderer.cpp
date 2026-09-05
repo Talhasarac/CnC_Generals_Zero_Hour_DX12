@@ -703,7 +703,7 @@ bool NativeD3D12Renderer::CreateTexturedPipeline(const std::array<UINT,4>& texco
 	static const std::string shaderSource = std::string(NativeLightingHlsl) + R"(
 cbuffer Transform : register(b0) { row_major float4x4 worldViewProjection; uint4 vertexFlags; row_major float4x4 textureMatrices[4]; uint4 textureFlags; float4 treeSway[11]; row_major float4x4 worldView; float4 fogParameters; float4 fogColor; LightingState lighting; };
 cbuffer AlphaTest : register(b1) { uint alphaTestEnable; uint alphaTestFunction; uint alphaTestReference; uint alphaTestPadding; uint grayscaleEnabled; uint textureColorTexture; uint textureColorVertex; uint textureAlphaTexture; uint textureAlphaVertex; uint grayscaleTint; float grayscaleAmount; };
-struct MaterialStage { uint colorOp; uint colorArg1; uint colorArg2; uint colorArg0; uint alphaOp; uint alphaArg1; uint alphaArg2; uint alphaArg0; uint4 resultFlags; };
+struct MaterialStage { uint colorOp; uint colorArg1; uint colorArg2; uint colorArg0; uint alphaOp; uint alphaArg1; uint alphaArg2; uint alphaArg0; uint4 resultFlags; float4 bumpMatrix; float4 bumpParameters; };
 cbuffer Material : register(b2) { MaterialStage stages[4]; float4 materialFactor; };
 Texture2D texture0 : register(t0);
 Texture2D texture1 : register(t1);
@@ -799,19 +799,28 @@ float4 mainPS(VSOutput input) : SV_TARGET
     float4 color = input.color;
 #if MATERIAL_VARIANT > 1
         float4 samples[MATERIAL_VARIANT-1];
-        samples[0] = texture0.Sample(sampler0,input.texcoord);
-#if MATERIAL_VARIANT > 2
-        samples[1] = texture1.Sample(sampler1,input.uv1);
-#endif
-#if MATERIAL_VARIANT > 3
-        samples[2] = texture2.Sample(sampler2,input.uv2);
-#endif
-#if MATERIAL_VARIANT > 4
-        samples[3] = texture3.Sample(sampler3,input.uv3);
-#endif
+        float2 bumpOffset = 0;
+        float bumpLuminance = 1;
         float4 temporary = 0;
         [unroll] for (uint stage = 0; stage < MATERIAL_VARIANT-1; ++stage) {
             MaterialStage settings = stages[stage];
+            // A bump stage offsets only the following stage's texture fetch.
+            // Sampling all textures before evaluation loses that dependency.
+            float4 texel;
+            if (stage == 0) texel = texture0.Sample(sampler0,input.texcoord+bumpOffset);
+            else if (stage == 1) texel = texture1.Sample(sampler1,input.uv1+bumpOffset);
+            else if (stage == 2) texel = texture2.Sample(sampler2,input.uv2+bumpOffset);
+            else texel = texture3.Sample(sampler3,input.uv3+bumpOffset);
+            samples[stage] = float4(texel.rgb*bumpLuminance,texel.a);
+            bumpOffset = 0;
+            bumpLuminance = 1;
+            if (settings.colorOp == 23 || settings.colorOp == 24) {
+                float2 delta = clamp(texel.rg*settings.bumpParameters.z+settings.bumpParameters.w,-1,1);
+                bumpOffset = float2(dot(delta,settings.bumpMatrix.xy),dot(delta,settings.bumpMatrix.zw));
+                if (settings.colorOp == 24)
+                    bumpLuminance = saturate(texel.b*settings.bumpParameters.x+settings.bumpParameters.y);
+                continue; // Bump samples are vectors, not a replacement surface color/alpha.
+            }
             float4 a = Argument(settings.colorArg1,input.color,color,samples[stage],temporary,input.specular);
             float4 b = Argument(settings.colorArg2,input.color,color,samples[stage],temporary,input.specular);
             float4 c = Argument(settings.colorArg0,input.color,color,samples[stage],temporary,input.specular);
@@ -1619,7 +1628,7 @@ bool NativeD3D12Renderer::DrawIndexedTextured(const void* vertices, UINT vertexB
 		std::array<NativeMaterialStage, 4> stages;
 		std::array<float,4> factor;
 	} material = {m_materialStages, m_materialFactor};
-	static_assert(sizeof(NativeMaterialStage) == 48, "HLSL material packing");
+	static_assert(sizeof(NativeMaterialStage) == 80, "HLSL material packing");
 	D3D12_GPU_VIRTUAL_ADDRESS materialAddress;
 	if (!UploadGeometry(&material, sizeof(material), materialAddress)) return false;
 	m_commandList->SetGraphicsRootConstantBufferView(10, materialAddress);

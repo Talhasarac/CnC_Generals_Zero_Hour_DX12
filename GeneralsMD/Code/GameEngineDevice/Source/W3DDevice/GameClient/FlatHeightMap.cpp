@@ -57,7 +57,6 @@
 #include <coltest.h>
 #include <rinfo.h>
 #include <camera.h>
-#include <d3dx8core.h>
 #include "Common/GlobalData.h"
 #include "Common/PerfTimer.h"
 

@@ -34,8 +34,7 @@
 #include "always.h"
 #include "rendobj.h"
 #include "w3d_file.h"
-#include "dx8vertexbuffer.h"			 
-#include "dx8indexbuffer.h"
+class DX8IndexBufferClass;
 #include "shader.h"
 #include "vertmaterial.h"
 #include "light.h"
@@ -46,12 +45,6 @@
 #define INVALID_WATER_HEIGHT 0.0f	///water height guaranteed to be below all terrain.
 
 #define NUM_BUMP_FRAMES 32	///number of animation frames in bump map
-//Offsets in constant register file to Vertex shader constants
-#define CV_ZERO 0
-#define CV_ONE 1
-#define CV_WORLDVIEWPROJ_0 2
-#define CV_TEXPROJ_0 6
-#define CV_PATCH_SCALE_OFFSET 10
 
 class PolygonTrigger;
 class WaterTracksRenderSystem;
@@ -111,7 +104,7 @@ public:
 	void setTimeOfDay(TimeOfDay tod); ///<change sky/water for time of day
 	void toggleCloudLayer(Bool state)	{	m_useCloudLayer=state;}	///<enables/disables the cloud layer
 	void updateRenderTargetTextures(CameraClass *cam);	///< renders into any required textures.	
-	void ReleaseResources(void);	///< Release all dx8 resources so the device can be reset.
+	void ReleaseResources(void);	///< Release water rendering resources.
 	void ReAcquireResources(void);  ///< Reacquire all resources after device reset.
 	Real getWaterHeight(Real x, Real y);	///<return water height at given point - for use by WB.
 	void setGridHeightClamps(Real minz, Real maxz);	///<set min/max height values alllowed in grid
@@ -152,8 +145,7 @@ protected:
 	WaterType	m_waterType;		///<type of water being used
 	Int			m_sortLevel;		///<sort order after main scene is rendered
 
-	//Data used in GeForce3 bump-mapped water (uses direct D3D resources for better
-	//performance and compatibility (most of these featues are not supported by W3D).
+	// Native water mesh resources.
 	struct SEA_PATCH_VERTEX	//vertex structure passed to D3D
 	{
 		float x,y,z;
@@ -161,18 +153,10 @@ protected:
 		float tu, tv;
 	}; 
 
-	LPDIRECT3DDEVICE8 m_pDev;						///<pointer to D3D Device
-	LPDIRECT3DVERTEXBUFFER8 m_vertexBufferD3D;		///<D3D vertex buffer
-	LPDIRECT3DINDEXBUFFER8	m_indexBufferD3D;	///<D3D index buffer
 	NativeD3D12UploadBuffer *m_vertexBufferNative;	///<native D3D12 staging vertex buffer
 	NativeD3D12UploadBuffer *m_indexBufferNative;	///<native D3D12 staging index buffer
-	Int						m_vertexBufferD3DOffset;	///<location to start writing vertices
-	DWORD					m_dwWavePixelShader;	///<handle to D3D pixel shader
-	DWORD					m_dwWaveVertexShader;	///<handle to D3D vertex shader
 	Int	m_numVertices;				///<number of vertices in D3D vertex buffer
 	Int m_numIndices;				///<number of indices in D3D index buffer
-	LPDIRECT3DTEXTURE8 m_pBumpTexture[NUM_BUMP_FRAMES]; ///<animation frames
-	LPDIRECT3DTEXTURE8 m_pBumpTexture2[NUM_BUMP_FRAMES]; ///<animation frames
 	Int					m_iBumpFrame;	///<current animation frame
 	Real				m_bumpFrameAccum;	///<fractional carry, so the flipbook can run slower than one frame per tick
 	Real				m_fBumpScale;	///<scales bump map uv perturbation
@@ -216,9 +200,6 @@ protected:
 	TextureClass *m_riverTexture;
 	TextureClass *m_whiteTexture;		///< a texture containing only white used for NULL pixel shader stages.
 	TextureClass *m_waterNoiseTexture;
-	DWORD	m_waterPixelShader;		///<D3D handle to pixel shader.
-	DWORD	m_riverWaterPixelShader;		///<D3D handle to pixel shader.
-	DWORD	m_trapezoidWaterPixelShader;	///<handle to D3D vertex shader
 	TextureClass *m_waterSparklesTexture;
 	Real m_riverXOffset;
 	Real m_riverYOffset;
@@ -252,7 +233,6 @@ protected:
 	void testCurvedWater(void);	///<draw the sky layer (clouds, stars, etc.)
 	void renderSkyBody(Matrix3D *mat);	///<draw the sky body (sun, moon, etc.)
 	void renderWaterMesh(void);			///<draw the water surface mesh (deformed 3d mesh).
-	HRESULT initBumpMap(LPDIRECT3DTEXTURE8 *pTex, TextureClass *pBumpSource);	///<copies data into bump-map format.
 	void renderMirror(CameraClass *cam);	///< Draw reflected scene into texture
 	void drawSea(RenderInfoClass & rinfo);	///< Draw the surface of the water
 	///bounding box of frustum clipped polygon plane
@@ -262,7 +242,7 @@ protected:
 	void setupJbaWaterShader(void);
 	void cleanupJbaWaterShader(void);
 
-	//Methods used for GeForce3 specific water
+	// Native water mesh allocation
 	HRESULT WaterRenderObjClass::generateIndexBuffer(int sizeX, int sizeY);	///<Generate static index buufer
 	HRESULT WaterRenderObjClass::generateVertexBuffer( Int sizeX, Int sizeY, Int vertexSize, Bool doFill);///<Generate static vertex buffer
 
