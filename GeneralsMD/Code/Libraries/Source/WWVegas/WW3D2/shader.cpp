@@ -251,6 +251,95 @@ ShaderClass ShaderClass::_PresetMultiplicativeSpriteShader(SC_MUL_SPRITE);
  * HISTORY:                                                                                    *
  *   4/24/2001  gth : Created.                                                                 *
  *=============================================================================================*/
+#include "native_pipeline_description.h"
+
+NativePipelineDescription ShaderClass::Get_Native_Pipeline(bool mirrored) const
+{
+	NativePipelineDescription result;
+	static const D3D12_COMPARISON_FUNC comparisons[] = {
+		D3D12_COMPARISON_FUNC_NEVER, D3D12_COMPARISON_FUNC_LESS,
+		D3D12_COMPARISON_FUNC_EQUAL, D3D12_COMPARISON_FUNC_LESS_EQUAL,
+		D3D12_COMPARISON_FUNC_GREATER, D3D12_COMPARISON_FUNC_NOT_EQUAL,
+		D3D12_COMPARISON_FUNC_GREATER_EQUAL, D3D12_COMPARISON_FUNC_ALWAYS };
+	static const D3D12_BLEND sources[] = {D3D12_BLEND_ZERO, D3D12_BLEND_ONE,
+		D3D12_BLEND_SRC_ALPHA, D3D12_BLEND_DEST_COLOR};
+	// This engine repurposed encoded source-blend value 3 for destination
+	// color. Preserve the actual material behavior, despite the old enum name.
+	static const D3D12_BLEND destinations[] = {D3D12_BLEND_ZERO, D3D12_BLEND_ONE,
+		D3D12_BLEND_SRC_COLOR, D3D12_BLEND_INV_SRC_COLOR,
+		D3D12_BLEND_SRC_ALPHA, D3D12_BLEND_INV_SRC_ALPHA};
+	result.depthCompare = comparisons[Get_Depth_Compare()];
+	result.depthWrite = Get_Depth_Mask() == DEPTH_WRITE_ENABLE;
+	result.source = sources[Get_Src_Blend_Func()];
+	const unsigned dest = Get_Dst_Blend_Func();
+	result.destination = dest < DSTBLEND_MAX ? destinations[dest] : D3D12_BLEND_ZERO;
+	result.blend = result.source != D3D12_BLEND_ONE || result.destination != D3D12_BLEND_ZERO;
+	result.colorMask = Get_Color_Mask() == COLOR_WRITE_ENABLE ? D3D12_COLOR_WRITE_ENABLE_ALL : 0;
+	result.cull = Get_Cull_Mode() == CULL_MODE_DISABLE ? D3D12_CULL_MODE_NONE :
+		(mirrored ? D3D12_CULL_MODE_BACK : D3D12_CULL_MODE_FRONT);
+	result.alphaTest = Get_Alpha_Test() == ALPHATEST_ENABLE;
+	if (result.source == D3D12_BLEND_INV_SRC_ALPHA) {
+		result.alphaCompare = D3D12_COMPARISON_FUNC_LESS_EQUAL;
+		result.alphaReference = 0xff - 0x60;
+	}
+	return result;
+}
+
+#include "native_draw_state.h"
+
+NativeMaterialDescription ShaderClass::Get_Native_Texture_Material() const
+{
+	NativeMaterialDescription material;
+	material.enabled = true;
+	auto& base = material.stages[0];
+	base.colorArg1 = base.alphaArg1 = UINT(NativeMaterialSource::Texture);
+	base.colorArg2 = base.alphaArg2 = UINT(NativeMaterialSource::Diffuse);
+	base.alphaOp = NativeMaterialOp::Modulate;
+	if (Get_Texturing() == TEXTURING_DISABLE) {
+		base.colorOp = base.alphaOp = Get_Primary_Gradient() == GRADIENT_DISABLE ?
+			NativeMaterialOp::Disable : NativeMaterialOp::Select2;
+		return material;
+	}
+	switch (Get_Primary_Gradient()) {
+	case GRADIENT_DISABLE: base.colorOp = base.alphaOp = NativeMaterialOp::Select1; break;
+	case GRADIENT_ADD: base.colorOp = NativeMaterialOp::Add; break;
+	case GRADIENT_MODULATE2X: base.colorOp = NativeMaterialOp::Modulate2X; break;
+	case GRADIENT_BUMPENVMAP:
+	case GRADIENT_BUMPENVMAPLUMINANCE:
+		base.colorOp = Get_Primary_Gradient() == GRADIENT_BUMPENVMAP ?
+			NativeMaterialOp::BumpEnvironment : NativeMaterialOp::BumpEnvironmentLuminance;
+		base.alphaOp = NativeMaterialOp::Disable;
+		break;
+	default: base.colorOp = NativeMaterialOp::Modulate; break;
+	}
+	auto& detail = material.stages[1];
+	detail.alphaArg1 = UINT(NativeMaterialSource::Texture);
+	detail.alphaArg2 = UINT(NativeMaterialSource::Current);
+	static const NativeMaterialOp colors[] = {
+		NativeMaterialOp::Disable,NativeMaterialOp::Select1,NativeMaterialOp::Modulate,
+		NativeMaterialOp::AddSmooth,NativeMaterialOp::Add,NativeMaterialOp::Subtract,
+		NativeMaterialOp::Subtract,NativeMaterialOp::BlendTextureAlpha,
+		NativeMaterialOp::BlendCurrentAlpha,NativeMaterialOp::AddSigned,
+		NativeMaterialOp::AddSigned2X,NativeMaterialOp::Modulate2X,NativeMaterialOp::ModulateAlphaAddColor
+	};
+	static const NativeMaterialOp alphas[] = {NativeMaterialOp::Disable,
+		NativeMaterialOp::Select1,NativeMaterialOp::Modulate,NativeMaterialOp::AddSmooth};
+	const auto color = Get_Post_Detail_Color_Func();
+	const auto alpha = Get_Post_Detail_Alpha_Func();
+	detail.colorOp = color < DETAILCOLOR_MAX ? colors[color] : NativeMaterialOp::Disable;
+	detail.alphaOp = alpha < DETAILALPHA_MAX ? alphas[alpha] : NativeMaterialOp::Disable;
+	// Preserve actual asset-rendering operand order, not the misleading SUB comments.
+	if (color == DETAILCOLOR_SUBR || color == DETAILCOLOR_MODALPHAADDCOLOR) {
+		detail.colorArg1 = UINT(NativeMaterialSource::Current);
+		detail.colorArg2 = UINT(NativeMaterialSource::Texture);
+	}
+	if (detail.colorOp != NativeMaterialOp::Disable && detail.alphaOp == NativeMaterialOp::Disable)
+		detail.alphaOp = NativeMaterialOp::Select2;
+	else if (detail.colorOp == NativeMaterialOp::Disable && detail.alphaOp != NativeMaterialOp::Disable)
+		detail.colorOp = NativeMaterialOp::Select2;
+	return material;
+}
+
 void ShaderClass::Init_From_Material3(const W3dMaterial3Struct & mat3)
 {
 	if ( mat3.Attributes & W3DMATERIAL_USE_ALPHA ) {

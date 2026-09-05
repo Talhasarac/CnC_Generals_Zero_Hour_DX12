@@ -355,6 +355,8 @@ void TextureBaseClass::Set_Texture_Name(const char * name)
 */
 unsigned int TextureBaseClass::Get_Priority(void)
 {
+	if (NativeD3D12Renderer::Active() != nullptr)
+		return 0;
 	if (!D3DTexture) 
 	{
 		WWASSERT_PRINT(0, "Get_Priority: D3DTexture is NULL!\n");
@@ -375,6 +377,8 @@ unsigned int TextureBaseClass::Get_Priority(void)
 */
 unsigned int TextureBaseClass::Set_Priority(unsigned int priority)
 {
+	if (NativeD3D12Renderer::Active() != nullptr)
+		return 0;
 	if (!D3DTexture) 
 	{
 		WWASSERT_PRINT(0, "Set_Priority: D3DTexture is NULL!\n");
@@ -420,6 +424,8 @@ unsigned TextureBaseClass::Get_Reduction() const
 */
 void TextureBaseClass::Apply_Null(unsigned int stage)
 {
+	if (NativeD3D12Renderer::Active() != nullptr)
+		return;
 	// This function sets the render states for a "NULL" texture
 	DX8Wrapper::Set_DX8_Texture(stage, NULL);
 }
@@ -1022,6 +1028,11 @@ void TextureClass::Apply_New_Surface
 */
 void TextureClass::Apply(unsigned int stage)
 {
+	if (NativeD3D12Renderer::Active() != nullptr) {
+		Prepare_Native_Texture();
+		Filter.Apply(stage); // Remaining state-cache consumers only.
+		return;
+	}
 	// Initialization needs to be done when texture is used if it hasn't been done before.
 	// XBOX always initializes textures at creation time.
 	if (!Initialized) 
@@ -1054,14 +1065,6 @@ void TextureClass::Apply(unsigned int stage)
 		}*/
 	}
 	LastAccessed=WW3D::Get_Sync_Time();
-	if (NativeD3D12Renderer::Active() != nullptr)
-	{
-		Upload_Native_Surface();
-		// DrawIndexedTextured binds the descriptor after its root signature and
-		// pipeline are active. Texture application only performs pending uploads.
-		Filter.Apply(stage);
-		return;
-	}
 
 	DX8_RECORD_TEXTURE(this);
 
@@ -2061,6 +2064,14 @@ void VolumeTextureClass::Apply_New_Surface
 	}
 }
 
+
+NativeD3D12Texture* TextureClass::Prepare_Native_Texture()
+{
+	if (!Initialized) Init();
+	LastAccessed = WW3D::Get_Sync_Time();
+	Upload_Native_Surface();
+	return Peek_Native_Texture();
+}
 
 void TextureClass::Upload_Native_Surface()
 {

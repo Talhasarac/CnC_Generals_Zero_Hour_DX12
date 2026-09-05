@@ -1048,8 +1048,7 @@ Bool ScreenCrossFadeFilter::postRender(enum FilterModes mode, Coord2D &scrollDel
 		const FLOAT v1 = (y + h) / texture->Height();
 		bool result;
 		if (mode == FM_VIEW_CROSSFADE_CIRCLE && m_fadePatternTexture != NULL) {
-			if (!m_fadePatternTexture->Is_Initialized()) m_fadePatternTexture->Init();
-			m_fadePatternTexture->Upload_Native_Surface();
+			m_fadePatternTexture->Prepare_Native_Texture();
 			FLOAT radius = (1.0f - m_curFadeValue) * 2.0f;
 			if (radius <= 0.0f) radius = 0.01f;
 			result = native->DrawMaskedScreenQuad(static_cast<FLOAT>(x), static_cast<FLOAT>(y),
@@ -1959,6 +1958,32 @@ void TerrainShader2Stage::updateNoise1(D3DXMATRIX *destMatrix,D3DXMATRIX *curVie
 
 	D3DXMatrixTranslation(&offset, m_xOffset, m_yOffset,0);
 	*destMatrix = NativeMatrixMath::MultiplyValue(*destMatrix, offset);
+}
+
+NativeMaterialCoordinates W3DShaderManager::nativeNoiseCoordinates()
+{
+	D3DXMATRIX identity, projection;
+	NativeMatrixMath::Identity(&identity);
+	terrainShader2Stage.updateNoise2(&projection,&identity,false);
+	NativeMaterialCoordinates coordinates;
+	coordinates.position = coordinates.transform = true;
+	coordinates.offset = UINT_MAX;
+	std::memcpy(coordinates.matrix.data(),&projection,sizeof(projection));
+	return coordinates;
+}
+
+NativeMaterialCoordinates W3DShaderManager::nativeCloudCoordinates()
+{
+	D3DXMATRIX identity, projection;
+	NativeMatrixMath::Identity(&identity);
+	// Reuse animation timing only. Native vertices are in world space, so
+	// projection contains no inverse-view or deferred texture transform.
+	terrainShader2Stage.updateNoise1(&projection,&identity,false);
+	NativeMaterialCoordinates coordinates;
+	coordinates.position = coordinates.transform = true;
+	coordinates.offset = UINT_MAX;
+	std::memcpy(coordinates.matrix.data(),&projection,sizeof(projection));
+	return coordinates;
 }
 
 void TerrainShader2Stage::updateNoise2(D3DXMATRIX *destMatrix,D3DXMATRIX *curViewInverse, Bool doUpdate)

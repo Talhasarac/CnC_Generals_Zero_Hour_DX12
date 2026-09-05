@@ -35,12 +35,18 @@
 #include <d3dx8.h>
 #include "WW3D2/dx8wrapper.h"
 #include "WW3D2/dx8WebBrowser.h"
+#include "WW3D2/native_d3d12_renderer.h"
 
 W3DWebBrowser::W3DWebBrowser() : WebBrowser() {
 }
 
 Bool W3DWebBrowser::createBrowserWindow(char *tag, GameWindow *win) 
 {
+	// BrowserEngine's initialization contract is an IDirect3DDevice8.  Do
+	// not report a successful browser window when the native renderer is
+	// active; the optional browser remains available to the legacy path.
+	if (NativeD3D12Renderer::Active() != NULL)
+		return FALSE;
 
 	WinInstanceData *winData = win->winGetInstanceData();
 	AsciiString windowName = winData->m_decoratedNameString;

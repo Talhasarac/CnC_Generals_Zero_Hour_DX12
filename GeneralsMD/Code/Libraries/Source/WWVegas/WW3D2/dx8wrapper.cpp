@@ -2431,20 +2431,25 @@ void DX8Wrapper::Draw_Sorting_IB_VB(
 			vertex_count>(vb->Size()-vo)/stride || index_count>(ib->Size()-io)/sizeof(unsigned short)) return;
 		const void* vertices = static_cast<const unsigned char*>(vb->Data())+vo;
 		const auto* indices = reinterpret_cast<const unsigned short*>(static_cast<const unsigned char*>(ib->Data())+io);
-		const UINT colorOffset = (fvf.Get_FVF() & D3DFVF_DIFFUSE) ? fvf.Get_Diffuse_Offset() : UINT_MAX;
-		const UINT normalOffset = (fvf.Get_FVF() & D3DFVF_NORMAL) ? fvf.Get_Normal_Offset() : UINT_MAX;
-		const UINT specularOffset = (fvf.Get_FVF() & D3DFVF_SPECULAR) ? fvf.Get_Specular_Offset() : UINT_MAX;
 		Apply_Native_Lighting();
 		TextureClass* texture = render_state.Textures[0] ? render_state.Textures[0]->As_TextureClass() : nullptr;
+		NativeDrawSubmission submission;
+		submission.vertices = vertices;
+		submission.vertexBytes = static_cast<UINT>(vb->Size()-vo);
+		submission.vertexStride = stride;
+		submission.vertexCount = vertex_count;
+		submission.indices = indices;
+		submission.indexCount = index_count;
+		submission.topology = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+		submission.layout = fvf.Build_Native_Layout();
+		submission.vertexOwner = vb;
+		submission.indexOwner = ib;
 		if (texture && texture->Peek_Native_Texture()) {
-			Apply_Native_Material(fvf);
-			native->DrawIndexedTextured(vertices, static_cast<UINT>(vb->Size()-vo), stride,
-				vertex_count, fvf.Get_Tex_Offset(0), indices, index_count,
-				D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, texture->Peek_Native_Texture(), colorOffset, vb, ib, normalOffset, specularOffset);
-		} else {
-			native->DrawIndexed(vertices, static_cast<UINT>(vb->Size()-vo), stride,
-				vertex_count, indices, index_count, 0, 0, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, colorOffset, vb, ib, normalOffset, specularOffset);
+			submission.material = Build_Native_Material_Description(fvf);
+			submission.useMaterial = true;
+			submission.texture = texture->Peek_Native_Texture();
 		}
+		Submit_Native_Draw(*native, submission);
 	}
 
 	DX8_RECORD_RENDER(polygon_count,vertex_count,render_state.shader);
@@ -2573,8 +2578,6 @@ void DX8Wrapper::Draw(
 						render_state.Textures[0]->Peek_Native_Texture() : nullptr;
 					for (UINT stage=1; !nativeTexture && stage<4; ++stage)
 						if (render_state.Textures[stage]) nativeTexture = render_state.Textures[stage]->Peek_Native_Texture();
-					const unsigned nativeColorOffset = (vb->FVF_Info().Get_FVF() & D3DFVF_DIFFUSE) != 0 ?
-						vb->FVF_Info().Get_Diffuse_Offset() : UINT_MAX;
 					if (nativeVB == nullptr || nativeIB == nullptr || stride == 0 ||
 						vertexOffset > nativeVB->Size() || indexOffset > nativeIB->Size() ||
 						vertex_count > (nativeVB->Size() - vertexOffset) / stride ||
@@ -2616,20 +2619,24 @@ void DX8Wrapper::Draw(
 					const UINT normalOffset = (nativeFvf.Get_FVF() & D3DFVF_NORMAL) ? nativeFvf.Get_Normal_Offset() : UINT_MAX;
 					const UINT specularOffset = (nativeFvf.Get_FVF() & D3DFVF_SPECULAR) ? nativeFvf.Get_Specular_Offset() : UINT_MAX;
 					Apply_Native_Lighting();
+					NativeDrawSubmission submission;
+					submission.vertices = vertexData;
+					submission.vertexBytes = static_cast<UINT>(nativeVB->Size() - vertexOffset);
+					submission.vertexStride = stride;
+					submission.vertexCount = vertex_count;
+					submission.indices = drawIndices;
+					submission.indexCount = indexCount;
+					submission.topology = topology;
+					submission.layout = nativeFvf.Build_Native_Layout();
+					submission.vertexOwner = nativeVB;
+					submission.indexOwner = indexOwner;
 					if (nativeTexture != nullptr)
 					{
-						Apply_Native_Material(vb->FVF_Info());
-						native->DrawIndexedTextured(vertexData,
-							static_cast<UINT>(nativeVB->Size() - vertexOffset), stride, vertex_count,
-							vb->FVF_Info().Get_Tex_Offset(0), drawIndices, indexCount,
-							topology, nativeTexture, nativeColorOffset, nativeVB, indexOwner, normalOffset, specularOffset);
+						submission.material = Build_Native_Material_Description(nativeFvf);
+						submission.useMaterial = true;
+						submission.texture = nativeTexture;
 					}
-					else
-					{
-						native->DrawIndexed(vertexData, static_cast<UINT>(nativeVB->Size() - vertexOffset),
-							stride, vertex_count, drawIndices, indexCount, 0, 0, topology,
-							nativeColorOffset, nativeVB, indexOwner, normalOffset, specularOffset);
-					}
+					Submit_Native_Draw(*native, submission);
 				}
 			}
 			break;
@@ -5031,10 +5038,9 @@ void DX8Wrapper::Apply_Native_Lighting()
 	native->SetLighting(state);
 }
 
-void DX8Wrapper::Apply_Native_Material(const FVFInfoClass& fvf)
+NativeMaterialDescription DX8Wrapper::Build_Native_Material_Description(const FVFInfoClass& fvf)
 {
-	NativeD3D12Renderer* native = NativeD3D12Renderer::Active();
-	if (!native) return;
+	NativeMaterialDescription description;
 	const auto samplerFilter = [](UINT filter) {
 		return filter == D3DTEXF_ANISOTROPIC ? NativeD3D12FilterMode::Anisotropic :
 			(filter == D3DTEXF_LINEAR ? NativeD3D12FilterMode::Linear : NativeD3D12FilterMode::Point);
@@ -5082,8 +5088,8 @@ void DX8Wrapper::Apply_Native_Material(const FVFInfoClass& fvf)
 		if (value & D3DTA_ALPHAREPLICATE) result |= 32;
 		return result;
 	};
-	native->SetMaterialEnabled(true);
-	native->SetMaterialFactor(RenderStates[D3DRS_TEXTUREFACTOR]);
+	description.enabled = true;
+	description.factor = RenderStates[D3DRS_TEXTUREFACTOR];
 	const UINT uvCount = (fvf.Get_FVF() & D3DFVF_TEXCOUNT_MASK) >> D3DFVF_TEXCOUNT_SHIFT;
 	bool terminated = false;
 	for (UINT stage=0; stage<4; ++stage) {
@@ -5112,17 +5118,31 @@ void DX8Wrapper::Apply_Native_Material(const FVFInfoClass& fvf)
 		const UINT index = states[D3DTSS_TEXCOORDINDEX] & 0xffff;
 		coords.offset = index < uvCount ? fvf.Get_Tex_Offset(index) : UINT_MAX;
 		coords.position = (states[D3DTSS_TEXCOORDINDEX] & 0xffff0000) == D3DTSS_TCI_CAMERASPACEPOSITION;
+		const UINT generation = states[D3DTSS_TEXCOORDINDEX] & 0xffff0000;
+		if (generation == D3DTSS_TCI_CAMERASPACENORMAL)
+			coords.environment = NativeEnvironmentCoordinates::CameraNormal;
+		else if (generation == D3DTSS_TCI_CAMERASPACEREFLECTIONVECTOR)
+			coords.environment = NativeEnvironmentCoordinates::CameraReflection;
 		coords.transform = states[D3DTSS_TEXTURETRANSFORMFLAGS] != D3DTTFF_DISABLE;
 		coords.projected = (states[D3DTSS_TEXTURETRANSFORMFLAGS] & D3DTTFF_PROJECTED) != 0;
 		Matrix4x4 matrix = DX8Transforms[D3DTS_TEXTURE0+stage];
 		if (coords.position) matrix = render_state.world * render_state.view * matrix;
 		std::memcpy(coords.matrix.data(), &matrix, sizeof(matrix));
 		TextureClass* texture = render_state.Textures[stage] ? render_state.Textures[stage]->As_TextureClass() : nullptr;
-		if (texture) texture->Upload_Native_Surface();
-		native->SetMaterialStage(stage, settings, coords, texture ? texture->Peek_Native_Texture() : nullptr);
-		native->SetSamplerState(samplerFilter(states[D3DTSS_MINFILTER]),
-			samplerFilter(states[D3DTSS_MAGFILTER]), samplerFilter(states[D3DTSS_MIPFILTER]),
-			states[D3DTSS_ADDRESSU] == D3DTADDRESS_CLAMP, states[D3DTSS_ADDRESSV] == D3DTADDRESS_CLAMP);
-		native->SetMaterialSampler(stage);
+		description.stages[stage] = settings;
+		description.coordinates[stage] = coords;
+		description.textures[stage] = texture ? texture->Prepare_Native_Texture() : nullptr;
+		description.samplers[stage] = {
+			samplerFilter(states[D3DTSS_MINFILTER]), samplerFilter(states[D3DTSS_MAGFILTER]),
+			samplerFilter(states[D3DTSS_MIPFILTER]), states[D3DTSS_ADDRESSU] == D3DTADDRESS_CLAMP,
+			states[D3DTSS_ADDRESSV] == D3DTADDRESS_CLAMP, 1};
 	}
+	return description;
+}
+
+void DX8Wrapper::Apply_Native_Material(const FVFInfoClass& fvf)
+{
+	NativeD3D12Renderer* native = NativeD3D12Renderer::Active();
+	if (!native) return;
+	Apply_Native_Material_Description(*native, Build_Native_Material_Description(fvf));
 }

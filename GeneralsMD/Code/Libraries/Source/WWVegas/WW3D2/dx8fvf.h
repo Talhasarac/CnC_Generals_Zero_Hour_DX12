@@ -49,6 +49,7 @@
 
 #include "always.h"
 #include <d3d8.h>
+#include "native_draw_state.h"
 #ifdef WWDEBUG
 #include "wwdebug.h"
 #endif
@@ -263,6 +264,9 @@ class FVFInfoClass : public W3DMPO
 	unsigned							texcoord_offset[D3DDP_MAXTEXCOORD];	
 	unsigned							diffuse_offset;
 	unsigned							specular_offset;
+	mutable NativeVertexLayoutDesc nativeLayout;
+	mutable unsigned nativeLayoutFVF = UINT_MAX;
+	mutable unsigned nativeLayoutStride = 0;
 public:
 	FVFInfoClass(unsigned FVF, unsigned vertex_size=0);
 
@@ -280,6 +284,10 @@ public:
 	inline unsigned Get_FVF_Size() const { return fvf_size; }
 
 	void Get_FVF_Name(StringClass& fvfname) const;	// For debug purposes
+	// Emits the native input layout represented by this legacy vertex storage.
+	// The FVF remains available to old callers, but native draw producers should
+	// pass this value across the renderer boundary instead of replaying FVF state.
+	const NativeVertexLayoutDesc& Build_Native_Layout() const;
 
 	// for enabling vertex shaders
 	inline void Set_FVF(unsigned fvf) const { FVF=fvf; }

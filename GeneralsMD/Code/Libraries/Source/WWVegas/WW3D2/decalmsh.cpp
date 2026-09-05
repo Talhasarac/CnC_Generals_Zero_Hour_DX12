@@ -58,12 +58,87 @@
 #include "meshmdl.h"
 #include "plane.h"
 #include "statistics.h"
-#include "dx8vertexbuffer.h"
-#include "dx8indexbuffer.h"
 #include "simplevec.h"
 #include "texture.h"
-#include "dx8wrapper.h"
-#include "dx8caps.h"
+#include "camera.h"
+#include "native_draw_state.h"
+#include "native_pipeline_description.h"
+#include "native_light_environment.h"
+#include <vector>
+#include <cstddef>
+
+
+namespace {
+struct NativeDecalVertex {
+	float x,y,z,nx,ny,nz;
+	UINT32 diffuse;
+	float u1,v1,u2,v2;
+};
+
+bool DrawNativeDecalRun(CameraClass& camera, MeshClass& parent, const Matrix3D& world,
+	const std::vector<NativeDecalVertex>& vertices, const std::vector<unsigned short>& indices,
+	int first, int count, TextureClass* texture, VertexMaterialClass* vertexMaterial,
+	const ShaderClass& shader)
+{
+	NativeD3D12Renderer* native = NativeD3D12Renderer::Active();
+	if (!native || vertices.empty() || count<=0) return false;
+	NativeD3D12ScopedState scope(*native);
+	Matrix3D view;
+	Matrix4x4 projection;
+	camera.Get_View_Matrix(&view);
+	camera.Get_D3D_Projection_Matrix(&projection);
+	NativeMapperContext context = {
+		Matrix4x4(world).Transpose()*Matrix4x4(view).Transpose(), Matrix4x4(view), projection};
+	const Matrix4x4 wvp = context.worldView*projection.Transpose();
+	native->SetWorldView(reinterpret_cast<const float*>(&context.worldView));
+	native->SetWorldViewProjection(reinterpret_cast<const float*>(&wvp));
+	native->SetTreeSway(nullptr,0);
+
+	NativeDrawSubmission draw;
+	draw.vertices = vertices.data();
+	draw.vertexCount = static_cast<UINT>(vertices.size());
+	draw.vertexStride = sizeof(NativeDecalVertex);
+	draw.vertexBytes = draw.vertexCount*draw.vertexStride;
+	draw.indices = indices.data()+first*3;
+	draw.indexCount = count*3;
+	draw.layout.stride = sizeof(NativeDecalVertex);
+	draw.layout.Add(NativeVertexSemantic::Position,0,DXGI_FORMAT_R32G32B32_FLOAT,offsetof(NativeDecalVertex,x));
+	draw.layout.Add(NativeVertexSemantic::Normal,0,DXGI_FORMAT_R32G32B32_FLOAT,offsetof(NativeDecalVertex,nx));
+	draw.layout.Add(NativeVertexSemantic::Color,0,DXGI_FORMAT_R8G8B8A8_UNORM,offsetof(NativeDecalVertex,diffuse));
+	draw.layout.Add(NativeVertexSemantic::TexCoord,0,DXGI_FORMAT_R32G32_FLOAT,offsetof(NativeDecalVertex,u1));
+	draw.layout.Add(NativeVertexSemantic::TexCoord,1,DXGI_FORMAT_R32G32_FLOAT,offsetof(NativeDecalVertex,u2));
+	draw.material = shader.Get_Native_Texture_Material();
+	draw.useMaterial = true;
+	if (texture) {
+		draw.material.textures[0] = texture->Prepare_Native_Texture();
+		draw.material.samplers[0] = texture->Get_Filter().Get_Native_Description();
+	}
+	draw.material.coordinates[0].offset = offsetof(NativeDecalVertex,u1);
+	draw.material.coordinates[1].offset = offsetof(NativeDecalVertex,u2);
+	if (vertexMaterial && !vertexMaterial->Describe_Native_Mapping(context,draw.layout,draw.material)) {
+		WWASSERT(false); // An unsupported authored mapper must not silently use stale state.
+		return false;
+	}
+	auto lighting = native->CaptureState().lighting;
+	if (parent.Get_Lighting_Environment())
+		Describe_Native_Light_Environment(*parent.Get_Lighting_Environment(),context.view,lighting);
+	if (vertexMaterial) vertexMaterial->Describe_Native_Lighting(lighting,WW3D::Is_Coloring_Enabled());
+	else lighting.flags[0] = 0;
+	lighting.flags[1] = shader.Get_Secondary_Gradient()!=ShaderClass::SECONDARY_GRADIENT_DISABLE;
+	lighting.flags[2] = parent.Get_ObjectScale()!=1.0f;
+	native->SetLighting(lighting);
+	if (shader.Get_Fog_Func()==ShaderClass::FOG_DISABLE)
+		native->SetVertexFog(0,0,1,0,0,false);
+	else if (shader.Get_Fog_Func()!=ShaderClass::FOG_ENABLE) {
+		const auto state = native->CaptureState();
+		native->SetVertexFog(state.fogMode,state.fogParameters[0],state.fogParameters[1],
+			state.fogParameters[2],shader.Get_Fog_Func()==ShaderClass::FOG_WHITE ? 0xffffff : 0,state.fogRange);
+	}
+	shader.Get_Native_Pipeline(ShaderClass::Is_Backface_Culling_Inverted()).Apply(*native);
+	native->SetDepthBias(-8);
+	return Submit_Native_Draw(*native,draw);
+}
+}
 
 #define DISABLE_CLIPPING	0
 
@@ -289,80 +364,31 @@ RigidDecalMeshClass::~RigidDecalMeshClass(void)
  * HISTORY:                                                                                    *
  *   1/26/00    gth : Created.                                                                 *
  *=============================================================================================*/
-void RigidDecalMeshClass::Render(void)
+void RigidDecalMeshClass::Render(CameraClass& camera)
 {
-	if ((Decals.Count() == 0) || (WW3D::Are_Decals_Enabled() == false)) return;
-	
-	/*
-	** Install the mesh'es transform.  NOTE, this could go wrong if someone changes the
-	** transform between the time that the mesh is rendered and the time that the decal
-	** mesh is rendered...  It shouldn't happen though.
-	*/
-	DX8Wrapper::Set_Transform(D3DTS_WORLD,Parent->Get_Transform());
+	if (Decals.Count()==0 || !WW3D::Are_Decals_Enabled()) return;
 
-	/*
-	** Copy the vertices into the dynamic vb
-	*/
-	DynamicVBAccessClass dynamic_vb(BUFFER_TYPE_DYNAMIC_DX8,dynamic_fvf_type,Verts.Count());
-	{	
-		DynamicVBAccessClass::WriteLockClass lock(&dynamic_vb);
-		VertexFormatXYZNDUV2 * vertex = lock.Get_Formatted_Vertex_Array();
-
-		for (int i=0; i<Verts.Count(); i++) {
-			
-			vertex->x = Verts[i].X;
-			vertex->y = Verts[i].Y;
-			vertex->z = Verts[i].Z;
-
-			vertex->nx = VertNorms[i].X;
-			vertex->ny = VertNorms[i].Y;
-			vertex->nz = VertNorms[i].Z;
-
-			vertex->diffuse = 0xFFFFFFFF;
-
-			vertex->u1 = TexCoords[i].X;
-			vertex->v1 = TexCoords[i].Y;
-
-			vertex->u2 = 0.0f;
-			vertex->v2 = 0.0f;
-
-			vertex++;
-		}
+	// These transient CPU arrays are uploaded by the native renderer's frame
+	// allocator. Skins keep the existing deformation; no legacy VB/state is bound.
+	std::vector<NativeDecalVertex> vertices(Verts.Count());
+	for (int i=0; i<Verts.Count(); ++i) {
+		const Vector3& p = Verts[i];
+		const Vector3& normal = VertNorms[i];
+		vertices[i] = {p.X,p.Y,p.Z,normal.X,normal.Y,normal.Z,0xffffffff,
+			TexCoords[i].X,TexCoords[i].Y,0,0};
 	}
-	
-	/*
-	** Copy the indices into the dynamic ib
-	*/
-	DynamicIBAccessClass dynamic_ib(BUFFER_TYPE_DYNAMIC_DX8,Polys.Count() * 3);
-	{
-		DynamicIBAccessClass::WriteLockClass lock(&dynamic_ib);
-		unsigned short * indices = lock.Get_Index_Array();
-		for (int i=0; i < Polys.Count(); i++)
-		{
-			indices[i*3 + 0] = (unsigned short)Polys[i].I;
-			indices[i*3 + 1] = (unsigned short)Polys[i].J;
-			indices[i*3 + 2] = (unsigned short)Polys[i].K;
-		}
+	std::vector<unsigned short> indices(Polys.Count()*3);
+	for (int i=0; i<Polys.Count(); ++i) {
+		indices[i*3] = static_cast<unsigned short>(Polys[i].I);
+		indices[i*3+1] = static_cast<unsigned short>(Polys[i].J);
+		indices[i*3+2] = static_cast<unsigned short>(Polys[i].K);
 	}
-
-	/*
-	** Render in runs of constant material settings
-	*/
-	int cur_poly_index = 0;
-	int next_poly_index = 0;
-
-	while (next_poly_index < Polys.Count()) {
-		next_poly_index = Process_Material_Run(cur_poly_index);
-
-		DX8Wrapper::Set_Index_Buffer(dynamic_ib,0);
-		DX8Wrapper::Set_Vertex_Buffer(dynamic_vb);
-		DX8Wrapper::Draw_Triangles(	3*cur_poly_index,
-												(next_poly_index - cur_poly_index), // poly count
-												Polys[cur_poly_index].I, 
-												1 + Polys[next_poly_index-1].K - Polys[cur_poly_index].I);
-		cur_poly_index = next_poly_index;
+	for (int first=0; first<Polys.Count();) {
+		const int next = Process_Material_Run(first);
+		DrawNativeDecalRun(camera,*Parent,Parent->Get_Transform(),
+			vertices,indices,first,next-first,Textures[first],VertexMaterials[Polys[first].I],Shaders[first]);
+		first = next;
 	}
-		
 }
 
 
@@ -383,15 +409,12 @@ void RigidDecalMeshClass::Render(void)
  *=============================================================================================*/
 int RigidDecalMeshClass::Process_Material_Run(int start_index)
 {
-	DX8Wrapper::Set_Texture(0,Textures[start_index]);
-	DX8Wrapper::Set_Material(VertexMaterials[Polys[start_index].I]);
-	DX8Wrapper::Set_Shader(Shaders[start_index]);
 
 	int next_index = start_index;
 	while (	(next_index < Polys.Count()) && 
 				(Textures[next_index] == Textures[start_index]) &&
 				(Shaders[next_index] == Shaders[start_index]) &&
-				(VertexMaterials[next_index] == VertexMaterials[start_index])) 
+				(VertexMaterials[Polys[next_index].I] == VertexMaterials[Polys[start_index].I]))
 	{
 		next_index++;
 	}
@@ -419,20 +442,9 @@ bool RigidDecalMeshClass::Create_Decal
 	const DynamicVectorClass<Vector3> * world_vertex_locs
 )
 {
-	// Since we can't rely on the hardware polygon offset function, I'm physically offsetting
-	// the decal polygons along the normal of the decal generator.  If we could instead rely
-	// on hardware "polygon offset" we could remove this code and we could make decals non-sorting
+	// Native rasterizer depth bias handles coplanar geometry without modifying
+	// the authored decal positions or consulting legacy device capabilities.
 	Vector3 zbias_offset(0.0f,0.0f,0.0f);
-	
-	if (!DX8Wrapper::Get_Current_Caps()->Support_ZBias()) {
-		const float ZBIAS_DISTANCE = 0.01f;
-		generator->Get_Transform().Get_Z_Vector(&zbias_offset);
-		Matrix3D invtm;
-		Parent->Get_Transform().Get_Orthogonal_Inverse(invtm);
-		Matrix3D::Rotate_Vector(invtm,zbias_offset,&zbias_offset);
-		zbias_offset *= ZBIAS_DISTANCE;
-	}
-
 	// NOTE: world_vertex_locs/norms should not be set for this class
 	WWASSERT(world_vertex_locs == 0);
 
@@ -772,94 +784,38 @@ SkinDecalMeshClass::~SkinDecalMeshClass(void)
  * HISTORY:                                                                                    *
  *   1/31/00    NH : Created.                                                                  *
  *=============================================================================================*/
-void SkinDecalMeshClass::Render(void)
+void SkinDecalMeshClass::Render(CameraClass& camera)
 {
-	if ((Decals.Count() == 0) || (WW3D::Are_Decals_Enabled() == false)) return;
+	if (Decals.Count()==0 || !WW3D::Are_Decals_Enabled()) return;
 
-	/*
-	** Don't allow decals on sorted meshes
-	*/
-	MeshModelClass * model = Parent->Peek_Model();
+	MeshModelClass* model = Parent->Peek_Model();
 	if (model->Get_Flag(MeshModelClass::SORT)) {
 		WWDEBUG_SAY(("ERROR: decals applied to a sorted mesh!\n"));
 		return;
 	}
-
-	/*
-	** Skin decals coordinates are in world space
-	*/
-	DX8Wrapper::Set_Transform(D3DTS_WORLD,Matrix3D::Identity);
-
-	/*
-	** Skin decals have to get the deformed vertices of their parent meshes.  For this
-	** reason, decals on skins is not a very good idea...  
-	*/
 	_TempVertexBuffer.Uninitialised_Grow(model->Get_Vertex_Count());
 	_TempNormalBuffer.Uninitialised_Grow(model->Get_Vertex_Count());
 	Parent->Get_Deformed_Vertices(&(_TempVertexBuffer[0]),&(_TempNormalBuffer[0]));
-
-	/*
-	** Copy the vertices into the dynamic vb
-	*/
-	DynamicVBAccessClass dynamic_vb(BUFFER_TYPE_DYNAMIC_DX8,dynamic_fvf_type,ParentVertexIndices.Count());
-	{	
-		DynamicVBAccessClass::WriteLockClass lock(&dynamic_vb);
-		VertexFormatXYZNDUV2 * vertex = lock.Get_Formatted_Vertex_Array();
-
-		for (int i=0; i<ParentVertexIndices.Count(); i++) {
-			int src_i = ParentVertexIndices[i];
-			vertex->x = _TempVertexBuffer[src_i].X;
-			vertex->y = _TempVertexBuffer[src_i].Y;
-			vertex->z = _TempVertexBuffer[src_i].Z;
-
-			vertex->nx = _TempNormalBuffer[src_i].X;
-			vertex->ny = _TempNormalBuffer[src_i].Y;
-			vertex->nz = _TempNormalBuffer[src_i].Z;
-
-			vertex->diffuse = 0xFFFFFFFF;
-
-			vertex->u1 = TexCoords[i].X;
-			vertex->v1 = TexCoords[i].Y;
-
-			vertex->u2 = 0.0f;
-			vertex->v2 = 0.0f;
-			
-			vertex++;
-		}
+	// These transient CPU arrays are uploaded by the native renderer's frame
+	// allocator. Skins keep the existing deformation; no legacy VB/state is bound.
+	std::vector<NativeDecalVertex> vertices(ParentVertexIndices.Count());
+	for (int i=0; i<ParentVertexIndices.Count(); ++i) {
+		const Vector3& p = _TempVertexBuffer[ParentVertexIndices[i]];
+		const Vector3& normal = _TempNormalBuffer[ParentVertexIndices[i]];
+		vertices[i] = {p.X,p.Y,p.Z,normal.X,normal.Y,normal.Z,0xffffffff,
+			TexCoords[i].X,TexCoords[i].Y,0,0};
 	}
-
-	/*
-	** Copy the indices into the dynamic ib
-	*/
-	DynamicIBAccessClass dynamic_ib(BUFFER_TYPE_DYNAMIC_DX8,Polys.Count() * 3);
-	{
-		DynamicIBAccessClass::WriteLockClass lock(&dynamic_ib);
-		unsigned short * indices = lock.Get_Index_Array();
-		for (int i=0; i < Polys.Count(); i++)
-		{
-			indices[i*3 + 0] = (unsigned short)Polys[i].I;
-			indices[i*3 + 1] = (unsigned short)Polys[i].J;
-			indices[i*3 + 2] = (unsigned short)Polys[i].K;
-		}
+	std::vector<unsigned short> indices(Polys.Count()*3);
+	for (int i=0; i<Polys.Count(); ++i) {
+		indices[i*3] = static_cast<unsigned short>(Polys[i].I);
+		indices[i*3+1] = static_cast<unsigned short>(Polys[i].J);
+		indices[i*3+2] = static_cast<unsigned short>(Polys[i].K);
 	}
-
-	/*
-	** Render in runs of constant material settings
-	*/
-	int cur_poly_index = 0;
-	int next_poly_index = 0;
-
-	while (next_poly_index < Polys.Count()) {
-		next_poly_index = Process_Material_Run(cur_poly_index);
-
-		DX8Wrapper::Set_Index_Buffer(dynamic_ib,0);
-		DX8Wrapper::Set_Vertex_Buffer(dynamic_vb);
-		DX8Wrapper::Draw_Triangles(3*cur_poly_index,
-											(next_poly_index - cur_poly_index), // poly count
-											Polys[cur_poly_index].I, 
-											1 + Polys[next_poly_index-1].K - Polys[cur_poly_index].I);
-		
-		cur_poly_index = next_poly_index;
+	for (int first=0; first<Polys.Count();) {
+		const int next = Process_Material_Run(first);
+		DrawNativeDecalRun(camera,*Parent,Matrix3D::Identity,
+			vertices,indices,first,next-first,Textures[first],VertexMaterials[Polys[first].I],Shaders[first]);
+		first = next;
 	}
 }
 
@@ -881,15 +837,12 @@ void SkinDecalMeshClass::Render(void)
  *=============================================================================================*/
 int SkinDecalMeshClass::Process_Material_Run(int start_index)
 {
-	DX8Wrapper::Set_Texture(0,Textures[start_index]);
-	DX8Wrapper::Set_Material(VertexMaterials[Polys[start_index].I]);
-	DX8Wrapper::Set_Shader(Shaders[start_index]);
 
 	int next_index = start_index;
 	while (	(next_index < Polys.Count()) && 
 				(Textures[next_index] == Textures[start_index]) &&
 				(Shaders[next_index] == Shaders[start_index]) &&
-				(VertexMaterials[next_index] == VertexMaterials[start_index])) 
+				(VertexMaterials[Polys[next_index].I] == VertexMaterials[Polys[start_index].I]))
 	{
 		next_index++;
 	}

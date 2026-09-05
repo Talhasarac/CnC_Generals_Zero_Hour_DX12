@@ -51,6 +51,7 @@
 #include "sortingrenderer.h"
 #include "mesh.h"
 #include "dx8wrapper.h"
+#include "native_draw_state.h"
 
 class DX8PolygonRendererClass;
 class DX8TextureCategoryClass;
@@ -91,6 +92,11 @@ public:
 	
 	unsigned							Get_Vertex_Offset(void)	{ return vertex_offset; }
 	unsigned							Get_Index_Offset(void)	{ return index_offset; }
+	bool Describe_Native_Range(NativeDrawSubmission& draw, unsigned baseVertex) const {
+		return Describe_Native_Indexed_Range(draw,index_offset,index_count,baseVertex,
+			min_vertex_index,vertex_index_range,
+			strip ? D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP : D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	}
 	inline unsigned						Get_Pass(void)	{ return pass; }
 
 	MeshModelClass*				Get_Mesh_Model_Class() { return mmc; }

@@ -46,6 +46,9 @@
 //         Includes                                                      
 //-----------------------------------------------------------------------------
 #include "W3DDevice/GameClient/W3DRoadBuffer.h"
+#include "W3DDevice/GameClient/NativeTerrainDraw.h"
+#include "W3DDevice/GameClient/NativeWorldMaterial.h"
+#include "WW3D2/native_pipeline_description.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -162,12 +165,6 @@ RoadType::~RoadType(void)
 //=============================================================================
 /** Sets the W3D texture. */
 //=============================================================================
-void RoadType::applyTexture(void)
-{
- 	W3DShaderManager::setTexture(0,m_roadTexture);
-	DX8Wrapper::Set_Index_Buffer(m_indexRoad,0);
-	DX8Wrapper::Set_Vertex_Buffer(m_vertexRoad);
-}
 
 
 //=============================================================================
@@ -3312,23 +3309,20 @@ void W3DRoadBuffer::drawRoads(CameraClass * camera, TextureClass *cloudTexture, 
 		}
 	}
 	Int stacking;
-	W3DShaderManager::ShaderTypes st=W3DShaderManager::ST_ROAD_BASE; //set default shader
-	if (cloudTexture) {	
-		st=W3DShaderManager::ST_ROAD_BASE_NOISE1;
-		if (noiseTexture)
-			st=W3DShaderManager::ST_ROAD_BASE_NOISE12;
-	}
-	else
-	if (noiseTexture)
-		st=W3DShaderManager::ST_ROAD_BASE_NOISE2;
-
-	Int devicePasses = 1;	//assume regular rendering
- 	//Find number of passes required to render current shader
-	devicePasses=W3DShaderManager::getShaderPasses(st);
-
-	W3DShaderManager::setTexture(1,cloudTexture);	//cloud
-	W3DShaderManager::setTexture(2,noiseTexture);	//noise/lightmap
-
+	NativeD3D12Renderer* native = NativeD3D12Renderer::Active();
+	if (!native) return;
+	NativeD3D12ScopedState roadPass(*native);
+	NativeTerrainSetCameraMatrices(*native,camera,Matrix3D(true));
+	NativeTerrainSetMaterial(*native,false,true,D3D12_CULL_MODE_NONE);
+	native->SetVertexFog(0,0,1,1,0,false);
+	NativePipelineDescription pipeline;
+	pipeline.depthWrite = false;
+	pipeline.blend = true;
+	pipeline.source = D3D12_BLEND_SRC_ALPHA;
+	pipeline.destination = D3D12_BLEND_INV_SRC_ALPHA;
+	const NativeMaterialCoordinates cloudCoordinates = W3DShaderManager::nativeCloudCoordinates();
+	const NativeMaterialCoordinates noiseCoordinates = W3DShaderManager::nativeNoiseCoordinates();
+	const Int devicePasses = !wireframe && cloudTexture && noiseTexture ? 2 : 1;
 
 	Bool loadBuffers = false;
 	if (m_updateBuffers) {
@@ -3347,28 +3341,44 @@ void W3DRoadBuffer::drawRoads(CameraClass * camera, TextureClass *cloudTexture, 
 			m_curRoadType = i;
 			if (loadBuffers) loadRoadsInVertexAndIndexBuffers();
 			if (m_roadTypes[i].getNumIndices() == 0) continue;
-			if (wireframe) {
-				m_roadTypes[i].applyTexture();
-				DX8Wrapper::Set_Texture(0,NULL);
-			} else {
-				m_roadTypes[i].applyTexture();
-			}
-	#ifdef _DEBUG
-			//DX8Wrapper::Set_Shader(detailShader); // shows clipping.
-	#endif	
-			for (Int pass=0; pass < devicePasses; pass++)
-			{
-				if (!wireframe)
-		 			W3DShaderManager::setShader(st, pass);
-				//Draw all this road type.
-				DX8Wrapper::Draw_Triangles(	0, m_roadTypes[i].getNumIndices()/3, 0,	m_roadTypes[i].getNumVertices());
+			RoadType& road = m_roadTypes[i];
+			TextureClass* texture = wireframe ? NULL : road.getTexture();
+			for (Int pass=0;pass<devicePasses;++pass) {
+				NativeMaterialDescription material = NativeWorldModulatedMaterial(texture,
+					offsetof(VertexFormatXYZDUV1,u1),NULL);
+				TextureClass* modulation = !wireframe ? (pass == 0 && cloudTexture ? cloudTexture : noiseTexture) : NULL;
+				if (modulation) {
+					material.textures[1] = modulation->Prepare_Native_Texture();
+					material.stages[1] = material.stages[0];
+					material.stages[1].colorArg2 = material.stages[1].alphaArg2 = UINT(NativeMaterialSource::Current);
+					const bool cloud = pass == 0 && cloudTexture;
+					material.coordinates[1] = cloud ? cloudCoordinates : noiseCoordinates;
+					material.samplers[1] = {cloud ? NativeD3D12FilterMode::Linear : NativeD3D12FilterMode::Point,
+						NativeD3D12FilterMode::Linear,
+						TheGlobalData && TheGlobalData->m_trilinearTerrainTex ? NativeD3D12FilterMode::Linear : NativeD3D12FilterMode::Point,
+						false,false,1};
+				}
+				pipeline.source = D3D12_BLEND_SRC_ALPHA;
+				pipeline.destination = D3D12_BLEND_INV_SRC_ALPHA;
+				if (pass == 1) {
+					// Preserve the masked lightmap multiply after cloud compositing.
+					// Road alpha prevents this pass from darkening uncovered terrain.
+					material.stages[0].colorOp = NativeMaterialOp::Select2;
+					material.stages[0].colorArg2 = UINT(NativeMaterialSource::Diffuse) | 32u;
+					material.stages[0].alphaOp = NativeMaterialOp::Select1;
+					material.stages[1].colorOp = NativeMaterialOp::BlendCurrentAlpha;
+					material.stages[1].alphaOp = NativeMaterialOp::Disable;
+					pipeline.source = D3D12_BLEND_ZERO;
+					pipeline.destination = D3D12_BLEND_SRC_COLOR;
+				}
+				pipeline.Apply(*native);
+				Apply_Native_Material_Description(*native,material);
+				NativeTerrainDrawBuffer(*native,road.getVB(),road.getIB(),0,
+					road.getNumIndices(),road.getNumVertices(),texture);
 #ifdef LOG_STATS
-				polys += m_roadTypes[i].getNumIndices()/3;
+				polys += road.getNumIndices()/3;
 #endif
 			}
-
-			if (!wireframe)	//shader was applied at least once?
- 				W3DShaderManager::resetShader(st);
 		}
 	}
 #ifdef LOG_STATS
@@ -3377,31 +3387,7 @@ void W3DRoadBuffer::drawRoads(CameraClass * camera, TextureClass *cloudTexture, 
 	}
 #endif
 
-#if 0
-	// Need to use a separate set of index & vertex buffers for this.  jba.
-	DX8Wrapper::Set_Index_Buffer(NULL,0);
-	DX8Wrapper::Set_Vertex_Buffer(NULL);
-	if (pDynamicLightsIterator) {
-		for (i=0; i<m_maxRoadTypes; i++) {
-			m_curRoadType = i;
-			m_curUniqueID = m_roadTypes[i].getUniqueID();
-			if (m_curUniqueID < 0 || m_curUniqueID >= m_maxRoadTypes) continue;
-			loadLitRoadsInVertexAndIndexBuffers(pDynamicLightsIterator);
-			if (this->m_curNumRoadIndices == 0) continue;
-			if (wireframe) {
-					DX8Wrapper::Set_Texture(0,NULL);
-			} else {
-				m_roadTypes[i].applyTexture();
-				if (cloudTexture) {
-					DX8Wrapper::Set_Texture(1,cloudTexture);
-				}
-			}
-			DX8Wrapper::Set_Shader(detailAlphaShader);
-			//Draw all the roads.
-			DX8Wrapper::Draw_Triangles(	0, m_curNumRoadIndices/3, 0,	m_curNumRoadVertices);
-		}
-	}
-#endif
+
 	m_curRoadType = 0;
 }
 

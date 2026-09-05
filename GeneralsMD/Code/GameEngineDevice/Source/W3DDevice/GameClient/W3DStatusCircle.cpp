@@ -301,85 +301,57 @@ Int W3DStatusCircle::updateScreenVB(Int diffuse)
 	return -1;
 }
 
-void W3DStatusCircle::Render(RenderInfoClass & rinfo)	 
+#include "W3DDevice/GameClient/NativeTerrainDraw.h"
+#include "WW3D2/native_pipeline_description.h"
+
+void W3DStatusCircle::Render(RenderInfoClass& rinfo)
 {
-	if (!TheGameLogic->isInGame() || TheGameLogic->getGameMode() == GAME_SHELL)
-		return;
-
-	if (m_indexBuffer == NULL) {
-		initData();
-	}
-	if (m_indexBuffer == NULL) {
-		return;
-	}
-	Bool setIndex = false;
-	Matrix3D tm(true);
-	if( TheGlobalData->m_showTeamDot )
+	if (!TheGameLogic->isInGame() || TheGameLogic->getGameMode() == GAME_SHELL) return;
+	NativeD3D12Renderer* native = NativeD3D12Renderer::Active();
+	if (!native) return;
+	if (!m_indexBuffer) initData();
+	if (!m_indexBuffer) return;
+	NativeD3D12ScopedState pass(*native);
+	NativeTerrainSetMaterial(*native,false,true,D3D12_CULL_MODE_NONE);
+	native->SetVertexFog(0,0,1,1,0,false);
+	if (TheGlobalData->m_showTeamDot)
 	{
-		if (m_needUpdate) {
-			updateCircleVB();
-		}
-		//Apply the shader and material
-		DX8Wrapper::Set_Material(m_vertexMaterialClass);
-		DX8Wrapper::Set_Shader(m_shaderClass);
-		DX8Wrapper::Set_Texture(0, NULL);
-		DX8Wrapper::Set_Index_Buffer(m_indexBuffer,0);
-		DX8Wrapper::Set_Vertex_Buffer(m_vertexBufferCircle);
-		setIndex = true;
-
-		Vector3 vec(0.95f, 0.67f, 0);
-		Matrix3x3 rot(true);
-
-		tm.Set_Translation(vec);
-
-		DX8Wrapper::Set_Transform(D3DTS_WORLD,tm);
-		DX8Wrapper::Draw_Triangles(	0,NUM_TRI, 0,	(m_numTriangles*3));
+		if (m_needUpdate) updateCircleVB();
+		Matrix3D world(true);
+		world.Set_Translation(Vector3(0.95f,0.67f,0));
+		NativeTerrainSetCameraMatrices(*native,&rinfo.Camera,world);
+		NativePipelineDescription pipeline = m_shaderClass.Get_Native_Pipeline();
+		pipeline.cull = D3D12_CULL_MODE_NONE;
+		pipeline.Apply(*native);
+		NativeTerrainDrawBuffer(*native,m_vertexBufferCircle,m_indexBuffer,0,
+			NUM_TRI*3,m_numTriangles*3,NULL);
 	}
 
-
-	ScriptEngine::TFade fade = TheScriptEngine->getFade();
-	if (fade == ScriptEngine::FADE_NONE) {
-		return;
-	}
-
-	if (!setIndex) {
-		DX8Wrapper::Set_Material(m_vertexMaterialClass);
-		DX8Wrapper::Set_Index_Buffer(m_indexBuffer,0);
-		DX8Wrapper::Set_Texture(0, NULL);
-	}
-
-	tm.Make_Identity();
-	Real intensity = TheScriptEngine->getFadeValue();
-	Int clr = 255*intensity;
-	Int diffuse = (0xff<<24)|(clr<<16)|(clr<<8)|clr;	 // b g<<8 r<<16 a<<24.		 
-	updateScreenVB(diffuse);
-	DX8Wrapper::Set_Transform(D3DTS_WORLD,tm);
-	DX8Wrapper::Set_Shader(ShaderClass(SC_ADD));
-	DX8Wrapper::Set_Vertex_Buffer(m_vertexBufferScreen);
-	DX8Wrapper::Apply_Render_State_Changes();
+	const ScriptEngine::TFade fade = TheScriptEngine->getFade();
+	if (fade == ScriptEngine::FADE_NONE) return;
+	const int level = static_cast<int>(255 * TheScriptEngine->getFadeValue());
+	const UINT32 color = 0xff000000u | (level<<16) | (level<<8) | level;
+	updateScreenVB(color);
+	NativeTerrainSetCameraMatrices(*native,&rinfo.Camera,Matrix3D(true));
+	NativePipelineDescription pipeline = ShaderClass(SC_ADD).Get_Native_Pipeline();
+	pipeline.cull = D3D12_CULL_MODE_NONE;
+	unsigned draws = 1;
 	switch (fade) {
-		default:
-		case ScriptEngine::FADE_ADD:
-			DX8Wrapper::Draw_Triangles(	0,2, 0,	(2*3));
-			break;
-		case ScriptEngine::FADE_SUBTRACT:
-			DX8Wrapper::Set_DX8_Render_State(D3DRS_BLENDOP, D3DBLENDOP_REVSUBTRACT );
-			DX8Wrapper::Draw_Triangles(	0,2, 0,	(2*3));
-			DX8Wrapper::Set_DX8_Render_State(D3DRS_BLENDOP, D3DBLENDOP_ADD );
-			break;
-		case ScriptEngine::FADE_SATURATE:
-			// 4x multiply
-			DX8Wrapper::Set_DX8_Render_State(D3DRS_SRCBLEND,D3DBLEND_DESTCOLOR);
-			DX8Wrapper::Set_DX8_Render_State(D3DRS_DESTBLEND,D3DBLEND_SRCCOLOR);
-			DX8Wrapper::Draw_Triangles(	0,2, 0,	(2*3));
-			DX8Wrapper::Draw_Triangles(	0,2, 0,	(2*3));
-			break;
-		case ScriptEngine::FADE_MULTIPLY:
-			// Straight multiply
-			DX8Wrapper::Set_DX8_Render_State(D3DRS_SRCBLEND,D3DBLEND_ZERO);
-			DX8Wrapper::Set_DX8_Render_State(D3DRS_DESTBLEND,D3DBLEND_SRCCOLOR);
-			DX8Wrapper::Draw_Triangles(	0,2, 0,	(2*3));
-			break;
+	case ScriptEngine::FADE_SUBTRACT:
+		pipeline.operation = D3D12_BLEND_OP_REV_SUBTRACT;
+		break;
+	case ScriptEngine::FADE_SATURATE:
+		pipeline.source = D3D12_BLEND_DEST_COLOR;
+		pipeline.destination = D3D12_BLEND_SRC_COLOR;
+		draws = 2; // Preserve the two successive authored multiply passes.
+		break;
+	case ScriptEngine::FADE_MULTIPLY:
+		pipeline.source = D3D12_BLEND_ZERO;
+		pipeline.destination = D3D12_BLEND_SRC_COLOR;
+		break;
+	default: break;
 	}
-	ShaderClass::Invalidate();
+	pipeline.Apply(*native);
+	for (unsigned draw = 0; draw < draws; ++draw)
+		NativeTerrainDrawBuffer(*native,m_vertexBufferScreen,m_indexBuffer,0,6,6,NULL);
 }

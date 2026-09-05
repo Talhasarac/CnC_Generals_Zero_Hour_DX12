@@ -19,6 +19,8 @@
 #include "ww3dformat.h"
 #include "formconv.h"
 #include "shader.h"
+#include "native_pipeline_description.h"
+#include "native_draw_state.h"
 #include "dx8fvf.h"
 #include "w3d_util.h"
 #include "w3d_file.h"
@@ -31,6 +33,7 @@
 #include "render2dsentence.h"
 #include "dx8wrapper.h"
 #include "native_bump_pixels.h"
+#include "vertmaterial.h"
 
 TEST(native_bump_encoding_preserves_signed_zero_and_extremes)
 {
@@ -1765,6 +1768,347 @@ TEST(surface_missing_storage_reports_empty_and_locks_safely)
 	surface->Release_Ref();
 }
 
+TEST(native_pipeline_describes_authored_shader_without_device)
+{
+	ShaderClass shader;
+	for (unsigned depth=0;depth<8;++depth) {
+		shader.Set_Depth_Compare(static_cast<ShaderClass::DepthCompareType>(depth));
+		CHECK_EQ(static_cast<unsigned>(shader.Get_Native_Pipeline().depthCompare),depth+1);
+	}
+	shader.Set_Cull_Mode(ShaderClass::CULL_MODE_ENABLE);
+	CHECK(shader.Get_Native_Pipeline().cull == D3D12_CULL_MODE_FRONT);
+	CHECK(shader.Get_Native_Pipeline(true).cull == D3D12_CULL_MODE_BACK);
+	shader.Set_Cull_Mode(ShaderClass::CULL_MODE_DISABLE);
+	CHECK(shader.Get_Native_Pipeline().cull == D3D12_CULL_MODE_NONE);
+	shader.Set_Color_Mask(ShaderClass::COLOR_WRITE_DISABLE);
+	CHECK_EQ(shader.Get_Native_Pipeline().colorMask,0);
+	shader.Set_Alpha_Test(ShaderClass::ALPHATEST_ENABLE);
+	shader.Set_Src_Blend_Func(ShaderClass::SRCBLEND_ONE_MINUS_SRC_ALPHA);
+	CHECK(shader.Get_Native_Pipeline().source == D3D12_BLEND_DEST_COLOR);
+	CHECK(shader.Get_Native_Pipeline().alphaTest);
+	CHECK_EQ(shader.Get_Native_Pipeline().alphaReference,0x60);
+	shader.Set_Src_Blend_Func(ShaderClass::SRCBLEND_ONE);
+	shader.Set_Dst_Blend_Func(ShaderClass::DSTBLEND_ZERO);
+	CHECK(!shader.Get_Native_Pipeline().blend);
+}
+
+#include "matrixmapper.h"
+
+TEST(native_projector_coordinates_preserve_projection_modes_without_device)
+{
+	class TestProjector : public MatrixMapperClass {
+	public:
+		TestProjector() : MatrixMapperClass(0) {
+			ViewToPixel.Make_Identity();
+			ViewToPixel[0].Set(2,0,0,3);
+			ViewToPixel[1].Set(0,4,0,5);
+			ViewToPixel[2].Set(0,0,6,7);
+			ViewToPixel[3].Set(0,0,1,2);
+			ViewSpaceProjectionNormal.Set(0,0,-1);
+		}
+	};
+	TestProjector mapper;
+	Matrix4x4 worldView(true);
+	worldView[3].X = 10; // Row-vector world-to-view translation.
+	mapper.Set_Gradient_U_Coord(.25f);
+	for (int type=0;type<4;++type) {
+		mapper.Set_Type(MatrixMapperClass::MappingType(type));
+		NativeMaterialCoordinates coordinates;
+		CHECK(mapper.Try_Get_Native_Coordinates(worldView,UINT_MAX,coordinates));
+		CHECK(coordinates.transform);
+		CHECK(coordinates.position == (type!=MatrixMapperClass::NORMAL_GRADIENT));
+		CHECK(coordinates.projected == (type==MatrixMapperClass::PERSPECTIVE_PROJECTION));
+		CHECK(coordinates.environment == (type==MatrixMapperClass::NORMAL_GRADIENT ?
+			NativeEnvironmentCoordinates::CameraNormal : NativeEnvironmentCoordinates::None));
+		CHECK_EQ(coordinates.offset,UINT_MAX);
+		if (type<2) {
+			CHECK_EQ(coordinates.matrix[12],23.f);
+			CHECK_EQ(coordinates.matrix[13],5.f);
+		}
+		if (type==MatrixMapperClass::PERSPECTIVE_PROJECTION) {
+			CHECK_EQ(coordinates.matrix[10],1.f);
+			CHECK_EQ(coordinates.matrix[14],2.f);
+		}
+		if (type>=2) CHECK_EQ(coordinates.matrix[12],.25f);
+		if (type==MatrixMapperClass::DEPTH_GRADIENT) {
+			CHECK_EQ(coordinates.matrix[9],6.f);
+			CHECK_EQ(coordinates.matrix[13],7.f);
+		}
+		if (type==MatrixMapperClass::NORMAL_GRADIENT) CHECK_EQ(coordinates.matrix[9],-1.f);
+	}
+}
+
+TEST(native_composite_projectors_use_explicit_context_at_every_nesting_level)
+{
+	struct Tracker { int live=0, legacyCalls=0; bool supported=true; } tracker;
+	class ContextMapper : public ScaleTextureMapperClass {
+		Tracker* tracker;
+	public:
+		ContextMapper(Tracker* t) : ScaleTextureMapperClass(Vector2(1,1),0),tracker(t) { ++tracker->live; }
+		ContextMapper(const ContextMapper& src) : ScaleTextureMapperClass(src),tracker(src.tracker) { ++tracker->live; }
+		~ContextMapper() { --tracker->live; }
+		TextureMapperClass* Clone() const override { return new ContextMapper(*this); }
+		void Apply(int) override { ++tracker->legacyCalls; }
+		void Calculate_Texture_Matrix(Matrix4x4& output) override {
+			++tracker->legacyCalls; output.Make_Identity();
+		}
+		bool Try_Calculate_Native_Texture_Matrix(const NativeMapperContext& context, Matrix4x4& output) override {
+			if (!tracker->supported) return false;
+			output=context.projection;
+			return true;
+		}
+	};
+	class Projector : public CompositeMatrixMapperClass {
+	public:
+		Projector(TextureMapperClass* inner) : CompositeMatrixMapperClass(inner,0) {
+			ViewToPixel.Make_Identity();
+			ViewToPixel[0][3]=.25f;
+			ViewToPixel[1][3]=.5f;
+			Set_Type(PERSPECTIVE_PROJECTION);
+		}
+	};
+	auto* leaf = new ContextMapper(&tracker);
+	auto* inner = new Projector(leaf);
+	leaf->Release_Ref();
+	auto* outer = new Projector(inner);
+	inner->Release_Ref();
+	NativeMapperContext context = {Matrix4x4(true),Matrix4x4(true),Matrix4x4(true)};
+	context.worldView[3][0]=10;
+	context.projection[0][0]=2;
+	context.projection[1][1]=4;
+	Matrix4x4 input(true);
+	input[0][3]=.25f; input[1][3]=.5f; input[2]=input[3];
+	Matrix4x4 expected = context.projection*input*input;
+	expected[2]=expected[3]; // Outer perspective projection divides by clip W.
+	expected = context.worldView*expected.Transpose();
+	NativeMaterialCoordinates coordinates;
+	CHECK(outer->Try_Get_Native_Coordinates_For_View(context,UINT_MAX,coordinates));
+	CHECK(coordinates.position && coordinates.projected);
+	for (int i=0;i<16;++i) CHECK_EQ(coordinates.matrix[i],reinterpret_cast<const float*>(&expected)[i]);
+	CHECK_EQ(tracker.legacyCalls,0);
+	context.projection[0][0]=7;
+	CHECK(outer->Try_Get_Native_Coordinates_For_View(context,UINT_MAX,coordinates));
+	CHECK_EQ(coordinates.matrix[0],7.0f);
+	const auto saved = coordinates;
+	CHECK(!outer->Try_Get_Native_Coordinates(context.worldView,0,coordinates));
+	CHECK(coordinates.matrix==saved.matrix);
+	tracker.supported=false;
+	CHECK(!outer->Try_Get_Native_Coordinates_For_View(context,0,coordinates));
+	CHECK(coordinates.matrix==saved.matrix);
+	CHECK_EQ(tracker.legacyCalls,0);
+	auto* clone = outer->Clone();
+	CHECK_EQ(tracker.live,2);
+	clone->Release_Ref();
+	CHECK_EQ(tracker.live,1);
+	outer->Release_Ref();
+	CHECK_EQ(tracker.live,0);
+}
+
+TEST(native_projector_matrix_contract_covers_screen_world_environment_and_uv_mappers)
+{
+	NativeMapperContext context = {Matrix4x4(true),Matrix4x4(true),Matrix4x4(true)};
+	context.projection[0][0]=3;
+	context.view[0].Set(0,-1,0,0); context.view[1].Set(1,0,0,0);
+	ScreenMapperClass screen(Vector2(0,0),Vector2(.25f,.5f),false,Vector2(1,1),0);
+	WSClassicEnvironmentMapperClass environment(WSEnvMapperClass::AXISTYPE_Z,0);
+	ScaleTextureMapperClass scale(Vector2(2,3),0);
+	Matrix4x4 matrix, expected;
+	CHECK(screen.Try_Calculate_Native_Texture_Matrix(context,matrix));
+	screen.Calculate_Texture_Matrix_For_View(expected,context.projection);
+	for (int i=0;i<16;++i) CHECK_EQ(reinterpret_cast<float*>(&matrix)[i],reinterpret_cast<float*>(&expected)[i]);
+	CHECK(environment.Try_Calculate_Native_Texture_Matrix(context,matrix));
+	CHECK_EQ(matrix[0][0],0.0f); CHECK_EQ(matrix[0][1],.5f);
+	CHECK_EQ(matrix[1][0],-.5f); CHECK_EQ(matrix[0][3],.5f);
+	CHECK(scale.Try_Calculate_Native_Texture_Matrix(context,matrix));
+	CHECK_EQ(matrix[0][0],2.0f); CHECK_EQ(matrix[1][1],3.0f);
+}
+
+TEST(native_mapper_interface_authors_uv_animation_and_environment_without_state_cache)
+{
+	Matrix4x4 worldView(true);
+	worldView[3].X = 99; // Must not affect authored UV mapping.
+	NativeMaterialCoordinates coordinates;
+	ScaleTextureMapperClass scale(Vector2(2,3),0);
+	TextureMapperClass* mapper = &scale;
+	CHECK(mapper->Try_Get_Native_Coordinates(worldView,24,coordinates));
+	CHECK_EQ(coordinates.offset,24u);
+	CHECK_EQ(coordinates.matrix[0],2.f);
+	CHECK_EQ(coordinates.matrix[5],3.f);
+	CHECK_EQ(coordinates.matrix[12],0.f);
+	CHECK(!coordinates.position && !coordinates.projected);
+	LinearOffsetTextureMapperClass offset(Vector2(0,0),Vector2(.25f,.5f),false,Vector2(1,1),0);
+	CHECK(offset.Try_Get_Native_Coordinates(worldView,32,coordinates));
+	CHECK_EQ(coordinates.matrix[8],.25f);
+	CHECK_EQ(coordinates.matrix[9],.5f);
+	ClassicEnvironmentMapperClass normal(0);
+	CHECK(normal.Try_Get_Native_Coordinates(worldView,32,coordinates));
+	CHECK(coordinates.environment == NativeEnvironmentCoordinates::CameraNormal);
+	CHECK_EQ(coordinates.offset,UINT_MAX);
+	EnvironmentMapperClass reflection(0);
+	CHECK(reflection.Try_Get_Native_Coordinates(worldView,32,coordinates));
+	CHECK(coordinates.environment == NativeEnvironmentCoordinates::CameraReflection);
+	class UnmigratedMapper : public ScaleTextureMapperClass {
+	public:
+		UnmigratedMapper() : ScaleTextureMapperClass(Vector2(1,1),0) {}
+		int Mapper_ID() const override { return MAPPER_ID_UNKNOWN; }
+	};
+	UnmigratedMapper unsupported;
+	coordinates.offset = 72;
+	CHECK(!unsupported.Try_Get_Native_Coordinates(worldView,16,coordinates));
+	CHECK_EQ(coordinates.offset,72u);
+	CHECK(coordinates.environment == NativeEnvironmentCoordinates::CameraReflection);
+}
+
+TEST(native_camera_mapper_context_does_not_read_legacy_transforms)
+{
+	NativeMapperContext context;
+	context.worldView.Make_Identity(); context.view.Make_Identity(); context.projection.Make_Identity();
+	context.worldView[3].X = 10;
+	context.projection[0].X = 2;
+	context.projection[1].Y = 4;
+	context.projection[3].Set(0,0,1,0);
+	ScreenMapperClass screen(Vector2(0,0),Vector2(.25f,.5f),false,Vector2(1,1),0);
+	NativeMaterialCoordinates coordinates;
+	TextureMapperClass* mapper = &screen;
+	CHECK(mapper->Try_Get_Native_Coordinates_For_View(context,16,coordinates));
+	CHECK(coordinates.position && coordinates.projected);
+	const auto& m = coordinates.matrix;
+	const float u=m[0]+2*m[4]+2*m[8]+m[12];
+	const float v=m[1]+2*m[5]+2*m[9]+m[13];
+	const float q=m[2]+2*m[6]+2*m[10]+m[14];
+	CHECK_EQ(u/q,11.25f); CHECK_EQ(v/q,4.5f);
+	WSClassicEnvironmentMapperClass environment(WSEnvMapperClass::AXISTYPE_Z,0);
+	mapper = &environment;
+	CHECK(mapper->Try_Get_Native_Coordinates_For_View(context,16,coordinates));
+	CHECK(coordinates.environment == NativeEnvironmentCoordinates::CameraNormal);
+	CHECK_EQ(coordinates.matrix[0],.5f);
+	CHECK_EQ(coordinates.matrix[12],.5f);
+	context.view[0].Set(0,-1,0,0); context.view[1].Set(1,0,0,0);
+	CHECK(mapper->Try_Get_Native_Coordinates_For_View(context,16,coordinates));
+	CHECK_EQ(coordinates.matrix[0],0.f); CHECK_EQ(coordinates.matrix[4],.5f);
+	CHECK_EQ(coordinates.matrix[1],-.5f);
+	EdgeMapperClass edge(0);
+	CHECK(edge.Try_Get_Native_Coordinates_For_View(context,16,coordinates));
+	CHECK(coordinates.transform && !coordinates.position);
+	CHECK_EQ(coordinates.offset,UINT_MAX);
+}
+
+TEST(native_material_mapping_selects_uv_channels_and_bump_parameters)
+{
+	WWMath::Init(); // Game startup initializes the fast-trig tables used by animated mappers.
+	NativeMapperContext context;
+	context.worldView.Make_Identity(); context.view.Make_Identity(); context.projection.Make_Identity();
+	NativeVertexLayoutDesc layout;
+	layout.Add(NativeVertexSemantic::Position,0,DXGI_FORMAT_R32G32B32_FLOAT,0);
+	layout.Add(NativeVertexSemantic::TexCoord,0,DXGI_FORMAT_R32G32_FLOAT,24);
+	layout.Add(NativeVertexSemantic::TexCoord,1,DXGI_FORMAT_R32G32_FLOAT,32);
+	VertexMaterialClass* vertexMaterial = new VertexMaterialClass;
+	vertexMaterial->Set_UV_Source(0,1);
+	vertexMaterial->Set_UV_Source(1,0);
+	NativeMaterialDescription material = ShaderClass::_PresetOpaqueShader.Get_Native_Texture_Material();
+	CHECK(vertexMaterial->Describe_Native_Mapping(context,layout,material));
+	CHECK_EQ(material.coordinates[0].offset,32u);
+	CHECK_EQ(material.coordinates[1].offset,24u);
+	BumpEnvTextureMapperClass* bump = new BumpEnvTextureMapperClass(0,.5f,Vector2(0,0),
+		Vector2(.25f,.5f),false,Vector2(2,3),0);
+	vertexMaterial->Set_Mapper(bump,0);
+	bump->Release_Ref();
+	material.stages[0].bumpParameters[0]=.75f;
+	material.stages[0].bumpParameters[1]=.125f;
+	CHECK(vertexMaterial->Describe_Native_Mapping(context,layout,material));
+	CHECK_EQ(material.coordinates[0].offset,32u);
+	CHECK_EQ(material.coordinates[0].matrix[0],2.f);
+	CHECK_EQ(material.coordinates[0].matrix[5],3.f);
+	CHECK_EQ(material.coordinates[0].matrix[8],.25f);
+	CHECK_EQ(material.coordinates[0].matrix[9],.5f);
+	CHECK(std::abs(material.stages[0].bumpMatrix[0]-.5f)<.001f);
+	CHECK(std::abs(material.stages[0].bumpMatrix[1])<.001f);
+	CHECK_EQ(material.stages[0].bumpParameters[0],.75f);
+	CHECK_EQ(material.stages[0].bumpParameters[1],.125f);
+	CHECK_EQ(material.stages[0].bumpParameters[2],255.f/127.f);
+	CHECK_EQ(material.stages[0].bumpParameters[3],-128.f/127.f);
+	vertexMaterial->Release_Ref();
+}
+
+TEST(native_texture_material_covers_all_authored_detail_combinations)
+{
+	const NativeMaterialOp colors[] = {NativeMaterialOp::Disable,NativeMaterialOp::Select1,
+		NativeMaterialOp::Modulate,NativeMaterialOp::AddSmooth,NativeMaterialOp::Add,
+		NativeMaterialOp::Subtract,NativeMaterialOp::Subtract,NativeMaterialOp::BlendTextureAlpha,
+		NativeMaterialOp::BlendCurrentAlpha,NativeMaterialOp::AddSigned,NativeMaterialOp::AddSigned2X,
+		NativeMaterialOp::Modulate2X,NativeMaterialOp::ModulateAlphaAddColor};
+	const NativeMaterialOp alphas[] = {NativeMaterialOp::Disable,NativeMaterialOp::Select1,
+		NativeMaterialOp::Modulate,NativeMaterialOp::AddSmooth};
+	ShaderClass shader = ShaderClass::_PresetOpaqueShader;
+	for (int color=0;color<ShaderClass::DETAILCOLOR_MAX;++color) {
+		for (int alpha=0;alpha<ShaderClass::DETAILALPHA_MAX;++alpha) {
+			shader.Set_Post_Detail_Color_Func(ShaderClass::DetailColorFuncType(color));
+			shader.Set_Post_Detail_Alpha_Func(ShaderClass::DetailAlphaFuncType(alpha));
+			const auto material = shader.Get_Native_Texture_Material();
+			const auto& stage = material.stages[1];
+			CHECK(stage.colorOp == (color==0 && alpha!=0 ? NativeMaterialOp::Select2 : colors[color]));
+			CHECK(stage.alphaOp == (alpha==0 && color!=0 ? NativeMaterialOp::Select2 : alphas[alpha]));
+			const bool reversed = color==ShaderClass::DETAILCOLOR_SUBR || color==ShaderClass::DETAILCOLOR_MODALPHAADDCOLOR;
+			CHECK_EQ(stage.colorArg1,UINT(reversed ? NativeMaterialSource::Current : NativeMaterialSource::Texture));
+			CHECK_EQ(stage.colorArg2,UINT(reversed ? NativeMaterialSource::Texture : NativeMaterialSource::Current));
+			CHECK(material.stages[2].colorOp == NativeMaterialOp::Disable);
+			CHECK(material.textures[0] == nullptr && material.textures[1] == nullptr);
+		}
+	}
+}
+
+TEST(native_texture_material_primary_modes_and_untextured_isolation)
+{
+	const NativeMaterialOp primary[] = {NativeMaterialOp::Select1,NativeMaterialOp::Modulate,
+		NativeMaterialOp::Add,NativeMaterialOp::BumpEnvironment,
+		NativeMaterialOp::BumpEnvironmentLuminance,NativeMaterialOp::Modulate2X};
+	ShaderClass shader = ShaderClass::_PresetOpaqueShader;
+	shader.Set_Post_Detail_Color_Func(ShaderClass::DETAILCOLOR_SCALE);
+	for (int mode=0;mode<ShaderClass::GRADIENT_MAX;++mode) {
+		shader.Set_Primary_Gradient(ShaderClass::PriGradientType(mode));
+		shader.Set_Texturing(ShaderClass::TEXTURING_ENABLE);
+		const auto textured = shader.Get_Native_Texture_Material();
+		CHECK(textured.stages[0].colorOp == primary[mode]);
+		CHECK_EQ(textured.stages[0].alphaArg1,UINT(NativeMaterialSource::Texture));
+		CHECK_EQ(textured.stages[0].alphaArg2,UINT(NativeMaterialSource::Diffuse));
+		const bool bump = mode==ShaderClass::GRADIENT_BUMPENVMAP || mode==ShaderClass::GRADIENT_BUMPENVMAPLUMINANCE;
+		CHECK(textured.stages[0].alphaOp == (bump ? NativeMaterialOp::Disable : mode==0 ? NativeMaterialOp::Select1 : NativeMaterialOp::Modulate));
+		shader.Set_Texturing(ShaderClass::TEXTURING_DISABLE);
+		const auto untextured = shader.Get_Native_Texture_Material();
+		CHECK(untextured.stages[0].colorOp == (mode==0 ? NativeMaterialOp::Disable : NativeMaterialOp::Select2));
+		CHECK(untextured.stages[1].colorOp == NativeMaterialOp::Disable);
+	}
+}
+
+TEST(native_sampler_honors_explicit_and_default_filters_without_device)
+{
+	TextureFilterClass filter(MIP_LEVELS_1);
+	filter.Set_Min_Filter(TextureFilterClass::FILTER_TYPE_NONE);
+	filter.Set_Mag_Filter(TextureFilterClass::FILTER_TYPE_FAST);
+	filter.Set_U_Addr_Mode(TextureFilterClass::TEXTURE_ADDRESS_CLAMP);
+	const auto explicitSampler = filter.Get_Native_Description();
+	CHECK(explicitSampler.minFilter == NativeD3D12FilterMode::Point);
+	CHECK(explicitSampler.magFilter == NativeD3D12FilterMode::Linear);
+	CHECK(explicitSampler.mipFilter == NativeD3D12FilterMode::Point);
+	CHECK(explicitSampler.clampU && !explicitSampler.clampV);
+	TextureFilterClass::_Set_Default_Min_Filter(TextureFilterClass::FILTER_TYPE_NONE);
+	filter.Set_Min_Filter(TextureFilterClass::FILTER_TYPE_DEFAULT);
+	CHECK(filter.Get_Native_Description().minFilter == NativeD3D12FilterMode::Point);
+	TextureFilterClass::_Set_Default_Min_Filter(TextureFilterClass::FILTER_TYPE_BEST);
+}
+
+TEST(native_layout_is_cached_and_invalidated_when_fvf_changes)
+{
+	FVFInfoClass info(DX8_FVF_XYZDUV1);
+	const auto* layout = &info.Build_Native_Layout();
+	CHECK(layout == &info.Build_Native_Layout());
+	CHECK(layout->Supports_Native_Draw(sizeof(VertexFormatXYZDUV1)));
+	info.Set_FVF(D3DFVF_XYZRHW);
+	CHECK(!info.Build_Native_Layout().valid);
+	info.Set_FVF(DX8_FVF_XYZDUV1);
+	CHECK(info.Build_Native_Layout().valid);
+}
+
 TEST(surface_cpu_copy_does_not_require_a_gpu_device)
 {
 	SurfaceClass *source = new SurfaceClass(2,2,WW3D_FORMAT_A8R8G8B8);
@@ -1782,6 +2126,250 @@ TEST(surface_cpu_copy_does_not_require_a_gpu_device)
 	CHECK_EQ(pixels[2],51); CHECK_EQ(pixels[3],68);
 	target->Unlock();
 	target->Release_Ref(); source->Release_Ref();
+}
+
+#include "native_light_environment.h"
+#include "native_mesh_material.h"
+#include "native_material_pass.h"
+#include "matpass.h"
+
+TEST(native_material_pass_authors_pipeline_mapping_and_lighting_without_install)
+{
+	MaterialPassClass pass;
+	pass.Set_Shader(ShaderClass::_PresetAlphaShader);
+	auto* material=new VertexMaterialClass;
+	material->Set_Lighting(true);
+	material->Set_Opacity(.3f);
+	auto* mapper=new ScaleTextureMapperClass(Vector2(2,3),0);
+	material->Set_Mapper(mapper,0);
+	mapper->Release_Ref();
+	pass.Set_Material(material);
+	material->Release_Ref();
+	NativeMapperContext context={Matrix4x4(true),Matrix4x4(true),Matrix4x4(true)};
+	NativeVertexLayoutDesc layout;
+	layout.Add(NativeVertexSemantic::Position,0,DXGI_FORMAT_R32G32B32_FLOAT,0);
+	layout.Add(NativeVertexSemantic::TexCoord,0,DXGI_FORMAT_R32G32_FLOAT,12);
+	NativeMaterialPassDescription output;
+	output.lighting.globalAmbient={.1f,.2f,.3f,0};
+	CHECK(pass.Describe_Native_Pass(context,layout,Matrix3D::Identity,output));
+	CHECK_EQ(output.pipeline.source,D3D12_BLEND_SRC_ALPHA);
+	CHECK_EQ(output.pipeline.destination,D3D12_BLEND_INV_SRC_ALPHA);
+	CHECK_EQ(output.lighting.flags[0],1u);
+	CHECK_EQ(output.lighting.diffuse[3],.3f);
+	CHECK_EQ(output.lighting.globalAmbient[2],.3f);
+	CHECK_EQ(output.material.coordinates[0].offset,12u);
+	CHECK_EQ(output.material.coordinates[0].matrix[0],2.0f);
+	CHECK_EQ(output.material.coordinates[0].matrix[5],3.0f);
+	class Unsupported : public ScaleTextureMapperClass {
+	public:
+		Unsupported() : ScaleTextureMapperClass(Vector2(1,1),0) {}
+		int Mapper_ID() const override { return MAPPER_ID_UNKNOWN; }
+	};
+	auto* unsupported=new Unsupported;
+	pass.Peek_Material()->Set_Mapper(unsupported,0);
+	unsupported->Release_Ref();
+	output.material.factor=0x12345678;
+	CHECK(!pass.Describe_Native_Pass(context,layout,Matrix3D::Identity,output));
+	CHECK_EQ(output.material.factor,0x12345678u);
+	CHECK_EQ(output.material.coordinates[0].matrix[0],2.0f);
+}
+
+TEST(native_planar_pass_projection_includes_object_transform_without_camera_cache)
+{
+	Matrix4x4 world(true);
+	world[0][0]=2; world[1][1]=3; world[3][0]=10; world[3][1]=20;
+	auto uv=Describe_Native_Planar_Projection(world,.25f,.5f,.125f,.25f);
+	CHECK(uv.position && uv.transform && !uv.projected);
+	CHECK_EQ(uv.offset,UINT_MAX);
+	CHECK_EQ(uv.matrix[0],.5f); CHECK_EQ(uv.matrix[5],1.5f);
+	CHECK_EQ(uv.matrix[12],2.625f); CHECK_EQ(uv.matrix[13],10.25f);
+	uv=Describe_Native_Planar_Projection(world,0,0,0,0);
+	CHECK_EQ(uv.matrix[0],0.0f); CHECK_EQ(uv.matrix[5],0.0f);
+	CHECK_EQ(uv.matrix[12],0.0f); CHECK_EQ(uv.matrix[13],0.0f);
+}
+
+TEST(native_mesh_pipeline_preserves_opacity_additive_and_forced_multiply)
+{
+	ShaderClass shader;
+	shader.Set_Src_Blend_Func(ShaderClass::SRCBLEND_ONE);
+	shader.Set_Dst_Blend_Func(ShaderClass::DSTBLEND_ZERO);
+	auto opaque = Describe_Native_Mesh_Pipeline(shader,1,false,false,false);
+	CHECK_EQ(opaque.source,D3D12_BLEND_ONE); CHECK_EQ(opaque.destination,D3D12_BLEND_ZERO);
+	CHECK_EQ(opaque.alphaReference,96);
+	auto alpha = Describe_Native_Mesh_Pipeline(shader,.5f,false,true,false);
+	CHECK_EQ(alpha.source,D3D12_BLEND_SRC_ALPHA); CHECK_EQ(alpha.destination,D3D12_BLEND_INV_SRC_ALPHA);
+	CHECK_EQ(alpha.alphaReference,48);
+	auto multiply = Describe_Native_Mesh_Pipeline(shader,1,false,true,false);
+	CHECK_EQ(multiply.source,D3D12_BLEND_DEST_COLOR); CHECK_EQ(multiply.destination,D3D12_BLEND_SRC_COLOR);
+	shader.Set_Dst_Blend_Func(ShaderClass::DSTBLEND_ONE);
+	auto additive = Describe_Native_Mesh_Pipeline(shader,.25f,true,true,false);
+	CHECK_EQ(additive.source,D3D12_BLEND_ONE); CHECK_EQ(additive.destination,D3D12_BLEND_ONE);
+	NativeLightingState lighting;
+	lighting.diffuse = {.2f,.3f,.4f,.8f};
+	Describe_Native_Mesh_Opacity(lighting,1,true);
+	CHECK_EQ(lighting.diffuse[3],.8f);
+	Describe_Native_Mesh_Opacity(lighting,.5f,false);
+	CHECK_EQ(lighting.diffuse[0],.2f); CHECK_EQ(lighting.diffuse[3],.5f);
+	Describe_Native_Mesh_Opacity(lighting,.25f,true);
+	for (float value : lighting.diffuse) CHECK_EQ(value,.25f);
+}
+
+TEST(native_mesh_geometry_range_preserves_base_vertex_and_rejects_overflow)
+{
+	const unsigned short indices[] = {0,1,2,3,4,5};
+	NativeDrawSubmission geometry;
+	geometry.indices = indices; geometry.indexCount = 6; geometry.vertexCount = 12;
+	auto draw = geometry;
+	CHECK(Describe_Native_Indexed_Range(draw,3,3,6,3,3,D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST));
+	CHECK(draw.indices==indices+3); CHECK_EQ(draw.indexCount,3u); CHECK_EQ(draw.baseVertex,6u);
+	draw = geometry;
+	CHECK(!Describe_Native_Indexed_Range(draw,UINT_MAX,3,0,0,3,D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST));
+	CHECK(!Describe_Native_Indexed_Range(draw,0,7,0,0,3,D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST));
+	CHECK(!Describe_Native_Indexed_Range(draw,0,3,UINT_MAX,0,3,D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST));
+	CHECK(!Describe_Native_Indexed_Range(draw,0,3,9,3,1,D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST));
+	CHECK(draw.indices==indices); CHECK_EQ(draw.indexCount,6u); CHECK_EQ(draw.baseVertex,0u);
+	CHECK(Describe_Native_Indexed_Range(draw,0,4,0,0,4,D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP));
+	CHECK_EQ(draw.topology,D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+}
+#include "light.h"
+#include "decalmsh.h"
+#include "decalsys.h"
+#include "mesh.h"
+
+template<class Base>
+class DecalMaterialRunFixture : public Base {
+public:
+	DecalMaterialRunFixture(MeshClass* parent, DecalSystemClass* system,
+		VertexMaterialClass* first, VertexMaterialClass* second) : Base(parent,system) {
+		for (int i=0;i<6;++i) {
+			auto* material = i<3 ? first : second;
+			material->Add_Ref();
+			this->VertexMaterials.Add(material);
+		}
+		for (int i=0;i<2;++i) {
+			this->Polys.Add(TriIndex(i*3,i*3+1,i*3+2));
+			this->Shaders.Add(ShaderClass());
+			this->Textures.Add(NULL);
+		}
+	}
+	~DecalMaterialRunFixture() {
+		// No geometry is allocated by this CPU-only run-boundary fixture.
+		for (int i=0;i<this->VertexMaterials.Count();++i) this->VertexMaterials[i]->Release_Ref();
+		this->VertexMaterials.Delete_All();
+	}
+	int Next(int first) { return this->Process_Material_Run(first); }
+};
+
+TEST(native_decal_runs_use_polygon_vertex_materials_not_polygon_indices)
+{
+	MeshClass parent;
+	DecalSystemClass system;
+	auto* first = new VertexMaterialClass;
+	auto* second = new VertexMaterialClass;
+	{
+		DecalMaterialRunFixture<RigidDecalMeshClass> rigid(&parent,&system,first,second);
+		DecalMaterialRunFixture<SkinDecalMeshClass> skin(&parent,&system,first,second);
+		CHECK_EQ(rigid.Next(0),1); CHECK_EQ(rigid.Next(1),2);
+		CHECK_EQ(skin.Next(0),1); CHECK_EQ(skin.Next(1),2);
+	}
+	{
+		DecalMaterialRunFixture<RigidDecalMeshClass> rigid(&parent,&system,first,first);
+		DecalMaterialRunFixture<SkinDecalMeshClass> skin(&parent,&system,first,first);
+		CHECK_EQ(rigid.Next(0),2); CHECK_EQ(skin.Next(0),2);
+	}
+	first->Release_Ref(); second->Release_Ref();
+}
+
+TEST(native_material_lighting_preserves_explicit_light_environment)
+{
+	VertexMaterialClass* material = new VertexMaterialClass;
+	material->Set_Lighting(true);
+	material->Set_Diffuse(.2f,.3f,.4f);
+	material->Set_Opacity(.6f);
+	material->Set_Emissive(.1f,.2f,.3f);
+	material->Set_Shininess(12);
+	material->Set_Ambient_Color_Source(VertexMaterialClass::COLOR1);
+	material->Set_Diffuse_Color_Source(VertexMaterialClass::COLOR2);
+	NativeLightingState state;
+	state.flags = {0,1,1,1};
+	state.globalAmbient = {.5f,.6f,.7f,0};
+	state.lights[0].position = {1,2,3,1};
+	material->Describe_Native_Lighting(state,false);
+	CHECK_EQ(state.flags[0],1u); CHECK_EQ(state.flags[1],1u);
+	CHECK_EQ(state.flags[2],1u); CHECK_EQ(state.flags[3],1u);
+	CHECK_EQ(state.diffuse[0],.2f); CHECK_EQ(state.diffuse[3],.6f);
+	CHECK_EQ(state.emissive[2],.3f); CHECK_EQ(state.parameters[0],12.0f);
+	CHECK_EQ(state.sources[0],1u); CHECK_EQ(state.sources[1],2u);
+	CHECK_EQ(state.sources[2],0u); CHECK_EQ(state.globalAmbient[1],.6f);
+	CHECK_EQ(state.lights[0].position[2],3.0f);
+	material->Describe_Native_Lighting(state,true);
+	CHECK_EQ(state.flags[0],0u);
+	material->Release_Ref();
+}
+
+TEST(native_light_environment_uses_explicit_camera_and_clears_unused_lights)
+{
+	WWMath::Init();
+	LightEnvironmentClass environment;
+	environment.Reset(Vector3(0,0,0),Vector3(.2f,.3f,.4f));
+	LightClass light(LightClass::POINT);
+	light.Set_Position(Vector3(1,2,3));
+	light.Set_Diffuse(Vector3(1,1,1));
+	light.Set_Far_Attenuation_Range(10,20);
+	environment.Add_Light(light);
+	CHECK_EQ(environment.Get_Light_Count(),1);
+	Matrix4x4 view(true);
+	view[0][0]=0; view[0][1]=-1; view[0][3]=5;
+	view[1][0]=1; view[1][1]=0; view[1][3]=7;
+	NativeLightingState state;
+	state.lights[3].position[3]=3;
+	Describe_Native_Light_Environment(environment,view,state);
+	CHECK_EQ(state.lights[0].position[0],3.0f);
+	CHECK_EQ(state.lights[0].position[1],8.0f);
+	CHECK_EQ(state.lights[0].position[2],3.0f);
+	CHECK_EQ(state.lights[0].position[3],1.0f);
+	CHECK_EQ(state.lights[0].direction[3],20.0f);
+	CHECK_EQ(state.lights[0].attenuation[0],1.0f);
+	CHECK_EQ(state.lights[0].attenuation[1],.01f);
+	CHECK_EQ(state.lights[3].position[3],0.0f);
+	CHECK_EQ(state.globalAmbient[2],environment.Get_Equivalent_Ambient().Z);
+	environment.Reset(Vector3(0,0,0),Vector3(0,0,0));
+	Describe_Native_Light_Environment(environment,view,state);
+	CHECK_EQ(state.lights[0].position[3],0.0f);
+}
+
+class NativeTexturePreparationFixture : public TextureClass {
+public:
+	unsigned initializations = 0, preparations = 0;
+	NativeTexturePreparationFixture() : TextureClass(1u,1u,MIP_LEVELS_1,POOL_MANAGED) {
+		Initialized = false;
+		LastAccessed = UINT_MAX;
+	}
+	void Init() override { ++initializations; Initialized = true; }
+	NativeD3D12Texture* Prepare_Native_Texture() override {
+		++preparations;
+		return TextureClass::Prepare_Native_Texture();
+	}
+	void Simulate_Inactivation() { Initialized = false; LastAccessed = UINT_MAX; }
+	unsigned Last_Use() const { return LastAccessed; }
+};
+
+TEST(native_texture_preparation_initializes_once_and_tracks_use_without_state_apply)
+{
+	auto* texture = new NativeTexturePreparationFixture;
+	TextureClass* base = texture;
+	CHECK(base->Prepare_Native_Texture()==nullptr); // CPU fixture deliberately creates no GPU allocation.
+	CHECK_EQ(texture->initializations,1u);
+	CHECK_EQ(texture->preparations,1u); // Resource-specialized virtual preparation is honored.
+	CHECK_EQ(texture->Last_Use(),WW3D::Get_Sync_Time());
+	base->Prepare_Native_Texture();
+	CHECK_EQ(texture->initializations,1u);
+	CHECK_EQ(texture->preparations,2u);
+	texture->Simulate_Inactivation();
+	base->Prepare_Native_Texture();
+	CHECK_EQ(texture->initializations,2u);
+	CHECK_EQ(texture->Last_Use(),WW3D::Get_Sync_Time());
+	texture->Release_Ref();
 }
 
 TEST(surface_unsupported_format_does_not_fall_back_to_d3d8)

@@ -73,6 +73,7 @@ public:
 		// Create texture for a height map.
 		AlphaTerrainTextureClass(TextureClass *pBaseTex );
 		virtual ~AlphaTerrainTextureClass();
+		NativeD3D12Texture* Prepare_Native_Texture() override;
 
 		// just use default destructor. ~TerrainTextureClass(void);
 

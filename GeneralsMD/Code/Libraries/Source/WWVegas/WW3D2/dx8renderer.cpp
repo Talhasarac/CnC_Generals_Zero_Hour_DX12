@@ -60,6 +60,32 @@
 #include "camera.h"
 #include "stripoptimizer.h"
 #include "meshgeometry.h"
+#include "native_draw_state.h"
+#include "native_pipeline_description.h"
+#include "native_light_environment.h"
+#include "native_mesh_material.h"
+#include "scene.h"
+
+static NativeDrawSubmission NativeMeshGeometry(const NativeD3D12UploadBuffer* vertices,
+	const NativeD3D12UploadBuffer* indices, const FVFInfoClass& format,
+	unsigned vertexOffset, unsigned vertexCount)
+{
+	NativeDrawSubmission draw;
+	if (!vertices || !indices) return draw;
+	draw.layout = format.Build_Native_Layout();
+	draw.vertexStride = draw.layout.stride;
+	const size_t offset = size_t(vertexOffset)*draw.vertexStride;
+	const size_t bytes = size_t(vertexCount)*draw.vertexStride;
+	if (!draw.vertexStride || offset>vertices->Size() || bytes>vertices->Size()-offset) return draw;
+	draw.vertices = static_cast<const unsigned char*>(vertices->Data())+offset;
+	draw.vertexBytes = static_cast<UINT>(bytes);
+	draw.vertexCount = vertexCount;
+	draw.indices = static_cast<const unsigned short*>(indices->Data());
+	draw.indexCount = static_cast<UINT>(indices->Size()/sizeof(unsigned short));
+	draw.vertexOwner = vertices;
+	draw.indexOwner = indices;
+	return draw;
+}
 
 /*
 ** Global Instance of the DX8MeshRender
@@ -288,7 +314,7 @@ void DX8FVFCategoryContainer::Add_Visible_Material_Pass(MaterialPassClass * pass
 	AnythingToRender=true;
 }
 
-void DX8FVFCategoryContainer::Render_Procedural_Material_Passes(void)
+void DX8FVFCategoryContainer::Render_Procedural_Material_Passes(const NativeDrawSubmission* geometry)
 {
 	// additional passes
 	MatPassTaskClass * mpr = visible_matpass_head;
@@ -308,7 +334,9 @@ void DX8FVFCategoryContainer::Render_Procedural_Material_Passes(void)
    			continue;
    		}
 	
-		mpr->Peek_Mesh()->Render_Material_Pass(mpr->Peek_Material_Pass(),index_buffer);
+		if (geometry && TheDX8MeshRenderer.Peek_Camera())
+			mesh->Render_Native_Material_Pass(*mpr->Peek_Material_Pass(),*geometry,*TheDX8MeshRenderer.Peek_Camera());
+		else mesh->Render_Material_Pass(mpr->Peek_Material_Pass(),index_buffer);
 		MatPassTaskClass * next_mpr = mpr->Get_Next_Visible();
 		
 		// remove from list, then delete
@@ -353,9 +381,16 @@ void DX8RigidFVFCategoryContainer::Render_Delayed_Procedural_Material_Passes(voi
 
 	// additional passes
 	MatPassTaskClass * mpr = delayed_matpass_head;
+	NativeDrawSubmission geometry;
+	if (!sorting) geometry = NativeMeshGeometry(
+		static_cast<DX8VertexBufferClass*>(vertex_buffer)->Get_Native_Vertex_Buffer(),
+		static_cast<DX8IndexBufferClass*>(index_buffer)->Get_Native_Index_Buffer(),
+		vertex_buffer->FVF_Info(),0,vertex_buffer->Get_Vertex_Count());
 	while (mpr != NULL) {
 	
-		mpr->Peek_Mesh()->Render_Material_Pass(mpr->Peek_Material_Pass(),index_buffer);
+		if (!sorting && TheDX8MeshRenderer.Peek_Camera())
+			mpr->Peek_Mesh()->Render_Native_Material_Pass(*mpr->Peek_Material_Pass(),geometry,*TheDX8MeshRenderer.Peek_Camera());
+		else mpr->Peek_Mesh()->Render_Material_Pass(mpr->Peek_Material_Pass(),index_buffer);
 		MatPassTaskClass * next_mpr = mpr->Get_Next_Visible();
 		
 		delete mpr;
@@ -816,14 +851,25 @@ void DX8RigidFVFCategoryContainer::Render(void)
 	for (unsigned p=0;p<passes;++p) {
 		SNAPSHOT_SAY(("Pass: %d\n",p));
 		while (DX8TextureCategoryClass * tex = visible_texture_category_list[p].Remove_Head()) {
-			tex->Render();
+			if (sorting) tex->Render();
+			else tex->Render_Native(NativeMeshGeometry(
+				static_cast<DX8VertexBufferClass*>(vertex_buffer)->Get_Native_Vertex_Buffer(),
+				static_cast<DX8IndexBufferClass*>(index_buffer)->Get_Native_Index_Buffer(),
+				vertex_buffer->FVF_Info(),0,vertex_buffer->Get_Vertex_Count()));
 		}
 		//zbias++;
 		//if (zbias>15) zbias=15;
 		//DX8Wrapper::Set_DX8_ZBias(zbias);
 	}
 
-	Render_Procedural_Material_Passes();
+	if (sorting) Render_Procedural_Material_Passes();
+	else {
+		const auto geometry = NativeMeshGeometry(
+			static_cast<DX8VertexBufferClass*>(vertex_buffer)->Get_Native_Vertex_Buffer(),
+			static_cast<DX8IndexBufferClass*>(index_buffer)->Get_Native_Index_Buffer(),
+			vertex_buffer->FVF_Info(),0,vertex_buffer->Get_Vertex_Count());
+		Render_Procedural_Material_Passes(&geometry);
+	}
 
 	//DX8Wrapper::Set_DX8_ZBias(0);
 }
@@ -1418,12 +1464,21 @@ void DX8SkinFVFCategoryContainer::Render(void)
 
 			TextureCategoryListIterator it(&visible_texture_category_list[pass]);
 			while (!it.Is_Done()) {
-				it.Peek_Obj()->Render();
+				if (sorting) it.Peek_Obj()->Render();
+				else it.Peek_Obj()->Render_Native(NativeMeshGeometry(vb.Get_Native_Vertex_Buffer(),
+					static_cast<DX8IndexBufferClass*>(index_buffer)->Get_Native_Index_Buffer(),
+					vb.FVF_Info(),vb.Get_Native_Vertex_Offset(),vb.Get_Vertex_Count()));
 				it.Next();
 			}
 		}
 
-		Render_Procedural_Material_Passes();
+		if (sorting) Render_Procedural_Material_Passes();
+		else {
+			const auto geometry = NativeMeshGeometry(vb.Get_Native_Vertex_Buffer(),
+				static_cast<DX8IndexBufferClass*>(index_buffer)->Get_Native_Index_Buffer(),
+				vb.FVF_Info(),vb.Get_Native_Vertex_Offset(),vb.Get_Vertex_Count());
+			Render_Procedural_Material_Passes(&geometry);
+		}
 	}//while
 
 	//remove all the rendered data from queues
@@ -1684,6 +1739,129 @@ unsigned DX8TextureCategoryClass::Add_Mesh(
 }
 
 // ----------------------------------------------------------------------------
+
+void DX8TextureCategoryClass::Render_Native(const NativeDrawSubmission& geometry)
+{
+	NativeD3D12Renderer* native = NativeD3D12Renderer::Active();
+	CameraClass* camera = TheDX8MeshRenderer.Peek_Camera();
+	if (!native || !camera || !geometry.Is_Valid()) {
+		WWASSERT(false);
+		return;
+	}
+	NativeD3D12ScopedState restore(*native);
+	const NativeD3D12State frame = native->CaptureState();
+	Matrix3D view;
+	Matrix4x4 projection;
+	camera->Get_View_Matrix(&view);
+	camera->Get_D3D_Projection_Matrix(&projection);
+	NativeMapperContext context = {Matrix4x4(true),Matrix4x4(view),projection};
+	NativeMaterialDescription categoryMaterial = shader.Get_Native_Texture_Material();
+	for (unsigned stage=0;stage<MeshMatDescClass::MAX_TEX_STAGES;++stage) {
+		if (textures[stage] && WW3D::Is_Texturing_Enabled()) {
+			categoryMaterial.textures[stage] = textures[stage]->Prepare_Native_Texture();
+			categoryMaterial.samplers[stage] = textures[stage]->Get_Filter().Get_Native_Description();
+		}
+		categoryMaterial.coordinates[stage].offset =
+			geometry.layout.Find_Offset(NativeVertexSemantic::TexCoord,stage);
+	}
+	native->SetTreeSway(nullptr,0);
+	native->SetDepthBias(0);
+
+	PolyRenderTaskClass* task = render_task_head;
+	PolyRenderTaskClass* previous = nullptr;
+	while (task) {
+		MeshClass* mesh = task->Peek_Mesh();
+		if (mesh->Get_Base_Vertex_Offset()==VERTEX_BUFFER_OVERFLOW) {
+			previous = task;
+			task = task->Get_Next_Visible();
+			continue;
+		}
+		if (!DX8RendererDebugger::Is_Enabled() || !mesh->Is_Disabled_By_Debugger()) {
+			Matrix3D world = mesh->Get_Transform();
+			if (mesh->Peek_Model()->Get_Flag(MeshModelClass::ALIGNED)) {
+				Vector3 position, direction;
+				world.Get_Translation(&position);
+				camera->Get_Transform().Get_Z_Vector(&direction);
+				world.Obj_Look_At(position,position+direction,0);
+			} else if (mesh->Peek_Model()->Get_Flag(MeshModelClass::ORIENTED)) {
+				Vector3 position, eye;
+				world.Get_Translation(&position);
+				camera->Get_Transform().Get_Translation(&eye);
+				world.Obj_Look_At(position,eye,0);
+			} else if (mesh->Peek_Model()->Get_Flag(MeshModelClass::SKIN)) {
+				world.Make_Identity(); // CPU-deformed skin vertices are already world-space.
+			}
+			context.worldView = Matrix4x4(world).Transpose()*context.view.Transpose();
+			const Matrix4x4 wvp = context.worldView*projection.Transpose();
+			native->SetWorldView(reinterpret_cast<const float*>(&context.worldView));
+			native->SetWorldViewProjection(reinterpret_cast<const float*>(&wvp));
+
+			NativeDrawSubmission draw = geometry;
+			draw.useMaterial = true;
+			draw.material = categoryMaterial;
+#ifdef WWDEBUG
+			if (WW3D::Expose_Prelit()) {
+				const int prelit = mesh->Peek_Model()->Get_Flag(MeshGeometryClass::PRELIT_MASK);
+				for (unsigned stage=0;stage<MeshMatDescClass::MAX_TEX_STAGES;++stage)
+					if (prelit==MeshGeometryClass::PRELIT_VERTEX ||
+						(prelit==MeshGeometryClass::PRELIT_LIGHTMAP_MULTI_PASS && pass!=mesh->Peek_Model()->Get_Pass_Count()-1) ||
+						(prelit==MeshGeometryClass::PRELIT_LIGHTMAP_MULTI_TEXTURE && stage!=0))
+						draw.material.textures[stage] = nullptr;
+			}
+#endif
+			// The UV override is temporary authoring input, not a render-state
+			// mutation. Restore both animation time and offset before the next mesh.
+			LinearOffsetTextureMapperClass* mapper = nullptr;
+			Vector2 savedUV;
+			unsigned savedTime = 0;
+			if (material && mesh->Get_User_Data() &&
+				*static_cast<int*>(mesh->Get_User_Data())==RenderObjClass::USER_DATA_MATERIAL_OVERRIDE &&
+				material->Peek_Mapper() && material->Peek_Mapper()->Mapper_ID()==TextureMapperClass::MAPPER_ID_LINEAR_OFFSET) {
+				mapper = static_cast<LinearOffsetTextureMapperClass*>(material->Peek_Mapper());
+				mapper->Get_Current_UV_Offset(savedUV);
+				savedTime = mapper->Get_LastUsedSyncTime();
+				mapper->Set_LastUsedSyncTime(WW3D::Get_Sync_Time());
+				mapper->Set_Current_UV_Offset(static_cast<RenderObjClass::Material_Override*>(mesh->Get_User_Data())->customUVOffset);
+			}
+			const bool mapped = !material || material->Describe_Native_Mapping(context,draw.layout,draw.material);
+			if (mapper) {
+				mapper->Set_LastUsedSyncTime(savedTime);
+				mapper->Set_Current_UV_Offset(savedUV);
+			}
+			NativeLightingState lighting = frame.lighting;
+			if (mesh->Get_Lighting_Environment())
+				Describe_Native_Light_Environment(*mesh->Get_Lighting_Environment(),context.view,lighting);
+			if (material) material->Describe_Native_Lighting(lighting,WW3D::Is_Coloring_Enabled());
+			else lighting.flags[0] = 0;
+			lighting.flags[2] = mesh->Get_ObjectScale()!=1.0f;
+			const float alpha = mesh->Get_Alpha_Override();
+			Describe_Native_Mesh_Opacity(lighting,alpha,mesh->Is_Additive());
+			lighting.flags[1] = shader.Get_Secondary_Gradient()!=ShaderClass::SECONDARY_GRADIENT_DISABLE;
+			native->SetLighting(lighting);
+			Describe_Native_Mesh_Pipeline(shader,alpha,mesh->Is_Additive(),m_gForceMultiply,
+				ShaderClass::Is_Backface_Culling_Inverted()).Apply(*native);
+			SceneClass* scene = mesh->Peek_Scene();
+			if (scene && scene->Get_Fog_Enable() && shader.Get_Fog_Func()!=ShaderClass::FOG_DISABLE) {
+				float start,end;
+				scene->Get_Fog_Range(&start,&end);
+				const Vector3& fog = scene->Get_Fog_Color();
+				const auto channel = [](float value) { return UINT((std::max)(0.0f,(std::min)(255.0f,value*255.0f))); };
+				UINT32 color = (channel(fog.X)<<16)|(channel(fog.Y)<<8)|channel(fog.Z);
+				if (shader.Get_Fog_Func()==ShaderClass::FOG_WHITE) color=0xffffff;
+				if (shader.Get_Fog_Func()==ShaderClass::FOG_SCALE_FRAGMENT) color=0;
+				native->SetVertexFog(3,start,end,0,color,frame.fogRange);
+			} else native->SetVertexFog(0,0,1,0,0,false);
+			const bool valid = mapped && task->Peek_Polygon_Renderer()->Describe_Native_Range(draw,mesh->Get_Base_Vertex_Offset());
+			if (!valid || !Submit_Native_Draw(*native,draw))
+				WWDEBUG_SAY(("Native mesh submission failed: %s\n",mesh->Get_Name()));
+		}
+		PolyRenderTaskClass* next = task->Get_Next_Visible();
+		if (previous) previous->Set_Next_Visible(next);
+		else render_task_head = next;
+		delete task;
+		task = next;
+	}
+}
 
 void DX8TextureCategoryClass::Render(void)
 {
@@ -2217,15 +2395,11 @@ void DX8MeshRendererClass::Render_Decal_Meshes(void)
 	DecalMeshClass * decal_mesh = visible_decal_meshes;
 	if (!decal_mesh) return;
 
-	DX8Wrapper::Set_DX8_Render_State(D3DRS_ZBIAS,8);
-	
 	while (decal_mesh != NULL) {
-		decal_mesh->Render();
+		if (camera) decal_mesh->Render(*camera);
 		decal_mesh = decal_mesh->Peek_Next_Visible();
 	}
 	visible_decal_meshes = NULL;
-
-	DX8Wrapper::Set_DX8_Render_State(D3DRS_ZBIAS,0);
 }
 
 // ----------------------------------------------------------------------------

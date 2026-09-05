@@ -36,6 +36,8 @@
 #include "vertmaterial.h"
 #include "Lib/BaseType.h"
 
+class CameraClass;
+
 #define MAX_TRACK_EDGE_COUNT	100	//maximum number of edges or divisions in track mark
 #define MAX_TRACK_OPAQUE_EDGE	25	//linear fade of edges will begin at this edge
 #define FADE_TIME_FRAMES 300000	// 300 seconds at 30 fps - time to fade out an edge and remove it from the system.
@@ -124,7 +126,7 @@ public:
 
 	void setDetail(void);
 
-	void flush (void);	///<draw all tracks that were requested for rendering.
+	void flush (CameraClass *camera);	///<draw all tracks that were requested for rendering.
 	void update(void);	///<update the state of all edges (fade alpha, remove old, etc.)
 
 	void init( SceneClass *TerrainTracksScene);	///< pre-allocate track objects

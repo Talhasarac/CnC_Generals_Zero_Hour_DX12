@@ -88,7 +88,10 @@ class SurfaceClass : public W3DMPO, public RefCountClass
 		// Native D3D12 mode keeps UI/font surfaces in CPU memory until they are
 		// converted to a sampled texture.  The legacy D3D surface is not present
 		// on this path.
-		bool Is_Native() const { return D3DSurface == NULL && !NativePixels.empty(); }
+		// Native CPU storage remains authoritative even when the requested format
+		// is unsupported or allocation failed.  Do not fall through to a null
+		// legacy COM pointer in that case.
+		bool Is_Native() const { return NativeStorage && D3DSurface == NULL; }
 		const void *Peek_Native_Pixels() const { return NativePixels.empty() ? NULL : NativePixels.data(); }
 		unsigned int Peek_Native_Pitch() const { return NativePitch; }
 		unsigned long long Native_Revision() const { return NativeRevision; }
@@ -173,6 +176,7 @@ class SurfaceClass : public W3DMPO, public RefCountClass
 		unsigned int NativeHeight;
 		unsigned int NativePitch;
 		bool NativeLocked;
+		bool NativeStorage;
 		unsigned long long NativeRevision = 0;
 	friend class TextureClass;	
 };

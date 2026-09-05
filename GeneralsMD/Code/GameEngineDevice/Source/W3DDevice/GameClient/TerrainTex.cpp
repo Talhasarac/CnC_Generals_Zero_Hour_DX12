@@ -659,6 +659,20 @@ for a single texture.  If stage==1, then we are doing a single pass, and we
 set up the pipe so that we blend onto the base texture in stage 0.
 (standard D3D setup, but beyond the scope of W3D). */
 //=============================================================================
+NativeD3D12Texture* AlphaTerrainTextureClass::Prepare_Native_Texture()
+{
+	NativeD3D12Texture* base = m_baseTexture ? m_baseTexture->Prepare_Native_Texture() : nullptr;
+	if (!base) return nullptr;
+	LastAccessed = WW3D::Get_Sync_Time();
+	if (!Peek_Native_Texture() || Peek_Native_Texture()->Resource()!=base->Resource()) {
+		// Submitted draws retain the old allocation; only the CPU-side view is
+		// replaced when the atlas is rebuilt. Never upload the throwaway 8x8 surface.
+		delete Peek_Native_Texture();
+		Set_Native_Texture(base->ShareResource());
+	}
+	return Peek_Native_Texture();
+}
+
 void AlphaTerrainTextureClass::Apply(unsigned int stage)
 {
 	if (NativeD3D12Renderer::Active() != NULL)
@@ -666,15 +680,6 @@ void AlphaTerrainTextureClass::Apply(unsigned int stage)
 		// Keep this material bound while sharing the base atlas allocation.
 		// Rebinding Set_Texture during Apply used to replace the material being
 		// traversed and lose its blend/sampler settings at the end of the draw.
-		m_baseTexture->Init();
-		m_baseTexture->Upload_Native_Surface();
-		NativeD3D12Texture* base = m_baseTexture->Peek_Native_Texture();
-		if (!base) return;
-		if (!Peek_Native_Texture() || Peek_Native_Texture()->Resource() != base->Resource())
-		{
-			delete Peek_Native_Texture();
-			Set_Native_Texture(base->ShareResource());
-		}
 		TextureClass::Apply(stage);
 		const bool linear = TheGlobalData && (TheGlobalData->m_bilinearTerrainTex || TheGlobalData->m_trilinearTerrainTex);
 		DX8Wrapper::Set_DX8_Texture_Stage_State(stage,D3DTSS_MINFILTER,linear ? D3DTEXF_LINEAR : D3DTEXF_POINT);

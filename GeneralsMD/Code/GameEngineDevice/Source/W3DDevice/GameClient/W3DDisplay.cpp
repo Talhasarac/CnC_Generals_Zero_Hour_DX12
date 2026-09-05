@@ -468,7 +468,8 @@ W3DDisplay::~W3DDisplay()
 	delete m_assetManager;
 	WW3D::Shutdown();
 	WWMath::Shutdown();
-	DX8WebBrowser::Shutdown();
+	if (NativeD3D12Renderer::Active() == NULL)
+		DX8WebBrowser::Shutdown();
 	delete TheW3DFileSystem;
 	TheW3DFileSystem = NULL;
 
@@ -844,7 +845,11 @@ void W3DDisplay::init( void )
 		m_nativeDebugDisplay->setFontWidth( 9 );
 	}
 
-	DX8WebBrowser::Initialize();
+	// The embedded control accepts only an IDirect3DDevice8.  Keep its
+	// legacy lifecycle available for the legacy renderer, but do not invoke it
+	// while the native renderer owns the frame.
+	if (NativeD3D12Renderer::Active() == NULL)
+		DX8WebBrowser::Initialize();
 
 	// we're now online
 	m_initialized = true;

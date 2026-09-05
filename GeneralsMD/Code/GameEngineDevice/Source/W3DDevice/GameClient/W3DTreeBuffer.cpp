@@ -314,6 +314,45 @@ void W3DTreeBuffer::W3DTreeTextureClass::Apply(unsigned int stage)
 static ShaderClass detailAlphaShader(SC_ALPHA_DETAIL);
 static ShaderClass detailAlphaShader2X(SC_ALPHA_DETAIL_2X);
 
+// Tree vertices are authored in world space.  Keep the camera transform in the
+// native pass rather than changing the shared DX8 state cache; this lets the
+// pass configure its own material without asking the compatibility layer to
+// replay a legacy shader description.
+static void SetNativeTreeTransform(NativeD3D12Renderer& renderer)
+{
+	Matrix4x4 world(true);
+	Matrix4x4 view;
+	Matrix4x4 projection;
+	DX8Wrapper::_Get_DX8_Transform(D3DTS_VIEW, view);
+	DX8Wrapper::_Get_DX8_Transform(D3DTS_PROJECTION, projection);
+	const Matrix4x4 worldView = world * view;
+	const Matrix4x4 worldViewProjection = worldView * projection;
+	renderer.SetWorldView(reinterpret_cast<const float*>(&worldView));
+	renderer.SetWorldViewProjection(reinterpret_cast<const float*>(&worldViewProjection));
+}
+
+static NativeMaterialCoordinates MakeNativeTreeShroudCoordinates(W3DShroud& shroud)
+{
+	NativeMaterialCoordinates coordinates;
+	coordinates.position = true;
+	coordinates.transform = true;
+	coordinates.offset = UINT_MAX;
+
+	const float xoffset = -static_cast<float>(shroud.getDrawOriginX()) + shroud.getCellWidth();
+	const float yoffset = -static_cast<float>(shroud.getDrawOriginY()) + shroud.getCellHeight();
+	D3DXMATRIX offset;
+	D3DXMATRIX scale;
+	NativeMatrixMath::Translation(&offset, xoffset, yoffset, 0.0f);
+	NativeMatrixMath::Scaling(&scale,
+		1.0f / (shroud.getCellWidth() * shroud.getTextureWidth()),
+		1.0f / (shroud.getCellHeight() * shroud.getTextureHeight()), 1.0f);
+	// Native coordinates use the authored world-space position, not camera
+	// space. Applying inverse-view here makes the shroud slide with the camera.
+	const D3DXMATRIX combined = NativeMatrixMath::MultiplyValue(offset, scale);
+	std::memcpy(coordinates.matrix.data(), &combined, sizeof(combined));
+	return coordinates;
+}
+
 
 /*
 #define SC_ALPHA_DETAIL ( SHADE_CNST(ShaderClass::PASS_LEQUAL, ShaderClass::DEPTH_WRITE_ENABLE, ShaderClass::COLOR_WRITE_ENABLE, ShaderClass::SRCBLEND_ONE, \
@@ -1807,19 +1846,71 @@ void W3DTreeBuffer::drawTrees(CameraClass * camera, RefRenderObjListIterator *pD
 
 	if (NativeD3D12Renderer::Active() != NULL)
 	{
+		NativeD3D12Renderer* native = NativeD3D12Renderer::Active();
+		NativeD3D12ScopedState nativeState(*native);
 		if (m_curNumTreeIndices[0] == 0)
 			return;
 
 		// Cutout alpha and the shroud stage are part of the tree material;
 		// inheriting the preceding terrain pass produces opaque tree rectangles.
-		DX8Wrapper::Set_Shader(detailAlphaShader);
-		DX8Wrapper::Set_World_Identity();
-		DX8Wrapper::Set_Texture(0, m_treeTexture);
-		DX8Wrapper::Set_Texture(1, NULL);
-		DX8Wrapper::Apply_Render_State_Changes();
-		DX8Wrapper::Set_DX8_Texture_Stage_State(0, D3DTSS_TEXCOORDINDEX, 0);
-		DX8Wrapper::Set_DX8_Texture_Stage_State(0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_DISABLE);
-		W3DShaderManager::setShroudTex(1);
+		SetNativeTreeTransform(*native);
+		native->SetFixedFunctionState(D3D12_CULL_MODE_NONE, true, true,
+			D3D12_COMPARISON_FUNC_LESS_EQUAL, false, D3D12_BLEND_ONE,
+			D3D12_BLEND_ZERO, D3D12_BLEND_OP_ADD, D3D12_COLOR_WRITE_ENABLE_ALL);
+		native->SetAlphaTestState(true, D3D12_COMPARISON_FUNC_GREATER_EQUAL, 0x60);
+		native->SetStencilState(false, D3D12_COMPARISON_FUNC_ALWAYS, 0, 0xff, 0xff,
+			D3D12_STENCIL_OP_KEEP, D3D12_STENCIL_OP_KEEP, D3D12_STENCIL_OP_KEEP);
+		// Keep the scene fog: trees must fade with the surrounding terrain.
+		native->SetLighting(NativeLightingState());
+		native->SetMaterialEnabled(true);
+		native->SetMaterialFactor(0xffffffff);
+
+		const NativeD3D12Texture* treeTexture = m_treeTexture->Prepare_Native_Texture();
+		if (treeTexture == NULL)
+			return;
+		NativeMaterialStage treeStage;
+		treeStage.colorOp = NativeMaterialOp::Modulate;
+		treeStage.colorArg1 = UINT(NativeMaterialSource::Texture);
+		treeStage.colorArg2 = UINT(NativeMaterialSource::Diffuse);
+		treeStage.alphaOp = NativeMaterialOp::Modulate;
+		treeStage.alphaArg1 = UINT(NativeMaterialSource::Texture);
+		treeStage.alphaArg2 = UINT(NativeMaterialSource::Diffuse);
+		NativeMaterialCoordinates treeCoordinates;
+		treeCoordinates.offset = static_cast<UINT>(offsetof(VertexFormatXYZNDUV1, u1));
+		native->SetMaterialStage(0, treeStage, treeCoordinates, treeTexture);
+		native->SetSamplerState(NativeD3D12FilterMode::Linear,
+			NativeD3D12FilterMode::Linear, NativeD3D12FilterMode::Linear, false, false);
+		native->SetMaterialSampler(0);
+
+		NativeMaterialStage shroudStage;
+		NativeMaterialCoordinates shroudCoordinates;
+		const NativeD3D12Texture* shroudTexture = NULL;
+		if (TheTerrainRenderObject != NULL && TheTerrainRenderObject->getShroud() != NULL)
+		{
+			W3DShroud* shroud = TheTerrainRenderObject->getShroud();
+			TextureClass* texture = shroud->getShroudTexture();
+			if (texture != NULL)
+			{
+				shroudTexture = texture->Prepare_Native_Texture();
+				if (shroudTexture != NULL)
+				{
+					shroudStage.colorOp = NativeMaterialOp::Modulate;
+					shroudStage.colorArg1 = UINT(NativeMaterialSource::Texture);
+					shroudStage.colorArg2 = UINT(NativeMaterialSource::Current);
+					shroudStage.alphaOp = NativeMaterialOp::Select2;
+					shroudStage.alphaArg2 = UINT(NativeMaterialSource::Current);
+					shroudCoordinates = MakeNativeTreeShroudCoordinates(*shroud);
+				}
+			}
+		}
+		native->SetMaterialStage(1, shroudStage, shroudCoordinates, shroudTexture);
+		native->SetSamplerState(NativeD3D12FilterMode::Linear,
+			NativeD3D12FilterMode::Linear, NativeD3D12FilterMode::Linear,
+			true, true);
+		native->SetMaterialSampler(1);
+		native->SetMaterialStage(2, NativeMaterialStage(), NativeMaterialCoordinates(), NULL);
+		native->SetMaterialStage(3, NativeMaterialStage(), NativeMaterialCoordinates(), NULL);
+
 		// Reuse the logic-timed breeze offsets, with slot zero keeping static
 		// vertices rooted. Deformation and push-aside shading run in native HLSL.
 		float nativeSway[MAX_SWAY_TYPES+1][4] = {};
@@ -1828,18 +1919,29 @@ void W3DTreeBuffer::drawTrees(CameraClass * camera, RefRenderObjListIterator *pD
 			nativeSway[sway+1][1] = swayFactor[sway].Y;
 			nativeSway[sway+1][2] = swayFactor[sway].Z;
 		}
-		NativeD3D12Renderer::Active()->SetTreeSway(nativeSway,MAX_SWAY_TYPES+1);
+		native->SetTreeSway(nativeSway,MAX_SWAY_TYPES+1);
 		for (Int bufferIndex = 0; bufferIndex < MAX_BUFFERS; ++bufferIndex)
 		{
 			if (m_curNumTreeIndices[bufferIndex] == 0)
 				break;
-			DX8Wrapper::Set_Index_Buffer(m_indexTree[bufferIndex], 0);
-			DX8Wrapper::Set_Vertex_Buffer(m_vertexTree[bufferIndex]);
-			DX8Wrapper::Apply_Render_State_Changes();
-			DX8Wrapper::Draw_Triangles(0, m_curNumTreeIndices[bufferIndex] / 3, 0,
-				m_curNumTreeVertices[bufferIndex]);
+			const NativeD3D12UploadBuffer* vertexBuffer =
+				m_vertexTree[bufferIndex]->Get_Native_Vertex_Buffer();
+			const NativeD3D12UploadBuffer* indexBuffer =
+				m_indexTree[bufferIndex]->Get_Native_Index_Buffer();
+			if (vertexBuffer == NULL || indexBuffer == NULL)
+				continue;
+			const UINT vertexCount = static_cast<UINT>(m_curNumTreeVertices[bufferIndex]);
+			const UINT indexCount = static_cast<UINT>(m_curNumTreeIndices[bufferIndex]);
+			const UINT stride = static_cast<UINT>(sizeof(VertexFormatXYZNDUV1));
+			native->DrawIndexedTextured(vertexBuffer->Data(),
+				static_cast<UINT>(vertexBuffer->Size()), stride, vertexCount,
+				static_cast<UINT>(offsetof(VertexFormatXYZNDUV1, u1)),
+				reinterpret_cast<const unsigned short*>(indexBuffer->Data()), indexCount,
+				D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, treeTexture,
+				static_cast<UINT>(offsetof(VertexFormatXYZNDUV1, diffuse)),
+				vertexBuffer, indexBuffer);
 		}
-		NativeD3D12Renderer::Active()->SetTreeSway(NULL,0);
+		native->SetTreeSway(NULL,0);
 		return;
 	}
 

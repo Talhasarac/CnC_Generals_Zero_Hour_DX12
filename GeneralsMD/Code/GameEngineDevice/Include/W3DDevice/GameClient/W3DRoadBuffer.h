@@ -169,7 +169,7 @@ protected:
 #endif
 public:
 	void loadTexture(AsciiString path, Int id);
-	void applyTexture(void);
+	TextureClass* getTexture() const { return m_roadTexture; }
 	Int getStacking(void) {return m_stackingOrder;}
 	void setStacking(Int order) {m_stackingOrder = order;}
 	Int getUniqueID(void) {return m_uniqueID;};

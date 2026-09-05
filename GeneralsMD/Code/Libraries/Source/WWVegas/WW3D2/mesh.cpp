@@ -107,6 +107,10 @@
 #include "meshgeometry.h"
 #include "ww3d.h"
 #include "camera.h"
+#include "native_material_pass.h"
+#include "native_light_environment.h"
+#include "scene.h"
+#include <vector>
 #include "texture.h"
 #include "rinfo.h"
 #include "coltest.h"
@@ -820,6 +824,98 @@ void MeshClass::Render(RenderInfoClass & rinfo)
  * HISTORY:                                                                                    *
  *   3/4/2001   gth : Created.                                                                 *
  *=============================================================================================*/
+void MeshClass::Render_Native_Material_Pass(MaterialPassClass& pass,
+	const NativeDrawSubmission& geometry, CameraClass& camera)
+{
+	NativeD3D12Renderer* native = NativeD3D12Renderer::Active();
+	if (!native || !geometry.Is_Valid()) return;
+	const bool skin = Model->Get_Flag(MeshModelClass::SKIN)!=0;
+	const bool culled = !skin && pass.Get_Cull_Volume() && MaterialPassClass::Is_Per_Polygon_Culling_Enabled();
+	std::vector<unsigned short> indices;
+	unsigned firstVertex=0, minVertex=0, vertexRange=0;
+	if (culled) {
+		temp_apt.Delete_All(false);
+		Matrix3D inverse;
+		Get_Transform().Get_Orthogonal_Inverse(inverse);
+		OBBoxClass local;
+		OBBoxClass::Transform(inverse,*pass.Get_Cull_Volume(),&local);
+		Vector3 direction;
+		local.Basis.Get_Z_Vector(&direction);
+		direction = -direction;
+		if (Model->Has_Cull_Tree()) Model->Generate_Rigid_APT(local,direction,temp_apt);
+		else Model->Generate_Rigid_APT(direction,temp_apt);
+		if (!temp_apt.Count() || !Model->PolygonRendererList.Peek_Head()) return;
+		firstVertex = Model->PolygonRendererList.Peek_Head()->Get_Vertex_Offset();
+		minVertex = Model->Get_Vertex_Count();
+		unsigned maxVertex=0;
+		indices.reserve(temp_apt.Count()*3);
+		const TriIndex* polygons=Model->Get_Polygon_Array();
+		for (int i=0;i<temp_apt.Count();++i) for (int corner=0;corner<3;++corner) {
+			const unsigned vertex=polygons[temp_apt[i]][corner];
+			if (vertex>0xffff) return;
+			indices.push_back(static_cast<unsigned short>(vertex));
+			minVertex=(std::min)(minVertex,vertex); maxVertex=(std::max)(maxVertex,vertex);
+		}
+		vertexRange=maxVertex-minVertex+1;
+	}
+	NativeD3D12ScopedState restore(*native);
+	const auto frame=native->CaptureState();
+	const Matrix3D world=skin ? Matrix3D::Identity : Get_Transform();
+	Matrix3D view;
+	Matrix4x4 projection;
+	camera.Get_View_Matrix(&view);
+	camera.Get_D3D_Projection_Matrix(&projection);
+	NativeMapperContext context={Matrix4x4(world).Transpose()*Matrix4x4(view).Transpose(),Matrix4x4(view),projection};
+	NativeMaterialPassDescription description;
+	description.lighting=frame.lighting;
+	if (LightEnvironment) Describe_Native_Light_Environment(*LightEnvironment,context.view,description.lighting);
+	if (!pass.Describe_Native_Pass(context,geometry.layout,world,description)) return;
+	// Preserve the original APT branch's authored material; other branches have
+	// per-object overrides, applied to the value state without mutating shared assets.
+	if (!culled) {
+		if (m_materialPassAlphaOverride!=1) description.lighting.diffuse[3]=m_materialPassAlphaOverride;
+		if (m_materialPassEmissiveOverride!=1)
+			for (int i=0;i<3;++i) description.lighting.emissive[i]*=m_materialPassEmissiveOverride;
+	}
+	description.lighting.flags[2]=Get_ObjectScale()!=1;
+	description.pipeline.colorMask &= frame.renderTargetWriteMask;
+	description.pipeline.Apply(*native);
+	native->SetDepthBias(0);
+	native->SetTreeSway(nullptr,0);
+	native->SetWorldView(reinterpret_cast<const float*>(&context.worldView));
+	const Matrix4x4 wvp=context.worldView*projection.Transpose();
+	native->SetWorldViewProjection(reinterpret_cast<const float*>(&wvp));
+	native->SetLighting(description.lighting);
+	SceneClass* scene=Peek_Scene();
+	if (scene && scene->Get_Fog_Enable() && description.fog!=ShaderClass::FOG_DISABLE) {
+		float start,end;
+		scene->Get_Fog_Range(&start,&end);
+		const auto channel=[](float c) { return UINT((std::max)(0.0f,(std::min)(255.0f,c*255.0f))); };
+		const Vector3& color=scene->Get_Fog_Color();
+		UINT32 fog=(channel(color.X)<<16)|(channel(color.Y)<<8)|channel(color.Z);
+		if (description.fog==ShaderClass::FOG_WHITE) fog=0xffffff;
+		if (description.fog==ShaderClass::FOG_SCALE_FRAGMENT) fog=0;
+		native->SetVertexFog(3,start,end,0,fog,frame.fogRange);
+	} else native->SetVertexFog(0,0,1,0,0,false);
+	NativeDrawSubmission draw=geometry;
+	draw.material=description.material;
+	draw.useMaterial=true;
+	if (culled) {
+		draw.indices=indices.data(); draw.indexCount=static_cast<UINT>(indices.size()); draw.indexOwner=nullptr;
+		if (Describe_Native_Indexed_Range(draw,0,draw.indexCount,firstVertex,minVertex,vertexRange,
+			D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST)) Submit_Native_Draw(*native,draw);
+	} else {
+		DX8PolygonRendererListIterator it(&Model->PolygonRendererList);
+		while (!it.Is_Done()) {
+			if (it.Peek_Obj()->Get_Pass()==0) {
+				auto range=draw;
+				if (it.Peek_Obj()->Describe_Native_Range(range,BaseVertexOffset)) Submit_Native_Draw(*native,range);
+			}
+			it.Next();
+		}
+	}
+}
+
 void MeshClass::Render_Material_Pass(MaterialPassClass * pass,IndexBufferClass * ib)
 {
 	//Added to allow dynamic opacity on additional render passed

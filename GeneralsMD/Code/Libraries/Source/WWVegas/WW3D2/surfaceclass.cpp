@@ -223,7 +223,8 @@ SurfaceClass::SurfaceClass(unsigned width, unsigned height, WW3DFormat format):
 	NativeWidth(width),
 	NativeHeight(height),
 	NativePitch(0),
-	NativeLocked(false)
+	NativeLocked(false),
+	NativeStorage(true)
 {
 	WWASSERT(width);
 	WWASSERT(height);
@@ -237,6 +238,11 @@ SurfaceClass::SurfaceClass(unsigned width, unsigned height, WW3DFormat format):
 		NativePitch = width * bytes;
 		NativePixels.resize(static_cast<size_t>(NativePitch) * height);
 	}
+	else
+	{
+		// Empty native surfaces must advertise no readable pixels.
+		NativeWidth = NativeHeight = 0;
+	}
 }
 
 SurfaceClass::SurfaceClass(const char *filename):
@@ -245,10 +251,12 @@ SurfaceClass::SurfaceClass(const char *filename):
 	NativeWidth(0),
 	NativeHeight(0),
 	NativePitch(0),
-	NativeLocked(false)
+	NativeLocked(false),
+	NativeStorage(false)
 {
 	if (NativeD3D12Renderer::Active() != NULL)
 	{
+		NativeStorage = true;
 		Targa targa;
 		if (!TARGA_ERROR_HANDLER(targa.Open(filename, TGA_READMODE), filename))
 		{
@@ -294,7 +302,8 @@ SurfaceClass::SurfaceClass(IDirect3DSurface8 *d3d_surface)	:
 	NativeWidth(0),
 	NativeHeight(0),
 	NativePitch(0),
-	NativeLocked(false)
+	NativeLocked(false),
+	NativeStorage(false)
 {
 	Attach (d3d_surface);
 	SurfaceDescription desc;
@@ -334,6 +343,7 @@ void * SurfaceClass::Lock(int * pitch)
 	if (pitch) *pitch = 0;
 	if (Is_Native())
 	{
+		if (NativePixels.empty() || NativePitch == 0) return NULL;
 		if (pitch != NULL)
 			*pitch = static_cast<int>(NativePitch);
 		NativeLocked = true;
@@ -924,7 +934,7 @@ bool SurfaceClass::Is_Transparent_Column(unsigned int column)
 	if (Is_Native())
 	{
 		const unsigned int sourceSize = PixelSize(sd);
-		if (sourceSize == 0)
+		if (sourceSize == 0 || NativePixels.empty() || NativePitch == 0)
 			return true;
 		for (unsigned int y = 0; y < sd.Height; ++y)
 		{
@@ -1008,6 +1018,12 @@ void SurfaceClass::Get_Pixel(Vector3 &rgb, int x,int y)
 	if (Is_Native())
 	{
 		const unsigned int sourceSize = PixelSize(sd);
+		if (sourceSize == 0 || NativePixels.empty() || NativePitch == 0 ||
+			sd.Width == 0 || sd.Height == 0)
+		{
+			rgb.Set(0.0f, 0.0f, 0.0f);
+			return;
+		}
 		Convert_Pixel(rgb, sd, NativePixels.data() + static_cast<size_t>(y) * NativePitch +
 			static_cast<size_t>(x) * sourceSize);
 		return;
@@ -1046,6 +1062,10 @@ void SurfaceClass::Get_Pixel(Vector3 &rgb, int x,int y)
 void SurfaceClass::Attach (IDirect3DSurface8 *surface)
 {
 	Detach ();
+	NativeStorage = false;
+	NativePixels.clear();
+	NativeWidth = NativeHeight = NativePitch = 0;
+	NativeLocked = false;
 	D3DSurface = surface;
 	
 	//
@@ -1111,7 +1131,8 @@ void SurfaceClass::DrawPixel(const unsigned int x,const unsigned int y, unsigned
 	if (Is_Native())
 	{
 		++NativeRevision;
-		if (x < sd.Width && y < sd.Height)
+		if (size != 0 && !NativePixels.empty() && NativePitch != 0 &&
+			x < sd.Width && y < sd.Height)
 			Draw_Pixel(x, y, color, size, NativePixels.data(), static_cast<int>(NativePitch));
 		return;
 	}
@@ -1195,7 +1216,7 @@ void SurfaceClass::Draw_H_Line(const unsigned int y, const unsigned int x1, cons
 }
 
 void SurfaceClass::DrawHLine(const unsigned int y,const unsigned int x1, const unsigned int x2, unsigned int color)
-{ 
+{
 	SurfaceDescription sd;
 	Get_Description(sd);
 
@@ -1203,7 +1224,8 @@ void SurfaceClass::DrawHLine(const unsigned int y,const unsigned int x1, const u
 	if (Is_Native())
 	{
 		++NativeRevision;
-		if (y < sd.Height && x1 < sd.Width && x2 >= x1)
+		if (size != 0 && !NativePixels.empty() && NativePitch != 0 &&
+			y < sd.Height && x1 < sd.Width && x2 >= x1)
 		{
 			const unsigned int clippedX2 = MIN(x2, sd.Width - 1);
 			Draw_H_Line(y, x1, clippedX2, color, size, NativePixels.data(), static_cast<int>(NativePitch));
@@ -1312,6 +1334,8 @@ bool SurfaceClass::Is_Monochrome(void)
 
 	size=PixelSize(sd);
 	unsigned char *bits=(unsigned char*) Lock(&pitch);
+	if (size == 0 || bits == NULL || pitch <= 0)
+		return false;
 
 	Vector3 rgb;
 	bool mono=true;
@@ -1362,6 +1386,8 @@ void SurfaceClass::Hue_Shift(const Vector3 &hsv_shift)
 
 	size=PixelSize(sd);
 	unsigned char *bits=(unsigned char*) Lock(&pitch);
+	if (size == 0 || bits == NULL || pitch <= 0)
+		return;
 
 	Vector3 rgb;
 

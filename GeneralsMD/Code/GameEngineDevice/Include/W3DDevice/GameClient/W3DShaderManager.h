@@ -51,6 +51,7 @@ class NativeD3D12Texture;
 	the proper shader given video card limitations and also allow the app to query the
 	hardware for specific features.
 */
+struct NativeMaterialCoordinates;
 class W3DShaderManager
 {
 public:
@@ -80,6 +81,8 @@ public:
 
 	W3DShaderManager(void);	///<constructor
 	static void init( void );	///<determine optimal shaders for current device.
+	static NativeMaterialCoordinates nativeCloudCoordinates();
+	static NativeMaterialCoordinates nativeNoiseCoordinates();
 	static void shutdown(void);	///<release resources used by shaders
 	static ChipsetType getChipset(void);	///<return current device chipset.
 	static GraphicsVenderID getCurrentVendor(void) {return m_currentVendor;}	///<return current card vendor.

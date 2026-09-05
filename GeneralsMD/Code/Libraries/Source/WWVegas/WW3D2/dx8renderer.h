@@ -70,6 +70,7 @@ class PolyRenderTaskClass;
 class TextureClass;
 class VertexMaterialClass;
 class CameraClass;
+struct NativeDrawSubmission;
 
 #define RECORD_RENDER(I,P) render_stats[I].count++; render_stats[I].polys+=P;
 
@@ -100,6 +101,7 @@ public:
 	void									Add_Render_Task(DX8PolygonRendererClass * p_renderer,MeshClass * p_mesh);
 
 	void									Render(void);
+	void Render_Native(const NativeDrawSubmission& geometry);
 	bool									Anything_To_Render() { return (render_task_head != NULL); }
 	void									Clear_Render_List() { render_task_head = NULL; }
 
@@ -169,7 +171,7 @@ protected:
 	inline bool Anything_To_Render()					{ return AnythingToRender; }
 	inline bool Any_Delayed_Passes_To_Render()	{ return AnyDelayedPassesToRender; }
 
-	void Render_Procedural_Material_Passes(void);
+	void Render_Procedural_Material_Passes(const NativeDrawSubmission* geometry = nullptr);
 
 	DX8TextureCategoryClass* Find_Matching_Texture_Category(
 		TextureClass* texture,

@@ -1,5 +1,9 @@
 /* Native D3D12 regression tests: assertions verify GPU pixels, not just Present. */
 #include "native_d3d12_renderer.h"
+#include "native_draw_state.h"
+#include "native_terrain_material.h"
+#include "native_water_material.h"
+#include "native_shadow_state.h"
 #include "surface_pixel_write.h"
 #include "native_dds_layout.h"
 #include <d3d12sdklayers.h>
@@ -313,6 +317,92 @@ bool Run(NativeD3D12Renderer& r, HWND window)
 		REQUIRE(Pixel(pixels,64,32,32,stageColors[last][0],stageColors[last][1],stageColors[last][2],
 			"specialized material stage-count PSO transition"));
 	}
+	{
+		NativeD3D12ScopedState restore(r);
+		NativeDrawSubmission tile;
+		tile.vertices=quad; tile.vertexBytes=sizeof(quad);
+		tile.vertexStride=sizeof(MaterialVertex); tile.vertexCount=4;
+		tile.indices=quadIndices; tile.indexCount=6; tile.useMaterial=true;
+		tile.layout.stride=sizeof(MaterialVertex);
+		tile.layout.Add(NativeVertexSemantic::Position,0,DXGI_FORMAT_R32G32B32_FLOAT,0);
+		tile.layout.Add(NativeVertexSemantic::Color,0,DXGI_FORMAT_R8G8B8A8_UNORM,12);
+		tile.layout.Add(NativeVertexSemantic::TexCoord,0,DXGI_FORMAT_R32G32_FLOAT,16);
+		NativeMaterialCoordinates uv; uv.offset=16;
+		for (int variant=0;variant<3;++variant) {
+			tile.material=Describe_Native_Flat_Base(variant!=2,variant==1 ? layers[0].get() : nullptr,uv,NativeSamplerDesc());
+			if (variant!=2) {
+				tile.material.textures[1]=layers[3].get();
+				tile.material.coordinates[1]=uv;
+			}
+			REQUIRE(r.BeginFrame(black)); State(r);
+			REQUIRE(Submit_Native_Draw(r,tile));
+			REQUIRE(r.ReadbackFrame(pixels));
+			REQUIRE(Pixel(pixels,64,32,32,variant==2 ? 255 : (variant==1 ? 16 : 64),
+				variant==2 ? 255 : (variant==1 ? 0 : 64),variant==2 ? 255 : (variant==1 ? 0 : 64),
+				"flat terrain tile, shrouded tile, and textures-disabled variants"));
+		}
+		for (UINT layersMask=1;layersMask<4;++layersMask) {
+			REQUIRE(r.BeginFrame(black)); State(r);
+			REQUIRE(r.DrawScreenQuad(0,0,64,64,0xff808080));
+			tile.material=Describe_Native_Terrain_Modulation(layersMask&1 ? layers[3].get() : nullptr,uv,
+				layersMask&2 ? layers[3].get() : nullptr,uv,NativeD3D12FilterMode::Point);
+			r.SetFixedFunctionState(D3D12_CULL_MODE_NONE,false,false,D3D12_COMPARISON_FUNC_ALWAYS,true,
+				D3D12_BLEND_DEST_COLOR,D3D12_BLEND_ZERO,D3D12_BLEND_OP_ADD,D3D12_COLOR_WRITE_ENABLE_ALL);
+			REQUIRE(Submit_Native_Draw(r,tile));
+			REQUIRE(r.ReadbackFrame(pixels));
+			const int expected=layersMask==3 ? 8 : 32;
+			REQUIRE(Pixel(pixels,64,32,32,expected,expected,expected,"flat terrain cloud/noise framebuffer modulation"));
+		}
+	}
+	{
+		NativeD3D12ScopedState restore(r);
+		std::unique_ptr<NativeD3D12Texture> atlas(r.CreateTexture2D(2,1,1,DXGI_FORMAT_R8G8B8A8_UNORM));
+		const unsigned char samples[]={255,0,0,255,0,255,0,128};
+		const NativeD3D12TextureLevel atlasLevel={samples,8,8};
+		REQUIRE(atlas && r.UploadTexture2D(*atlas,&atlasLevel,1));
+		MaterialVertex terrain[4];
+		std::memcpy(terrain,quad,sizeof(terrain));
+		NativeDrawSubmission draw;
+		draw.vertices=terrain; draw.vertexBytes=sizeof(terrain);
+		draw.vertexStride=sizeof(MaterialVertex); draw.vertexCount=4;
+		draw.indices=quadIndices; draw.indexCount=6; draw.useMaterial=true;
+		draw.layout.stride=sizeof(MaterialVertex);
+		draw.layout.Add(NativeVertexSemantic::Position,0,DXGI_FORMAT_R32G32B32_FLOAT,0);
+		draw.layout.Add(NativeVertexSemantic::Color,0,DXGI_FORMAT_R8G8B8A8_UNORM,12);
+		draw.layout.Add(NativeVertexSemantic::TexCoord,0,DXGI_FORMAT_R32G32_FLOAT,16);
+		draw.layout.Add(NativeVertexSemantic::TexCoord,1,DXGI_FORMAT_R32G32_FLOAT,24);
+		for (UINT alpha : {0u,128u,255u}) {
+			for (auto& v : terrain) {
+				v.color=(alpha<<24)|0xffffff;
+				v.uv[0][0]=0.25f; v.uv[0][1]=0.5f;
+				v.uv[1][0]=0.75f; v.uv[1][1]=0.5f;
+			}
+			REQUIRE(r.BeginFrame(black)); State(r);
+			draw.material=Describe_Native_Terrain_Layer(atlas.get(),16,false,NativeSamplerDesc());
+			REQUIRE(Submit_Native_Draw(r,draw));
+			State(r,true);
+			draw.material=Describe_Native_Terrain_Layer(atlas.get(),24,true,NativeSamplerDesc());
+			REQUIRE(Submit_Native_Draw(r,draw));
+			REQUIRE(r.ReadbackFrame(pixels));
+			const int green=int(alpha*128/255);
+			REQUIRE(Pixel(pixels,64,32,32,255-green,green,0,"main terrain UV1 blend multiplies texture and diffuse alpha"));
+		}
+		for (auto& v : terrain) v.color=0x80ffffff;
+		NativeMaterialCoordinates overlayUV; overlayUV.offset=16;
+		for (UINT mode=0;mode<4;++mode) {
+			REQUIRE(r.BeginFrame(black)); State(r,true);
+			for (UINT pass=0;pass<(mode==3 ? 2u : 1u);++pass) {
+				draw.material=Describe_Native_Terrain_Overlay(atlas.get(),16,NativeSamplerDesc(),
+					mode ? layers[3].get() : nullptr,overlayUV,NativeSamplerDesc(),pass==1);
+				if (pass) r.SetFixedFunctionState(D3D12_CULL_MODE_NONE,false,false,D3D12_COMPARISON_FUNC_ALWAYS,true,
+					D3D12_BLEND_ZERO,D3D12_BLEND_SRC_COLOR,D3D12_BLEND_OP_ADD,D3D12_COLOR_WRITE_ENABLE_ALL);
+				REQUIRE(Submit_Native_Draw(r,draw));
+			}
+			REQUIRE(r.ReadbackFrame(pixels));
+			REQUIRE(Pixel(pixels,64,32,32,mode==3 ? 8 : (mode ? 32 : 128),0,0,
+				"extra terrain overlay base, single modulation and masked second pass"));
+		}
+	}
 	// Terrain blends the two atlas samples with diffuse alpha before lighting.
 	MaterialVertex blendQuad[4];
 	std::memcpy(blendQuad,quad,sizeof(quad));
@@ -370,6 +460,20 @@ bool Run(NativeD3D12Renderer& r, HWND window)
 		quadIndices,6,D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST,layers[0].get(),12));
 	REQUIRE(r.ReadbackFrame(pixels));
 	REQUIRE(Pixel(pixels,64,32,32,32,32,8,"river edge opacity survives sparkle-noise temporary register"));
+	{
+		NativeD3D12ScopedState restore(r);
+		for (UINT variant=0;variant<3;++variant) {
+			const auto water=Describe_Native_Water_Material(layers[0].get(),variant==1 ? nullptr : riverEdge.get(),
+				variant==2 ? nullptr : layers[2].get(),layers[3].get(),16,24,atlasUV);
+			REQUIRE(r.BeginFrame(black)); State(r,true);
+			Apply_Native_Material_Description(r,water);
+			REQUIRE(r.DrawIndexedTextured(quad,sizeof(quad),sizeof(MaterialVertex),4,16,
+				quadIndices,6,D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST,layers[0].get(),12));
+			REQUIRE(r.ReadbackFrame(pixels));
+			REQUIRE(Pixel(pixels,64,32,32,variant==1 ? 64 : 32,variant==1 ? 0 : 32,
+				variant==2 ? 0 : (variant==1 ? 16 : 8),"authored water: edge opacity, missing-edge highlights, missing sparkle"));
+		}
+	}
 	State(r);
 	// A signed bump vector perturbs the next sample, never the base color.
 	std::unique_ptr<NativeD3D12Texture> bumpTexture(r.CreateTexture2D(1,1,1,DXGI_FORMAT_R8G8B8A8_UNORM));
@@ -437,6 +541,88 @@ bool Run(NativeD3D12Renderer& r, HWND window)
 	REQUIRE(Pixel(pixels,64,48,32,255,255,255,"row-major world transform translation"));
 	REQUIRE(Pixel(pixels,64,16,32,0,0,0,"translated geometry does not remain at origin"));
 	const float identity[] = {1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};
+	{
+		NativeD3D12ScopedState restore(r);
+		r.SetWorldView(identity); r.SetWorldViewProjection(identity);
+		r.SetMaterialEnabled(false); r.SetLighting(NativeLightingState());
+		State(r);
+		const auto wireDraw=[&](bool textured) {
+			return textured ? r.DrawIndexedTextured(quad,sizeof(quad),sizeof(MaterialVertex),4,16,
+				quadIndices,6,D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST,white.get(),12) :
+				r.DrawIndexed(quad,sizeof(quad),sizeof(MaterialVertex),4,quadIndices,6,0,0,
+					D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST,12);
+		};
+		for (bool textured : {false,true}) {
+			REQUIRE(r.SetRasterizerFill(D3D12_FILL_MODE_SOLID));
+			REQUIRE(r.BeginFrame(black));
+			REQUIRE(wireDraw(textured)); // Populate the solid cache entry first.
+			REQUIRE(r.ReadbackFrame(pixels));
+			REQUIRE(Pixel(pixels,64,16,32,255,255,255,"solid rasterizer fills interiors"));
+			{
+				NativeD3D12ScopedState wireScope(r);
+				REQUIRE(r.SetRasterizerFill(D3D12_FILL_MODE_WIREFRAME));
+				REQUIRE(!r.SetRasterizerFill(static_cast<D3D12_FILL_MODE>(0)));
+				REQUIRE(r.CaptureState().fillMode==D3D12_FILL_MODE_WIREFRAME);
+				REQUIRE(r.BeginFrame(black));
+				REQUIRE(wireDraw(textured));
+				REQUIRE(r.ReadbackFrame(pixels));
+				REQUIRE(Pixel(pixels,64,16,32,0,0,0,textured ? "textured wireframe excludes interiors" : "basic wireframe excludes interiors"));
+				REQUIRE(Pixel(pixels,64,32,32,255,255,255,"wireframe retains triangle edges"));
+				REQUIRE(r.BeginFrame(black));
+				REQUIRE(r.DrawScreenQuad(0,0,32,64,0xffff0000));
+				REQUIRE(r.DrawTexturedScreenQuad(32,0,32,64,0,0,1,1,0xff00ff00,white.get()));
+				REQUIRE(r.CaptureState().fillMode==D3D12_FILL_MODE_WIREFRAME);
+				REQUIRE(r.ReadbackFrame(pixels));
+				REQUIRE(Pixel(pixels,64,12,32,255,0,0,"basic screen quads stay solid during wireframe"));
+				REQUIRE(Pixel(pixels,64,44,32,0,255,0,"textured screen quads stay solid during wireframe"));
+			}
+			REQUIRE(r.CaptureState().fillMode==D3D12_FILL_MODE_SOLID);
+			REQUIRE(r.BeginFrame(black));
+			REQUIRE(wireDraw(textured));
+			REQUIRE(r.ReadbackFrame(pixels));
+			REQUIRE(Pixel(pixels,64,16,32,255,255,255,"solid PSO restored after wireframe"));
+		}
+	}
+	// Coplanar mesh decals require a distinct biased PSO in both pipelines.
+	// Reusing an unbiased cached PSO (or leaking bias out of the scope) fails these pixels.
+	{
+		NativeD3D12ScopedState restore(r);
+		r.SetWorldView(identity);
+		r.SetWorldViewProjection(identity);
+		r.SetMaterialEnabled(false);
+		r.SetLighting(NativeLightingState());
+		for (bool textured : {false,true}) {
+			MaterialVertex decalQuad[4];
+			std::memcpy(decalQuad,quad,sizeof(quad));
+			for (auto& vertex : decalQuad) vertex.position[2] = 0.5f;
+			const auto drawDecal = [&](UINT32 color) {
+				for (auto& vertex : decalQuad) vertex.color = color;
+				return textured ? r.DrawIndexedTextured(decalQuad,sizeof(decalQuad),sizeof(MaterialVertex),4,16,
+					quadIndices,6,D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST,white.get(),12) :
+					r.DrawIndexed(decalQuad,sizeof(decalQuad),sizeof(MaterialVertex),4,quadIndices,6,0,0,
+						D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST,12);
+			};
+			REQUIRE(r.BeginFrame(black));
+			r.SetDepthBias(0);
+			r.SetFixedFunctionState(D3D12_CULL_MODE_NONE,true,true,D3D12_COMPARISON_FUNC_LESS,
+				false,D3D12_BLEND_ONE,D3D12_BLEND_ZERO,D3D12_BLEND_OP_ADD,15);
+			REQUIRE(drawDecal(0xffff0000));
+			r.SetFixedFunctionState(D3D12_CULL_MODE_NONE,true,false,D3D12_COMPARISON_FUNC_LESS,
+				false,D3D12_BLEND_ONE,D3D12_BLEND_ZERO,D3D12_BLEND_OP_ADD,15);
+			{
+				NativeD3D12ScopedState decalScope(r);
+				r.SetDepthBias(-8);
+				REQUIRE(drawDecal(0xff00ff00));
+			}
+			REQUIRE(r.CaptureState().depthBias==0);
+			REQUIRE(drawDecal(0xff0000ff));
+			r.SetDepthBias(8);
+			REQUIRE(drawDecal(0xff0000ff));
+			REQUIRE(r.ReadbackFrame(pixels));
+			REQUIRE(Pixel(pixels,64,32,32,0,255,0,textured ? "textured decal depth bias and restore" :
+				"basic decal depth bias and restore"));
+		}
+	}
 	r.SetWorldViewProjection(identity);
 	const float fogView[] = {0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,5,1};
 	r.SetWorldView(fogView);
@@ -523,6 +709,84 @@ bool Run(NativeD3D12Renderer& r, HWND window)
 	REQUIRE(r.ReadbackFrame(pixels));
 	REQUIRE(Pixel(pixels,64,32,32,64,128,192,"sparse textured indices and rejected-draw recovery"));
 
+	// Submission descriptions must preserve a base vertex on textured draws,
+	// just as the untextured path does, and reject unsupported layouts/ranges.
+	NativeDrawSubmission described;
+	described.vertices = sparse.data();
+	described.vertexBytes = sparseBytes;
+	described.vertexStride = sizeof(MaterialVertex);
+	described.vertexCount = 65537;
+	described.indices = sparseList;
+	described.indexCount = 6;
+	described.baseVertex = 1;
+	described.texture = white.get();
+	described.layout.stride = sizeof(MaterialVertex);
+	described.layout.Add(NativeVertexSemantic::Position,0,DXGI_FORMAT_R32G32B32_FLOAT,0);
+	described.layout.Add(NativeVertexSemantic::Color,0,DXGI_FORMAT_R8G8B8A8_UNORM,12);
+	described.layout.Add(NativeVertexSemantic::TexCoord,0,DXGI_FORMAT_R32G32_FLOAT,16);
+	REQUIRE(r.BeginFrame(black));
+	REQUIRE(Submit_Native_Draw(r,described));
+	REQUIRE(r.ReadbackFrame(pixels));
+	REQUIRE(Pixel(pixels,64,32,32,64,128,192,"native submission textured base vertex"));
+	{
+		NativeD3D12ScopedState restore(r);
+		auto factorDraw=described;
+		factorDraw.texture=nullptr;
+		factorDraw.layout.elementCount=2; // No UV attribute is needed for arithmetic.
+		factorDraw.useMaterial=true;
+		factorDraw.material.enabled=true;
+		factorDraw.material.factor=0xff808080;
+		auto& factorStage=factorDraw.material.stages[0];
+		factorStage.colorOp=factorStage.alphaOp=NativeMaterialOp::Select1;
+		factorStage.colorArg1=factorStage.alphaArg1=UINT(NativeMaterialSource::Factor);
+		REQUIRE(r.BeginFrame(black));
+		REQUIRE(Submit_Native_Draw(r,factorDraw));
+		REQUIRE(r.ReadbackFrame(pixels));
+		REQUIRE(Pixel(pixels,64,32,32,128,128,128,"textureless native factor with base vertex and no UV"));
+		auto& diffuseStage=factorDraw.material.stages[1];
+		diffuseStage.colorOp=NativeMaterialOp::Modulate;
+		diffuseStage.colorArg1=UINT(NativeMaterialSource::Current);
+		diffuseStage.colorArg2=UINT(NativeMaterialSource::Diffuse);
+		REQUIRE(r.BeginFrame(black));
+		REQUIRE(Submit_Native_Draw(r,factorDraw));
+		REQUIRE(r.ReadbackFrame(pixels));
+		REQUIRE(Pixel(pixels,64,32,32,32,64,96,"textureless multistage material arithmetic"));
+		factorDraw.material.enabled=false;
+		REQUIRE(r.BeginFrame(black));
+		REQUIRE(Submit_Native_Draw(r,factorDraw));
+		REQUIRE(r.ReadbackFrame(pixels));
+		REQUIRE(Pixel(pixels,64,32,32,64,128,192,"disabled material returns to basic diffuse path"));
+	}
+	described.startIndex = 1; REQUIRE(!described.Is_Valid()); described.startIndex = 0;
+	described.layout.elements[0].inputSlot = 1; REQUIRE(!described.Is_Valid());
+	described.layout.elements[0].inputSlot = 0;
+	described.layout.elements[1].offset = sizeof(MaterialVertex); REQUIRE(!described.Is_Valid());
+	described.layout.elements[1].offset = 12;
+	described.vertexCount = UINT_MAX; REQUIRE(!described.Is_Valid());
+
+	// Only shadow-count pixels darken. Player-color bits and unshadowed pixels
+	// are unchanged, and compositing must not mutate stencil or depth.
+	for (UINT8 occlusionMask : {UINT8(0x80), UINT8(0xf8)}) {
+		REQUIRE(r.BeginFrame(black));
+		State(r);
+		r.SetStencilState(false,D3D12_COMPARISON_FUNC_ALWAYS,0,0xff,0xff,
+			D3D12_STENCIL_OP_KEEP,D3D12_STENCIL_OP_KEEP,D3D12_STENCIL_OP_KEEP);
+		REQUIRE(r.DrawScreenQuad(0,0,64,64,0xffffffff));
+		r.SetStencilState(true,D3D12_COMPARISON_FUNC_ALWAYS,1,0xff,0xff,
+			D3D12_STENCIL_OP_KEEP,D3D12_STENCIL_OP_KEEP,D3D12_STENCIL_OP_REPLACE);
+		REQUIRE(r.DrawScreenQuad(0,0,16,64,0xffffffff));
+		r.SetStencilState(true,D3D12_COMPARISON_FUNC_ALWAYS,occlusionMask,0xff,0xff,
+			D3D12_STENCIL_OP_KEEP,D3D12_STENCIL_OP_KEEP,D3D12_STENCIL_OP_REPLACE);
+		REQUIRE(r.DrawScreenQuad(16,0,16,64,0xffffffff));
+		SetNativeShadowCompositeState(r,occlusionMask);
+		REQUIRE(r.DrawScreenQuad(0,0,64,64,0x7fa0a0a0));
+		REQUIRE(r.ReadbackFrame(pixels));
+		REQUIRE(Pixel(pixels,64,8,32,160,160,160,"shadow count composite"));
+		REQUIRE(Pixel(pixels,64,24,32,255,255,255,"player-color stencil excluded"));
+		REQUIRE(Pixel(pixels,64,48,32,255,255,255,"unshadowed scene preserved"));
+	}
+	r.SetStencilState(false,D3D12_COMPARISON_FUNC_ALWAYS,0,0xff,0xff,
+		D3D12_STENCIL_OP_KEEP,D3D12_STENCIL_OP_KEEP,D3D12_STENCIL_OP_KEEP);
 	// The stencil shadow composite must use its packed vertex color, not white.
 	State(r,true);
 	REQUIRE(r.BeginFrame(black));
@@ -634,6 +898,46 @@ bool Run(NativeD3D12Renderer& r, HWND window)
 	LitVertex litQuad[] = {
 		{{-1,-1,0},{0,0,-1},0,0xff00ff00,{0,1}}, {{-1,1,0},{0,0,-1},0,0xff00ff00,{0,0}},
 		{{1,-1,0},{0,0,-1},0,0xff00ff00,{1,1}}, {{1,1,0},{0,0,-1},0,0xff00ff00,{1,0}}};
+	// Environment coordinates are generated from normals/reflections, even for
+	// unlit materials with deliberately conflicting authored UVs.
+	NativeMaterialCoordinates environmentUV;
+	environmentUV.transform = true;
+	environmentUV.matrix = {.5f,0,0,0, 0,0,0,0, 0,0,0,0, .5f,.25f,0,1};
+	NativeMaterialStage environmentStage;
+	environmentStage.colorOp = NativeMaterialOp::Select1;
+	for (unsigned variant=0;variant<4;++variant) {
+		State(r);
+		r.SetLighting(NativeLightingState());
+		float environmentView[16];
+		std::memcpy(environmentView,identity,sizeof(environmentView));
+		environmentView[0] = variant==1 ? -2.f : 2.f;
+		environmentView[12] = variant>=2 ? 4.f : 0.f;
+		environmentView[14] = 4.f;
+		r.SetWorldView(environmentView);
+		r.SetWorldViewProjection(identity);
+		for (auto& vertex : litQuad) {
+			vertex.normal[0] = variant<2 ? 1.f : (variant==3 ? -.70710678f : 0.f);
+			vertex.normal[1] = 0;
+			vertex.normal[2] = variant<2 ? 0.f : (variant==3 ? -.70710678f : -1.f);
+		}
+		environmentUV.environment = variant<2 ? NativeEnvironmentCoordinates::CameraNormal : NativeEnvironmentCoordinates::CameraReflection;
+		r.SetMaterialEnabled(true);
+		for (UINT stage=0;stage<4;++stage)
+			r.SetMaterialStage(stage,NativeMaterialStage(),NativeMaterialCoordinates(),nullptr);
+		r.SetMaterialStage(0,environmentStage,environmentUV,environment.get());
+		r.SetSamplerState(NativeD3D12FilterMode::Point,NativeD3D12FilterMode::Point,NativeD3D12FilterMode::Point,true,true);
+		r.SetMaterialSampler(0);
+		REQUIRE(r.BeginFrame(black));
+		REQUIRE(r.DrawIndexedTextured(litQuad,sizeof(litQuad),sizeof(LitVertex),4,32,
+			quadIndices,6,D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST,environment.get(),24,nullptr,nullptr,12,28));
+		REQUIRE(r.ReadbackFrame(pixels));
+		const bool red = variant==1 || variant==3;
+		REQUIRE(Pixel(pixels,64,32,32,red?255:0,red?0:255,0,"native unlit normal/reflection coordinates"));
+	}
+	for (auto& vertex : litQuad) {
+		vertex.normal[0]=vertex.normal[1]=0;
+		vertex.normal[2]=-1;
+	}
 	r.SetWorldView(identity);
 	r.SetWorldViewProjection(identity);
 	r.SetMaterialEnabled(false);
@@ -758,6 +1062,81 @@ bool Run(NativeD3D12Renderer& r, HWND window)
 	REQUIRE(r.ReadbackFrame(pixels));
 	REQUIRE(Pixel(pixels,64,2,2,0,255,255,"reflection capture top-left survives separate frame"));
 	REQUIRE(Pixel(pixels,64,61,61,0,255,255,"reflection capture covers full small target"));
+	// Nested native passes must restore alpha rejection and the full viewport
+	// without consulting the engine's old state cache.
+	State(r);
+	REQUIRE(r.BeginFrame(black));
+	{
+		NativeD3D12ScopedState outer(r);
+		r.SetViewport(16,16,32,32);
+		r.SetAlphaTestState(true,D3D12_COMPARISON_FUNC_NEVER,0);
+		{
+			NativeD3D12ScopedState inner(r);
+			r.SetAlphaTestState(false,D3D12_COMPARISON_FUNC_ALWAYS,0);
+			REQUIRE(r.DrawTexturedScreenQuad(16,16,32,32,0,0,1,1,0xff00ff00,white.get()));
+		}
+		REQUIRE(r.DrawTexturedScreenQuad(16,16,32,32,0,0,1,1,0xff0000ff,white.get()));
+	}
+	REQUIRE(r.DrawTexturedScreenQuad(0,0,8,8,0,0,1,1,0xffff0000,white.get()));
+	REQUIRE(r.ReadbackFrame(pixels));
+	REQUIRE(Pixel(pixels,64,32,32,0,255,0,"nested native pass restores alpha rejection"));
+	REQUIRE(Pixel(pixels,64,2,2,255,0,0,"native pass restores viewport and alpha state"));
+	// A pass may replace a material texture and release its external owner;
+	// a saved native binding must still refer to the original resource.
+	std::unique_ptr<NativeD3D12Texture> scopedTexture(r.CreateTexture2D(1,1,1,DXGI_FORMAT_R8G8B8A8_UNORM));
+	const unsigned char scopedRed[] = {255,0,0,255};
+	level = {scopedRed,4,4};
+	REQUIRE(scopedTexture && r.UploadTexture2D(*scopedTexture,&level,1));
+	REQUIRE(r.BeginFrame(black));
+	{
+		NativeD3D12ScopedState original(r);
+		NativeMaterialStage scopedMaterial;
+		scopedMaterial.colorOp = NativeMaterialOp::Select1;
+		NativeMaterialCoordinates scopedUV;
+		scopedUV.offset = 16;
+		r.SetMaterialEnabled(true);
+		r.SetMaterialStage(0,scopedMaterial,scopedUV,scopedTexture.get());
+		for (UINT stage=1;stage<4;++stage)
+			r.SetMaterialStage(stage,NativeMaterialStage(),NativeMaterialCoordinates(),nullptr);
+		{
+			NativeD3D12ScopedState savedBinding(r);
+			r.SetMaterialStage(0,scopedMaterial,scopedUV,white.get());
+			scopedTexture.reset();
+		}
+		REQUIRE(r.DrawTexturedScreenQuad(0,0,64,64,0,0,1,1,0xffffffff,white.get(),true));
+	}
+	REQUIRE(r.ReadbackFrame(pixels));
+	REQUIRE(Pixel(pixels,64,32,32,255,0,0,"native saved material retains original texture"));
+	// Distortion uses a GPU snapshot, including offscreen filter targets. Copying
+	// must leave the original target writable and the snapshot independently sampled.
+	std::unique_ptr<NativeD3D12Texture> snapshot(r.CreateTexture2D(64,64,1,DXGI_FORMAT_R8G8B8A8_UNORM));
+	std::unique_ptr<NativeD3D12Texture> wrongSize(r.CreateTexture2D(8,8,1,DXGI_FORMAT_R8G8B8A8_UNORM));
+	REQUIRE(snapshot && wrongSize);
+	State(r);
+	REQUIRE(!r.CopyCurrentRenderTarget(*snapshot));
+	REQUIRE(r.BeginFrame(black));
+	REQUIRE(!r.CopyCurrentRenderTarget(*wrongSize));
+	REQUIRE(r.DrawScreenQuad(0,0,64,64,0xffff0000));
+	REQUIRE(r.CopyCurrentRenderTarget(*snapshot));
+	REQUIRE(r.DrawScreenQuad(0,0,64,64,0xff0000ff));
+	REQUIRE(r.DrawTexturedScreenQuad(0,0,32,64,0,0,1,1,0xffffffff,snapshot.get()));
+	REQUIRE(r.ReadbackFrame(pixels));
+	REQUIRE(Pixel(pixels,64,16,32,255,0,0,"GPU snapshot remains independently sampled"));
+	REQUIRE(Pixel(pixels,64,48,32,0,0,255,"GPU snapshot preserves writable source target"));
+	std::unique_ptr<NativeD3D12Texture> distortionTarget(r.CreateTexture2D(64,64,1,DXGI_FORMAT_R8G8B8A8_UNORM,true));
+	REQUIRE(distortionTarget);
+	REQUIRE(r.BeginFrame(black));
+	REQUIRE(r.SetRenderTarget(distortionTarget.get(),false));
+	REQUIRE(!r.CopyCurrentRenderTarget(*distortionTarget));
+	REQUIRE(r.DrawScreenQuad(0,0,64,64,0xff00ff00));
+	REQUIRE(r.CopyCurrentRenderTarget(*snapshot));
+	REQUIRE(r.DrawScreenQuad(0,0,64,64,0xff0000ff));
+	REQUIRE(r.SetRenderTarget(nullptr));
+	REQUIRE(r.DrawTexturedScreenQuad(0,0,32,64,0,0,1,1,0xffffffff,snapshot.get()));
+	REQUIRE(r.DrawTexturedScreenQuad(32,0,32,64,0,0,1,1,0xffffffff,distortionTarget.get()));
+	REQUIRE(r.ReadbackFrame(pixels));
+	REQUIRE(Pixel(pixels,64,16,32,0,255,0,"GPU snapshot copies offscreen targets"));
+	REQUIRE(Pixel(pixels,64,48,32,0,0,255,"GPU snapshot does not change offscreen binding"));
 	for (UINT frame=0;frame<64;++frame) {
 		REQUIRE(r.BeginFrame(black));
 		REQUIRE(r.DrawScreenQuad(0,0,64,64,frame&1?0xff00ff00:0xffff0000));

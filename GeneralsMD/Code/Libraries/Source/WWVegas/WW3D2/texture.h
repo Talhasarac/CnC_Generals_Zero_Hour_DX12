@@ -331,6 +331,8 @@ public:
 	virtual TexAssetType Get_Asset_Type() const { return TEX_REGULAR; }
 
 	virtual void Init();
+	// Prepare resources only: no sampler, mapper, or pipeline-state installation.
+	virtual NativeD3D12Texture* Prepare_Native_Texture();
 
 	// Background texture loader will call this when texture has been loaded
 	virtual void Apply_New_Surface(IDirect3DBaseTexture8* tex, bool initialized, bool disable_auto_invalidation = false);	// If the parameter is true, the texture will be flagged as initialised
@@ -338,7 +340,6 @@ public:
 	// Get the surface of one of the mipmap levels (defaults to highest-resolution one)
 	SurfaceClass *Get_Surface_Level(unsigned int level = 0);
 	void Mark_Native_Surface_Dirty();
-	void Upload_Native_Surface();
 	IDirect3DSurface8 *Get_D3D_Surface_Level(unsigned int level = 0);
 	void Get_Level_Description( SurfaceClass::SurfaceDescription & desc, unsigned int level = 0 );
 	
@@ -355,6 +356,8 @@ public:
 protected:
 
 	WW3DFormat				TextureFormat;
+	// Internal uploads must not be used by draw producers to bypass preparation.
+	void Upload_Native_Surface();
 
 	// legacy
 	TextureFilterClass	Filter;

@@ -56,6 +56,7 @@
 #include "meshgeometry.h"
 
 class MeshClass;
+class CameraClass;
 class RenderInfoClass;
 class DecalGeneratorClass;
 class DecalSystemClass;
@@ -87,7 +88,7 @@ public:
 	// which are used by some decal types which cannot use static object geometry (such as decals
 	// for skins, procedurally generated meshes, etc.)
 
-	virtual void											Render(void) = 0;
+	virtual void											Render(CameraClass& camera) = 0;
 
 	virtual bool											Create_Decal(	DecalGeneratorClass * generator,
 																					const OBBoxClass & localbox,
@@ -130,7 +131,7 @@ public:
 
 	// Rigid decal meshes have static geometry so they do not use world_vertex_locs/norms
 
-	virtual void											Render(void);
+	virtual void											Render(CameraClass& camera);
 
 	virtual bool											Create_Decal(	DecalGeneratorClass * generator,
 																					const OBBoxClass & localbox,
@@ -195,7 +196,7 @@ public:
 
 	// Skin decals use world_vertex_locs/norms since they cannot use static geometry
 
-	virtual void											Render(void);
+	virtual void											Render(CameraClass& camera);
 
 	virtual bool											Create_Decal(	DecalGeneratorClass * generator,
 																					const OBBoxClass & localbox,

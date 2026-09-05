@@ -291,6 +291,58 @@ void MatrixMapperClass::Apply(int uv_array_index)
  * HISTORY:                                                                                    *
  *   11/06/01     NH : Created comment block.                                                  *
  *=============================================================================================*/
+NativeMaterialCoordinates MatrixMapperClass::Build_Native_Coordinates(
+	const Matrix4x4& viewToPixel, const Matrix4x4& worldView) const
+{
+	Matrix4x4 matrix(true);
+	NativeMaterialCoordinates coordinates;
+	coordinates.transform = true;
+	coordinates.position = Type != NORMAL_GRADIENT;
+	switch (Type) {
+	case ORTHO_PROJECTION: matrix = viewToPixel; break;
+	case PERSPECTIVE_PROJECTION:
+		matrix[0] = viewToPixel[0]; matrix[1] = viewToPixel[1]; matrix[2] = viewToPixel[3];
+		coordinates.projected = true;
+		break;
+	case DEPTH_GRADIENT:
+		matrix[0].Set(0,0,0,GradientUCoord); matrix[1] = viewToPixel[2];
+		break;
+	case NORMAL_GRADIENT:
+		matrix[0].Set(0,0,0,GradientUCoord);
+		matrix[1].Set(ViewSpaceProjectionNormal.X,ViewSpaceProjectionNormal.Y,ViewSpaceProjectionNormal.Z,0);
+		coordinates.environment = NativeEnvironmentCoordinates::CameraNormal;
+		break;
+	}
+	// Native generated positions are authored/world space; normals are already
+	// transformed to camera space by the native vertex shader.
+	matrix = coordinates.position ? worldView * matrix.Transpose() : matrix.Transpose();
+	std::memcpy(coordinates.matrix.data(),&matrix,sizeof(matrix));
+	return coordinates;
+}
+
+bool MatrixMapperClass::Try_Get_Native_Coordinates_For_View(const NativeMapperContext& context,
+	unsigned int uvOffset, NativeMaterialCoordinates& output)
+{
+	Matrix4x4 matrix;
+	if (!Try_Calculate_Native_Texture_Matrix(context,matrix)) return false;
+	output = Build_Native_Coordinates(matrix,context.worldView);
+	return true;
+}
+
+bool CompositeMatrixMapperClass::Try_Calculate_Native_Texture_Matrix(const NativeMapperContext& context,
+	Matrix4x4& output)
+{
+	if (!InternalMapper) {
+		output = ViewToPixel;
+		return true;
+	}
+	Matrix4x4 internal, input = ViewToPixel;
+	if (!InternalMapper->Try_Calculate_Native_Texture_Matrix(context,internal)) return false;
+	input[2] = input[3];
+	output = internal * input;
+	return true;
+}
+
 void MatrixMapperClass::Calculate_Texture_Matrix(Matrix4x4 &tex_matrix)
 {
 	// We return ViewToPixel. This is not, strictly speaking, always correct, but it is close
@@ -336,9 +388,7 @@ CompositeMatrixMapperClass::CompositeMatrixMapperClass(const CompositeMatrixMapp
 	MatrixMapperClass(src),
 	InternalMapper(src.InternalMapper ? src.InternalMapper->Clone() : NULL)
 {
-	if (InternalMapper) {
-		InternalMapper->Add_Ref();
-	}
+	// Clone already returns an owned reference; adding another leaks nested mappers.
 }
 
 /***********************************************************************************************

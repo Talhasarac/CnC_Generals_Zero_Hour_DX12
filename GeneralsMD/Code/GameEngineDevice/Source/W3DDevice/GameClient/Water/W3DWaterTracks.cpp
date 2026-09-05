@@ -308,6 +308,10 @@ Int WaterTracksObj::update(Int msElapsed)
  */
 //=============================================================================
 
+#include "W3DDevice/GameClient/NativeTerrainDraw.h"
+#include "W3DDevice/GameClient/NativeWorldMaterial.h"
+#include "WW3D2/native_pipeline_description.h"
+
 Int WaterTracksObj::render(DX8VertexBufferClass	*vertexBuffer, Int batchStart)
 {
 	VertexFormatXYZDUV1 *vb;
@@ -485,8 +489,21 @@ Int WaterTracksObj::render(DX8VertexBufferClass	*vertexBuffer, Int batchStart)
 
 	Int idxCount=(m_y-1)*(m_x*2+2) - 2;	//index count
 
-	DX8Wrapper::Set_Index_Buffer(TheWaterTracksRenderSystem->m_indexBuffer,batchStart);
-	DX8Wrapper::Draw_Strip(0,idxCount-2,0,m_x*m_y);	//there are always n-2 primitives for n index strip.
+	if (NativeD3D12Renderer* native = NativeD3D12Renderer::Active())
+	{
+		const auto* vertices = vertexBuffer->Get_Native_Vertex_Buffer();
+		const auto* indices = TheWaterTracksRenderSystem->m_indexBuffer->Get_Native_Index_Buffer();
+		const NativeMaterialDescription material = NativeWorldModulatedMaterial(
+			m_stageZeroTexture,offsetof(VertexFormatXYZDUV1,u1),
+			TheTerrainRenderObject ? TheTerrainRenderObject->getShroud() : NULL,true);
+		Apply_Native_Material_Description(*native,material);
+		const UINT stride = sizeof(VertexFormatXYZDUV1);
+		native->DrawIndexedTextured(static_cast<const unsigned char*>(vertices->Data())+batchStart*stride,
+			m_x*m_y*stride,stride,m_x*m_y,offsetof(VertexFormatXYZDUV1,u1),
+			static_cast<const unsigned short*>(indices->Data()),idxCount,
+			D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP,material.textures[0],
+			offsetof(VertexFormatXYZDUV1,diffuse),vertices,indices);
+	}
 
 	return batchStart+m_x*m_y;	//return new offset into unused area of vertex buffer
 }
@@ -926,56 +943,17 @@ Try improving the fit to vertical surfaces like cliffs.
 
 	diffuseLight=REAL_TO_INT(shadeB) | (REAL_TO_INT(shadeG) << 8) | (REAL_TO_INT(shadeR) << 16);
 
-	Matrix3D tm(1);	///set to identity
-	DX8Wrapper::Set_Transform(D3DTS_WORLD,tm);	//position the water surface
-
-	DX8Wrapper::Set_Material(m_vertexMaterialClass);
-	DX8Wrapper::Set_Shader(m_shaderClass);
-
-	DX8Wrapper::Set_Vertex_Buffer(m_vertexBuffer);
-	DX8Wrapper::Set_DX8_Render_State(D3DRS_ZBIAS,8);
-	//Force apply of render states so we can override them.
-	DX8Wrapper::Apply_Render_State_Changes();
-
-	if (TheTerrainRenderObject->getShroud())
-	{	
-		W3DShaderManager::setTexture(0,TheTerrainRenderObject->getShroud()->getShroudTexture());
-		W3DShaderManager::setShader(W3DShaderManager::ST_SHROUD_TEXTURE, 1);
-
-		//modulate with shroud texture
-		DX8Wrapper::Set_DX8_Texture_Stage_State( 1, D3DTSS_COLORARG1, D3DTA_TEXTURE );	//stage 1 texture
-		DX8Wrapper::Set_DX8_Texture_Stage_State( 1, D3DTSS_COLORARG2, D3DTA_CURRENT );	//previous stage texture
-		DX8Wrapper::Set_DX8_Texture_Stage_State( 1, D3DTSS_COLOROP,   D3DTOP_MODULATE );
-		DX8Wrapper::Set_DX8_Texture_Stage_State( 1, D3DTSS_ALPHAOP,   D3DTOP_MODULATE );
-
-		//Shroud shader uses z-compare of EQUAL which wouldn't work on water because it doesn't
-		//write to the zbuffer.  Change to LESSEQUAL.
-		DX8Wrapper::Set_DX8_Render_State(D3DRS_ZFUNC, D3DCMP_LESSEQUAL);
-	}
-
-	Int LastTextureType=-1;
-
-	WaterTracksObj *mod=m_usedModules;
-
-	while( mod )
-	{
-		if (LastTextureType != mod->m_type)
-			DX8Wrapper::Set_Texture(0,mod->m_stageZeroTexture);
-
-		Int vertsRendered=mod->render(m_vertexBuffer,m_batchStart);
-
-		m_batchStart = vertsRendered;	//advance past vertices already in buffer
-
-		mod = mod->m_nextSystem;
-	}	//while (mod)
-
-	DX8Wrapper::Set_DX8_Render_State(D3DRS_ZBIAS,0);
-
-	if (TheTerrainRenderObject->getShroud())
-	{	//we used the shroud shader, so reset it.
-		DX8Wrapper::Set_DX8_Render_State(D3DRS_ZFUNC, D3DCMP_EQUAL);
-		W3DShaderManager::resetShader(W3DShaderManager::ST_SHROUD_TEXTURE);
-	}
+	NativeD3D12Renderer* native = NativeD3D12Renderer::Active();
+	if (!native) return;
+	NativeD3D12ScopedState pass(*native);
+	NativeTerrainSetCameraMatrices(*native,&rinfo.Camera,Matrix3D(1));
+	NativeTerrainSetMaterial(*native,false,true,D3D12_CULL_MODE_NONE);
+	m_shaderClass.Get_Native_Pipeline().Apply(*native);
+	native->SetVertexFog(0,0,1,1,0,false);
+	// Geometry is already lifted 1.5 world units above the water surface.
+	// Each wave binds its own texture/shroud material and relative buffer view.
+	for (WaterTracksObj* mod=m_usedModules; mod; mod=mod->m_nextSystem)
+		m_batchStart = mod->render(m_vertexBuffer,m_batchStart);
 }
 
 WaterTracksObj *WaterTracksRenderSystem::findTrack(Vector2 &start, Vector2 &end, waveType type)

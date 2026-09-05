@@ -82,6 +82,8 @@
 #include "W3DDevice/GameClient/W3DWater.h"
 #include "W3DDevice/GameClient/W3DShroud.h"
 #include "WW3D2/DX8Wrapper.h"
+#include "W3DDevice/GameClient/NativeTerrainDraw.h"
+#include "WW3D2/native_pipeline_description.h"
 #include "WW3D2/Light.h"
 #include "WW3D2/Scene.h"
 #include "W3DDevice/GameClient/W3DPoly.h"
@@ -2539,9 +2541,10 @@ void BaseHeightMapRenderObjClass::renderShoreLines(CameraClass *pCamera)
 	if (!TheGlobalData->m_showSoftWaterEdge || TheWaterTransparency->m_transparentWaterDepth==0 || m_numShoreLineTiles == 0)
 		return;
 
-	//Check if video card is capable of using this effect
-	if (DX8Wrapper::getBackBufferFormat() != WW3D_FORMAT_A8R8G8B8)
-		return;	//can't apply effect on cards without destination alpha
+	auto* native=NativeD3D12Renderer::Active();
+	if (!native || !pCamera || !m_destAlphaTexture) return;
+	if (native->RenderTargetFormat()!=DXGI_FORMAT_R8G8B8A8_UNORM &&
+		native->RenderTargetFormat()!=DXGI_FORMAT_B8G8R8A8_UNORM) return;
 
 	Int vertexCount = 0;
 	Int indexCount = 0;
@@ -2555,17 +2558,23 @@ void BaseHeightMapRenderObjClass::renderShoreLines(CameraClass *pCamera)
 	Int drawStartY=m_map->getDrawOrgY();
 	Int j=0;
 
+	NativeD3D12ScopedState restore(*native);
+	NativeTerrainSetCameraMatrices(*native,pCamera,Matrix3D::Identity);
+	native->SetTreeSway(nullptr,0);
+	native->SetLighting(NativeLightingState());
+	native->SetVertexFog(0,0,1,0,0,false);
+	native->SetDepthBias(0);
 	ShaderClass unlitShader=ShaderClass::_PresetOpaque2DShader;
 	unlitShader.Set_Depth_Compare(ShaderClass::PASS_LEQUAL);
-	DX8Wrapper::Set_Shader(unlitShader);
-	VertexMaterialClass *vmat=VertexMaterialClass::Get_Preset(VertexMaterialClass::PRELIT_DIFFUSE);
-	DX8Wrapper::Set_Material(vmat);
-	REF_PTR_RELEASE(vmat);
-	DX8Wrapper::Set_Texture(0,m_destAlphaTexture);
-	DX8Wrapper::Set_Transform(D3DTS_WORLD,Matrix3D(1));
-	//Enabled writes to destination alpha only
-	DX8Wrapper::Set_DX8_Render_State(D3DRS_COLORWRITEENABLE,D3DCOLORWRITEENABLE_ALPHA);
-	DX8Wrapper::Set_DX8_Texture_Stage_State(0,  D3DTSS_TEXCOORDINDEX, 0);
+	auto pipeline=unlitShader.Get_Native_Pipeline(ShaderClass::Is_Backface_Culling_Inverted());
+	pipeline.colorMask=D3D12_COLOR_WRITE_ENABLE_ALPHA;
+	pipeline.Apply(*native);
+	const auto layout=FVFInfoClass(dynamic_fvf_type).Build_Native_Layout();
+	auto material=unlitShader.Get_Native_Texture_Material();
+	material.textures[0]=m_destAlphaTexture->Prepare_Native_Texture();
+	if (!material.textures[0]) return;
+	material.coordinates[0].offset=layout.Find_Offset(NativeVertexSemantic::TexCoord);
+	material.samplers[0]=m_destAlphaTexture->Get_Filter().Get_Native_Description();
 	
 
 	while (j != m_numShoreLineTiles)
@@ -2579,7 +2588,7 @@ void BaseHeightMapRenderObjClass::renderShoreLines(CameraClass *pCamera)
 			DynamicIBAccessClass::WriteLockClass lockib(&ib_access);
 			UnsignedShort *ib=lockib.Get_Index_Array();
 			if (!ib || !vb)
-			{	DX8Wrapper::Set_DX8_Render_State(D3DRS_COLORWRITEENABLE,D3DCOLORWRITEENABLE_BLUE|D3DCOLORWRITEENABLE_GREEN|D3DCOLORWRITEENABLE_RED);
+			{
 				return;
 			}
 
@@ -2681,19 +2690,15 @@ void BaseHeightMapRenderObjClass::renderShoreLines(CameraClass *pCamera)
 
 		if (indexCount > 0 && vertexCount > 0)
 		{
-			DX8Wrapper::Set_Index_Buffer(ib_access,0);
-			DX8Wrapper::Set_Vertex_Buffer(vb_access);
-			DX8Wrapper::Draw_Triangles(	0,indexCount/3, 0,	vertexCount);	//draw a quad, 2 triangles, 4 verts
-			m_numVisibleShoreLineTiles += indexCount/6;
+			if (NativeTerrainDrawDynamic(*native,vb_access,ib_access,vertexCount,indexCount,layout,material))
+				m_numVisibleShoreLineTiles += indexCount/6;
 		}
 
 		vertexCount=0;
 		indexCount=0;
 	}//for all shore tiles
 
-	//Disable writes to destination alpha
-	DX8Wrapper::Set_DX8_Render_State(D3DRS_COLORWRITEENABLE,D3DCOLORWRITEENABLE_BLUE|D3DCOLORWRITEENABLE_GREEN|D3DCOLORWRITEENABLE_RED);
-	ShaderClass::Invalidate();
+	// Scoped native state restores the caller's write mask on every exit.
 }
 
 /**Render parts of terrain that are along the coast line and have vertices directly under the
@@ -2707,9 +2712,10 @@ void BaseHeightMapRenderObjClass::renderShoreLinesSorted(CameraClass *pCamera)
 	if (!TheGlobalData->m_showSoftWaterEdge || TheWaterTransparency->m_transparentWaterDepth==0 || m_numShoreLineTiles == 0)
 		return;
 
-	//Check if video card is capable of using this effect
-	if (DX8Wrapper::getBackBufferFormat() != WW3D_FORMAT_A8R8G8B8)
-		return;	//can't apply effect on cards without destination alpha
+	auto* native=NativeD3D12Renderer::Active();
+	if (!native || !pCamera || !m_destAlphaTexture) return;
+	if (native->RenderTargetFormat()!=DXGI_FORMAT_R8G8B8A8_UNORM &&
+		native->RenderTargetFormat()!=DXGI_FORMAT_B8G8R8A8_UNORM) return;
 
 	Int vertexCount = 0;
 	Int indexCount = 0;
@@ -2744,17 +2750,23 @@ void BaseHeightMapRenderObjClass::renderShoreLinesSorted(CameraClass *pCamera)
 			return;	//nothing to draw
 	}
 
+	NativeD3D12ScopedState restore(*native);
+	NativeTerrainSetCameraMatrices(*native,pCamera,Matrix3D::Identity);
+	native->SetTreeSway(nullptr,0);
+	native->SetLighting(NativeLightingState());
+	native->SetVertexFog(0,0,1,0,0,false);
+	native->SetDepthBias(0);
 	ShaderClass unlitShader=ShaderClass::_PresetOpaque2DShader;
 	unlitShader.Set_Depth_Compare(ShaderClass::PASS_LEQUAL);
-	DX8Wrapper::Set_Shader(unlitShader);
-	VertexMaterialClass *vmat=VertexMaterialClass::Get_Preset(VertexMaterialClass::PRELIT_DIFFUSE);
-	DX8Wrapper::Set_Material(vmat);
-	REF_PTR_RELEASE(vmat);
-	DX8Wrapper::Set_Texture(0,m_destAlphaTexture);
-	DX8Wrapper::Set_Transform(D3DTS_WORLD,Matrix3D(1));
-	//Enabled writes to destination alpha only
-	DX8Wrapper::Set_DX8_Render_State(D3DRS_COLORWRITEENABLE,D3DCOLORWRITEENABLE_ALPHA);
-	DX8Wrapper::Set_DX8_Texture_Stage_State(0,  D3DTSS_TEXCOORDINDEX, 0);
+	auto pipeline=unlitShader.Get_Native_Pipeline(ShaderClass::Is_Backface_Culling_Inverted());
+	pipeline.colorMask=D3D12_COLOR_WRITE_ENABLE_ALPHA;
+	pipeline.Apply(*native);
+	const auto layout=FVFInfoClass(dynamic_fvf_type).Build_Native_Layout();
+	auto material=unlitShader.Get_Native_Texture_Material();
+	material.textures[0]=m_destAlphaTexture->Prepare_Native_Texture();
+	if (!material.textures[0]) return;
+	material.coordinates[0].offset=layout.Find_Offset(NativeVertexSemantic::TexCoord);
+	material.samplers[0]=m_destAlphaTexture->Get_Filter().Get_Native_Description();
 
 	Bool isDone=FALSE;
 	Int lastRenderedTile=0;
@@ -2770,7 +2782,7 @@ void BaseHeightMapRenderObjClass::renderShoreLinesSorted(CameraClass *pCamera)
 			DynamicIBAccessClass::WriteLockClass lockib(&ib_access);
 			UnsignedShort *ib=lockib.Get_Index_Array();
 			if (!ib || !vb)
-			{	DX8Wrapper::Set_DX8_Render_State(D3DRS_COLORWRITEENABLE,D3DCOLORWRITEENABLE_BLUE|D3DCOLORWRITEENABLE_GREEN|D3DCOLORWRITEENABLE_RED);
+			{
 				return;
 			}
 
@@ -3027,19 +3039,15 @@ flushVertexBuffer1:
 
 		if (indexCount > 0 && vertexCount > 0)
 		{
-			DX8Wrapper::Set_Index_Buffer(ib_access,0);
-			DX8Wrapper::Set_Vertex_Buffer(vb_access);
-			DX8Wrapper::Draw_Triangles(	0,indexCount/3, 0,	vertexCount);	//draw a quad, 2 triangles, 4 verts
-			m_numVisibleShoreLineTiles += indexCount/6;
+			if (NativeTerrainDrawDynamic(*native,vb_access,ib_access,vertexCount,indexCount,layout,material))
+				m_numVisibleShoreLineTiles += indexCount/6;
 		}
 
 		vertexCount=0;
 		indexCount=0;
 	}//for all shore tiles
 
-	//Disable writes to destination alpha
-	DX8Wrapper::Set_DX8_Render_State(D3DRS_COLORWRITEENABLE,D3DCOLORWRITEENABLE_BLUE|D3DCOLORWRITEENABLE_GREEN|D3DCOLORWRITEENABLE_RED);
-	ShaderClass::Invalidate();
+	// Scoped native state restores the caller's write mask on every exit.
 }
 
 //=============================================================================

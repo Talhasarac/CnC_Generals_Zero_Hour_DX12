@@ -1015,7 +1015,7 @@ void RTS3DScene::Render(RenderInfoClass & rinfo)
 			DX8Wrapper::Set_DX8_Render_State(D3DRS_COLORWRITEENABLE,D3DCOLORWRITEENABLE_BLUE|D3DCOLORWRITEENABLE_GREEN|D3DCOLORWRITEENABLE_RED);
 			WW3D::Enable_Coloring(0xff008000);
 			WW3D::Enable_Texturing(false);
-			DX8Wrapper::Set_DX8_Render_State(D3DRS_FILLMODE,D3DFILL_WIREFRAME);
+			if (auto* native=NativeD3D12Renderer::Active()) native->SetRasterizerFill(D3D12_FILL_MODE_WIREFRAME);
 
 			//Move maximum z-buffer value in a little to shift all z-values closer
 			//and thus forcing line to appear on top of previous pass.
@@ -1027,7 +1027,7 @@ void RTS3DScene::Render(RenderInfoClass & rinfo)
 //			DX8Wrapper::Set_DX8_Render_State (D3DRS_ZBIAS, 4);
 			Customized_Render(rinfo);	//render wireframe where z-test passes
 			Flush(rinfo);
-			DX8Wrapper::Set_DX8_Render_State(D3DRS_FILLMODE,D3DFILL_SOLID);
+			if (auto* native=NativeD3D12Renderer::Active()) native->SetRasterizerFill(D3D12_FILL_MODE_SOLID);
 
 			rinfo.Camera.Set_Zbuffer_Range(nearZ, farZ);
 			rinfo.Camera.Apply();
@@ -1052,7 +1052,7 @@ void RTS3DScene::Render(RenderInfoClass & rinfo)
 			switch (Get_Extra_Pass_Polygon_Mode()) {
 			case EXTRA_PASS_LINE:
 				WW3D::Enable_Texturing(false);
-				DX8Wrapper::Set_DX8_Render_State(D3DRS_FILLMODE,D3DFILL_WIREFRAME);
+				if (auto* native=NativeD3D12Renderer::Active()) native->SetRasterizerFill(D3D12_FILL_MODE_WIREFRAME);
 				DX8Wrapper::Set_DX8_Render_State (D3DRS_ZBIAS, 7);
 				Customized_Render(rinfo);
 				break;
@@ -1060,13 +1060,13 @@ void RTS3DScene::Render(RenderInfoClass & rinfo)
 				DX8Wrapper::Clear(true, false, Vector3(0.0f,0.0f,0.0f), 0.0f);	// Clear color but not z
 				WW3D::Enable_Texturing(false);
 				WW3D::Enable_Coloring(0xff008000);
-				DX8Wrapper::Set_DX8_Render_State(D3DRS_FILLMODE,D3DFILL_WIREFRAME);
+				if (auto* native=NativeD3D12Renderer::Active()) native->SetRasterizerFill(D3D12_FILL_MODE_WIREFRAME);
 				DX8Wrapper::Set_DX8_Render_State (D3DRS_ZBIAS, 7);
 				Customized_Render(rinfo);
 				break;
 			}
 			Flush(rinfo);
-			DX8Wrapper::Set_DX8_Render_State(D3DRS_FILLMODE,D3DFILL_SOLID);
+			if (auto* native=NativeD3D12Renderer::Active()) native->SetRasterizerFill(D3D12_FILL_MODE_SOLID);
 			DX8Wrapper::Set_DX8_Render_State (D3DRS_ZBIAS, 0);
 			WW3D::Enable_Texturing(old_enable);
 			WW3D::Enable_Coloring(0);
@@ -1234,47 +1234,37 @@ void renderStenciledPlayerColor( UnsignedInt color, UnsignedInt stencilRef, Bool
 {
 	if (NativeD3D12Renderer::Active() != NULL)
 	{
+		NativeD3D12Renderer& native = *NativeD3D12Renderer::Active();
+		NativeD3D12ScopedState native_state(native);
+		native.SetAlphaTestState(false, D3D12_COMPARISON_FUNC_ALWAYS, 0);
+		native.SetLighting(NativeLightingState());
+		native.SetGrayscale(false);
+		native.SetMaterialEnabled(false);
 		Int xpos, ypos;
 		TheTacticalView->getOrigin(&xpos, &ypos);
 		if (clear)
 		{
 			const Int occludedMask = TheW3DShadowManager->getStencilShadowMask();
-			DX8Wrapper::Set_DX8_Render_State(D3DRS_STENCILENABLE, TRUE);
-			DX8Wrapper::Set_DX8_Render_State(D3DRS_ZENABLE, TRUE);
-			DX8Wrapper::Set_DX8_Render_State(D3DRS_STENCILREF, 0x80808080);
-			DX8Wrapper::Set_DX8_Render_State(D3DRS_STENCILMASK, occludedMask);
-			DX8Wrapper::Set_DX8_Render_State(D3DRS_STENCILWRITEMASK, 0xffffffff);
-			DX8Wrapper::Set_DX8_Render_State(D3DRS_STENCILFUNC, D3DCMP_LESS);
-			DX8Wrapper::Set_DX8_Render_State(D3DRS_STENCILZFAIL, D3DSTENCILOP_REPLACE);
-			DX8Wrapper::Set_DX8_Render_State(D3DRS_STENCILPASS, D3DSTENCILOP_REPLACE);
-			DX8Wrapper::Set_DX8_Render_State(D3DRS_STENCILFAIL, D3DSTENCILOP_ZERO);
-			DX8Wrapper::Set_DX8_Render_State(D3DRS_ZFUNC, D3DCMP_NEVER);
-			DX8Wrapper::Set_DX8_Render_State(D3DRS_COLORWRITEENABLE, 0);
+			native.SetFixedFunctionState(D3D12_CULL_MODE_NONE, true, false,
+				D3D12_COMPARISON_FUNC_NEVER, false, D3D12_BLEND_ONE,
+				D3D12_BLEND_ZERO, D3D12_BLEND_OP_ADD, 0);
+			native.SetStencilState(true, D3D12_COMPARISON_FUNC_LESS,
+				static_cast<UINT8>(0x80808080), static_cast<UINT8>(occludedMask), 0xff,
+				D3D12_STENCIL_OP_ZERO, D3D12_STENCIL_OP_REPLACE, D3D12_STENCIL_OP_REPLACE);
 		}
 		else
 		{
-			DX8Wrapper::Set_DX8_Render_State(D3DRS_STENCILENABLE, TRUE);
-			DX8Wrapper::Set_DX8_Render_State(D3DRS_STENCILREF, stencilRef);
-			DX8Wrapper::Set_DX8_Render_State(D3DRS_STENCILMASK, 0xffffffff);
-			DX8Wrapper::Set_DX8_Render_State(D3DRS_STENCILWRITEMASK, 0xffffffff);
-			DX8Wrapper::Set_DX8_Render_State(D3DRS_STENCILFUNC, D3DCMP_EQUAL);
-			DX8Wrapper::Set_DX8_Render_State(D3DRS_STENCILZFAIL, D3DSTENCILOP_KEEP);
-			DX8Wrapper::Set_DX8_Render_State(D3DRS_STENCILPASS, D3DSTENCILOP_KEEP);
-			DX8Wrapper::Set_DX8_Render_State(D3DRS_STENCILFAIL, D3DSTENCILOP_KEEP);
-			DX8Wrapper::Set_DX8_Render_State(D3DRS_ALPHABLENDENABLE, TRUE);
-			DX8Wrapper::Set_DX8_Render_State(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
-			DX8Wrapper::Set_DX8_Render_State(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
+			native.SetFixedFunctionState(D3D12_CULL_MODE_NONE, false, false,
+				D3D12_COMPARISON_FUNC_ALWAYS, true, D3D12_BLEND_SRC_ALPHA,
+				D3D12_BLEND_INV_SRC_ALPHA, D3D12_BLEND_OP_ADD, D3D12_COLOR_WRITE_ENABLE_ALL);
+			native.SetStencilState(true, D3D12_COMPARISON_FUNC_EQUAL,
+				static_cast<UINT8>(stencilRef), 0xff, 0xff,
+				D3D12_STENCIL_OP_KEEP, D3D12_STENCIL_OP_KEEP, D3D12_STENCIL_OP_KEEP);
 		}
-		NativeD3D12Renderer::Active()->DrawScreenQuad(
+		native.DrawScreenQuad(
 			static_cast<FLOAT>(xpos), static_cast<FLOAT>(ypos),
 			static_cast<FLOAT>(TheTacticalView->getWidth()),
 			static_cast<FLOAT>(TheTacticalView->getHeight()), color);
-		DX8Wrapper::Set_DX8_Render_State(D3DRS_STENCILENABLE, FALSE);
-		DX8Wrapper::Set_DX8_Render_State(D3DRS_ALPHABLENDENABLE, FALSE);
-		DX8Wrapper::Set_DX8_Render_State(D3DRS_SRCBLEND, D3DBLEND_ONE);
-		DX8Wrapper::Set_DX8_Render_State(D3DRS_DESTBLEND, D3DBLEND_ZERO);
-		DX8Wrapper::Set_DX8_Render_State(D3DRS_ZFUNC, D3DCMP_ALWAYS);
-		DX8Wrapper::Set_DX8_Render_State(D3DRS_COLORWRITEENABLE, 0x0000000f);
 		return;
 	}
 	struct _TRANSLITVERTEX {

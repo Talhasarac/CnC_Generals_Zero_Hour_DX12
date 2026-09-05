@@ -47,6 +47,12 @@
 
 #define DEFAULT_IB_SIZE 5000
 
+const NativeD3D12UploadBuffer* DynamicIBAccessClass::Get_Native_Index_Buffer() const
+{
+	return Type==BUFFER_TYPE_DYNAMIC_DX8 && IndexBuffer ?
+		static_cast<const DX8IndexBufferClass*>(IndexBuffer)->Get_Native_Index_Buffer() : nullptr;
+}
+
 static bool _DynamicSortingIndexArrayInUse=false;
 static SortingIndexBufferClass* _DynamicSortingIndexArray;
 static unsigned short _DynamicSortingIndexArraySize=0;

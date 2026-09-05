@@ -583,9 +583,10 @@ float4 mainPS(VSOutput input) : SV_TARGET
 	inputs[3].AlignedByteOffset = specularOffset == UINT_MAX ? 0 : specularOffset;
 
 	D3D12_RASTERIZER_DESC rasterizer = {};
-	rasterizer.FillMode = D3D12_FILL_MODE_SOLID;
+	rasterizer.FillMode = m_fillMode;
 	rasterizer.CullMode = m_cullMode;
 	rasterizer.DepthClipEnable = TRUE;
+	rasterizer.DepthBias = m_depthBias;
 	D3D12_BLEND_DESC blend = {};
 	blend.RenderTarget[0].BlendEnable = m_blendEnable ? TRUE : FALSE;
 	blend.RenderTarget[0].SrcBlend = m_sourceBlend;
@@ -715,9 +716,16 @@ SamplerState sampler3 : register(s3);
 SamplerState sampler0 : register(s0);
 struct VSInput { float3 position : POSITION; float4 color : COLOR0; float2 texcoord : TEXCOORD0; float2 uv1 : TEXCOORD1; float2 uv2 : TEXCOORD2; float2 uv3 : TEXCOORD3; float3 tree : TEXCOORD4; float3 normal : NORMAL; float4 secondary : COLOR1; };
 struct VSOutput { float4 position : SV_POSITION; float4 color : COLOR0; float2 texcoord : TEXCOORD0; float2 uv1 : TEXCOORD1; float2 uv2 : TEXCOORD2; float2 uv3 : TEXCOORD3; float4 fog : COLOR1; float4 specular : COLOR2; };
-float2 VertexUV(uint stage, float2 uv, float3 position) {
+float2 VertexUV(uint stage, float2 uv, float3 position, float3 normal) {
     uint flags = textureFlags[stage];
     float4 coordinate = (flags & 1) != 0 ? float4(position,1) : float4((flags & 8) != 0 ? uv : float2(0,0),1,0);
+    if ((flags & 48) != 0) {
+        float3 n = (flags & 64) != 0 ? mul(float4(normal,0),lighting.normalTransform).xyz : float3(0,0,1);
+        n *= rsqrt(max(dot(n,n),1e-20));
+        float3 eye = mul(float4(position,1),worldView).xyz;
+        eye *= rsqrt(max(dot(eye,eye),1e-20));
+        coordinate = float4((flags & 32) != 0 ? reflect(eye,n) : n,1);
+    }
     if ((flags & 2) != 0) {
         coordinate = mul(coordinate,textureMatrices[stage]);
         float divisor = (flags & 4) != 0 && coordinate.z != 0 ? coordinate.z : 1;
@@ -736,10 +744,10 @@ VSOutput mainVS(VSInput input)
         output.position = mul(float4(input.position,1),worldViewProjection);
         output.color.rgb *= saturate(input.tree.y);
     }
-    output.texcoord = VertexUV(0,input.texcoord,input.position);
-    output.uv1 = VertexUV(1,input.uv1,input.position);
-    output.uv2 = VertexUV(2,input.uv2,input.position);
-    output.uv3 = VertexUV(3,input.uv3,input.position);
+    output.texcoord = VertexUV(0,input.texcoord,input.position,input.normal);
+    output.uv1 = VertexUV(1,input.uv1,input.position,input.normal);
+    output.uv2 = VertexUV(2,input.uv2,input.position,input.normal);
+    output.uv3 = VertexUV(3,input.uv3,input.position,input.normal);
     float3 eye = mul(float4(input.position,1),worldView).xyz;
     LightVertex(lighting,eye,input.normal,output.color,
         lighting.parameters.y != 0 ? input.secondary.bgra : float4(0,0,0,0),output.color,output.specular);
@@ -914,9 +922,10 @@ float4 mainPS(VSOutput input) : SV_TARGET
 	inputs[8].SemanticIndex = 1;
 	inputs[8].AlignedByteOffset = specularOffset == UINT_MAX ? 0 : specularOffset;
 	D3D12_RASTERIZER_DESC rasterizer = {};
-	rasterizer.FillMode = D3D12_FILL_MODE_SOLID;
+	rasterizer.FillMode = m_fillMode;
 	rasterizer.CullMode = m_cullMode;
 	rasterizer.DepthClipEnable = TRUE;
+	rasterizer.DepthBias = m_depthBias;
 	D3D12_BLEND_DESC blend = {};
 	blend.RenderTarget[0].BlendEnable = m_blendEnable ? TRUE : FALSE;
 	blend.RenderTarget[0].SrcBlend = m_sourceBlend;
@@ -960,6 +969,117 @@ float4 mainPS(VSOutput input) : SV_TARGET
 	m_pipelineCache.emplace(key, m_texturedPipeline);
 	return true;
 }
+
+NativeD3D12State NativeD3D12Renderer::CaptureState() const
+{
+	NativeD3D12State state;
+	state.cullMode = m_cullMode;
+	state.depthEnable = m_depthEnable;
+	state.depthWrite = m_depthWrite;
+	state.depthFunc = m_depthFunc;
+	state.depthBias = m_depthBias;
+	state.fillMode = m_fillMode;
+	state.blendEnable = m_blendEnable;
+	state.sourceBlend = m_sourceBlend;
+	state.destinationBlend = m_destinationBlend;
+	state.blendOp = m_blendOp;
+	state.renderTargetWriteMask = m_renderTargetWriteMask;
+	state.alphaTestEnable = m_alphaTestEnable;
+	state.alphaTestFunc = m_alphaTestFunc;
+	state.alphaTestRef = m_alphaTestRef;
+	state.grayscale = m_grayscale;
+	state.grayscaleTint = m_grayscaleTint;
+	state.grayscaleAmount = m_grayscaleAmount;
+	state.materialEnabled = m_materialEnabled;
+	state.treeSway = m_treeSway;
+	state.treeSwayOffset = m_treeSwayOffset;
+	state.fogMode = m_fogMode;
+	state.fogRange = m_fogRange;
+	state.fogParameters = m_fogParameters;
+	state.fogColor = m_fogColor;
+	state.worldView = m_worldView;
+	state.worldViewProjection = m_worldViewProjection;
+	state.lighting = m_lighting;
+	state.materialStages = m_materialStages;
+	state.materialCoordinates = m_materialCoordinates;
+	state.materialTextures = m_materialTextures;
+	state.materialSamplers = m_materialSamplers;
+	state.materialFactor = m_materialFactor;
+	state.textureColorTexture = m_textureColorTexture;
+	state.textureColorVertex = m_textureColorVertex;
+	state.textureAlphaTexture = m_textureAlphaTexture;
+	state.textureAlphaVertex = m_textureAlphaVertex;
+	state.stencilEnable = m_stencilEnable;
+	state.stencilFunc = m_stencilFunc;
+	state.stencilRef = m_stencilRef;
+	state.stencilReadMask = m_stencilReadMask;
+	state.stencilWriteMask = m_stencilWriteMask;
+	state.stencilFail = m_stencilFail;
+	state.stencilDepthFail = m_stencilDepthFail;
+	state.stencilPass = m_stencilPass;
+	state.currentSamplerGpu = m_currentSamplerGpu;
+	state.viewport = m_viewport;
+	state.scissor = m_scissor;
+	return state;
+}
+
+void NativeD3D12Renderer::RestoreState(const NativeD3D12State& state)
+{
+	m_cullMode = state.cullMode;
+	m_depthEnable = state.depthEnable;
+	m_depthWrite = state.depthWrite;
+	m_depthFunc = state.depthFunc;
+	m_depthBias = state.depthBias;
+	m_fillMode = state.fillMode;
+	m_blendEnable = state.blendEnable;
+	m_sourceBlend = state.sourceBlend;
+	m_destinationBlend = state.destinationBlend;
+	m_blendOp = state.blendOp;
+	m_renderTargetWriteMask = state.renderTargetWriteMask;
+	m_alphaTestEnable = state.alphaTestEnable;
+	m_alphaTestFunc = state.alphaTestFunc;
+	m_alphaTestRef = state.alphaTestRef;
+	m_grayscale = state.grayscale;
+	m_grayscaleTint = state.grayscaleTint;
+	m_grayscaleAmount = state.grayscaleAmount;
+	m_materialEnabled = state.materialEnabled;
+	m_treeSway = state.treeSway;
+	m_treeSwayOffset = state.treeSwayOffset;
+	m_fogMode = state.fogMode;
+	m_fogRange = state.fogRange;
+	m_fogParameters = state.fogParameters;
+	m_fogColor = state.fogColor;
+	m_worldView = state.worldView;
+	m_worldViewProjection = state.worldViewProjection;
+	m_lighting = state.lighting;
+	m_materialStages = state.materialStages;
+	m_materialCoordinates = state.materialCoordinates;
+	m_materialTextures = state.materialTextures;
+	m_materialSamplers = state.materialSamplers;
+	m_materialFactor = state.materialFactor;
+	m_textureColorTexture = state.textureColorTexture;
+	m_textureColorVertex = state.textureColorVertex;
+	m_textureAlphaTexture = state.textureAlphaTexture;
+	m_textureAlphaVertex = state.textureAlphaVertex;
+	m_stencilEnable = state.stencilEnable;
+	m_stencilFunc = state.stencilFunc;
+	m_stencilRef = state.stencilRef;
+	m_stencilReadMask = state.stencilReadMask;
+	m_stencilWriteMask = state.stencilWriteMask;
+	m_stencilFail = state.stencilFail;
+	m_stencilDepthFail = state.stencilDepthFail;
+	m_stencilPass = state.stencilPass;
+	m_currentSamplerGpu = state.currentSamplerGpu;
+	m_viewport = state.viewport;
+	m_scissor = state.scissor;
+	// Pipeline/root bindings are selected by the next draw. Viewport/scissor
+	// are dynamic command-list state and must be restored immediately.
+	if (m_recording && m_commandList) {
+		m_commandList->RSSetViewports(1, &m_viewport);
+		m_commandList->RSSetScissorRects(1, &m_scissor);
+	}
+}
+
 
 void NativeD3D12Renderer::SetFixedFunctionState(D3D12_CULL_MODE cullMode,
 	bool depthEnable, bool depthWrite, D3D12_COMPARISON_FUNC depthFunc,
@@ -1019,12 +1139,12 @@ void NativeD3D12Renderer::SetVertexFog(UINT mode, float start, float end, float 
 void NativeD3D12Renderer::SetWorldView(const float* matrix16)
 {
 	if (matrix16) std::copy_n(matrix16,16,m_worldView.begin());
+	SetLighting(m_lighting); // Environment mapping also needs the current normal transform.
 }
 
 void NativeD3D12Renderer::SetLighting(const NativeLightingState& state)
 {
 	m_lighting = state;
-	if (!state.flags[0]) return;
 	// Cofactors / determinant give the inverse transpose for row-vector normals.
 	// Translation is excluded; singular transforms must not inject NaNs.
 	const auto& a = m_worldView;
@@ -1146,6 +1266,33 @@ NativeD3D12Texture* NativeD3D12Renderer::CreateTexture2D(UINT width, UINT height
 	texture->m_storage->m_format = format;
 	texture->m_storage->m_state = initialState;
 	return texture;
+}
+
+bool NativeD3D12Renderer::CopyCurrentRenderTarget(NativeD3D12Texture& destination)
+{
+	if (!m_recording || !destination.IsValid() ||
+		destination.Width() != RenderTargetWidth() || destination.Height() != RenderTargetHeight() ||
+		destination.Format() != m_targetFormat || destination.MipLevels() != 1)
+		return false;
+	ID3D12Resource* source = m_currentRenderTarget ? m_currentRenderTarget->Resource() : CurrentBackBuffer();
+	if (source == destination.Resource() || !RetainTexture(&destination)) return false;
+	D3D12_RESOURCE_BARRIER barriers[2];
+	UINT count = 0;
+	barriers[count++] = Transition(source,D3D12_RESOURCE_STATE_RENDER_TARGET,D3D12_RESOURCE_STATE_COPY_SOURCE);
+	if (destination.m_storage->m_state != D3D12_RESOURCE_STATE_COPY_DEST)
+		barriers[count++] = Transition(destination.Resource(),destination.m_storage->m_state,D3D12_RESOURCE_STATE_COPY_DEST);
+	m_commandList->ResourceBarrier(count,barriers);
+	D3D12_TEXTURE_COPY_LOCATION src = {}, dst = {};
+	src.pResource = source;
+	src.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+	dst.pResource = destination.Resource();
+	dst.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+	m_commandList->CopyTextureRegion(&dst,0,0,0,&src,nullptr);
+	barriers[0] = Transition(source,D3D12_RESOURCE_STATE_COPY_SOURCE,D3D12_RESOURCE_STATE_RENDER_TARGET);
+	barriers[1] = Transition(destination.Resource(),D3D12_RESOURCE_STATE_COPY_DEST,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+	m_commandList->ResourceBarrier(2,barriers);
+	destination.m_storage->m_state = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+	return true;
 }
 
 bool NativeD3D12Renderer::SetRenderTarget(const NativeD3D12Texture* texture,
@@ -1540,8 +1687,8 @@ bool NativeD3D12Renderer::DrawIndexedTextured(const void* vertices, UINT vertexB
 	const NativeD3D12UploadBuffer* indexOwner, UINT normalOffset, UINT specularOffset)
 {
 	CpuTimer timer(m_profiling ? &m_cpuMilliseconds[0] : nullptr);
-	if (!IsInitialized() || !m_recording || vertices == nullptr || indices == nullptr || texture == nullptr ||
-		!texture->IsValid() || vertexBytes == 0 || vertexStride < sizeof(float) * 3 || vertexCount == 0 ||
+	if (!IsInitialized() || !m_recording || vertices == nullptr || indices == nullptr ||
+		(texture ? !texture->IsValid() : !m_materialEnabled) || vertexBytes == 0 || vertexStride < sizeof(float) * 3 || vertexCount == 0 ||
 		indexCount == 0)
 		return false;
 	if (!m_materialEnabled && (texcoordOffset > vertexStride || sizeof(float) * 2 > vertexStride - texcoordOffset))
@@ -1585,7 +1732,23 @@ bool NativeD3D12Renderer::DrawIndexedTextured(const void* vertices, UINT vertexB
 		constants.textureMatrices[stage] = uv.matrix;
 		constants.textureFlags[stage] = (m_materialEnabled && uv.position ? 1u : 0u) |
 			(m_materialEnabled && uv.transform ? 2u : 0u) |
-			(m_materialEnabled && uv.projected ? 4u : 0u) | (validUV ? 8u : 0u);
+			(m_materialEnabled && uv.projected ? 4u : 0u) | (validUV ? 8u : 0u) |
+			(m_materialEnabled && uv.environment == NativeEnvironmentCoordinates::CameraNormal ? 16u : 0u) |
+			(m_materialEnabled && uv.environment == NativeEnvironmentCoordinates::CameraReflection ? 32u : 0u) |
+			(normalOffset != UINT_MAX ? 64u : 0u);
+	}
+	// A material can contain only diffuse/factor operations. Supply a stable
+	// neutral SRV so it still runs through the material shader, without a CPU
+	// recoloring pass or a texture allocation/upload on every draw.
+	if (!texture) {
+		if (!m_neutralMaterialTexture) {
+			std::unique_ptr<NativeD3D12Texture> neutral(CreateTexture2D(1,1,1,DXGI_FORMAT_R8G8B8A8_UNORM));
+			const UINT32 white=0xffffffff;
+			const NativeD3D12TextureLevel level={&white,4,4};
+			if (!neutral || !UploadTexture2D(*neutral,&level,1)) return false;
+			m_neutralMaterialTexture=std::move(neutral);
+		}
+		texture=m_neutralMaterialTexture.get();
 	}
 	if (!RetainTexture(texture) || !CreateTexturedPipeline(offsets, colorOffset, normalOffset, specularOffset))
 		return false;
@@ -1683,10 +1846,13 @@ bool NativeD3D12Renderer::DrawScreenQuad(FLOAT x, FLOAT y, FLOAT width, FLOAT he
 		0.0f, 0.0f, 1.0f, 0.0f,
 		0.0f, 0.0f, 0.0f, 1.0f};
 	const UINT savedFog = m_fogMode;
+	const auto savedFill = m_fillMode;
+	m_fillMode = D3D12_FILL_MODE_SOLID;
 	m_fogMode = 0;
 	const bool result = DrawIndexed(vertices, sizeof(vertices), sizeof(ScreenVertex), 4,
 		indices, 6, 0, 0, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, sizeof(float) * 3);
 	m_fogMode = savedFog;
+	m_fillMode = savedFill;
 	m_worldViewProjection = savedTransform;
 	return result;
 }
@@ -1721,6 +1887,8 @@ bool NativeD3D12Renderer::DrawTexturedScreenQuad(FLOAT x, FLOAT y, FLOAT width,
 		0.0f, 0.0f, 0.0f, 1.0f};
 	const bool savedMaterial = m_materialEnabled;
 	const UINT savedFog = m_fogMode, savedSway = m_treeSwayOffset;
+	const auto savedFill = m_fillMode;
+	m_fillMode = D3D12_FILL_MODE_SOLID;
 	m_fogMode = 0;
 	m_treeSwayOffset = UINT_MAX;
 	m_materialEnabled = useMaterial;
@@ -1729,6 +1897,7 @@ bool NativeD3D12Renderer::DrawTexturedScreenQuad(FLOAT x, FLOAT y, FLOAT width,
 		D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, texture, sizeof(float) * 3);
 	m_fogMode = savedFog;
 	m_treeSwayOffset = savedSway;
+	m_fillMode = savedFill;
 	m_worldViewProjection = savedTransform;
 	m_materialEnabled = savedMaterial;
 	return result;
@@ -1970,6 +2139,7 @@ void NativeD3D12Renderer::Shutdown()
 	m_profileWindowStart = 0;
 	m_profileWindowFrames = 0;
 	for (auto& texture : m_materialTextures) texture.reset();
+	m_neutralMaterialTexture.reset();
 	m_materialEnabled = false;
 	m_materialSamplers = {};
 	m_descriptorPool.reset();
@@ -1984,11 +2154,13 @@ void NativeD3D12Renderer::Shutdown()
 
 NativeD3D12Renderer::PipelineKey NativeD3D12Renderer::GetPipelineKey(bool textured) const
 {
-	return {UINT(textured), UINT(m_cullMode), UINT(m_depthEnable), UINT(m_depthWrite),
+	PipelineKey key = {UINT(textured), UINT(m_cullMode), UINT(m_depthEnable), UINT(m_depthWrite),
 		UINT(m_depthFunc), UINT(m_blendEnable), UINT(m_sourceBlend), UINT(m_destinationBlend),
 		UINT(m_blendOp), m_renderTargetWriteMask, UINT(m_stencilEnable), UINT(m_stencilFunc),
 		m_stencilReadMask, m_stencilWriteMask, UINT(m_stencilFail), UINT(m_stencilDepthFail),
-		UINT(m_stencilPass), UINT(m_targetFormat), UINT(m_useDefaultDepth), 0};
+		UINT(m_stencilPass), UINT(m_targetFormat), UINT(m_useDefaultDepth), UINT(m_depthBias)};
+	key[29]=UINT(m_fillMode);
+	return key;
 }
 
 bool NativeD3D12Renderer::WaitForFence(UINT64 value)
@@ -2122,7 +2294,7 @@ bool NativeD3D12Renderer::ResolveGeometry(const void* source, UINT size,
 			desc.Height = desc.DepthOrArraySize = desc.MipLevels = desc.SampleDesc.Count = 1;
 			desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
 			if (!CheckHr(m_device->CreateCommittedResource(&heap,D3D12_HEAP_FLAG_NONE,&desc,
-				D3D12_RESOURCE_STATE_COPY_DEST,nullptr,IID_PPV_ARGS(&version->resource)),
+				D3D12_RESOURCE_STATE_COMMON,nullptr,IID_PPV_ARGS(&version->resource)),
 				"Create persistent geometry buffer")) return false;
 			version->deviceIdentity = m_descriptorPool;
 			versions.push_back(version);

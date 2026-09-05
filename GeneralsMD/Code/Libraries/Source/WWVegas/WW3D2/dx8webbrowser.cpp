@@ -33,6 +33,7 @@
 #include "dx8webbrowser.h"
 #include "ww3d.h"
 #include "dx8wrapper.h"
+#include "native_d3d12_renderer.h"
 
 #if ENABLE_EMBEDDED_BROWSER
 
@@ -51,6 +52,13 @@ bool DX8WebBrowser::Initialize(	const char* badpageurl,
 											const char* mousefilename,
 											const char* mousebusyfilename)
 {
+	// BrowserEngine::Initialize requires an IDirect3DDevice8.  The native
+	// renderer deliberately exposes no compatibility device, so this optional
+	// subsystem is disabled until BrowserEngine has a native initialization
+	// contract.
+	if (NativeD3D12Renderer::Active() != NULL)
+		return false;
+
 	if(pBrowser == 0)
 	{
 		// Initialize COM

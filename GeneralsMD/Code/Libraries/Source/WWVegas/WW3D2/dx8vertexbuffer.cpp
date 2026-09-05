@@ -48,6 +48,12 @@
 
 #define DEFAULT_VB_SIZE 5000
 
+const NativeD3D12UploadBuffer* DynamicVBAccessClass::Get_Native_Vertex_Buffer() const
+{
+	return Type==BUFFER_TYPE_DYNAMIC_DX8 && VertexBuffer ?
+		static_cast<const DX8VertexBufferClass*>(VertexBuffer)->Get_Native_Vertex_Buffer() : nullptr;
+}
+
 static bool _DynamicSortingVertexArrayInUse=false;
 //static VertexFormatXYZNDUV2* _DynamicSortingVertexArray=NULL;
 static SortingVertexBufferClass* _DynamicSortingVertexArray=NULL;

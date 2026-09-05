@@ -52,6 +52,7 @@
 #include "texture.h"
 #include "statistics.h"
 #include "dx8wrapper.h"
+#include "native_material_pass.h"
 
 
 bool MaterialPassClass::EnablePerPolygonCulling = true;
@@ -115,6 +116,32 @@ MaterialPassClass::~MaterialPassClass(void)
  *   12/9/99    gth : Created.                                                                 *
  *   2/26/2001  gth : Changed to Install_Materials                                             *
  *=============================================================================================*/
+bool MaterialPassClass::Describe_Native_Pass(const NativeMapperContext& context,
+	const NativeVertexLayoutDesc& layout, const Matrix3D& world,
+	NativeMaterialPassDescription& output) const
+{
+	NativeMaterialPassDescription result = output;
+	result.material = Shader.Get_Native_Texture_Material();
+	result.pipeline = Shader.Get_Native_Pipeline(ShaderClass::Is_Backface_Culling_Inverted());
+	result.fog = Shader.Get_Fog_Func();
+	for (unsigned stage=4;stage<MAX_TEX_STAGES;++stage)
+		if (Texture[stage]) return false; // Native shaders have four material stages.
+	for (unsigned stage=0;stage<4;++stage) {
+		result.material.coordinates[stage].offset = layout.Find_Offset(NativeVertexSemantic::TexCoord,stage);
+		if (Texture[stage]) {
+			result.material.textures[stage] = Texture[stage]->Prepare_Native_Texture();
+			result.material.samplers[stage] = Texture[stage]->Get_Filter().Get_Native_Description();
+		}
+	}
+	if (Material) {
+		if (!Material->Describe_Native_Mapping(context,layout,result.material)) return false;
+		Material->Describe_Native_Lighting(result.lighting,WW3D::Is_Coloring_Enabled());
+	} else result.lighting.flags[0] = 0;
+	result.lighting.flags[1] = Shader.Get_Secondary_Gradient()!=ShaderClass::SECONDARY_GRADIENT_DISABLE;
+	output = result;
+	return true;
+}
+
 void MaterialPassClass::Install_Materials(void) const
 {
 	DX8Wrapper::Set_Material(Peek_Material());

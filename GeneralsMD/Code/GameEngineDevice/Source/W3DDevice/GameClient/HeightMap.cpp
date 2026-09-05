@@ -89,6 +89,11 @@
 #include "W3DDevice/GameClient/W3DShadow.h"
 #include "W3DDevice/GameClient/W3DWater.h"
 #include "W3DDevice/GameClient/W3DShroud.h"
+#include "W3DDevice/GameClient/NativeTerrainDraw.h"
+#include "WW3D2/native_material_pass.h"
+#include "WW3D2/native_terrain_material.h"
+#include <cstring>
+#include "WW3D2/matpass.h"
 #include "WW3D2/DX8Wrapper.h"
 #include "WW3D2/Light.h"
 #include "WW3D2/Scene.h"
@@ -1930,8 +1935,6 @@ void HeightMapRenderObjClass::Render(RenderInfoClass & rinfo)
 {
 	USE_PERF_TIMER(Terrain_Render)
 	
-	Int i,j,devicePasses;
-	W3DShaderManager::ShaderTypes st;
 	Bool doCloud = TheGlobalData->m_useCloudMap;
 
 	Matrix3D tm(Transform);
@@ -1981,7 +1984,6 @@ void HeightMapRenderObjClass::Render(RenderInfoClass & rinfo)
 
 	//Apply the shader and material
 
-	DX8Wrapper::Set_Index_Buffer(m_indexBuffer,0);
 
 	Bool doMultiPassWireFrame=FALSE;
 
@@ -1991,143 +1993,37 @@ void HeightMapRenderObjClass::Render(RenderInfoClass & rinfo)
 			if (WW3D::Is_Texturing_Enabled())
 			{	//first pass where we just fill the z-buffer
 
-				devicePasses=1;	//one pass solid, next in wireframe.
 				doMultiPassWireFrame=TRUE;
 
 				if (rinfo.Additional_Pass_Count())
 				{
-					rinfo.Peek_Additional_Pass(0)->Install_Materials();
-					renderTerrainPass(&rinfo.Camera);
-					rinfo.Peek_Additional_Pass(0)->UnInstall_Materials();
+					renderTerrainMaterialPass(rinfo.Camera,*rinfo.Peek_Additional_Pass(0));
 					return;
 				}
 			}
 			else
 			{	//wireframe pass
-				//Set to vertex diffuse lighting
-				DX8Wrapper::Set_Material(m_vertexMaterialClass);
-				//Set shader to non-textured solid color from vertex
-				DX8Wrapper::Set_Shader(ShaderClass::_PresetOpaqueSolidShader);
-				devicePasses=1;	//one pass solid, next in wireframe.
-				DX8Wrapper::Apply_Render_State_Changes();
-				DX8Wrapper::Set_DX8_Texture_Stage_State( 0, D3DTSS_COLORARG2, D3DTA_TFACTOR );
-				DX8Wrapper::Set_DX8_Render_State(D3DRS_TEXTUREFACTOR,0xff808080);
-				doMultiPassWireFrame=TRUE;
-				renderTerrainPass(&rinfo.Camera);
-				DX8Wrapper::Set_DX8_Render_State(D3DRS_TEXTUREFACTOR,0xff008000);
+				MaterialPassClass wireframe;
+				wireframe.Set_Material(m_vertexMaterialClass);
+				wireframe.Set_Shader(ShaderClass::_PresetOpaqueSolidShader);
+				renderTerrainMaterialPass(rinfo.Camera,wireframe,true);
 				return;
 			}
 	}
-	else
-	{
-		DX8Wrapper::Set_Material(m_vertexMaterialClass);
-		DX8Wrapper::Set_Shader(m_shaderClass);
-
-		if (TheGlobalData->m_timeOfDay == TIME_OF_DAY_NIGHT) {
-			doCloud = false;
-		}
-
- 		st=W3DShaderManager::ST_TERRAIN_BASE; //set default shader
- 		
- 		//set correct shader based on current settings
- 		if (!ShaderClass::Is_Backface_Culling_Inverted())
- 		{	//not reflection pass
- 			if (TheGlobalData->m_useLightMap && doCloud)
- 			{	st=W3DShaderManager::ST_TERRAIN_BASE_NOISE12;
- 			}
- 			else
- 			if (TheGlobalData->m_useLightMap)
- 			{	//lightmap only
- 				st=W3DShaderManager::ST_TERRAIN_BASE_NOISE2;
- 			}
- 			else
- 			if (doCloud)
- 			{	//cloudmap only
- 				st=W3DShaderManager::ST_TERRAIN_BASE_NOISE1;
- 			}
- 		}
- 		else
- 		{	//reflection pass, just do base texture
- 			st=W3DShaderManager::ST_TERRAIN_BASE;
- 		}
- 
- 		//Find number of passes required to render current shader
- 		devicePasses=W3DShaderManager::getShaderPasses(st);
- 
- 		if (m_disableTextures)
- 			devicePasses=1;	//force to 1 lighting-only pass
- 
- 		//Specify all textures that this shader may need.
- 		W3DShaderManager::setTexture(0,m_stageZeroTexture);
- 		W3DShaderManager::setTexture(1,m_stageZeroTexture);
- 		W3DShaderManager::setTexture(2,m_stageTwoTexture);	//cloud
- 		W3DShaderManager::setTexture(3,m_stageThreeTexture);//noise
-		//Disable writes to destination alpha channel (if there is one)
-		if (DX8Wrapper::getBackBufferFormat() == WW3D_FORMAT_A8R8G8B8)
-			DX8Wrapper::Set_DX8_Render_State(D3DRS_COLORWRITEENABLE,D3DCOLORWRITEENABLE_BLUE|D3DCOLORWRITEENABLE_GREEN|D3DCOLORWRITEENABLE_RED);
-	}
-
-	Int pass;
- 	for (pass=0; pass<devicePasses; pass++) {
-#ifdef TIMING_TESTS
-#endif
-		if (!doMultiPassWireFrame)	//multi-pass wireframe doesn't use regular shaders.
-		{
- 			if (m_disableTextures ) {
- 				DX8Wrapper::Set_Shader(ShaderClass::_PresetOpaque2DShader);
- 				DX8Wrapper::Set_Texture(0,NULL);
-   			} else {
- 				W3DShaderManager::setShader(st, pass);
-			}
-		}
-
-		for (j=0; j<m_numVBTilesY; j++)
-			for (i=0; i<m_numVBTilesX; i++)
-			{
-				static int count = 0;
-				count++;
-				Int numPolys = VERTEX_BUFFER_TILE_LENGTH*VERTEX_BUFFER_TILE_LENGTH*2;
-				Int numVertex = (VERTEX_BUFFER_TILE_LENGTH*2)*(VERTEX_BUFFER_TILE_LENGTH*2);
-				if (HALF_RES_MESH) {
-					numPolys /= 4;
-					numVertex /= 4;
-				}
-				DX8Wrapper::Set_Vertex_Buffer(m_vertexBufferTiles[j*m_numVBTilesX+i]);
-#ifdef PRE_TRANSFORM_VERTEX
-				if (m_xformedVertexBuffer && pass==0) {
-					// Note - m_xformedVertexBuffer should only be used for non T&L hardware.  jba.
-					DX8Wrapper::Apply_Render_State_Changes();
-					int code = DX8Wrapper::_Get_D3D_Device8()->ProcessVertices(0, 0, numVertex, m_xformedVertexBuffer[j*m_numVBTilesX+i], 0); 
-					::OutputDebugString("did process vertex\n");
-				}
-				if (m_xformedVertexBuffer) {
-					// Note - m_xformedVertexBuffer should only be used for non T&L hardware.  jba.
-					DX8Wrapper::Apply_Render_State_Changes();
-					DX8Wrapper::_Get_D3D_Device8()->SetStreamSource(
-						0,
-						m_xformedVertexBuffer[j*m_numVBTilesX+i],
-						D3DXGetFVFVertexSize(D3DFVF_XYZRHW |D3DFVF_DIFFUSE|D3DFVF_TEX2));
-					DX8Wrapper::_Get_D3D_Device8()->SetVertexShader(D3DFVF_XYZRHW |D3DFVF_DIFFUSE|D3DFVF_TEX2);
-				}
-#endif				
-				if (Is_Hidden() == 0) {
-					DX8Wrapper::Draw_Triangles(	0,numPolys, 0,	numVertex);
-				}
-
-			}
-	}		
-
+	if (TheGlobalData->m_timeOfDay == TIME_OF_DAY_NIGHT) doCloud=false;
+	renderNativeTerrain(rinfo.Camera,doMultiPassWireFrame);
 	if (!doMultiPassWireFrame)
 	{
-		if (pass)	//shader was applied at least once?
- 			W3DShaderManager::resetShader(st);
+		// Remaining extra-blend/shoreline producers still require engine cache setup.
+		DX8Wrapper::Set_Material(m_vertexMaterialClass);
+		DX8Wrapper::Set_Shader(m_shaderClass);
 
 		//Draw feathered shorelines
 		renderShoreLines(&rinfo.Camera);
 
 		//Do additional pass over any tiles that have 3 textures blended together.
 		if (TheGlobalData->m_use3WayTerrainBlends)
-			renderExtraBlendTiles();
+			renderExtraBlendTiles(rinfo.Camera);
 
 		Int yCoordMin = m_map->getDrawOrgY();
 		Int yCoordMax = m_y+m_map->getDrawOrgY()-1;
@@ -2179,13 +2075,11 @@ void HeightMapRenderObjClass::Render(RenderInfoClass & rinfo)
 		m_bridgeBuffer->drawBridges(&rinfo.Camera, m_disableTextures, doCloud?m_stageTwoTexture:NULL);
 
 		if (TheTerrainTracksRenderObjClassSystem)
-			TheTerrainTracksRenderObjClassSystem->flush();
+			TheTerrainTracksRenderObjClassSystem->flush(&rinfo.Camera);
 
 		if (m_shroud && rinfo.Additional_Pass_Count())
 		{
-			rinfo.Peek_Additional_Pass(0)->Install_Materials();
-			renderTerrainPass(&rinfo.Camera);
-			rinfo.Peek_Additional_Pass(0)->UnInstall_Materials();
+			renderTerrainMaterialPass(rinfo.Camera,*rinfo.Peek_Additional_Pass(0));
 		}
 
 		ShaderClass::Invalidate();
@@ -2197,7 +2091,7 @@ void HeightMapRenderObjClass::Render(RenderInfoClass & rinfo)
   if ( m_waypointBuffer ) 
 	  m_waypointBuffer->drawWaypoints(rinfo);
 
-	m_bibBuffer->renderBibs();
+	m_bibBuffer->renderBibs(&rinfo.Camera);
 
 	// the build grid goes down with the ground it describes: drawn here it is depth tested against
 	// the terrain and covered by everything drawn after it, so it reads as paint on the map rather
@@ -2216,56 +2110,153 @@ void HeightMapRenderObjClass::Render(RenderInfoClass & rinfo)
 
 
 
-///Performs additional terrain rendering pass, blending in the black shroud texture.
-void HeightMapRenderObjClass::renderTerrainPass(CameraClass *pCamera)
+void HeightMapRenderObjClass::renderNativeTerrain(CameraClass& camera, bool depthOnly)
 {
-	DX8Wrapper::Set_Transform(D3DTS_WORLD,Matrix3D(1));
-
-	//Apply the shader and material
-	
-	DX8Wrapper::Set_Index_Buffer(m_indexBuffer,0);
-
-	for (Int j=0; j<m_numVBTilesY; j++)
-		for (Int i=0; i<m_numVBTilesX; i++)
-		{
-			static int count = 0;
-			count++;
-			Int numPolys = VERTEX_BUFFER_TILE_LENGTH*VERTEX_BUFFER_TILE_LENGTH*2;
-			Int numVertex = (VERTEX_BUFFER_TILE_LENGTH*2)*(VERTEX_BUFFER_TILE_LENGTH*2);
-			if (HALF_RES_MESH) {
-				numPolys /= 4;
-				numVertex /= 4;
-			}
-			DX8Wrapper::Set_Vertex_Buffer(m_vertexBufferTiles[j*m_numVBTilesX+i]);
-#ifdef PRE_TRANSFORM_VERTEX
-			if (m_xformedVertexBuffer && pass==0) {
-				// Note - m_xformedVertexBuffer should only be used for non T&L hardware.  jba.
-				DX8Wrapper::Apply_Render_State_Changes();
-				int code = DX8Wrapper::_Get_D3D_Device8()->ProcessVertices(0, 0, numVertex, m_xformedVertexBuffer[j*m_numVBTilesX+i], 0); 
-				::OutputDebugString("did process vertex\n");
-			}
-			if (m_xformedVertexBuffer) {
-				// Note - m_xformedVertexBuffer should only be used for non T&L hardware.  jba.
-				DX8Wrapper::Apply_Render_State_Changes();
-				DX8Wrapper::_Get_D3D_Device8()->SetStreamSource(
-					0,
-					m_xformedVertexBuffer[j*m_numVBTilesX+i],
-					D3DXGetFVFVertexSize(D3DFVF_XYZRHW |D3DFVF_DIFFUSE|D3DFVF_TEX2));
-				DX8Wrapper::_Get_D3D_Device8()->SetVertexShader(D3DFVF_XYZRHW |D3DFVF_DIFFUSE|D3DFVF_TEX2);
-			}
-#endif				
-			if (Is_Hidden() == 0) {
-				DX8Wrapper::Draw_Triangles(	0,numPolys, 0,	numVertex);
-			}
+	auto* native=NativeD3D12Renderer::Active();
+	if (!native || Is_Hidden() || !m_indexBuffer) return;
+	const auto* indices=m_indexBuffer->Get_Native_Index_Buffer();
+	const UINT polygonCount=VERTEX_BUFFER_TILE_LENGTH*VERTEX_BUFFER_TILE_LENGTH*2/(HALF_RES_MESH ? 4 : 1);
+	const UINT vertexCount=(VERTEX_BUFFER_TILE_LENGTH*2)*(VERTEX_BUFFER_TILE_LENGTH*2)/(HALF_RES_MESH ? 4 : 1);
+	if (!indices || size_t(polygonCount)*3*sizeof(unsigned short)>indices->Size()) return;
+	NativeD3D12ScopedState restore(*native);
+	const auto frame=native->CaptureState();
+	NativeTerrainSetCameraMatrices(*native,&camera,Transform);
+	native->SetTreeSway(nullptr,0);
+	native->SetDepthBias(0);
+	native->SetLighting(NativeLightingState()); // Terrain colors are already lit.
+	native->SetVertexFog(0,0,1,0,0,false);
+	const bool mirrored=ShaderClass::Is_Backface_Culling_Inverted();
+	auto pipeline=m_shaderClass.Get_Native_Pipeline(mirrored);
+	pipeline.colorMask &= frame.renderTargetWriteMask;
+	if (depthOnly) pipeline.colorMask=0;
+	else pipeline.colorMask &= D3D12_COLOR_WRITE_ENABLE_RED | D3D12_COLOR_WRITE_ENABLE_GREEN | D3D12_COLOR_WRITE_ENABLE_BLUE;
+	const bool linear=TheGlobalData->m_bilinearTerrainTex || TheGlobalData->m_trilinearTerrainTex;
+	const auto mip=TheGlobalData->m_trilinearTerrainTex ? NativeD3D12FilterMode::Linear : NativeD3D12FilterMode::Point;
+	const NativeSamplerDesc sampler={linear ? NativeD3D12FilterMode::Linear : NativeD3D12FilterMode::Point,
+		linear ? NativeD3D12FilterMode::Linear : NativeD3D12FilterMode::Point,mip,true,true,1};
+	const bool textured=!depthOnly && !m_disableTextures;
+	const auto* atlas=textured && m_stageZeroTexture ? m_stageZeroTexture->Prepare_Native_Texture() : nullptr;
+	const auto* cloud=textured && !mirrored && TheGlobalData->m_useCloudMap &&
+		TheGlobalData->m_timeOfDay!=TIME_OF_DAY_NIGHT && m_stageTwoTexture ? m_stageTwoTexture->Prepare_Native_Texture() : nullptr;
+	const auto* noise=textured && !mirrored && TheGlobalData->m_useLightMap && m_stageThreeTexture ?
+		m_stageThreeTexture->Prepare_Native_Texture() : nullptr;
+	const auto worldProjection=[&](NativeMaterialCoordinates uv) {
+		Matrix4x4 projection;
+		std::memcpy(&projection,uv.matrix.data(),sizeof(projection));
+		projection=Matrix4x4(Transform).Transpose()*projection;
+		std::memcpy(uv.matrix.data(),&projection,sizeof(projection));
+		return uv;
+	};
+	const auto modulation=Describe_Native_Terrain_Modulation(cloud,
+		cloud ? worldProjection(W3DShaderManager::nativeCloudCoordinates()) : NativeMaterialCoordinates(),
+		noise,noise ? worldProjection(W3DShaderManager::nativeNoiseCoordinates()) : NativeMaterialCoordinates(),mip);
+	const UINT passCount=atlas ? (cloud || noise ? 3 : 2) : 1;
+	for (UINT pass=0;pass<passCount;++pass) {
+		pipeline.blend=pass!=0;
+		pipeline.source=pass==2 ? D3D12_BLEND_DEST_COLOR : D3D12_BLEND_SRC_ALPHA;
+		pipeline.destination=pass==2 ? D3D12_BLEND_ZERO : D3D12_BLEND_INV_SRC_ALPHA;
+		pipeline.Apply(*native);
+		for (Int j=0;j<m_numVBTilesY;++j) for (Int i=0;i<m_numVBTilesX;++i) {
+			auto* buffer=m_vertexBufferTiles[j*m_numVBTilesX+i];
+			if (!buffer) continue;
+			const auto* vertices=buffer->Get_Native_Vertex_Buffer();
+			if (!vertices) continue;
+			NativeDrawSubmission draw;
+			draw.layout=buffer->FVF_Info().Build_Native_Layout();
+			draw.vertexStride=draw.layout.stride;
+			draw.vertexBytes=vertexCount*draw.vertexStride;
+			if (draw.vertexBytes>vertices->Size()) continue;
+			draw.vertices=vertices->Data(); draw.vertexCount=vertexCount;
+			draw.indices=static_cast<const unsigned short*>(indices->Data());
+			draw.indexCount=polygonCount*3;
+			draw.vertexOwner=vertices; draw.indexOwner=indices;
+			draw.useMaterial=true;
+			draw.material=pass==2 ? modulation : Describe_Native_Terrain_Layer(atlas,
+				draw.layout.Find_Offset(NativeVertexSemantic::TexCoord,pass),pass==1,sampler);
+			Submit_Native_Draw(*native,draw);
 		}
+	}
 }
+
+///Performs additional terrain rendering pass, blending in the black shroud texture.
+void HeightMapRenderObjClass::renderTerrainMaterialPass(CameraClass& camera, MaterialPassClass& pass, bool wireframe)
+{
+	NativeD3D12Renderer* native=NativeD3D12Renderer::Active();
+	if (!native || Is_Hidden() || !m_indexBuffer) return;
+	const auto* indices=m_indexBuffer->Get_Native_Index_Buffer();
+	if (!indices) return;
+	NativeD3D12ScopedState restore(*native);
+	const auto frame=native->CaptureState();
+	if (wireframe) native->SetRasterizerFill(D3D12_FILL_MODE_WIREFRAME);
+	Matrix3D view;
+	Matrix4x4 projection;
+	camera.Get_View_Matrix(&view);
+	camera.Get_D3D_Projection_Matrix(&projection);
+	const NativeMapperContext context={Matrix4x4(view).Transpose(),Matrix4x4(view),projection};
+	const Matrix4x4 wvp=context.worldView*projection.Transpose();
+	native->SetWorldView(reinterpret_cast<const float*>(&context.worldView));
+	native->SetWorldViewProjection(reinterpret_cast<const float*>(&wvp));
+	native->SetTreeSway(nullptr,0);
+	native->SetDepthBias(0);
+	const UINT polygonCount=VERTEX_BUFFER_TILE_LENGTH*VERTEX_BUFFER_TILE_LENGTH*2/(HALF_RES_MESH ? 4 : 1);
+	const UINT vertexCount=(VERTEX_BUFFER_TILE_LENGTH*2)*(VERTEX_BUFFER_TILE_LENGTH*2)/(HALF_RES_MESH ? 4 : 1);
+	if (size_t(polygonCount)*3*sizeof(unsigned short)>indices->Size()) return;
+	for (Int j=0;j<m_numVBTilesY;++j) for (Int i=0;i<m_numVBTilesX;++i) {
+		auto* buffer=m_vertexBufferTiles[j*m_numVBTilesX+i];
+		if (!buffer) continue;
+		const auto* vertices=buffer->Get_Native_Vertex_Buffer();
+		if (!vertices) continue;
+		NativeDrawSubmission draw;
+		draw.layout=buffer->FVF_Info().Build_Native_Layout();
+		draw.vertexStride=draw.layout.stride;
+		draw.vertexCount=vertexCount;
+		draw.vertexBytes=vertexCount*draw.vertexStride;
+		if (draw.vertexBytes>vertices->Size()) continue;
+		draw.vertices=vertices->Data();
+		draw.indices=static_cast<const unsigned short*>(indices->Data());
+		draw.indexCount=polygonCount*3;
+		draw.vertexOwner=vertices;
+		draw.indexOwner=indices;
+		NativeMaterialPassDescription description;
+		description.lighting=frame.lighting;
+		if (wireframe) {
+			// Uniform gray is shader arithmetic, not a CPU rewrite of terrain
+			// colors. Preserve the resident geometry and its upload-cache owner.
+			description.pipeline=ShaderClass::_PresetOpaqueSolidShader.Get_Native_Pipeline(ShaderClass::Is_Backface_Culling_Inverted());
+			description.material.enabled=true;
+			description.material.factor=0xff808080;
+			auto& stage=description.material.stages[0];
+			stage.colorOp=stage.alphaOp=NativeMaterialOp::Select1;
+			stage.colorArg1=stage.alphaArg1=UINT(NativeMaterialSource::Factor);
+			description.lighting.flags={};
+		} else if (!pass.Describe_Native_Pass(context,draw.layout,Matrix3D::Identity,description)) continue;
+		description.pipeline.colorMask &= frame.renderTargetWriteMask;
+		description.pipeline.Apply(*native);
+		native->SetLighting(description.lighting);
+		SceneClass* scene=static_cast<SceneClass*>(camera.Get_User_Data());
+		if (scene && scene->Get_Fog_Enable() && description.fog!=ShaderClass::FOG_DISABLE) {
+			float start,end;
+			scene->Get_Fog_Range(&start,&end);
+			const auto channel=[](float c) { return UINT((std::max)(0.0f,(std::min)(255.0f,c*255.0f))); };
+			const Vector3& color=scene->Get_Fog_Color();
+			UINT32 fog=(channel(color.X)<<16)|(channel(color.Y)<<8)|channel(color.Z);
+			if (description.fog==ShaderClass::FOG_WHITE) fog=0xffffff;
+			if (description.fog==ShaderClass::FOG_SCALE_FRAGMENT) fog=0;
+			native->SetVertexFog(3,start,end,0,fog,frame.fogRange);
+		} else native->SetVertexFog(0,0,1,0,0,false);
+		draw.material=description.material;
+		draw.useMaterial=true;
+		Submit_Native_Draw(*native,draw);
+	}
+}
+
 
 //=============================================================================
 // HeightMapRenderObjClass::renderExtraBlendTiles
 //=============================================================================
 /** Renders an additoinal terrain pass including only those tiles which have more than 2 textures
 blended together.  Used primarily for corner cases where 3 different textures meet.*/
-void HeightMapRenderObjClass::renderExtraBlendTiles(void)
+void HeightMapRenderObjClass::renderExtraBlendTiles(CameraClass& camera)
 {
 	Int vertexCount = 0;
 	Int indexCount = 0;
@@ -2417,64 +2408,68 @@ void HeightMapRenderObjClass::renderExtraBlendTiles(void)
 		if (vertexCount == (maxBlendTiles*4))
 			maxBlendTiles += 16;	//enlarge by 16 to reduce trashing.
 		
-		ShaderClass::Invalidate();	//invalidate to force shader to reset since we directly changed states
-		DX8Wrapper::Set_Index_Buffer(ib_access,0);
-		DX8Wrapper::Set_Vertex_Buffer(vb_access);
-		VertexMaterialClass *vmat=VertexMaterialClass::Get_Preset(VertexMaterialClass::PRELIT_DIFFUSE);
-		DX8Wrapper::Set_Material(vmat);
-		REF_PTR_RELEASE(vmat);
-		ShaderClass shader=ShaderClass::_PresetOpaqueShader;
-		shader.Set_Depth_Mask(ShaderClass::DEPTH_WRITE_DISABLE);	//disable writes to z
-		DX8Wrapper::Set_Shader(shader);
-
-		if (TheGlobalData->m_use3WayTerrainBlends == 2)
-		{
-			shader.Set_Primary_Gradient(ShaderClass::GRADIENT_DISABLE);	//disable lighting.
-			shader.Set_Texturing(ShaderClass::TEXTURING_DISABLE);		//disable texturing.
-			DX8Wrapper::Set_Shader(shader);
-			DX8Wrapper::Set_Texture(0,NULL);	//debug mode which draws terrain tiles in white.
-			if (Is_Hidden() == 0) {
-				DX8Wrapper::Draw_Triangles(	0,indexCount/3, 0,	vertexCount);	//draw a quad, 2 triangles, 4 verts
-				m_numVisibleExtraBlendTiles += indexCount/6;
+		auto* native=NativeD3D12Renderer::Active();
+		if (!native || Is_Hidden()) return;
+		const auto* vertices=vb_access.Get_Native_Vertex_Buffer();
+		const auto* indices=ib_access.Get_Native_Index_Buffer();
+		const size_t vertexOffset=size_t(vb_access.Get_Native_Vertex_Offset())*sizeof(VertexFormatXYZNDUV2);
+		const size_t indexOffset=size_t(ib_access.Get_Native_Index_Offset())*sizeof(unsigned short);
+		const size_t vertexBytes=size_t(vertexCount)*sizeof(VertexFormatXYZNDUV2);
+		const size_t indexBytes=size_t(indexCount)*sizeof(unsigned short);
+		if (!vertices || !indices || vertexOffset>vertices->Size() || vertexBytes>vertices->Size()-vertexOffset ||
+			indexOffset>indices->Size() || indexBytes>indices->Size()-indexOffset) return;
+		NativeD3D12ScopedState restore(*native);
+		const auto frame=native->CaptureState();
+		NativeTerrainSetCameraMatrices(*native,&camera,Transform);
+		native->SetTreeSway(nullptr,0);
+		native->SetLighting(NativeLightingState());
+		native->SetVertexFog(0,0,1,0,0,false);
+		native->SetDepthBias(0);
+		auto pipeline=ShaderClass::_PresetOpaqueShader.Get_Native_Pipeline(ShaderClass::Is_Backface_Culling_Inverted());
+		pipeline.depthWrite=false;
+		pipeline.colorMask &= frame.renderTargetWriteMask;
+		NativeDrawSubmission draw;
+		draw.vertices=static_cast<const unsigned char*>(vertices->Data())+vertexOffset;
+		draw.vertexBytes=UINT(vertexBytes); draw.vertexStride=sizeof(VertexFormatXYZNDUV2);
+		draw.vertexCount=vertexCount;
+		draw.indices=reinterpret_cast<const unsigned short*>(static_cast<const unsigned char*>(indices->Data())+indexOffset);
+		draw.indexCount=indexCount;
+		draw.layout=FVFInfoClass(DX8_FVF_XYZNDUV2).Build_Native_Layout();
+		draw.vertexOwner=vertices; draw.indexOwner=indices; draw.useMaterial=true;
+		const bool debugWhite=TheGlobalData->m_use3WayTerrainBlends==2;
+		const auto* atlas=!debugWhite && m_stageOneTexture ? m_stageOneTexture->Prepare_Native_Texture() : nullptr;
+		const auto* cloud=!debugWhite && TheGlobalData->m_useCloudMap &&
+			TheGlobalData->m_timeOfDay!=TIME_OF_DAY_NIGHT && m_stageTwoTexture ? m_stageTwoTexture->Prepare_Native_Texture() : nullptr;
+		const auto* noise=!debugWhite && TheGlobalData->m_useLightMap && m_stageThreeTexture ? m_stageThreeTexture->Prepare_Native_Texture() : nullptr;
+		const auto project=[&](NativeMaterialCoordinates uv) {
+			Matrix4x4 matrix;
+			std::memcpy(&matrix,uv.matrix.data(),sizeof(matrix));
+			matrix=Matrix4x4(Transform).Transpose()*matrix;
+			std::memcpy(uv.matrix.data(),&matrix,sizeof(matrix));
+			return uv;
+		};
+		const auto cloudUV=cloud ? project(W3DShaderManager::nativeCloudCoordinates()) : NativeMaterialCoordinates();
+		const auto noiseUV=noise ? project(W3DShaderManager::nativeNoiseCoordinates()) : NativeMaterialCoordinates();
+		const auto mip=TheGlobalData->m_trilinearTerrainTex ? NativeD3D12FilterMode::Linear : NativeD3D12FilterMode::Point;
+		const auto sampler=m_stageOneTexture ? m_stageOneTexture->Get_Filter().Get_Native_Description() : NativeSamplerDesc();
+		for (UINT pass=0;pass<(cloud && noise ? 2u : 1u);++pass) {
+			const bool useCloud=pass==0 && cloud;
+			const auto* modulation=useCloud ? cloud : noise;
+			const NativeSamplerDesc modulationSampler={useCloud ? NativeD3D12FilterMode::Linear : NativeD3D12FilterMode::Point,
+				NativeD3D12FilterMode::Linear,mip,false,false,1};
+			draw.material=Describe_Native_Terrain_Overlay(atlas,offsetof(VertexFormatXYZNDUV2,u1),sampler,
+				modulation,useCloud ? cloudUV : noiseUV,modulationSampler,pass==1);
+			pipeline.blend=!debugWhite;
+			pipeline.source=pass ? D3D12_BLEND_ZERO : D3D12_BLEND_SRC_ALPHA;
+			pipeline.destination=pass ? D3D12_BLEND_SRC_COLOR : D3D12_BLEND_INV_SRC_ALPHA;
+			if (debugWhite) {
+				draw.material=NativeMaterialDescription();
+				draw.material.enabled=true;
+				draw.material.stages[0].colorOp=NativeMaterialOp::Select1;
+				draw.material.stages[0].colorArg1=UINT(NativeMaterialSource::Factor);
 			}
-		}
-		else
-		{
-			W3DShaderManager::setTexture(0,m_stageOneTexture);
-			W3DShaderManager::setTexture(1,m_stageTwoTexture);	//cloud
-			W3DShaderManager::setTexture(2,m_stageThreeTexture);	//noise/lightmap
-
-			W3DShaderManager::ShaderTypes st = W3DShaderManager::ST_ROAD_BASE;
-
-			Bool doCloud = TheGlobalData->m_useCloudMap;
-			if (TheGlobalData->m_timeOfDay == TIME_OF_DAY_NIGHT) {
-				doCloud = false;
-			}
-
-			if (TheGlobalData->m_useLightMap && doCloud)
- 			{	
-				st = W3DShaderManager::ST_ROAD_BASE_NOISE12;
- 			}
- 			else if (TheGlobalData->m_useLightMap)
- 			{	//lightmap only
- 				st = W3DShaderManager::ST_ROAD_BASE_NOISE2;
- 			}
- 			else if (doCloud)
- 			{	//cloudmap only
- 				st = W3DShaderManager::ST_ROAD_BASE_NOISE1;
- 			}
-
-			Int devicePasses=W3DShaderManager::getShaderPasses(st);
-
-			for (Int pass=0; pass < devicePasses; pass++)
-			{
-				W3DShaderManager::setShader(st, pass);
-				if (Is_Hidden() == 0) {
-					DX8Wrapper::Draw_Triangles(	0,indexCount/3, 0,	vertexCount);	//draw a quad, 2 triangles, 4 verts
-					m_numVisibleExtraBlendTiles += indexCount/6;
-				}
-			}
-			W3DShaderManager::resetShader(st);
+			pipeline.Apply(*native);
+			if (Submit_Native_Draw(*native,draw)) m_numVisibleExtraBlendTiles+=indexCount/6;
 		}
   }
 }

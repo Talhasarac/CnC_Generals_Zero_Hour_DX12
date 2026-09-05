@@ -33,7 +33,7 @@ struct NativeD3D12BufferVersion {
 	Microsoft::WRL::ComPtr<ID3D12Resource> resource;
 	std::weak_ptr<NativeD3D12DescriptorPool> deviceIdentity;
 	UINT64 revision = 0;
-	D3D12_RESOURCE_STATES state = D3D12_RESOURCE_STATE_COPY_DEST;
+	D3D12_RESOURCE_STATES state = D3D12_RESOURCE_STATE_COMMON;
 };
 
 // CPU authoring storage with revisioned, GPU-resident snapshots. Submitted
@@ -155,11 +155,59 @@ struct NativeMaterialStage {
 	// Luminance scale/offset; signed UV sample decode scale/offset.
 	std::array<float,4> bumpParameters = {1,0,1,0};
 };
+enum class NativeEnvironmentCoordinates : UINT { None, CameraNormal, CameraReflection };
 struct NativeMaterialCoordinates {
 	UINT offset = UINT_MAX;
 	bool position = false, transform = false, projected = false;
+	NativeEnvironmentCoordinates environment = NativeEnvironmentCoordinates::None;
 	std::array<float, 16> matrix = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
 };
+// Complete native draw settings for a scoped pass. Texture references stay alive
+// while captured. Targets, command-list lifetime and resource transitions remain
+// explicit; a snapshot must be restored within the same renderer/device lifetime.
+struct NativeD3D12State
+{
+	D3D12_CULL_MODE cullMode = D3D12_CULL_MODE_NONE;
+	bool depthEnable = true, depthWrite = true;
+	D3D12_COMPARISON_FUNC depthFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
+	INT depthBias = 0;
+	D3D12_FILL_MODE fillMode = D3D12_FILL_MODE_SOLID;
+	bool blendEnable = false;
+	D3D12_BLEND sourceBlend = D3D12_BLEND_ONE, destinationBlend = D3D12_BLEND_ZERO;
+	D3D12_BLEND_OP blendOp = D3D12_BLEND_OP_ADD;
+	UINT8 renderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+	bool alphaTestEnable = false;
+	D3D12_COMPARISON_FUNC alphaTestFunc = D3D12_COMPARISON_FUNC_ALWAYS;
+	UINT8 alphaTestRef = 0;
+	bool grayscale = false;
+	UINT32 grayscaleTint = 0xffffffff;
+	float grayscaleAmount = 1.0f;
+	bool materialEnabled = false;
+	std::array<std::array<float,4>,11> treeSway = {};
+	UINT treeSwayOffset = UINT_MAX;
+	UINT fogMode = 0;
+	bool fogRange = false;
+	std::array<float,4> fogParameters = {}, fogColor = {};
+	std::array<float,16> worldView = {}, worldViewProjection = {};
+	NativeLightingState lighting;
+	std::array<NativeMaterialStage,4> materialStages;
+	std::array<NativeMaterialCoordinates,4> materialCoordinates;
+	std::array<std::shared_ptr<NativeD3D12Texture>,4> materialTextures;
+	std::array<D3D12_GPU_DESCRIPTOR_HANDLE,4> materialSamplers = {};
+	std::array<float,4> materialFactor = {1,1,1,1};
+	bool textureColorTexture = true, textureColorVertex = true;
+	bool textureAlphaTexture = true, textureAlphaVertex = true;
+	bool stencilEnable = false;
+	D3D12_COMPARISON_FUNC stencilFunc = D3D12_COMPARISON_FUNC_ALWAYS;
+	UINT8 stencilRef = 0, stencilReadMask = 0xff, stencilWriteMask = 0xff;
+	D3D12_STENCIL_OP stencilFail = D3D12_STENCIL_OP_KEEP;
+	D3D12_STENCIL_OP stencilDepthFail = D3D12_STENCIL_OP_KEEP;
+	D3D12_STENCIL_OP stencilPass = D3D12_STENCIL_OP_KEEP;
+	D3D12_GPU_DESCRIPTOR_HANDLE currentSamplerGpu = {};
+	D3D12_VIEWPORT viewport = {};
+	D3D12_RECT scissor = {};
+};
+
 class NativeD3D12Renderer final
 {
 public:
@@ -189,6 +237,15 @@ public:
 
 	bool IsInitialized() const { return m_device != nullptr && m_swapChain != nullptr; }
 	static NativeD3D12Renderer* Active();
+	NativeD3D12State CaptureState() const;
+	// Signed D24 depth units; negative values pull coplanar decals toward the camera.
+	void SetDepthBias(INT bias) { m_depthBias = bias; }
+	bool SetRasterizerFill(D3D12_FILL_MODE mode) {
+		if (mode!=D3D12_FILL_MODE_SOLID && mode!=D3D12_FILL_MODE_WIREFRAME) return false;
+		m_fillMode=mode;
+		return true;
+	}
+	void RestoreState(const NativeD3D12State& state);
 	void SetWorldViewProjection(const float* matrix16);
 	UINT Width() const { return m_width; }
 	UINT Height() const { return m_height; }
@@ -218,6 +275,10 @@ public:
 	void SetSamplerState(NativeD3D12FilterMode minFilter, NativeD3D12FilterMode magFilter,
 		NativeD3D12FilterMode mipFilter, bool clampU, bool clampV, UINT maxAnisotropy = 1);
 	bool SetRenderTarget(const NativeD3D12Texture* texture, bool useDefaultDepth = true);
+	// GPU-only snapshot for refraction/distortion. Keeps the current target,
+	// viewport and frame open; destination becomes shader-readable.
+	bool CopyCurrentRenderTarget(NativeD3D12Texture& destination);
+	DXGI_FORMAT RenderTargetFormat() const { return m_targetFormat; }
 	UINT RenderTargetWidth() const { return m_currentRenderTarget ? m_currentRenderTarget->Width() : m_width; }
 	UINT RenderTargetHeight() const { return m_currentRenderTarget ? m_currentRenderTarget->Height() : m_height; }
 	void SetFixedFunctionState(D3D12_CULL_MODE cullMode, bool depthEnable,
@@ -292,7 +353,7 @@ private:
 	bool CreateBasicPipeline(UINT colorOffset, UINT normalOffset = UINT_MAX, UINT specularOffset = UINT_MAX);
 	bool CreateTexturedPipeline(const std::array<UINT,4>& texcoordOffsets, UINT colorOffset,
 		UINT normalOffset, UINT specularOffset);
-	using PipelineKey = std::array<UINT, 29>;
+	using PipelineKey = std::array<UINT, 30>;
 	PipelineKey GetPipelineKey(bool textured) const;
 	bool UploadGeometry(const void* source, UINT size, D3D12_GPU_VIRTUAL_ADDRESS& address,
 		ID3D12Resource** uploadResource = nullptr, UINT64* uploadOffset = nullptr);
@@ -350,6 +411,8 @@ private:
 	bool m_depthEnable = true;
 	bool m_depthWrite = true;
 	D3D12_COMPARISON_FUNC m_depthFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
+	INT m_depthBias = 0;
+	D3D12_FILL_MODE m_fillMode = D3D12_FILL_MODE_SOLID;
 	bool m_blendEnable = false;
 	D3D12_BLEND m_sourceBlend = D3D12_BLEND_ONE;
 	D3D12_BLEND m_destinationBlend = D3D12_BLEND_ZERO;
@@ -372,6 +435,7 @@ private:
 	std::array<NativeMaterialStage, 4> m_materialStages;
 	std::array<NativeMaterialCoordinates, 4> m_materialCoordinates;
 	std::array<std::shared_ptr<NativeD3D12Texture>, 4> m_materialTextures;
+	std::unique_ptr<NativeD3D12Texture> m_neutralMaterialTexture;
 	std::array<D3D12_GPU_DESCRIPTOR_HANDLE, 4> m_materialSamplers = {};
 	std::array<float, 4> m_materialFactor = {1,1,1,1};
 	bool m_textureColorTexture = true;
@@ -425,4 +489,19 @@ private:
 	std::array<double,6> m_engineCpuMs = {};
 	UINT64 m_submittedFrames = 0;
 	UINT m_recordedDraws = 0;
+};
+
+// Use around an effect/UI pass so it cannot leak native draw settings into
+// the following world pass, including exits caused by missing resources.
+class NativeD3D12ScopedState final
+{
+public:
+	explicit NativeD3D12ScopedState(NativeD3D12Renderer& renderer)
+		: m_renderer(renderer), m_state(renderer.CaptureState()) {}
+	~NativeD3D12ScopedState() { m_renderer.RestoreState(m_state); }
+	NativeD3D12ScopedState(const NativeD3D12ScopedState&) = delete;
+	NativeD3D12ScopedState& operator=(const NativeD3D12ScopedState&) = delete;
+private:
+	NativeD3D12Renderer& m_renderer;
+	NativeD3D12State m_state;
 };

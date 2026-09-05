@@ -56,6 +56,9 @@
 
 class ChunkLoadClass;
 class ChunkSaveClass;
+struct NativeVertexLayoutDesc;
+struct NativeMaterialDescription;
+struct NativeLightingState;
 
 #define DYN_MAT8
 #ifdef DYN_MAT8
@@ -169,6 +172,7 @@ public:
 
 	void			Set_Lighting(bool lighting) { CRCDirty=true; UseLighting=lighting; };
 	bool			Get_Lighting() const { return UseLighting; };
+	void Describe_Native_Lighting(NativeLightingState& state, bool coloring) const;
 
 	/*
 	** Color source control.  Note that if you set one of the sources to be one of
@@ -192,6 +196,8 @@ public:
 	*/
 	void					Set_UV_Source(int stage,int array_index);
 	int					Get_UV_Source(int stage);
+	bool Describe_Native_Mapping(const NativeMapperContext& context,
+		const NativeVertexLayoutDesc& layout, NativeMaterialDescription& description) const;
 
 	/*
 	** Mapper control.  

@@ -45,6 +45,7 @@
 #include "bittype.h"
 #include "matrix4.h"
 #include "mapper.h"
+#include "native_d3d12_renderer.h"
 
 // Modified to use DX 8 texture matrices
 // Hector Yee 1/29/01
@@ -99,9 +100,22 @@ public:
 	TextureMapperClass*	Clone(void) const { 	WWASSERT(0);	return NULL; }
 
 	virtual void			Apply(int uv_array_index);
+	bool Try_Get_Native_Coordinates(const Matrix4x4& worldView, unsigned int uvOffset,
+		NativeMaterialCoordinates& output) override {
+		output = Build_Native_Coordinates(ViewToPixel,worldView);
+		return true;
+	}
+	bool Try_Get_Native_Coordinates_For_View(const NativeMapperContext& context, unsigned int uvOffset,
+		NativeMaterialCoordinates& output) override;
+	bool Try_Calculate_Native_Texture_Matrix(const NativeMapperContext& context, Matrix4x4& output) override {
+		output = ViewToPixel;
+		return true;
+	}
 	virtual void			Calculate_Texture_Matrix(Matrix4x4 &tex_matrix);
 
 protected:
+	NativeMaterialCoordinates Build_Native_Coordinates(const Matrix4x4& viewToPixel,
+		const Matrix4x4& worldView) const;
 	
 	void						Update_View_To_Pixel_Transform(float texsize);
 
@@ -133,6 +147,10 @@ public:
 	virtual TextureMapperClass *Clone(void) const { return NEW_REF( CompositeMatrixMapperClass, (*this)); }
 
 	virtual void Apply(int uv_array_index);
+	// A composite may contain a screen/world-space mapper at any depth, so all
+	// native composition requires the explicit camera contract.
+	bool Try_Get_Native_Coordinates(const Matrix4x4&, unsigned int, NativeMaterialCoordinates&) override { return false; }
+	bool Try_Calculate_Native_Texture_Matrix(const NativeMapperContext& context, Matrix4x4& output) override;
 	virtual void Calculate_Texture_Matrix(Matrix4x4 &tex_matrix);
 
 protected:

@@ -131,16 +131,53 @@ static Real beZ;
 
 static NativeD3D12UploadBuffer* lastActiveVertexBuffer=NULL;
 
+#include "WW3D2/native_shadow_state.h"
+
+static void SetNativeShadowTransform(NativeD3D12Renderer& renderer, const Matrix4x4& world)
+{
+	Matrix4x4 view;
+	Matrix4x4 projection;
+	DX8Wrapper::_Get_DX8_Transform(D3DTS_VIEW, view);
+	DX8Wrapper::_Get_DX8_Transform(D3DTS_PROJECTION, projection);
+	// Set_Transform(Matrix4x4) transposes the engine's world convention before
+	// the wrapper submits it.  The native renderer consumes that row-vector
+	// form directly, so mirror that conversion here for non-identity volumes.
+	const Matrix4x4 nativeWorld = world.Transpose();
+	const Matrix4x4 worldView = nativeWorld * view;
+	const Matrix4x4 worldViewProjection = worldView * projection;
+	renderer.SetWorldView(reinterpret_cast<const float*>(&worldView));
+	renderer.SetWorldViewProjection(reinterpret_cast<const float*>(&worldViewProjection));
+}
+
+static void ConfigureNativeShadowVolumeState(NativeD3D12Renderer& renderer,
+	D3D12_CULL_MODE cullMode, D3D12_STENCIL_OP passOperation,
+	D3D12_COMPARISON_FUNC stencilFunction, UINT8 stencilReference,
+	UINT8 stencilReadMask, UINT8 colorWriteMask)
+{
+	renderer.SetFixedFunctionState(cullMode, true, false,
+		D3D12_COMPARISON_FUNC_LESS_EQUAL, false, D3D12_BLEND_ONE,
+		D3D12_BLEND_ZERO, D3D12_BLEND_OP_ADD, colorWriteMask);
+	renderer.SetAlphaTestState(false, D3D12_COMPARISON_FUNC_ALWAYS, 0);
+	renderer.SetStencilState(true, stencilFunction, stencilReference,
+		stencilReadMask, 0xff, D3D12_STENCIL_OP_KEEP,
+		D3D12_STENCIL_OP_KEEP, passOperation);
+	renderer.SetVertexFog(0, 0.0f, 1.0f, 1.0f, 0, false);
+	renderer.SetLighting(NativeLightingState());
+	renderer.SetMaterialEnabled(false);
+	renderer.SetTreeSway(NULL, 0);
+}
+
 static void DrawNativeShadowIndexed(const void* vertices, UINT vertex_bytes, UINT vertex_stride,
-	UINT vertex_count, const unsigned short* indices, UINT index_count)
+	UINT vertex_count, const unsigned short* indices, UINT index_count,
+	const NativeD3D12UploadBuffer* vertex_owner = NULL,
+	const NativeD3D12UploadBuffer* index_owner = NULL)
 {
 	NativeD3D12Renderer* renderer = NativeD3D12Renderer::Active();
 	if (renderer == nullptr || !DX8Wrapper::_Is_Triangle_Draw_Enabled())
 		return;
 
-	DX8Wrapper::Apply_Render_State_Changes();
 	renderer->DrawIndexed(vertices, vertex_bytes, vertex_stride, vertex_count, indices, index_count,
-		0, 0, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+		0, 0, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, UINT_MAX, vertex_owner, index_owner);
 }
 
 /** A simple structure to hold random geometry (vertices, polygons, etc.).  We'll use this
@@ -1540,14 +1577,17 @@ void W3DVolumetricShadow::RenderMeshVolume(Int meshIndex, Int lightIndex, const 
 
 	DEBUG_ASSERTCRASH(ibSlot->m_size >= numIndex,("Overflowing Shadow Index Buffer Slot"));
 
-	DX8Wrapper::Set_Transform(D3DTS_WORLD, mWorld);
 	const DX8VertexBufferClass* vertex_buffer = vbSlot->m_VB->m_DX8VertexBuffer;
 	const DX8IndexBufferClass* index_buffer = ibSlot->m_IB->m_DX8IndexBuffer;
+	const NativeD3D12UploadBuffer* vertex_owner = vertex_buffer->Get_Native_Vertex_Buffer();
+	const NativeD3D12UploadBuffer* index_owner = index_buffer->Get_Native_Index_Buffer();
 	const unsigned stride = vertex_buffer->FVF_Info().Get_FVF_Size();
-	const unsigned char* vertices = static_cast<const unsigned char*>(vertex_buffer->Get_Native_Vertex_Buffer()->Data()) + vbSlot->m_start * stride;
-	const unsigned short* indices = reinterpret_cast<const unsigned short*>(static_cast<const unsigned char*>(index_buffer->Get_Native_Index_Buffer()->Data()) + ibSlot->m_start * sizeof(unsigned short));
+	const unsigned char* vertices = static_cast<const unsigned char*>(vertex_owner->Data()) + vbSlot->m_start * stride;
+	const unsigned short* indices = reinterpret_cast<const unsigned short*>(static_cast<const unsigned char*>(index_owner->Data()) + ibSlot->m_start * sizeof(unsigned short));
+	SetNativeShadowTransform(*NativeD3D12Renderer::Active(), mWorld);
 	Debug_Statistics::Record_DX8_Polys_And_Vertices(numPolys,numVerts,ShaderClass::_PresetOpaqueShader);
-	DrawNativeShadowIndexed(vertices, static_cast<UINT>(vbSlot->m_size * stride), stride, numVerts, indices, numIndex);
+	DrawNativeShadowIndexed(vertices, static_cast<UINT>(vbSlot->m_size * stride), stride, numVerts, indices, numIndex,
+		vertex_owner, index_owner);
 
 }
 
@@ -1636,14 +1676,15 @@ void W3DVolumetricShadow::RenderDynamicMeshVolume(Int meshIndex, Int lightIndex,
 	shadowIndexBufferD3D->Unlock();
 
 	Matrix4x4 mWorld(*meshXform);
-	DX8Wrapper::Set_Transform(D3DTS_WORLD,mWorld);
+	SetNativeShadowTransform(*NativeD3D12Renderer::Active(), mWorld);
 
 	if (DX8Wrapper::_Is_Triangle_Draw_Enabled())
 	{
 		Debug_Statistics::Record_DX8_Polys_And_Vertices(numPolys,numVerts,ShaderClass::_PresetOpaqueShader);
 		const unsigned char* vertices = static_cast<const unsigned char*>(shadowVertexBufferD3D->Data()) + nShadowStartBatchVertex * sizeof(SHADOW_DYNAMIC_VOLUME_VERTEX);
 		const unsigned short* indices = static_cast<const unsigned short*>(shadowIndexBufferD3D->Data()) + nShadowStartBatchIndex;
-		DrawNativeShadowIndexed(vertices, static_cast<UINT>(numVerts * sizeof(SHADOW_DYNAMIC_VOLUME_VERTEX)), sizeof(SHADOW_DYNAMIC_VOLUME_VERTEX), numVerts, indices, numIndex);
+		DrawNativeShadowIndexed(vertices, static_cast<UINT>(numVerts * sizeof(SHADOW_DYNAMIC_VOLUME_VERTEX)), sizeof(SHADOW_DYNAMIC_VOLUME_VERTEX), numVerts, indices, numIndex,
+			shadowVertexBufferD3D, shadowIndexBufferD3D);
 	}
 
 	nShadowVertsInBuf += numVerts;
@@ -1781,10 +1822,11 @@ void W3DVolumetricShadow::RenderMeshVolumeBounds(Int meshIndex, Int lightIndex, 
 
 	//todo: replace this with mesh transform
 	Matrix4x4 mWorld(1);	//identity since boxes are pre-transformed to world space.
-	DX8Wrapper::Set_Transform(D3DTS_WORLD,mWorld);
+	SetNativeShadowTransform(*NativeD3D12Renderer::Active(), mWorld);
 	const unsigned char* vertices = static_cast<const unsigned char*>(shadowVertexBufferD3D->Data()) + nShadowStartBatchVertex * sizeof(SHADOW_DYNAMIC_VOLUME_VERTEX);
 	const unsigned short* indices = static_cast<const unsigned short*>(shadowIndexBufferD3D->Data()) + nShadowStartBatchIndex;
-	DrawNativeShadowIndexed(vertices, static_cast<UINT>(numVerts * sizeof(SHADOW_DYNAMIC_VOLUME_VERTEX)), sizeof(SHADOW_DYNAMIC_VOLUME_VERTEX), numVerts, indices, numIndex);
+	DrawNativeShadowIndexed(vertices, static_cast<UINT>(numVerts * sizeof(SHADOW_DYNAMIC_VOLUME_VERTEX)), sizeof(SHADOW_DYNAMIC_VOLUME_VERTEX), numVerts, indices, numIndex,
+		shadowVertexBufferD3D, shadowIndexBufferD3D);
 
 	nShadowVertsInBuf += numVerts;
 	nShadowStartBatchVertex=nShadowVertsInBuf;
@@ -3595,6 +3637,7 @@ void W3DVolumetricShadowManager::renderStencilShadows( void )
 	NativeD3D12Renderer* renderer = NativeD3D12Renderer::Active();
 	if (renderer == nullptr)
 		return;
+	NativeD3D12ScopedState nativeState(*renderer);
 
 	struct _TRANSLITVERTEX {
 		float x, y, z;
@@ -3617,21 +3660,14 @@ void W3DVolumetricShadowManager::renderStencilShadows( void )
 	v[2] = { left, bottom, 0.0f, color };
 	v[3] = { left, top, 0.0f, color };
 	const unsigned short indices[4] = { 0, 1, 2, 3 };
-	Matrix4x4 oldWorld, oldView, oldProjection, identity(true);
-	DX8Wrapper::Get_Transform(D3DTS_WORLD, oldWorld);
-	DX8Wrapper::Get_Transform(D3DTS_VIEW, oldView);
-	DX8Wrapper::Get_Transform(D3DTS_PROJECTION, oldProjection);
-	DX8Wrapper::Set_Transform(D3DTS_WORLD, identity);
-	DX8Wrapper::Set_Transform(D3DTS_VIEW, identity);
-	DX8Wrapper::Set_Transform(D3DTS_PROJECTION, identity);
-	DX8Wrapper::Apply_Render_State_Changes();
+	const UINT8 stencilMask = static_cast<UINT8>(TheW3DShadowManager->getStencilShadowMask());
+	SetNativeShadowCompositeState(*renderer, stencilMask);
+	const Matrix4x4 identity(true);
+	renderer->SetWorldView(reinterpret_cast<const float*>(&identity));
+	renderer->SetWorldViewProjection(reinterpret_cast<const float*>(&identity));
 	if (DX8Wrapper::_Is_Triangle_Draw_Enabled())
 		renderer->DrawIndexed(v, sizeof(v), sizeof(_TRANSLITVERTEX), 4, indices, 4, 0, 0,
 			D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP, sizeof(float) * 3);
-	DX8Wrapper::Set_Transform(D3DTS_WORLD, oldWorld);
-	DX8Wrapper::Set_Transform(D3DTS_VIEW, oldView);
-	DX8Wrapper::Set_Transform(D3DTS_PROJECTION, oldProjection);
-	DX8Wrapper::Apply_Render_State_Changes();
 
 }  // end renderStencilShadows
 
@@ -3675,83 +3711,14 @@ void W3DVolumetricShadowManager::renderShadows( Bool forceStencilFill )
  		nShadowIndicesInBuf = 0xffff;
  		nShadowVertsInBuf = 0xffff;
 
-		//Set W3D to some known state
-		VertexMaterialClass *vmat=VertexMaterialClass::Get_Preset(VertexMaterialClass::PRELIT_DIFFUSE);
-		DX8Wrapper::Set_Material(vmat);
-		REF_PTR_RELEASE(vmat);
-
-		DX8Wrapper::Set_Shader(ShaderClass::_PresetOpaqueShader);
-		DX8Wrapper::Set_Texture(0,NULL);	//turn off textures
-		DX8Wrapper::Set_Texture(1,NULL);	//turn off textures
-		DX8Wrapper::Apply_Render_State_Changes();	//force update of view and projection matrices
-
-		// turn off z writing
-		DX8Wrapper::Set_DX8_Render_State(D3DRS_ZFUNC, D3DCMP_LESSEQUAL);
-		DX8Wrapper::Set_DX8_Render_State( D3DRS_ZENABLE,          TRUE );
-		DX8Wrapper::Set_DX8_Render_State(D3DRS_ZWRITEENABLE , FALSE);
-		DX8Wrapper::Set_DX8_Render_State(D3DRS_ALPHATESTENABLE, FALSE);
-		DX8Wrapper::Set_DX8_Render_State(D3DRS_FOGENABLE, FALSE);
-
-
-		// setup the TMU to default
-		DX8Wrapper::Set_DX8_Render_State(D3DRS_SHADEMODE, D3DSHADE_FLAT);
-		DX8Wrapper::Set_DX8_Render_State(D3DRS_LIGHTING, FALSE);
-		DX8Wrapper::Set_DX8_Texture_Stage_State( 0, D3DTSS_COLORARG1, D3DTA_TEXTURE );
-		DX8Wrapper::Set_DX8_Texture_Stage_State( 0, D3DTSS_COLORARG2, D3DTA_DIFFUSE );
-		DX8Wrapper::Set_DX8_Texture_Stage_State( 0, D3DTSS_COLOROP,   D3DTOP_SELECTARG2);
-		DX8Wrapper::Set_DX8_Texture_Stage_State( 0, D3DTSS_ALPHAOP,   D3DTOP_DISABLE );
-		DX8Wrapper::Set_DX8_Texture_Stage_State( 0, D3DTSS_TEXCOORDINDEX, 0 );
-
-		DX8Wrapper::Set_DX8_Texture_Stage_State( 1, D3DTSS_COLOROP,   D3DTOP_DISABLE);
-		DX8Wrapper::Set_DX8_Texture_Stage_State( 1, D3DTSS_ALPHAOP,   D3DTOP_DISABLE );
-		DX8Wrapper::Set_DX8_Texture_Stage_State( 1, D3DTSS_TEXCOORDINDEX, 1 );
-		DX8Wrapper::Set_DX8_Texture(0,NULL);
-		DX8Wrapper::Set_DX8_Texture(1,NULL);
-
-		DWORD oldColorWriteEnable=0x12345678;
-
-	#ifdef SV_DEBUG
-		DX8Wrapper::Set_DX8_Render_State(D3DRS_ALPHABLENDENABLE , TRUE);
-		DX8Wrapper::Set_DX8_Render_State( D3DRS_STENCILENABLE, FALSE );
-		DX8Wrapper::Set_DX8_Render_State( D3DRS_SRCBLEND, D3DBLEND_ONE );
-		DX8Wrapper::Set_DX8_Render_State( D3DRS_DESTBLEND, D3DBLEND_ZERO );
-		DX8Wrapper::Set_DX8_Render_State(D3DRS_ZFUNC, D3DCMP_LESSEQUAL);
-	#else
-		//disable writes to color buffer
-		if (DX8Wrapper::Get_Current_Caps()->Get_DX8_Caps().PrimitiveMiscCaps & D3DPMISCCAPS_COLORWRITEENABLE)
-		{	oldColorWriteEnable = DX8Wrapper::Get_DX8_Render_State(D3DRS_COLORWRITEENABLE);
-			DX8Wrapper::Set_DX8_Render_State(D3DRS_COLORWRITEENABLE,0);
-		}
-		else
-		{	//device does not support disabling writes to color buffer so fake it through alpha blending
-			DX8Wrapper::Set_DX8_Render_State( D3DRS_SRCBLEND, D3DBLEND_ZERO );
-			DX8Wrapper::Set_DX8_Render_State( D3DRS_DESTBLEND, D3DBLEND_ONE );
-			DX8Wrapper::Set_DX8_Render_State(D3DRS_ALPHABLENDENABLE , TRUE);
-		}
-		DX8Wrapper::Set_DX8_Render_State( D3DRS_STENCILENABLE, TRUE );
-	#endif
-		//Any pixels with stencil already set to 128 contains a potential occluder.  If this pixels also has any of the player
-		//color stencil bits also set, it means that it's an occluded player color and we need to NOT render shadows here.  We
-		//do this determination by comparing the value in the combined bits against a value containing only a potential occluder.
-		//If the value of just the potential occluder bit is >= than the combined bits, then we know none of the player color
-		//bits were set and it's okay to render shadow.
-		if (TheW3DShadowManager->getStencilShadowMask() == 0x80808080)
-			DX8Wrapper::Set_DX8_Render_State( D3DRS_STENCILFUNC,     D3DCMP_NOTEQUAL );	//in this mode, MSB indicates occluded player pixels.
-		else
-			DX8Wrapper::Set_DX8_Render_State( D3DRS_STENCILFUNC,     D3DCMP_GREATEREQUAL );	//in this mode, multiple bits indicate occluded player pixels.
-			DX8Wrapper::Set_DX8_Render_State( D3DRS_STENCILREF,      0x80808080 );
-			DX8Wrapper::Set_DX8_Render_State( D3DRS_STENCILMASK,     TheW3DShadowManager->getStencilShadowMask());
-			DX8Wrapper::Set_DX8_Render_State( D3DRS_STENCILWRITEMASK,0xffffffff );
-			DX8Wrapper::Set_DX8_Render_State( D3DRS_STENCILZFAIL, D3DSTENCILOP_KEEP );
-			DX8Wrapper::Set_DX8_Render_State( D3DRS_STENCILFAIL,  D3DSTENCILOP_KEEP );
-			DX8Wrapper::Set_DX8_Render_State( D3DRS_STENCILPASS,  D3DSTENCILOP_INCR );
-		
-		DX8Wrapper::Set_Vertex_Shader(SHADOW_DYNAMIC_VOLUME_FVF);
-
-		DX8Wrapper::Set_DX8_Render_State(D3DRS_CULLMODE,D3DCULL_CW);
-//		m_pDev->SetRenderState(D3DRS_ZBIAS,1);	///@todo: See if this helps or makes things worse.
-		//m_pDev->SetRenderState(D3DRS_FILLMODE,D3DFILL_WIREFRAME);
-
+		NativeD3D12Renderer& native = *NativeD3D12Renderer::Active();
+		NativeD3D12ScopedState pass(native);
+		const UINT8 stencilMask = static_cast<UINT8>(TheW3DShadowManager->getStencilShadowMask());
+		const D3D12_COMPARISON_FUNC stencilFunction =
+			stencilMask == 0x80 ? D3D12_COMPARISON_FUNC_NOT_EQUAL :
+			D3D12_COMPARISON_FUNC_GREATER_EQUAL;
+		ConfigureNativeShadowVolumeState(native, D3D12_CULL_MODE_FRONT,
+			D3D12_STENCIL_OP_INCR, stencilFunction, 0x80, stencilMask, 0);
 
 		lastActiveVertexBuffer=NULL;	//reset
 
@@ -3794,8 +3761,7 @@ void W3DVolumetricShadowManager::renderShadows( Bool forceStencilFill )
 			}
 		}
 
-		// Set vertex format to that used by static shadow volumes
-		DX8Wrapper::Set_Vertex_Shader(W3DBufferManager::getDX8Format(W3DBufferManager::VBM_FVF_XYZ));
+		// Static and dynamic volumes submit explicit XYZ buffer layouts.
 
 		//Empty queue of static shadow volumes to render.
 		W3DBufferManager::W3DVertexBuffer *nextVb;
@@ -3811,15 +3777,9 @@ void W3DVolumetricShadowManager::renderShadows( Bool forceStencilFill )
 			}
 		}
 
-		// change the stencil op to decrement
-		DX8Wrapper::Set_DX8_Render_State( D3DRS_STENCILPASS,  D3DSTENCILOP_DECRSAT);
-
-		//
-		// invert normals of shadow volumes so we can decrement in the
-		// stencil buffer and render
-		//
-
-		DX8Wrapper::Set_DX8_Render_State(D3DRS_CULLMODE,D3DCULL_CCW);
+		// Opposite faces cancel increments; no deferred state replay between draws.
+		ConfigureNativeShadowVolumeState(native, D3D12_CULL_MODE_BACK,
+			D3D12_STENCIL_OP_DECR_SAT, stencilFunction, 0x80, stencilMask, 0);
 
 		for (nextVb=TheW3DBufferManager->getNextVertexBuffer(NULL,W3DBufferManager::VBM_FVF_XYZ);nextVb != NULL; nextVb=TheW3DBufferManager->getNextVertexBuffer(nextVb,W3DBufferManager::VBM_FVF_XYZ))
 		{
@@ -3831,8 +3791,8 @@ void W3DVolumetricShadowManager::renderShadows( Bool forceStencilFill )
 			}
 		}
 
-		DX8Wrapper::Set_Vertex_Shader(SHADOW_DYNAMIC_VOLUME_FVF);
-		//flush any dynamic shadow volumes
+		// Flush dynamic volumes with the same decrement state.
+
 		shadowDynamicTask=m_dynamicShadowVolumesToRender;
 		while (shadowDynamicTask)
 		{	//dynamic shadow columes don't need to wait in queue since they
@@ -3847,44 +3807,12 @@ void W3DVolumetricShadowManager::renderShadows( Bool forceStencilFill )
 			nextVb->m_renderTaskList=NULL;
 		}
 
-		DX8Wrapper::Set_DX8_Render_State(D3DRS_CULLMODE,D3DCULL_CW);
-//		m_pDev->SetRenderState(D3DRS_ZBIAS,0);	///@todo: See if this helps or makes things worse.
-		//m_pDev->SetRenderState(D3DRS_FILLMODE,D3DFILL_SOLID);
-
-
-		if (oldColorWriteEnable != 0x12345678)
-			DX8Wrapper::Set_DX8_Render_State(D3DRS_COLORWRITEENABLE,oldColorWriteEnable);
-
-		//
-		// render the big transparent square of shadows in the stencil buffer
-		// to the screen
-		//
-///@todo: Put this check back in after water is fixed so it doesn't require shadow rendering to fix alpha.
-//		if (numRenderedShadows)
-			renderStencilShadows();
-
-		DX8Wrapper::Set_DX8_Render_State(D3DRS_SHADEMODE, D3DSHADE_GOURAUD);
-		DX8Wrapper::Set_DX8_Render_State(D3DRS_ALPHABLENDENABLE , FALSE);
-		DX8Wrapper::Set_DX8_Render_State(D3DRS_LIGHTING, FALSE);
-
-		DX8Wrapper::Invalidate_Cached_Render_States();
-	}
-	else
-	if (forceStencilFill)
-	{	//no shadows to render, but still need to fill stencil buffer
-		//for other effects.
-
-		//Set W3D to some known state
-		VertexMaterialClass *vmat=VertexMaterialClass::Get_Preset(VertexMaterialClass::PRELIT_DIFFUSE);
-		DX8Wrapper::Set_Material(vmat);
-		REF_PTR_RELEASE(vmat);
-		DX8Wrapper::Set_Shader(ShaderClass::_PresetOpaqueShader);
-		DX8Wrapper::Set_Texture(0,NULL);
-		DX8Wrapper::Apply_Render_State_Changes();	//force update of view and projection matrices
-
 		renderStencilShadows();
 
-		DX8Wrapper::Invalidate_Cached_Render_States();
+	}
+	else if (forceStencilFill)
+	{
+		renderStencilShadows();
 	}
 
 }  // end RenderShadows

@@ -61,6 +61,8 @@
 #include "common/GameType.h"
 #include "Common/AsciiString.h"
 
+class CameraClass;
+
 //-----------------------------------------------------------------------------
 //           Forward References
 //-----------------------------------------------------------------------------
@@ -102,7 +104,7 @@ public:
 	/// Removes highlighting.
 	void removeHighlighting(void);
 	/// Draws the bibs.  
-	void renderBibs();
+	void renderBibs(CameraClass *camera);
 	/// Called when the view changes, and sort key needs to be recalculated.
 	/// Normally sortKey gets calculated when a bib becomes visible.
 protected:

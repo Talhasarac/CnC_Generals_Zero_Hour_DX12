@@ -47,6 +47,8 @@ class DX8IndexBufferClass;
 #define NUM_BUMP_FRAMES 32	///number of animation frames in bump map
 
 class PolygonTrigger;
+class DynamicVBAccessClass;
+class DynamicIBAccessClass;
 class WaterTracksRenderSystem;
 class Xfer;
 /// Custom render object that draws mirrors, water, and skies.
@@ -94,7 +96,7 @@ public:
   	virtual void	Set_Sort_Level(int level)		{ m_sortLevel = level;}
 
 	///allocate W3D resources needed to render water
-	void renderWater(void);				///<draw the water surface (flat)
+	void renderWater(CameraClass& camera);	///<draw the water surface (flat)
 	Int init(Real waterLevel, Real dx, Real dy, SceneClass *parentScene, WaterType type);
 	void reset( void );  ///< reset any resources we need to
 	void load(void);	///< load/setup any map dependent features
@@ -226,8 +228,8 @@ protected:
 	};
 
 	Setting m_settings[ TIME_OF_DAY_COUNT ];	///< settings for each time of day
-	void drawRiverWater(PolygonTrigger *pTrig);
-	void drawTrapezoidWater(Vector3 points[4]);
+	void drawRiverWater(PolygonTrigger *pTrig, CameraClass& camera);
+	void drawTrapezoidWater(Vector3 points[4], CameraClass& camera);
 	void loadSetting ( Setting *skySetting, TimeOfDay timeOfDay );	///<init sky/water settings from GDF
 	void renderSky(void);	///<draw the sky layer (clouds, stars, etc.)
 	void testCurvedWater(void);	///<draw the sky layer (clouds, stars, etc.)
@@ -238,8 +240,8 @@ protected:
 	///bounding box of frustum clipped polygon plane
 	Bool getClippedWaterPlane(CameraClass *cam, AABoxClass *box);
 
-	void setupFlatWaterShader(bool river = false);
-	void setupJbaWaterShader(void);
+	void submitNativeWater(CameraClass& camera, const DynamicVBAccessClass& vb,
+		const DynamicIBAccessClass& ib, UINT vertexCount, UINT indexCount, bool river);
 	void cleanupJbaWaterShader(void);
 
 	// Native water mesh allocation

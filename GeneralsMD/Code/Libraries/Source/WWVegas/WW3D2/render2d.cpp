@@ -47,17 +47,14 @@
 #include "texture.h"
 #include "matrix4.h"
 #include "matrix3d.h"
-#include "dx8wrapper.h"
-#include "dx8indexbuffer.h"
-#include "dx8vertexbuffer.h"
-#include "sortingrenderer.h"
-#include "vertmaterial.h"
-#include "dx8fvf.h"
-#include "dx8caps.h"
 #include "wwprofile.h"
 #include "wwmemlog.h"
 #include "assetmgr.h"
 #include "native_d3d12_renderer.h"
+#include "native_pipeline_description.h"
+#include "native_draw_state.h"
+
+#include <vector>
 
 //#pragma optimize("", off)
 //#pragma MESSAGE("************************************** WARNING, optimization disabled for debugging purposes")
@@ -608,105 +605,112 @@ void Render2DClass::Render(void)
 		return;
 	}
 
-	// save the view and projection matrices since we're nuking them
-	Matrix4x4 view,proj;
-	Matrix4x4 identity(true);
-
-	DX8Wrapper::Get_Transform(D3DTS_VIEW,view);
-	DX8Wrapper::Get_Transform(D3DTS_PROJECTION,proj);
-
-	//
-	//	Configure the viewport for entire screen
-	//
-	int width, height, bits;
-	bool windowed;
-	WW3D::Get_Device_Resolution( width, height, bits, windowed );
-	D3DVIEWPORT8 vp = { 0 };
-	vp.X			= 0;
-	vp.Y			= 0;
-	vp.Width		= width;
-	vp.Height	= height;
-	vp.MinZ		= 0;
-	vp.MaxZ		= 1;
-	DX8Wrapper::Set_Viewport(&vp);
-	DX8Wrapper::Set_Texture(0,Texture);
-
-	VertexMaterialClass *vm=VertexMaterialClass::Get_Preset(VertexMaterialClass::PRELIT_DIFFUSE);
-	DX8Wrapper::Set_Material(vm);
-	REF_PTR_RELEASE(vm);
-
-	DX8Wrapper::Set_World_Identity();
-	DX8Wrapper::Set_View_Identity();
-	DX8Wrapper::Set_Transform(D3DTS_PROJECTION,identity);
-
-	DynamicVBAccessClass vb(BUFFER_TYPE_DYNAMIC_DX8,dynamic_fvf_type,Vertices.Count());
+	// Native UI is authored directly as position/color/UV data.  Keep this
+	// pass independent of the legacy transform, FVF, material, and texture
+	// caches; the scoped state restores the preceding native world/UI pass.
+	if (NativeD3D12Renderer* native = NativeD3D12Renderer::Active())
 	{
-		DynamicVBAccessClass::WriteLockClass Lock(&vb);
-		const FVFInfoClass &fi=vb.FVF_Info();
-		unsigned char *va=(unsigned char*)Lock.Get_Formatted_Vertex_Array();
-		int i;
+		NativeD3D12ScopedState scoped_state(*native);
+		native->SetRasterizerFill(D3D12_FILL_MODE_SOLID);
 
-		for (i=0; i<Vertices.Count(); i++)
+		TextureClass* texture = Texture;
+		NativeD3D12Texture* native_texture = texture != NULL ? texture->Prepare_Native_Texture() : NULL;
+		const bool textured = Shader.Get_Texturing() != ShaderClass::TEXTURING_DISABLE &&
+			native_texture != NULL && native_texture->IsValid();
+
+		struct NativeUIVertex
 		{
-			Vector3 temp(Vertices[i].X,Vertices[i].Y,ZValue);
-			*(Vector3*)(va+fi.Get_Location_Offset())=temp;
-			*(unsigned int*)(va+fi.Get_Diffuse_Offset())=Colors[i];
-			*(Vector2*)(va+fi.Get_Tex_Offset(0))=UVCoordinates[i];
-			va+=fi.Get_FVF_Size();
-		}		
-	}
+			float position[3];
+			unsigned long color;
+			float texcoord[2];
+		};
 
-	DynamicIBAccessClass ib(BUFFER_TYPE_DYNAMIC_DX8,Indices.Count());
-	try {
-		DynamicIBAccessClass::WriteLockClass Lock(&ib);
-			unsigned short *mem=Lock.Get_Index_Array();
-			for (int i=0; i<Indices.Count(); i++)
-				mem[i]=Indices[i];
-	
-		IndexBufferExceptionFunc();
-	} catch(...) {
-		IndexBufferExceptionFunc();
-	}
+		std::vector<NativeUIVertex> vertices(Vertices.Count());
+		for (int index = 0; index < Vertices.Count(); ++index)
+		{
+			vertices[index].position[0] = Vertices[index].X;
+			vertices[index].position[1] = Vertices[index].Y;
+			vertices[index].position[2] = ZValue;
+			vertices[index].color = Colors[index];
+			vertices[index].texcoord[0] = UVCoordinates[index].X;
+			vertices[index].texcoord[1] = UVCoordinates[index].Y;
+		}
 
-	DX8Wrapper::Set_Vertex_Buffer(vb);
-	DX8Wrapper::Set_Index_Buffer(ib,0);
+		std::vector<unsigned short> indices(Indices.Count());
+		for (int index = 0; index < Indices.Count(); ++index)
+			indices[index] = Indices[index];
 
-	if (IsGrayScale)
-	{	//special case added to draw grayscale non-alpha blended images.
-		DX8Wrapper::Set_Shader(ShaderClass::_PresetOpaqueShader);
-		DX8Wrapper::Apply_Render_State_Changes();	//force update of all regular W3D states.
-		if (DX8Wrapper::Get_Current_Caps()->Support_Dot3())
-		{	//Override W3D states with customizations for grayscale
-			DX8Wrapper::Set_DX8_Render_State(D3DRS_TEXTUREFACTOR, 0x80A5CA8E);
-			DX8Wrapper::Set_DX8_Texture_Stage_State( 0, D3DTSS_COLORARG0, D3DTA_TFACTOR | D3DTA_ALPHAREPLICATE);
-			DX8Wrapper::Set_DX8_Texture_Stage_State( 0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
-			DX8Wrapper::Set_DX8_Texture_Stage_State( 0, D3DTSS_COLORARG2, D3DTA_TFACTOR | D3DTA_ALPHAREPLICATE);
-			DX8Wrapper::Set_DX8_Texture_Stage_State( 0, D3DTSS_COLOROP, D3DTOP_MULTIPLYADD);
+		// Render2D coordinates are already converted to NDC by Convert_Vert.
+		// The native draw helpers consume an explicit WVP, so identity preserves
+		// those coordinates without consulting the DX8 transform cache.
+		const float identity[16] = {
+			1.0f, 0.0f, 0.0f, 0.0f,
+			0.0f, 1.0f, 0.0f, 0.0f,
+			0.0f, 0.0f, 1.0f, 0.0f,
+			0.0f, 0.0f, 0.0f, 1.0f
+		};
+		int width, height, bits;
+		bool windowed;
+		WW3D::Get_Device_Resolution(width, height, bits, windowed);
+		native->SetViewport(0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height));
+		native->SetWorldView(identity);
+		native->SetWorldViewProjection(identity);
+		native->SetVertexFog(0, 0.0f, 0.0f, 0.0f, 0, false);
+		native->SetTreeSway(NULL, 0);
+		native->SetLighting(NativeLightingState{});
+		native->SetMaterialEnabled(false);
+		native->SetStencilState(false, D3D12_COMPARISON_FUNC_ALWAYS, 0, 0xff, 0xff,
+			D3D12_STENCIL_OP_KEEP, D3D12_STENCIL_OP_KEEP, D3D12_STENCIL_OP_KEEP);
 
-			DX8Wrapper::Set_DX8_Texture_Stage_State( 1, D3DTSS_COLORARG1, D3DTA_CURRENT);
-			DX8Wrapper::Set_DX8_Texture_Stage_State( 1, D3DTSS_COLORARG2, D3DTA_TFACTOR);
-			DX8Wrapper::Set_DX8_Texture_Stage_State( 1, D3DTSS_COLOROP, D3DTOP_DOTPRODUCT3);
+		NativePipelineDescription pipeline =
+			(IsGrayScale ? ShaderClass::_PresetOpaqueShader : Shader).Get_Native_Pipeline();
+		pipeline.cull = D3D12_CULL_MODE_NONE;
+		pipeline.Apply(*native);
+
+		const NativeSamplerDesc sampler = texture != NULL ?
+			texture->Get_Filter().Get_Native_Description() : NativeSamplerDesc();
+		native->SetSamplerState(sampler.minFilter, sampler.magFilter, sampler.mipFilter,
+			sampler.clampU, sampler.clampV, sampler.maxAnisotropy);
+
+		const bool use_material_gradient = textured &&
+			(Shader.Get_Primary_Gradient() == ShaderClass::GRADIENT_ADD ||
+			 Shader.Get_Primary_Gradient() == ShaderClass::GRADIENT_MODULATE2X);
+		if (use_material_gradient)
+		{
+			NativeMaterialDescription material = Shader.Get_Native_Texture_Material();
+			material.coordinates[0].offset = offsetof(NativeUIVertex,texcoord);
+			material.textures[0] = native_texture;
+			material.samplers[0] = sampler;
+			// Render2D owns one texture; detail stages belong to world materials.
+			material.stages[1] = NativeMaterialStage();
+			Apply_Native_Material_Description(*native,material);
 		}
 		else
-		{	//doesn't have DOT3 blend mode so fake it another way.
-			DX8Wrapper::Set_DX8_Render_State(D3DRS_TEXTUREFACTOR, 0x60606060);
-			DX8Wrapper::Set_DX8_Texture_Stage_State( 0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
-			DX8Wrapper::Set_DX8_Texture_Stage_State( 0, D3DTSS_COLORARG2, D3DTA_TFACTOR);
-			DX8Wrapper::Set_DX8_Texture_Stage_State( 0, D3DTSS_COLOROP, D3DTOP_MODULATE);
+		{
+			const bool vertex_gradient = textured &&
+				Shader.Get_Primary_Gradient() != ShaderClass::GRADIENT_DISABLE;
+			native->SetTextureCombine(textured, vertex_gradient || !textured,
+				textured, vertex_gradient || !textured);
 		}
-	}
-	else
-		DX8Wrapper::Set_Shader(Shader);
-	if (NativeD3D12Renderer* native = NativeD3D12Renderer::Active())
 		native->SetGrayscale(IsGrayScale);
-	DX8Wrapper::Draw_Triangles(0,Indices.Count()/3,0,Vertices.Count());	
-	if (NativeD3D12Renderer* native = NativeD3D12Renderer::Active())
-		native->SetGrayscale(false);
 
-	DX8Wrapper::Set_Transform(D3DTS_VIEW,view);
-	DX8Wrapper::Set_Transform(D3DTS_PROJECTION,proj);
-	if (IsGrayScale)
-		ShaderClass::Invalidate();	//force both stages to be reset.
+		if (textured)
+		{
+			native->DrawIndexedTextured(vertices.data(),
+				static_cast<UINT>(vertices.size() * sizeof(NativeUIVertex)), sizeof(NativeUIVertex),
+				static_cast<UINT>(vertices.size()), 16, indices.data(), static_cast<UINT>(indices.size()),
+				D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, native_texture, 12);
+		}
+		else
+		{
+			native->DrawIndexed(vertices.data(),
+				static_cast<UINT>(vertices.size() * sizeof(NativeUIVertex)), sizeof(NativeUIVertex),
+				static_cast<UINT>(vertices.size()), indices.data(), static_cast<UINT>(indices.size()),
+				0, 0, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, 12);
+		}
+		return;
+	}
+
 
 }
 

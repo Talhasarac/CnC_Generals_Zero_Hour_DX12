@@ -2435,7 +2435,7 @@ if (pMapObj->isSelected()) {
  	DX8Wrapper::Set_Vertex_Buffer(m_vertexBufferWater);
 
 	if (m_waterDrawObject) {
-		m_waterDrawObject->renderWater();
+		m_waterDrawObject->renderWater(rinfo.Camera);
 	}
 
 	if (m_drawLetterbox) {

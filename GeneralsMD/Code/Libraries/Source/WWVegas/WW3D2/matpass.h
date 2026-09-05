@@ -61,6 +61,10 @@ class TextureClass;
 class VertexMaterialClass;
 class MeshModelClass;
 class OBBoxClass;
+class Matrix3D;
+struct NativeMapperContext;
+struct NativeVertexLayoutDesc;
+struct NativeMaterialPassDescription;
 
 /**
 ** MaterialPassClass
@@ -85,6 +89,9 @@ public:
 	/// MW: Had to make this virtual so app can perform direct/custom D3D setup.
 	virtual void	Install_Materials(void) const;
 	virtual void	UnInstall_Materials(void) const { };	///< reset/cleanup D3D states
+	virtual bool Describe_Native_Pass(const NativeMapperContext& context,
+		const NativeVertexLayoutDesc& layout, const Matrix3D& world,
+		NativeMaterialPassDescription& output) const;
 
 	void							Set_Texture(TextureClass * Texture,int stage = 0);
 	void							Set_Shader(ShaderClass shader);

@@ -111,3 +111,45 @@ void FVFInfoClass::Get_FVF_Name(StringClass& fvfname) const
 	default: fvfname="Unknown!";
 	}
 }
+
+const NativeVertexLayoutDesc& FVFInfoClass::Build_Native_Layout() const
+{
+	if (nativeLayoutFVF == FVF && nativeLayoutStride == fvf_size) return nativeLayout;
+	nativeLayoutFVF = FVF;
+	nativeLayoutStride = fvf_size;
+	nativeLayout = NativeVertexLayoutDesc();
+	NativeVertexLayoutDesc& layout = nativeLayout;
+	const unsigned position = FVF & D3DFVF_POSITION_MASK;
+	if (position != D3DFVF_XYZ)
+	{
+		// Native D3D12 mesh submission currently consumes CPU-deformed XYZ
+		// vertices.  Keep unsupported legacy position encodings explicit rather
+		// than silently describing a byte layout the native shader cannot read.
+		layout.valid = false;
+		return layout;
+	}
+
+	layout.stride = fvf_size;
+	layout.Add(NativeVertexSemantic::Position, 0, DXGI_FORMAT_R32G32B32_FLOAT,
+		location_offset);
+	if (FVF & D3DFVF_NORMAL)
+		layout.Add(NativeVertexSemantic::Normal, 0, DXGI_FORMAT_R32G32B32_FLOAT,
+			normal_offset);
+	if (FVF & D3DFVF_DIFFUSE)
+		layout.Add(NativeVertexSemantic::Color, 0, DXGI_FORMAT_R8G8B8A8_UNORM,
+			diffuse_offset);
+	if (FVF & D3DFVF_SPECULAR)
+		layout.Add(NativeVertexSemantic::Color, 1, DXGI_FORMAT_R8G8B8A8_UNORM,
+			specular_offset);
+
+	const unsigned count = (FVF & D3DFVF_TEXCOUNT_MASK) >> D3DFVF_TEXCOUNT_SHIFT;
+	for (unsigned stage = 0; stage < count && stage < D3DDP_MAXTEXCOORD; ++stage)
+	{
+		const unsigned encoded = (FVF >> (16 + stage * 2)) & 3;
+		const DXGI_FORMAT format = encoded == 3 ? DXGI_FORMAT_R32_FLOAT :
+			(encoded == 0 ? DXGI_FORMAT_R32G32_FLOAT :
+			(encoded == 1 ? DXGI_FORMAT_R32G32B32_FLOAT : DXGI_FORMAT_R32G32B32A32_FLOAT));
+		layout.Add(NativeVertexSemantic::TexCoord, stage, format, texcoord_offset[stage]);
+	}
+	return layout;
+}

@@ -946,6 +946,38 @@ WW3DErrorType VertexMaterialClass::Save_W3D(ChunkSaveClass & csave)
 	return WW3D_ERROR_OK;
 }
 
+#include "native_draw_state.h"
+
+bool VertexMaterialClass::Describe_Native_Mapping(const NativeMapperContext& context,
+	const NativeVertexLayoutDesc& layout, NativeMaterialDescription& description) const
+{
+	NativeMaterialDescription result = description;
+	for (unsigned int stage=0;stage<MeshBuilderClass::MAX_STAGES && stage<result.stages.size();++stage) {
+		const UINT offset = layout.Find_Offset(NativeVertexSemantic::TexCoord,UVSource[stage]);
+		result.coordinates[stage] = NativeMaterialCoordinates();
+		result.coordinates[stage].offset = offset;
+		if (Mapper[stage] && !Mapper[stage]->Describe_Native_Mapping(context,offset,
+			result.coordinates[stage],result.stages[stage])) return false;
+	}
+	description = result;
+	return true;
+}
+
+void VertexMaterialClass::Describe_Native_Lighting(NativeLightingState& state, bool coloring) const
+{
+	// Keep the caller's camera-space light environment and viewer/normal policy.
+	state.flags[0] = UseLighting && !coloring;
+	const auto color = [](const D3DCOLORVALUE& c) {
+		return std::array<float,4>{c.r,c.g,c.b,c.a};
+	};
+	state.ambient = color(Material->Ambient);
+	state.diffuse = color(Material->Diffuse);
+	state.specular = color(Material->Specular);
+	state.emissive = color(Material->Emissive);
+	state.parameters[0] = Material->Power;
+	state.sources = {AmbientColorSource, DiffuseColorSource, 0, EmissiveColorSource};
+}
+
 void VertexMaterialClass::Apply(void) const
 {
 	int i;

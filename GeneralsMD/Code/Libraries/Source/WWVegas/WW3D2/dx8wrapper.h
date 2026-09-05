@@ -58,6 +58,7 @@
 #include "cpudetect.h"
 #include "dx8caps.h"
 #include "native_d3d12_renderer.h"
+#include "native_draw_state.h"
 
 #include "texture.h"
 #include "dx8vertexbuffer.h"
@@ -341,6 +342,7 @@ public:
 	static void Get_Shader(ShaderClass& shader);
 	static void Set_Texture(unsigned stage,TextureBaseClass* texture);
 	static void Apply_Native_Texture_Sampler(TextureClass* texture);
+	static NativeMaterialDescription Build_Native_Material_Description(const FVFInfoClass& fvf);
 	static void Apply_Native_Material(const FVFInfoClass& fvf);
 	static void Apply_Native_Lighting();
 	static D3DMATERIAL8 NativeMaterial;

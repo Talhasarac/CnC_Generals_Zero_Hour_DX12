@@ -75,6 +75,7 @@
 #include "ww3d.h"
 #include "matrix4.h"
 #include "dx8wrapper.h"
+#include "native_d3d12_renderer.h"
 
 
 /***********************************************************************************************
@@ -731,7 +732,19 @@ void CameraClass::Apply(void)
 	vp.Height = (DWORD)((Viewport.Max.Y - Viewport.Min.Y) * (float)height);
 	vp.MinZ = ZBufferMin;
 	vp.MaxZ = ZBufferMax;
-	DX8Wrapper::Set_Viewport(&vp);
+	if (NativeD3D12Renderer* native = NativeD3D12Renderer::Active())
+	{
+		// The wrapper still owns the legacy render-state matrix cache below.
+		// Viewport state has no such consumer, so submit it directly to the
+		// native command list without changing the camera's matrix boundary.
+		native->SetViewport(static_cast<FLOAT>(vp.X), static_cast<FLOAT>(vp.Y),
+			static_cast<FLOAT>(vp.Width), static_cast<FLOAT>(vp.Height),
+			vp.MinZ, vp.MaxZ);
+	}
+	else
+	{
+		DX8Wrapper::Set_Viewport(&vp);
+	}
 
 	Matrix4x4 d3dprojection;
 	Get_D3D_Projection_Matrix(&d3dprojection);

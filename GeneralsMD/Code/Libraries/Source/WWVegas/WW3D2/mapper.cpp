@@ -64,6 +64,57 @@ TextureMapperClass::TextureMapperClass(unsigned int stage)
 }
 
 
+#include "native_d3d12_renderer.h"
+
+bool TextureMapperClass::Try_Calculate_Native_Texture_Matrix(const NativeMapperContext& context,
+	Matrix4x4& output)
+{
+	switch (Mapper_ID()) {
+	case MAPPER_ID_SCALE: case MAPPER_ID_LINEAR_OFFSET: case MAPPER_ID_GRID:
+	case MAPPER_ID_ROTATE: case MAPPER_ID_SINE_LINEAR_OFFSET:
+	case MAPPER_ID_STEP_LINEAR_OFFSET: case MAPPER_ID_ZIGZAG_LINEAR_OFFSET:
+	case MAPPER_ID_RANDOM: case MAPPER_ID_EDGE: case MAPPER_ID_BUMPENV:
+	case MAPPER_ID_CLASSIC_ENVIRONMENT: case MAPPER_ID_GRID_CLASSIC_ENVIRONMENT:
+	case MAPPER_ID_ENVIRONMENT: case MAPPER_ID_GRID_ENVIRONMENT:
+		Calculate_Texture_Matrix(output); // These families contain animation math only.
+		return true;
+	default:
+		return false; // Camera-dependent/unknown families must implement the explicit contract.
+	}
+}
+
+bool TextureMapperClass::Try_Get_Native_Coordinates(const Matrix4x4& worldView,
+	unsigned int uvOffset, NativeMaterialCoordinates& output)
+{
+	NativeMaterialCoordinates coordinates;
+	coordinates.offset = uvOffset;
+	coordinates.transform = true;
+	switch (Mapper_ID()) {
+	case MAPPER_ID_SCALE: case MAPPER_ID_LINEAR_OFFSET: case MAPPER_ID_GRID:
+	case MAPPER_ID_ROTATE: case MAPPER_ID_SINE_LINEAR_OFFSET:
+	case MAPPER_ID_STEP_LINEAR_OFFSET: case MAPPER_ID_ZIGZAG_LINEAR_OFFSET:
+	case MAPPER_ID_RANDOM:
+		break;
+	case MAPPER_ID_CLASSIC_ENVIRONMENT: case MAPPER_ID_GRID_CLASSIC_ENVIRONMENT:
+		coordinates.environment = NativeEnvironmentCoordinates::CameraNormal;
+		coordinates.offset = UINT_MAX;
+		break;
+	case MAPPER_ID_ENVIRONMENT: case MAPPER_ID_GRID_ENVIRONMENT:
+		coordinates.environment = NativeEnvironmentCoordinates::CameraReflection;
+		coordinates.offset = UINT_MAX;
+		break;
+	default:
+		// World-space, screen and bump mappers need explicit camera/bump context.
+		return false;
+	}
+	Matrix4x4 matrix;
+	Calculate_Texture_Matrix(matrix); // Animation math only; no Apply/state replay.
+	matrix = matrix.Transpose();
+	std::memcpy(coordinates.matrix.data(),&matrix,sizeof(matrix));
+	output = coordinates;
+	return true;
+}
+
 // Scale mapper
 // HY 5/16/01
 ScaleTextureMapperClass::ScaleTextureMapperClass(const Vector2 &scale, unsigned int stage) :
@@ -700,6 +751,20 @@ EdgeMapperClass::EdgeMapperClass(const EdgeMapperClass & src):
 {
 }
 
+bool EdgeMapperClass::Try_Get_Native_Coordinates(const Matrix4x4& worldView,
+	unsigned int uvOffset, NativeMaterialCoordinates& output)
+{
+	Matrix4x4 matrix;
+	Calculate_Texture_Matrix(matrix);
+	matrix = matrix.Transpose();
+	NativeMaterialCoordinates coordinates;
+	coordinates.transform = true;
+	coordinates.environment = UseReflect ? NativeEnvironmentCoordinates::CameraReflection : NativeEnvironmentCoordinates::CameraNormal;
+	std::memcpy(coordinates.matrix.data(),&matrix,sizeof(matrix));
+	output = coordinates;
+	return true;
+}
+
 void EdgeMapperClass::Apply(int uv_array_index)
 {
 	// Set up the texture matrix
@@ -767,7 +832,14 @@ WSEnvMapperClass::WSEnvMapperClass(const INIClass &ini, const char *section, uns
 	}
 }
 
-void WSEnvMapperClass::Calculate_Texture_Matrix(Matrix4x4 &tex_matrix)
+void WSEnvMapperClass::Calculate_Texture_Matrix(Matrix4x4& tex_matrix)
+{
+	Matrix4x4 cameraMatrix;
+	DX8Wrapper::Get_Transform(D3DTS_VIEW,cameraMatrix);
+	Calculate_Texture_Matrix_For_View(tex_matrix,cameraMatrix);
+}
+
+void WSEnvMapperClass::Calculate_Texture_Matrix_For_View(Matrix4x4& tex_matrix, const Matrix4x4& cameraMatrix)
 {
 	// The canonical environment map
 	// scale the normal by (.5,.5) and add (.5,.5) to move it to (0,1) range
@@ -793,13 +865,27 @@ void WSEnvMapperClass::Calculate_Texture_Matrix(Matrix4x4 &tex_matrix)
 			break;
 	}
 	// multiply by inverse of view transform	
-	Matrix4x4 mat;	
-	DX8Wrapper::Get_Transform(D3DTS_VIEW,mat);		
+	const Matrix4x4& mat = cameraMatrix;
 	Matrix4x4 mat2(	mat[0].X, mat[1].X, mat[2].X, 0.0f,
 						mat[0].Y, mat[1].Y, mat[2].Y, 0.0f,
 						mat[0].Z, mat[1].Z, mat[2].Z, 0.0f,
 						0.0f, 0.0f, 0.0f, 1.0f );						  	
 	tex_matrix = tex_matrix * mat2;	
+}
+
+bool WSEnvMapperClass::Try_Get_Native_Coordinates_For_View(const NativeMapperContext& context,
+	unsigned int uvOffset, NativeMaterialCoordinates& output)
+{
+	Matrix4x4 matrix;
+	Calculate_Texture_Matrix_For_View(matrix,context.view);
+	NativeMaterialCoordinates coordinates;
+	coordinates.transform = true;
+	coordinates.environment = Mapper_ID() == MAPPER_ID_WS_CLASSIC_ENVIRONMENT ?
+		NativeEnvironmentCoordinates::CameraNormal : NativeEnvironmentCoordinates::CameraReflection;
+	matrix = matrix.Transpose();
+	std::memcpy(coordinates.matrix.data(),&matrix,sizeof(matrix));
+	output = coordinates;
+	return true;
 }
 
 void WSClassicEnvironmentMapperClass::Apply(int uv_array_index)
@@ -904,7 +990,14 @@ void ScreenMapperClass::Apply(int uv_array_index)
 	DX8Wrapper::Set_DX8_Texture_Stage_State(Stage,D3DTSS_TEXTURETRANSFORMFLAGS,D3DTTFF_PROJECTED | D3DTTFF_COUNT3);
 }
 
-void ScreenMapperClass::Calculate_Texture_Matrix(Matrix4x4 &tex_matrix)
+void ScreenMapperClass::Calculate_Texture_Matrix(Matrix4x4& tex_matrix)
+{
+	Matrix4x4 cameraMatrix;
+	DX8Wrapper::Get_Transform(D3DTS_PROJECTION,cameraMatrix);
+	Calculate_Texture_Matrix_For_View(tex_matrix,cameraMatrix);
+}
+
+void ScreenMapperClass::Calculate_Texture_Matrix_For_View(Matrix4x4& tex_matrix, const Matrix4x4& cameraMatrix)
 {
 	unsigned int delta = WW3D::Get_Sync_Time() - LastUsedSyncTime;
 	float del = (float)delta;
@@ -927,7 +1020,7 @@ void ScreenMapperClass::Calculate_Texture_Matrix(Matrix4x4 &tex_matrix)
 
 	// multiply by projection matrix	
 	// followed by scale and translation
-	DX8Wrapper::Get_Transform(D3DTS_PROJECTION, tex_matrix);	
+	tex_matrix = cameraMatrix;
 	tex_matrix[0] *= Scale.X; // entire row since we're pre-multiplying
 	tex_matrix[1] *= Scale.Y;
 	Vector4 last(tex_matrix[3]); // this gets the w
@@ -941,6 +1034,23 @@ void ScreenMapperClass::Calculate_Texture_Matrix(Matrix4x4 &tex_matrix)
 	CurrentUVOffset.X = offset_u;
 	CurrentUVOffset.Y = offset_v;
 	LastUsedSyncTime = WW3D::Get_Sync_Time();
+}
+
+bool ScreenMapperClass::Try_Get_Native_Coordinates_For_View(const NativeMapperContext& context,
+	unsigned int uvOffset, NativeMaterialCoordinates& output)
+{
+	Matrix4x4 matrix;
+	Calculate_Texture_Matrix_For_View(matrix,context.projection);
+	// Native projected UVs divide by the third generated component: carry
+	// clip W there, not depth Z, so perspective does not distort screen effects.
+	matrix[2] = matrix[3];
+	NativeMaterialCoordinates coordinates;
+	coordinates.transform = true;
+	coordinates.position = coordinates.projected = true;
+	matrix = context.worldView * matrix.Transpose();
+	std::memcpy(coordinates.matrix.data(),&matrix,sizeof(matrix));
+	output = coordinates;
+	return true;
 }
 
 RandomTextureMapperClass::RandomTextureMapperClass(float fps, const Vector2 &scale, unsigned int stage):
@@ -1058,6 +1168,30 @@ BumpEnvTextureMapperClass::BumpEnvTextureMapperClass(const BumpEnvTextureMapperC
 {
 }
 
+bool BumpEnvTextureMapperClass::Describe_Native_Mapping(const NativeMapperContext& context,
+	unsigned int uvOffset, NativeMaterialCoordinates& coordinates, NativeMaterialStage& stage)
+{
+	Matrix4x4 matrix;
+	LinearOffsetTextureMapperClass::Calculate_Texture_Matrix(matrix);
+	matrix = matrix.Transpose();
+	NativeMaterialCoordinates mapped;
+	mapped.offset = uvOffset;
+	mapped.transform = true;
+	std::memcpy(mapped.matrix.data(),&matrix,sizeof(matrix));
+	const unsigned int now = WW3D::Get_Sync_Time();
+	const unsigned int elapsed = now-LastUsedSyncTime;
+	LastUsedSyncTime = now;
+	CurrentAngle = fmodf(CurrentAngle+RadiansPerSecond*elapsed*.001f,2*WWMATH_PI);
+	const float c = ScaleFactor*WWMath::Fast_Cos(CurrentAngle);
+	const float s = ScaleFactor*WWMath::Fast_Sin(CurrentAngle);
+	stage.bumpMatrix = {c,-s,s,c};
+	// Signed V8U8 values are uploaded in UNORM storage; preserve signed zero.
+	stage.bumpParameters[2] = 255.f/127.f;
+	stage.bumpParameters[3] = -128.f/127.f;
+	coordinates = mapped;
+	return true;
+}
+
 void BumpEnvTextureMapperClass::Apply(int uv_array_index)
 {
 	LinearOffsetTextureMapperClass::Apply(uv_array_index);
@@ -1150,11 +1284,17 @@ GridWSEnvMapperClass::GridWSEnvMapperClass(const INIClass &ini, const char *sect
 	}
 }
 
-void GridWSEnvMapperClass::Calculate_Texture_Matrix(Matrix4x4 &tex_matrix)
+void GridWSEnvMapperClass::Calculate_Texture_Matrix(Matrix4x4& tex_matrix)
+{
+	Matrix4x4 cameraMatrix;
+	DX8Wrapper::Get_Transform(D3DTS_VIEW,cameraMatrix);
+	Calculate_Texture_Matrix_For_View(tex_matrix,cameraMatrix);
+}
+
+void GridWSEnvMapperClass::Calculate_Texture_Matrix_For_View(Matrix4x4& tex_matrix, const Matrix4x4& cameraMatrix)
 {
 	// multiply by inverse of view transform	
-	Matrix4x4 mat;	
-	DX8Wrapper::Get_Transform(D3DTS_VIEW,mat);		
+	const Matrix4x4& mat = cameraMatrix;
 	Matrix4x4 mv (	mat[0].X, mat[1].X, mat[2].X, 0.0f,
 						mat[0].Y, mat[1].Y, mat[2].Y, 0.0f,
 						mat[0].Z, mat[1].Z, mat[2].Z, 0.0f,
@@ -1195,6 +1335,21 @@ void GridWSEnvMapperClass::Calculate_Texture_Matrix(Matrix4x4 &tex_matrix)
 	// then offset by the grid coordinate
 
 	tex_matrix = md * mv;
+}
+
+bool GridWSEnvMapperClass::Try_Get_Native_Coordinates_For_View(const NativeMapperContext& context,
+	unsigned int uvOffset, NativeMaterialCoordinates& output)
+{
+	Matrix4x4 matrix;
+	Calculate_Texture_Matrix_For_View(matrix,context.view);
+	NativeMaterialCoordinates coordinates;
+	coordinates.transform = true;
+	coordinates.environment = Mapper_ID() == MAPPER_ID_GRID_WS_CLASSIC_ENVIRONMENT ?
+		NativeEnvironmentCoordinates::CameraNormal : NativeEnvironmentCoordinates::CameraReflection;
+	matrix = matrix.Transpose();
+	std::memcpy(coordinates.matrix.data(),&matrix,sizeof(matrix));
+	output = coordinates;
+	return true;
 }
 
 /***********************************************************************************************

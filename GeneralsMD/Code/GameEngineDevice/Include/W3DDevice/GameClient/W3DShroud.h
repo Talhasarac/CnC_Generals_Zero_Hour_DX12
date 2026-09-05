@@ -48,6 +48,8 @@ class W3DShroudMaterialPassClass : public MaterialPassClass
 {
 public:
 	W3DShroudMaterialPassClass(void) : m_isTransparentObjectPass(FALSE) {}
+	bool Describe_Native_Pass(const NativeMapperContext&, const NativeVertexLayoutDesc&,
+		const Matrix3D& world, NativeMaterialPassDescription& output) const override;
 	virtual void	Install_Materials(void) const;
 	virtual void	UnInstall_Materials(void) const;
 	void enableTransparentObjectPass(Bool enable) {m_isTransparentObjectPass = enable;}
@@ -65,6 +67,8 @@ class W3DMaskMaterialPassClass : public MaterialPassClass
 {
 public:
 	W3DMaskMaterialPassClass(void) : m_texture(NULL), m_allowUninstall(TRUE) {}
+	bool Describe_Native_Pass(const NativeMapperContext&, const NativeVertexLayoutDesc&,
+		const Matrix3D& world, NativeMaterialPassDescription& output) const override;
 	virtual void	Install_Materials(void) const;
 	virtual void	UnInstall_Materials(void) const;
 	void	setTexture(TextureClass *texture)	{m_texture=texture;}

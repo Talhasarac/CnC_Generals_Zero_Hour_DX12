@@ -58,6 +58,7 @@
 #include "W3DDevice/GameClient/W3DDynamicLight.h"
 #include "WW3D2/Camera.h"
 #include "WW3D2/DX8Wrapper.h"
+#include "W3DDevice/GameClient/NativeTerrainDraw.h"
 #include "WW3D2/DX8Renderer.h"
 #include "WW3D2/Mesh.h"
 #include "WW3D2/MeshMdl.h"
@@ -421,12 +422,32 @@ void W3DBibBuffer::removeBibDrawable(DrawableID id)
 //=============================================================================
 /** Draws the bibs.  Uses camera to cull. */
 //=============================================================================
-void W3DBibBuffer::renderBibs()
+void W3DBibBuffer::renderBibs(CameraClass *camera)
 {
 
 	loadBibsInVertexAndIndexBuffers();
 
 	if (m_curNumBibIndices == 0) {
+		return;
+	}
+	if (NativeD3D12Renderer *native = NativeD3D12Renderer::Active())
+	{
+		NativeD3D12ScopedState pass(*native);
+		NativeTerrainSetCameraMatrices(*native, camera, Matrix3D(1));
+		NativeTerrainSetMaterial(*native, false, true, D3D12_CULL_MODE_NONE);
+		// Bibs are ground overlays, authored with an unconditional depth test.
+		native->SetFixedFunctionState(D3D12_CULL_MODE_NONE, false, false,
+			D3D12_COMPARISON_FUNC_ALWAYS, true, D3D12_BLEND_SRC_ALPHA,
+			D3D12_BLEND_INV_SRC_ALPHA, D3D12_BLEND_OP_ADD, D3D12_COLOR_WRITE_ENABLE_ALL);
+		if (m_curNumNormalBibIndices)
+			NativeTerrainDrawBuffer(*native, m_vertexBib, m_indexBib, 0,
+				m_curNumNormalBibIndices, m_curNumNormalBibVertex, m_bibTexture);
+		if (m_curNumBibIndices > m_curNumNormalBibIndices)
+			NativeTerrainDrawBuffer(*native, m_vertexBib, m_indexBib,
+				m_curNumNormalBibIndices,
+				m_curNumBibIndices - m_curNumNormalBibIndices,
+				m_curNumBibVertices,
+				m_highlightBibTexture);
 		return;
 	}
 	// Setup the vertex buffer, shader & texture.

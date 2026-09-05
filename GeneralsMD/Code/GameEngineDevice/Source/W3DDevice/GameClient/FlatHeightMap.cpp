@@ -50,6 +50,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <cstring>
+#include "WW3D2/native_terrain_material.h"
+#include "WW3D2/native_material_pass.h"
 #include <assetmgr.h>
 #include <texture.h>
 #include <tri.h>
@@ -87,6 +90,7 @@
 #include "WW3D2/Scene.h"
 #include "W3DDevice/GameClient/W3DPoly.h"
 #include "W3DDevice/GameClient/W3DCustomScene.h"
+#include "W3DDevice/GameClient/NativeTerrainDraw.h"
 
 #include "Common/PerfTimer.h"
 #include "Common/UnitTimings.h" //Contains the DO_UNIT_TIMINGS define jba.		 
@@ -462,8 +466,6 @@ void FlatHeightMapRenderObjClass::Render(RenderInfoClass & rinfo)
 {
 	USE_PERF_TIMER(Terrain_Render_Flat)
 	
-	Int devicePasses;
-	W3DShaderManager::ShaderTypes st;
 	Bool doCloud = TheGlobalData->m_useCloudMap;
 
 	Matrix3D tm(Transform);
@@ -484,107 +486,84 @@ void FlatHeightMapRenderObjClass::Render(RenderInfoClass & rinfo)
 	}
 #endif
 
-	DX8Wrapper::Set_Light_Environment(rinfo.light_environment);
+	auto* native=NativeD3D12Renderer::Active();
+	if (!native || !m_map || Is_Hidden()) return;
+	Int yCoordMax=0, yCoordMin=m_map->getXExtent();
+	Int xCoordMax=0, xCoordMin=m_map->getYExtent();
+	{
+		NativeD3D12ScopedState restore(*native);
+		const auto frame=native->CaptureState();
+		NativeTerrainSetCameraMatrices(*native,&rinfo.Camera,tm);
+		native->SetTreeSway(nullptr,0);
+		native->SetDepthBias(0);
+		native->SetLighting(NativeLightingState());
+		native->SetVertexFog(0,0,1,0,0,false); // Terrain is prelit and uses FOG_DISABLE.
+		auto pipeline=m_shaderClass.Get_Native_Pipeline(ShaderClass::Is_Backface_Culling_Inverted());
+		pipeline.colorMask &= frame.renderTargetWriteMask & (D3D12_COLOR_WRITE_ENABLE_RED |
+			D3D12_COLOR_WRITE_ENABLE_GREEN | D3D12_COLOR_WRITE_ENABLE_BLUE);
+		pipeline.blend=false;
+		pipeline.Apply(*native);
 
-	// Force shaders to update.
+		const bool linear=TheGlobalData->m_bilinearTerrainTex || TheGlobalData->m_trilinearTerrainTex;
+		const auto mip=TheGlobalData->m_trilinearTerrainTex ? NativeD3D12FilterMode::Linear : NativeD3D12FilterMode::Point;
+		const NativeSamplerDesc sampler={linear ? NativeD3D12FilterMode::Linear : NativeD3D12FilterMode::Point,
+			linear ? NativeD3D12FilterMode::Linear : NativeD3D12FilterMode::Point,mip,true,true,1};
+		NativeMaterialCoordinates shroudUV;
+		const NativeD3D12Texture* shroudTexture=nullptr;
+		if (!m_disableTextures && m_shroud && rinfo.Additional_Pass_Count() &&
+			m_shroud->getCellWidth()>0 && m_shroud->getCellHeight()>0 &&
+			m_shroud->getTextureWidth()>0 && m_shroud->getTextureHeight()>0) {
+			auto* texture=m_shroud->getShroudTexture();
+			if (texture) shroudTexture=texture->Prepare_Native_Texture();
+			const float sx=1.0f/(m_shroud->getCellWidth()*m_shroud->getTextureWidth());
+			const float sy=1.0f/(m_shroud->getCellHeight()*m_shroud->getTextureHeight());
+			shroudUV=Describe_Native_Planar_Projection(Matrix4x4(tm).Transpose(),sx,sy,
+				(-float(m_shroud->getDrawOriginX())+m_shroud->getCellWidth())*sx,
+				(-float(m_shroud->getDrawOriginY())+m_shroud->getCellHeight())*sy);
+		}
+		const auto base=Describe_Native_Flat_Base(!m_disableTextures,shroudTexture,shroudUV,sampler);
+		doCloud=doCloud && TheGlobalData->m_timeOfDay!=TIME_OF_DAY_NIGHT;
+		const auto* cloud=!m_disableTextures && doCloud && m_stageTwoTexture ? m_stageTwoTexture->Prepare_Native_Texture() : nullptr;
+		const auto* noise=!m_disableTextures && TheGlobalData->m_useLightMap && m_stageThreeTexture ? m_stageThreeTexture->Prepare_Native_Texture() : nullptr;
+		// Noise projections consume world positions; fold in the terrain transform.
+		const auto worldProjection=[&](NativeMaterialCoordinates uv) {
+			Matrix4x4 projection;
+			std::memcpy(&projection,uv.matrix.data(),sizeof(projection));
+			projection=Matrix4x4(tm).Transpose()*projection;
+			std::memcpy(uv.matrix.data(),&projection,sizeof(projection));
+			return uv;
+		};
+		const auto modulation=Describe_Native_Terrain_Modulation(cloud,
+			cloud ? worldProjection(W3DShaderManager::nativeCloudCoordinates()) : NativeMaterialCoordinates(),
+			noise,noise ? worldProjection(W3DShaderManager::nativeNoiseCoordinates()) : NativeMaterialCoordinates(),mip);
+		for (Int pass=0;pass<(cloud || noise ? 2 : 1);++pass) {
+			if (pass) {
+				pipeline.blend=true;
+				pipeline.source=D3D12_BLEND_DEST_COLOR;
+				pipeline.destination=D3D12_BLEND_ZERO;
+				pipeline.Apply(*native);
+			}
+			for (Int i=0;i<m_tilesWidth;++i) for (Int j=0;j<m_tilesHeight;++j) {
+				auto* tile=m_tiles+j*m_tilesWidth+i;
+				if (tile->isCulled()) continue;
+				tile->drawVisiblePolys(pass ? modulation : base,!pass && !m_disableTextures);
+				xCoordMin=(std::min)(xCoordMin,i*CELLS_PER_TILE);
+				yCoordMin=(std::min)(yCoordMin,j*CELLS_PER_TILE);
+				xCoordMax=(std::max)(xCoordMax,(i+1)*CELLS_PER_TILE);
+				yCoordMax=(std::max)(yCoordMax,(j+1)*CELLS_PER_TILE);
+			}
+		}
+	}
+	// Remaining shoreline/prop producers still use the old engine cache.
+	// Keep their setup outside the scoped native terrain passes.
+	DX8Wrapper::Set_Light_Environment(rinfo.light_environment);
+	DX8Wrapper::Set_Transform(D3DTS_WORLD,tm);
+	DX8Wrapper::Set_Material(m_vertexMaterialClass);
+	DX8Wrapper::Set_Shader(m_shaderClass);
 	m_stageTwoTexture->restore();
 	DX8Wrapper::Set_Texture(0,NULL);
 	DX8Wrapper::Set_Texture(1,NULL);
 	ShaderClass::Invalidate();
-
-	//	tm.Scale(ObjSpaceExtent);
-	DX8Wrapper::Set_Transform(D3DTS_WORLD,tm);
-
-	
-	DX8Wrapper::Set_Material(m_vertexMaterialClass);
-	DX8Wrapper::Set_Shader(m_shaderClass);
-
-	if (TheGlobalData->m_timeOfDay == TIME_OF_DAY_NIGHT) {
-		doCloud = false;
-	}
-
- 	st=W3DShaderManager::ST_FLAT_TERRAIN_BASE; //set default shader
- 	
- 	//set correct shader based on current settings
- 	if (TheGlobalData->m_useLightMap && doCloud)
- 	{	st=W3DShaderManager::ST_FLAT_TERRAIN_BASE_NOISE12;
- 	}
- 	else
- 	if (TheGlobalData->m_useLightMap)
- 	{	//lightmap only
- 		st=W3DShaderManager::ST_FLAT_TERRAIN_BASE_NOISE2;
- 	}
- 	else
- 	if (doCloud)
- 	{	//cloudmap only
- 		st=W3DShaderManager::ST_FLAT_TERRAIN_BASE_NOISE1;
- 	}
-
- 	
-	
-	//Find number of passes required to render current shader
- 	devicePasses=W3DShaderManager::getShaderPasses(st);
-
- 	if (m_disableTextures)
- 		devicePasses=1;	//force to 1 lighting-only pass
-
- 	//Specify all textures that this shader may need.
- 	W3DShaderManager::setTexture(0,m_stageZeroTexture);
-	if (m_shroud && rinfo.Additional_Pass_Count() && !m_disableTextures)
-	{
-		W3DShaderManager::setTexture(0,TheTerrainRenderObject->getShroud()->getShroudTexture());
-	}	
-
- 	W3DShaderManager::setTexture(1,NULL);	// Set by the tile later. [3/31/2003]
- 	W3DShaderManager::setTexture(2,m_stageTwoTexture);	//cloud
- 	W3DShaderManager::setTexture(3,m_stageThreeTexture);//noise
-	//Disable writes to destination alpha channel (if there is one)
-	if (DX8Wrapper::getBackBufferFormat() == WW3D_FORMAT_A8R8G8B8) {
-		DX8Wrapper::Set_DX8_Render_State(D3DRS_COLORWRITEENABLE,D3DCOLORWRITEENABLE_BLUE|D3DCOLORWRITEENABLE_GREEN|D3DCOLORWRITEENABLE_RED);
-	}
-
-	Int pass;
-	Int yCoordMax = 0;
-	Int yCoordMin = m_map->getXExtent();
-	Int xCoordMax = 0;
-	Int xCoordMin = m_map->getYExtent();	
- 	for (pass=0; pass<devicePasses; pass++) {
-		Bool disableTex = m_disableTextures;
-		if (m_disableTextures ) {
-			DX8Wrapper::Set_Shader(ShaderClass::_PresetOpaque2DShader);
-			DX8Wrapper::Set_Texture(0,NULL);
-		} else {
-			W3DShaderManager::setShader(st, pass);
-		}
-
-		Int i, j;
-		for	(i=0; i<m_tilesWidth; i++) {
-			for (j=0; j<m_tilesHeight; j++) {
-				W3DTerrainBackground *tile = m_tiles+j*m_tilesWidth+i;
-				if (pass>0) {
-					disableTex = TRUE; // doing cloud/noise
-				}
-				if (!tile->isCulled()) {
-					tile->drawVisiblePolys(rinfo, disableTex);
-					if (i*CELLS_PER_TILE<xCoordMin) {
-						xCoordMin = i*CELLS_PER_TILE;
-					}
-					if (j*CELLS_PER_TILE<yCoordMin) {
-						yCoordMin = j*CELLS_PER_TILE;
-					}
-					if ((i+1)*CELLS_PER_TILE>xCoordMax) {
-						xCoordMax = (i+1)*CELLS_PER_TILE;
-					}
-					if ((j+1)*CELLS_PER_TILE>yCoordMax) {
-						yCoordMax = (j+1)*CELLS_PER_TILE;
-					}
-				}
-			}
-		}
-	}
-
-	if (pass)	//shader was applied at least once?
- 		W3DShaderManager::resetShader(st);
 #if 1
 
 	//Draw feathered shorelines
@@ -626,14 +605,14 @@ void FlatHeightMapRenderObjClass::Render(RenderInfoClass & rinfo)
 	m_bridgeBuffer->drawBridges(&rinfo.Camera, m_disableTextures, m_stageTwoTexture);
 
 	if (TheTerrainTracksRenderObjClassSystem)
-		TheTerrainTracksRenderObjClassSystem->flush();
+	TheTerrainTracksRenderObjClassSystem->flush(&rinfo.Camera);
 
 	ShaderClass::Invalidate();
 	DX8Wrapper::Apply_Render_State_Changes();
 
 	m_waypointBuffer->drawWaypoints(rinfo);
 
-	m_bibBuffer->renderBibs();
+	m_bibBuffer->renderBibs(&rinfo.Camera);
 #endif
 	// We do some custom blending, so tell the shader class to reset everything.
 	DX8Wrapper::Set_Texture(0,NULL);

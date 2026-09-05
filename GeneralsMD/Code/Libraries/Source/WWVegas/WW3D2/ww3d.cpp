@@ -856,18 +856,28 @@ WW3DErrorType WW3D::Begin_Render(bool clear,bool clearz,const Vector3 & color, f
 
 	// If we want to clear the screen, we need to set the viewport to include the entire screen:
 	if (clear || clearz) {
-		D3DVIEWPORT8 vp;
 		int width, height, bits;
 		bool windowed;
 		WW3D::Get_Render_Target_Resolution(width, height, bits, windowed);
-		vp.X = 0;
-		vp.Y = 0;
-		vp.Width = width;
-		vp.Height = height;
-		vp.MinZ = 0.0f;;
-		vp.MaxZ = 1.0f;
-		DX8Wrapper::Set_Viewport(&vp);
-		DX8Wrapper::Clear(clear, clearz, color, dest_alpha);
+		if (native_renderer != NULL)
+		{
+			native_renderer->SetViewport(0.0f, 0.0f,
+				static_cast<FLOAT>(width), static_cast<FLOAT>(height), 0.0f, 1.0f);
+			const FLOAT native_clear[4] = {color.X, color.Y, color.Z, dest_alpha};
+			native_renderer->Clear(native_clear, 1.0f, 0, clear, clearz);
+		}
+		else
+		{
+			D3DVIEWPORT8 vp;
+			vp.X = 0;
+			vp.Y = 0;
+			vp.Width = width;
+			vp.Height = height;
+			vp.MinZ = 0.0f;
+			vp.MaxZ = 1.0f;
+			DX8Wrapper::Set_Viewport(&vp);
+			DX8Wrapper::Clear(clear, clearz, color, dest_alpha);
+		}
 	}
 
 	// Notify D3D that we are beginning to render the frame
@@ -968,7 +978,15 @@ WW3DErrorType WW3D::Render(SceneClass * scene,CameraClass * cam,bool clear,bool 
 
 	// Clear the viewport
 	if (clear || clearz) {
-		DX8Wrapper::Clear(clear, clearz, color);
+		if (NativeD3D12Renderer* native = NativeD3D12Renderer::Active())
+		{
+			const FLOAT native_clear[4] = {color.X, color.Y, color.Z, 0.0f};
+			native->Clear(native_clear, 1.0f, 0, clear, clearz);
+		}
+		else
+		{
+			DX8Wrapper::Clear(clear, clearz, color);
+		}
 	}
 
 	// set the rendering mode

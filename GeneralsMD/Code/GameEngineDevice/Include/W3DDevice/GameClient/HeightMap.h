@@ -81,7 +81,7 @@ public:
 	virtual Int freeMapResources(void);	///< free resources used to render heightmap
 	virtual void updateCenter(CameraClass *camera, RefRenderObjListIterator *pLightsIterator);
 
-	void renderExtraBlendTiles(void);			///< render 3-way blend tiles that have blend of 3 textures.
+	void renderExtraBlendTiles(CameraClass& camera);	///< render 3-way blend tiles.
 
 
 	virtual void staticLightingChanged(void);
@@ -120,7 +120,8 @@ protected:
 	Int updateVB(DX8VertexBufferClass	*pVB, char *data, Int x0, Int y0, Int x1, Int y1, Int originX, Int originY, WorldHeightMap *pMap, RefRenderObjListIterator *pLightsIterator);
 	///upate vertex buffers associated with the given rectangle
 	void initDestAlphaLUT(void);	///<initialize water depth LUT stored in m_destAlphaTexture
-	void renderTerrainPass(CameraClass *pCamera);	///< renders additional terrain pass.
+	void renderTerrainMaterialPass(CameraClass& camera, MaterialPassClass& pass, bool wireframe = false);
+	void renderNativeTerrain(CameraClass& camera, bool depthOnly);
 	Int	getNumExtraBlendTiles(Bool visible) { return visible?m_numVisibleExtraBlendTiles:m_numExtraBlendTiles;}
 	void freeIndexVertexBuffers(void);
 

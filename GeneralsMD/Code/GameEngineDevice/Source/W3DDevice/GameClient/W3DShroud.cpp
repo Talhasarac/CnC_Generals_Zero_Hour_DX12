@@ -41,6 +41,9 @@
 #include "WW3D2/textureloader.h"
 #include "common/GlobalData.h"
 #include "GameLogic/PartitionManager.h"
+#include "GameClient/View.h"
+#include "native_material_pass.h"
+#include <cstring>
 
 #ifdef _INTERNAL
 // for occasional debugging...
@@ -833,6 +836,57 @@ void W3DShroud::setShroudFilter(Bool enable)
 
 //-----------------------------------------------------------------------------
 ///Set render states required to draw shroud pass.
+bool W3DShroudMaterialPassClass::Describe_Native_Pass(const NativeMapperContext&,
+	const NativeVertexLayoutDesc&, const Matrix3D& world, NativeMaterialPassDescription& output) const
+{
+	W3DShroud* shroud = TheTerrainRenderObject ? TheTerrainRenderObject->getShroud() : nullptr;
+	if (!shroud || !shroud->getShroudTexture() || shroud->getCellWidth()<=0 ||
+		shroud->getCellHeight()<=0 || shroud->getTextureWidth()<=0 || shroud->getTextureHeight()<=0) return false;
+	NativeMaterialPassDescription result;
+	ShaderClass shader = ShaderClass::_PresetMultiplicativeSpriteShader;
+#if defined(_DEBUG) || defined(_INTERNAL)
+	if (TheGlobalData && TheGlobalData->m_fogOfWarOn) shader = ShaderClass::_PresetAlphaSpriteShader;
+#endif
+	result.pipeline = shader.Get_Native_Pipeline(ShaderClass::Is_Backface_Culling_Inverted());
+	result.pipeline.depthCompare = D3D12_COMPARISON_FUNC_EQUAL;
+	result.material = shader.Get_Native_Texture_Material();
+	auto* texture = shroud->getShroudTexture();
+	result.material.textures[0] = texture->Prepare_Native_Texture();
+	result.material.samplers[0] = texture->Get_Filter().Get_Native_Description();
+	const float sx=1.0f/(shroud->getCellWidth()*shroud->getTextureWidth());
+	const float sy=1.0f/(shroud->getCellHeight()*shroud->getTextureHeight());
+	const bool map=TheTerrainRenderObject->getMap()!=nullptr;
+	result.material.coordinates[0]=Describe_Native_Planar_Projection(Matrix4x4(world).Transpose(),sx,sy,
+		map ? (-float(shroud->getDrawOriginX())+shroud->getCellWidth())*sx : 0,
+		map ? (-float(shroud->getDrawOriginY())+shroud->getCellHeight())*sy : 0);
+	output=result;
+	return true;
+}
+
+bool W3DMaskMaterialPassClass::Describe_Native_Pass(const NativeMapperContext&,
+	const NativeVertexLayoutDesc&, const Matrix3D& world, NativeMaterialPassDescription& output) const
+{
+	auto* texture=ScreenCrossFadeFilter::getCurrentMaskTexture();
+	if (!texture || !TheTacticalView) return false;
+	NativeMaterialPassDescription result;
+	ShaderClass shader=ShaderClass::_PresetOpaqueShader;
+	shader.Set_Primary_Gradient(ShaderClass::GRADIENT_DISABLE);
+	result.pipeline=shader.Get_Native_Pipeline(ShaderClass::Is_Backface_Culling_Inverted());
+	result.material=shader.Get_Native_Texture_Material();
+	result.material.textures[0]=texture->Prepare_Native_Texture();
+	result.material.samplers[0]=texture->Get_Filter().Get_Native_Description();
+	ICoord2D screen;
+	screen.x=TheTacticalView->getWidth()/2; screen.y=TheTacticalView->getHeight()/2;
+	Coord3D center={0,0,0};
+	TheTacticalView->screenToTerrain(&screen,&center);
+	const float extent=(1.0f-ScreenCrossFadeFilter::getCurrentFadeValue())*25.0f*128.0f;
+	const float scale=extent!=0 ? 1.0f/extent : 0;
+	result.material.coordinates[0]=Describe_Native_Planar_Projection(Matrix4x4(world).Transpose(),scale,scale,
+		extent!=0 ? .5f-center.x*scale : 0, extent!=0 ? .5f-center.y*scale : 0);
+	output=result;
+	return true;
+}
+
 void W3DShroudMaterialPassClass::Install_Materials(void) const
 {
 	if (TheTerrainRenderObject->getShroud())

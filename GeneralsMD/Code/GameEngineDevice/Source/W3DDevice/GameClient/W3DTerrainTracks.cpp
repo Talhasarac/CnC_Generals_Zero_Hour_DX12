@@ -55,6 +55,7 @@
 #include "camera.h"
 #include "assetmgr.h"
 #include "WW3D2/DX8Wrapper.h"
+#include "W3DDevice/GameClient/NativeTerrainDraw.h"
 #include "WW3D2/Scene.h"
 #include "GameLogic/TerrainLogic.h"
 #include "GameLogic/Object.h"
@@ -792,7 +793,7 @@ void TerrainTracksRenderObjClassSystem::update()
 //=============================================================================
 /** Draw all active track marks for this frame */
 //=============================================================================
-void TerrainTracksRenderObjClassSystem::flush()
+void TerrainTracksRenderObjClassSystem::flush(CameraClass *camera)
 {
 /** @todo: Optimize system by drawing tracks as triangle strips and use dynamic vertex buffer access.
 May also try rendering all tracks with one call to W3D/D3D by grouping them by texture.
@@ -892,6 +893,27 @@ Try improving the fit to vertical surfaces like cliffs.
 	//draw the filled vertex buffers
 	if (m_edgesToFlush >= 2)
 	{
+		if (NativeD3D12Renderer *native = NativeD3D12Renderer::Active())
+		{
+			NativeD3D12ScopedState pass(*native);
+			NativeTerrainSetCameraMatrices(*native, camera, Matrix3D(m_usedModules->Transform));
+			NativeTerrainSetMaterial(*native, false, true, D3D12_CULL_MODE_NONE);
+			trackStartIndex = 0;
+			mod = m_usedModules;
+			while (mod)
+			{
+				if (mod->m_activeEdgeCount >= 2 && mod->Is_Really_Visible())
+				{
+					NativeTerrainDrawBuffer(*native, m_vertexBuffer, m_indexBuffer,
+						0, (mod->m_activeEdgeCount - 1) * 6,
+						mod->m_activeEdgeCount * 2, mod->m_stageZeroTexture, trackStartIndex);
+					trackStartIndex += mod->m_activeEdgeCount * 2;
+				}
+				mod = mod->m_nextSystem;
+			}
+			m_edgesToFlush = 0;
+			return;
+		}
 		ShaderClass::Invalidate();
 		DX8Wrapper::Set_Material(m_vertexMaterialClass);
 		DX8Wrapper::Set_Shader(m_shaderClass);

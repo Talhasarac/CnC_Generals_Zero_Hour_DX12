@@ -139,7 +139,8 @@ public:
 	Bool isVisible(void) {return m_visible;};
 	Bool isEnabled(void) {return m_enabled;};
 	void setEnabled(Bool enable) {m_enabled = enable;};
-	void renderBridge(Bool wireframe);
+	void renderBridge(Bool bindBaseTexture, DX8VertexBufferClass* vertices,
+		DX8IndexBufferClass* indices, const NativeMaterialDescription& material);
 	void getBridgeInfo(BridgeInfo *pInfo);
 };
 

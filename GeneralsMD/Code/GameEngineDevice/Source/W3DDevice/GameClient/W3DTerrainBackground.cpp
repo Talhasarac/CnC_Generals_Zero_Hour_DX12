@@ -55,8 +55,8 @@
 #include "GameClient/View.h"
 #include "W3DDevice/GameClient/TerrainTex.h"
 #include "W3DDevice/GameClient/HeightMap.h"
-#include "WW3D2/DX8Wrapper.h"
-#include "WW3D2/DX8Renderer.h"
+#include "WW3D2/native_draw_state.h"
+#include "W3DDevice/GameClient/NativeTerrainDraw.h"
 #include "WW3D2/Camera.h"
 
 #ifdef _INTERNAL
@@ -759,49 +759,33 @@ void W3DTerrainBackground::updateTexture(void)
 // W3DTerrainBackground::renderTerrain
 //=============================================================================
 //=============================================================================
-void W3DTerrainBackground::drawVisiblePolys(RenderInfoClass & rinfo, Bool disableTextures)
+void W3DTerrainBackground::drawVisiblePolys(const NativeMaterialDescription& material, Bool bindTileTexture)
 {
-#if 1
-	if (m_curNumTerrainIndices == 0) {
-		return;
+	auto* native=NativeD3D12Renderer::Active();
+	if (!native || m_curNumTerrainIndices<=0 || m_curNumTerrainVertices<=0 ||
+		m_cullStatus==CULL_STATUS_INVISIBLE || !m_vertexTerrain || !m_indexTerrain) return;
+	const auto* vertices=m_vertexTerrain->Get_Native_Vertex_Buffer();
+	const auto* indices=m_indexTerrain->Get_Native_Index_Buffer();
+	if (!vertices || !indices || size_t(m_curNumTerrainIndices)*sizeof(unsigned short)>indices->Size()) return;
+	NativeDrawSubmission draw;
+	draw.vertices=vertices->Data();
+	draw.vertexBytes=static_cast<UINT>(vertices->Size());
+	draw.layout=m_vertexTerrain->FVF_Info().Build_Native_Layout();
+	draw.vertexStride=draw.layout.stride;
+	draw.vertexCount=m_curNumTerrainVertices;
+	draw.indices=static_cast<const unsigned short*>(indices->Data());
+	draw.indexCount=m_curNumTerrainIndices;
+	draw.material=material;
+	draw.useMaterial=true;
+	draw.vertexOwner=vertices;
+	draw.indexOwner=indices;
+	if (bindTileTexture) {
+		TextureClass* tile=m_terrainTexture4X ? m_terrainTexture4X :
+			(m_terrainTexture2X ? m_terrainTexture2X : m_terrainTexture);
+		if (!tile || !(draw.material.textures[1]=tile->Prepare_Native_Texture())) return;
+		draw.material.coordinates[1].offset=draw.layout.Find_Offset(NativeVertexSemantic::TexCoord);
 	}
-	if (m_cullStatus==CULL_STATUS_INVISIBLE) {
-		return;
-	}
-	// Setup the vertex buffer, shader & texture.
-	DX8Wrapper::Set_Index_Buffer(m_indexTerrain,0);
-	DX8Wrapper::Set_Vertex_Buffer(m_vertexTerrain);
-  if (!disableTextures) {
-		if (m_terrainTexture4X) {
-			DX8Wrapper::Set_Texture(1, m_terrainTexture4X);
-		}	else if (m_terrainTexture2X) {
-			DX8Wrapper::Set_Texture(1, m_terrainTexture2X);
-		}	else {
-			DX8Wrapper::Set_Texture(1, m_terrainTexture);
-		}
-	}
-	DX8Wrapper::Draw_Triangles(	0, m_curNumTerrainIndices/3, 0,	m_curNumTerrainVertices);
-#else
-	if (m_curNumTerrainIndices == 0) {
-		return;
-	}
-	if (m_cullStatus==CULL_STATUS_INVISIBLE) {
-		return;
-	}
-	// Setup the vertex buffer, shader & texture.
-	DX8Wrapper::Set_Index_Buffer(m_indexTerrain,0);
-	DX8Wrapper::Set_Vertex_Buffer(m_vertexTerrain);
-  if (!disableTextures) {
-		if (m_terrainTexture4X) {
-			DX8Wrapper::Set_Texture(0, m_terrainTexture4X);
-		}	else if (m_terrainTexture2X) {
-			DX8Wrapper::Set_Texture(0, m_terrainTexture2X);
-		}	else {
-			DX8Wrapper::Set_Texture(0, m_terrainTexture);
-		}
-	}
-	DX8Wrapper::Draw_Triangles(	0, m_curNumTerrainIndices/3, 0,	m_curNumTerrainVertices);
-#endif
+	Submit_Native_Draw(*native,draw);
 }
 
 

@@ -70,6 +70,7 @@ enum MipCountType
 
 // This is legacy and should be phased out into wwshade shader states
 // keeping as an abstracted class for now to support this transition later
+struct NativeSamplerDesc;
 class TextureFilterClass
 {
 public:
@@ -99,6 +100,7 @@ public:
 	TextureFilterClass(MipCountType mip_level_count);
 
 	void Apply(unsigned int stage);
+	NativeSamplerDesc Get_Native_Description() const;
 
 	// Filter and MIPmap settings:
 	FilterType Get_Min_Filter(void) const { return TextureMinFilter; }

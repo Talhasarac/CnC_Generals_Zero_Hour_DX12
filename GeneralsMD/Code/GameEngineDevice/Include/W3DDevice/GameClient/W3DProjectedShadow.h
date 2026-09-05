@@ -36,6 +36,7 @@
 #define __W3D_PROJECTED_SHADOW_H_
 
 #include "GameClient/Shadow.h"
+#include "WWMATH/matrix4.h"
 
 class W3DShadowTexture;	//forward reference
 class W3DShadowTextureManager;	//forward reference
@@ -76,6 +77,9 @@ class W3DProjectedShadowManager	: public ProjectedShadowManager
 		void flushDecals(W3DShadowTexture *texture, ShadowType type);	///<empty queue by rendering all decals with given texture
 
 	private:
+		Matrix4x4 m_decalWorldView;
+		Matrix4x4 m_decalWorldViewProjection;
+		Matrix4x4 m_decalProjection;
 		W3DProjectedShadow *m_shadowList;
 		W3DProjectedShadow *m_decalList;
 		TextureClass	*m_dynamicRenderTarget;	///<offscreen video memory texture used to render all shadow textures.

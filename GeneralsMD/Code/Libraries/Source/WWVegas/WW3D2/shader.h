@@ -50,6 +50,8 @@
 
 class DX8Wrapper;
 struct W3dMaterial3Struct;
+struct NativePipelineDescription;
+struct NativeMaterialDescription;
 class StringClass;
 
 // Re-written shader class
@@ -250,6 +252,12 @@ public:
 
 	ShaderClass(void)
 	{	Reset(); }
+
+	// Decode the engine's on-disk shader semantics directly into a native PSO
+	// description. This does not read or update DX8Wrapper's render-state cache.
+	NativePipelineDescription Get_Native_Pipeline(bool mirrored = false) const;
+	// Asset shader semantics, independent of texture bindings and state caches.
+	NativeMaterialDescription Get_Native_Texture_Material() const;
 
 	ShaderClass(const ShaderClass & s)
 	{	ShaderBits=s.ShaderBits; }

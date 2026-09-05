@@ -132,6 +132,8 @@ public:
 
 	unsigned Get_Type() const { return Type; }
 	unsigned short Get_Index_Count() const { return IndexCount; }
+	const NativeD3D12UploadBuffer* Get_Native_Index_Buffer() const;
+	unsigned short Get_Native_Index_Offset() const { return IndexBufferOffset; }
 
 	// Call at the end of the execution, or at whatever time you wish to release
 	// the recycled dynamic index buffer.

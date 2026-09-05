@@ -47,6 +47,11 @@
 #include "Lib/BaseType.h"
 #include "W3DDevice/GameClient/W3DGranny.h"
 #include "W3DDevice/GameClient/Heightmap.h"
+#include "W3DDevice/GameClient/NativeTerrainDraw.h"
+#include "W3DDevice/GameClient/NativeWorldMaterial.h"
+#include "WW3D2/native_pipeline_description.h"
+#include "WW3D2/matrixmapper.h"
+#include "WW3D2/matpass.h"
 #include "D3dx8math.h"
 #include "common/GlobalData.h"
 #include "W3DDevice/GameClient/W3DProjectedShadow.h"
@@ -570,41 +575,47 @@ Int W3DProjectedShadowManager::renderProjectedTerrainShadow(W3DProjectedShadow *
 
 		shadowIndexBufferD3D->Unlock();
 
-		DX8Wrapper::Set_Transform(D3DTS_WORLD,mWorld);
-		DX8Wrapper::Set_Vertex_Shader(SHADOW_VOLUME_FVF);
-
-		Int numPolys = (endX - startX)*(endY - startY)*2;	//2 triangles per cell
-
-		DX8Wrapper::Set_DX8_Render_State(D3DRS_ALPHATESTENABLE, TRUE);
-		DX8Wrapper::Set_DX8_Render_State( D3DRS_STENCILENABLE, TRUE );
-		DX8Wrapper::Set_DX8_Render_State( D3DRS_STENCILFUNC,     D3DCMP_ALWAYS );
-		DX8Wrapper::Set_DX8_Render_State( D3DRS_STENCILREF,      0x1 );
-		DX8Wrapper::Set_DX8_Render_State( D3DRS_STENCILMASK,     0xffffffff );
-		DX8Wrapper::Set_DX8_Render_State( D3DRS_STENCILWRITEMASK,0xffffffff );
-		DX8Wrapper::Set_DX8_Render_State( D3DRS_STENCILZFAIL, D3DSTENCILOP_KEEP );
-		DX8Wrapper::Set_DX8_Render_State( D3DRS_STENCILFAIL,  D3DSTENCILOP_KEEP );
-		DX8Wrapper::Set_DX8_Render_State( D3DRS_STENCILPASS,  D3DSTENCILOP_INCR );
-
-//    m_pDev->SetRenderState( D3DRS_ALPHABLENDENABLE, FALSE );	//useful to see bounds
-		DX8Wrapper::Set_DX8_Render_State( D3DRS_LIGHTING, FALSE);
-		DX8Wrapper::Set_DX8_Render_State( D3DRS_SRCBLEND,  D3DBLEND_DESTCOLOR);
-		DX8Wrapper::Set_DX8_Render_State( D3DRS_DESTBLEND, D3DBLEND_ZERO );
-
-		
-		if (DX8Wrapper::_Is_Triangle_Draw_Enabled())
-		{
-			Debug_Statistics::Record_DX8_Polys_And_Vertices(numPolys,numVerts,ShaderClass::_PresetOpaqueShader);
-			DX8Wrapper::Apply_Render_State_Changes();
-			const unsigned char* vertices = static_cast<const unsigned char*>(shadowVertexBufferD3D->Data()) + nShadowStartBatchVertex * sizeof(SHADOW_VOLUME_VERTEX);
-			const unsigned short* indices = static_cast<const unsigned short*>(shadowIndexBufferD3D->Data()) + nShadowStartBatchIndex;
-			renderer->DrawIndexed(vertices, static_cast<UINT>(numVerts * sizeof(SHADOW_VOLUME_VERTEX)), sizeof(SHADOW_VOLUME_VERTEX), numVerts, indices, numIndex, 0, 0, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+		const Int numPolys = (endX-startX)*(endY-startY)*2;
+		if (DX8Wrapper::_Is_Triangle_Draw_Enabled()) {
+			NativeD3D12ScopedState pass(*renderer);
+			NativeTerrainSetMaterial(*renderer,false,true,D3D12_CULL_MODE_NONE,true,0x60);
+			MaterialPassClass* projector = shadow->getShadowProjector()->Peek_Material_Pass();
+			NativeMaterialDescription material = projector->Peek_Shader().Get_Native_Texture_Material();
+			for (UINT stage=0;stage<2;++stage) {
+				TextureClass* texture = projector->Peek_Texture(stage);
+				if (texture) {
+					material.textures[stage] = texture->Prepare_Native_Texture();
+					material.samplers[stage] = texture->Get_Filter().Get_Native_Description();
+				}
+			}
+			const NativeMapperContext mapping = {m_decalWorldView,m_decalWorldView.Transpose(),m_decalProjection};
+			NativeVertexLayoutDesc layout;
+			layout.stride = sizeof(SHADOW_VOLUME_VERTEX);
+			layout.Add(NativeVertexSemantic::Position,0,DXGI_FORMAT_R32G32B32_FLOAT,0);
+			const bool supported = projector->Peek_Material()->Describe_Native_Mapping(mapping,layout,material);
+			DEBUG_ASSERTCRASH(supported,("Projected shadow material needs native mapping"));
+			if (!supported) return 0;
+			NativePipelineDescription pipeline = projector->Peek_Shader().Get_Native_Pipeline();
+			pipeline.alphaTest = true;
+			pipeline.source = D3D12_BLEND_DEST_COLOR;
+			pipeline.destination = D3D12_BLEND_ZERO;
+			pipeline.blend = true;
+			pipeline.Apply(*renderer);
+			renderer->SetWorldView(reinterpret_cast<const float*>(&m_decalWorldView));
+			renderer->SetWorldViewProjection(reinterpret_cast<const float*>(&m_decalWorldViewProjection));
+			renderer->SetVertexFog(0,0,1,1,0,false);
+			renderer->SetStencilState(true,D3D12_COMPARISON_FUNC_ALWAYS,1,255,255,
+				D3D12_STENCIL_OP_KEEP,D3D12_STENCIL_OP_KEEP,D3D12_STENCIL_OP_INCR);
+			Apply_Native_Material_Description(*renderer,material);
+			const unsigned char* vertices = static_cast<const unsigned char*>(shadowVertexBufferD3D->Data())+
+				nShadowStartBatchVertex*sizeof(SHADOW_VOLUME_VERTEX);
+			const unsigned short* indices = static_cast<const unsigned short*>(shadowIndexBufferD3D->Data())+nShadowStartBatchIndex;
+			const auto* texture = First_Native_Material_Texture(material);
+			if (texture) renderer->DrawIndexedTextured(vertices,numVerts*sizeof(SHADOW_VOLUME_VERTEX),
+				sizeof(SHADOW_VOLUME_VERTEX),numVerts,UINT_MAX,indices,numIndex,
+				D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST,texture,UINT_MAX,shadowVertexBufferD3D,shadowIndexBufferD3D);
+			Debug_Statistics::Record_DX8_Polys_And_Vertices(numPolys,numVerts,projector->Peek_Shader());
 		}
-
-		DX8Wrapper::Set_DX8_Render_State(D3DRS_ALPHATESTENABLE, FALSE);
-		DX8Wrapper::Set_DX8_Render_State( D3DRS_STENCILENABLE, FALSE );
-//    m_pDev->SetRenderState( D3DRS_ALPHABLENDENABLE, TRUE );
-		DX8Wrapper::Set_DX8_Render_State( D3DRS_LIGHTING, TRUE);
-
 		nShadowVertsInBuf += numVerts;
 		nShadowStartBatchVertex=nShadowVertsInBuf;
 
@@ -761,155 +772,40 @@ void TestBlendRender(RenderInfoClass & rinfo)
 
 void W3DProjectedShadowManager::flushDecals(W3DShadowTexture *texture, ShadowType type)
 {
-	static	Matrix4x4 mWorld(true);	//initialize to identity matrix
-
-	if (nShadowDecalVertsInBatch == 0 && nShadowDecalPolysInBatch == 0)
-	{	//nothing to render
-		return;
-	}
-
-	LPDIRECT3DDEVICE8 m_pDev=DX8Wrapper::_Get_D3D_Device8();
 	NativeD3D12Renderer* native = NativeD3D12Renderer::Active();
-	if (!native && !m_pDev)	return;	//no render device to render
-
-	VertexMaterialClass *vmat=VertexMaterialClass::Get_Preset(VertexMaterialClass::PRELIT_DIFFUSE);
-	DX8Wrapper::Set_Material(vmat);
-	REF_PTR_RELEASE(vmat);
-	DX8Wrapper::Set_Texture(0,texture->getTexture());
-
-//	DX8Wrapper::Set_Shader(ShaderClass::_PresetOpaqueShader);	//good for debugging, draws without alpha
-	switch (type)
+	TextureClass* shadowTexture = texture ? texture->getTexture() : NULL;
+	if (native && shadowTexture && shadowDecalVertexBufferNative && shadowDecalIndexBufferNative &&
+		nShadowDecalStartBatchVertex >= 0 && nShadowDecalStartBatchIndex >= 0 &&
+		nShadowDecalVertsInBatch > 0 && nShadowDecalPolysInBatch > 0 &&
+		static_cast<size_t>(nShadowDecalStartBatchVertex)+nShadowDecalVertsInBatch <= shadowDecalVertexBufferNative->Size()/sizeof(SHADOW_DECAL_VERTEX) &&
+		static_cast<size_t>(nShadowDecalStartBatchIndex)+static_cast<size_t>(nShadowDecalPolysInBatch)*3 <= shadowDecalIndexBufferNative->Size()/sizeof(unsigned short) &&
+		DX8Wrapper::_Is_Triangle_Draw_Enabled())
 	{
-		case SHADOW_DECAL:
-			//The blob used to be multiplied onto the ground (dest * texture).  That is right on
-			//paper and lands on nothing here: with the correct blend, the correct texture and the
-			//correct states - all read back off the device - a blob decal never changed a pixel,
-			//so no tree, prop or unit blob shadow in this port was ever visible.  Alpha blending
-			//the same texture does show, so the blob is now drawn the way its own alpha channel
-			//describes it: the shadow colour, faded by the texture (DECAL_SHADOW_ALPHA, set on the
-			//decal's diffuse where it is created).
-			DX8Wrapper::Set_Shader(ShaderClass::_PresetAlphaShader);
-			break;
-		case SHADOW_ALPHA_DECAL:
-			DX8Wrapper::Set_Shader(ShaderClass::_PresetAlphaShader);
-			break;
-		case SHADOW_ADDITIVE_DECAL:
-			DX8Wrapper::Set_Shader(ShaderClass::_PresetAdditiveShader);
-			break;
+		NativeD3D12ScopedState pass(*native);
+		NativeTerrainSetMaterial(*native,false,true,D3D12_CULL_MODE_NONE);
+		const ShaderClass& shader = type == SHADOW_ADDITIVE_DECAL ?
+			ShaderClass::_PresetAdditiveShader : ShaderClass::_PresetAlphaShader;
+		shader.Get_Native_Pipeline().Apply(*native);
+		native->SetWorldView(reinterpret_cast<const float*>(&m_decalWorldView));
+		native->SetWorldViewProjection(reinterpret_cast<const float*>(&m_decalWorldViewProjection));
+		native->SetVertexFog(0,0,1,1,0,false);
+		// Authored decal UVs must never inherit terrain/shroud projection.
+		const auto material = NativeWorldModulatedMaterial(shadowTexture,offsetof(SHADOW_DECAL_VERTEX,u),NULL);
+		Apply_Native_Material_Description(*native,material);
+		const unsigned char* vertices = static_cast<const unsigned char*>(shadowDecalVertexBufferNative->Data())+
+			static_cast<size_t>(nShadowDecalStartBatchVertex)*sizeof(SHADOW_DECAL_VERTEX);
+		const unsigned short* indices = static_cast<const unsigned short*>(shadowDecalIndexBufferNative->Data())+
+			nShadowDecalStartBatchIndex;
+		native->DrawIndexedTextured(vertices,nShadowDecalVertsInBatch*sizeof(SHADOW_DECAL_VERTEX),
+			sizeof(SHADOW_DECAL_VERTEX),nShadowDecalVertsInBatch,offsetof(SHADOW_DECAL_VERTEX,u),
+			indices,nShadowDecalPolysInBatch*3,D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST,
+			material.textures[0],offsetof(SHADOW_DECAL_VERTEX,diffuse),
+			shadowDecalVertexBufferNative,shadowDecalIndexBufferNative);
+		Debug_Statistics::Record_DX8_Polys_And_Vertices(nShadowDecalPolysInBatch,nShadowDecalVertsInBatch,shader);
 	}
-
-//	DX8Wrapper::Set_DX8_Render_State(D3DRS_ALPHAREF,0x60);
-//	DX8Wrapper::Set_DX8_Render_State(D3DRS_ALPHAFUNC,D3DCMP_GREATEREQUAL);
-	//_PresetAlphaSpriteShader
-
-	DX8Wrapper::Apply_Render_State_Changes();	//force update of view and projection matrices
-
-//Alpha Blended Shadows
-//	m_pDev->SetRenderState( D3DRS_SRCBLEND,  D3DBLEND_SRCALPHA );
-//	m_pDev->SetRenderState( D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA  );
-/*	UnsignedInt color=TheW3DShadowManager->getShadowColor();
-	m_pDev->SetRenderState( D3DRS_TEXTUREFACTOR, 0xff000000 | color);
-	m_pDev->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_MODULATE);
-	m_pDev->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
-	m_pDev->SetTextureStageState(0, D3DTSS_COLORARG2, D3DTA_TFACTOR);
-
-	m_pDev->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_MODULATE);
-	m_pDev->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_TEXTURE);
-	m_pDev->SetTextureStageState(0, D3DTSS_ALPHAARG2, D3DTA_TFACTOR);
-*/
-	 
-
-	if (!native)
-	{
-		m_pDev->SetIndices(shadowDecalIndexBufferD3D,nShadowDecalStartBatchVertex);
-		m_pDev->SetTransform(D3DTS_WORLD,(_D3DMATRIX *)&mWorld);
-		m_pDev->SetStreamSource(0,shadowDecalVertexBufferD3D,sizeof(SHADOW_DECAL_VERTEX));
-		m_pDev->SetVertexShader(SHADOW_DECAL_FVF);
-	}
-
-//Hard Shadows using stencil
-/*	m_pDev->SetRenderState( D3DRS_SRCBLEND,  D3DBLEND_ZERO);
-	m_pDev->SetRenderState( D3DRS_DESTBLEND, D3DBLEND_ONE );
-	m_pDev->SetRenderState(D3DRS_ALPHATESTENABLE, TRUE);	//should reject background pixels
-	m_pDev->SetRenderState( D3DRS_STENCILENABLE, TRUE );
-*/
-/*	m_pDev->SetRenderState( D3DRS_STENCILFUNC,     D3DCMP_ALWAYS );
-	m_pDev->SetRenderState( D3DRS_STENCILREF,      0x1 );
-	m_pDev->SetRenderState( D3DRS_STENCILMASK,     0xffffffff );
-	m_pDev->SetRenderState( D3DRS_STENCILWRITEMASK,0xffffffff );
-	m_pDev->SetRenderState( D3DRS_STENCILZFAIL, D3DSTENCILOP_KEEP );
-	m_pDev->SetRenderState( D3DRS_STENCILFAIL,  D3DSTENCILOP_KEEP );
-	m_pDev->SetRenderState( D3DRS_STENCILPASS,  D3DSTENCILOP_INCR );
-*/
-//m_pDev->SetRenderState( D3DRS_ALPHABLENDENABLE, FALSE );	//useful to see bounds
-
-	if (DX8Wrapper::_Is_Triangle_Draw_Enabled())
-	{
-		Debug_Statistics::Record_DX8_Polys_And_Vertices(nShadowDecalPolysInBatch,nShadowDecalVertsInBatch,ShaderClass::_PresetOpaqueShader);
-		if (native != nullptr)
-		{
-			TextureClass* shadowTexture = texture != nullptr ? texture->getTexture() : nullptr;
-			const NativeD3D12Texture* nativeTexture = shadowTexture != nullptr ?
-				shadowTexture->Peek_Native_Texture() : nullptr;
-			if (nativeTexture != nullptr && shadowDecalVertexBufferNative != nullptr &&
-				shadowDecalIndexBufferNative != nullptr &&
-				nShadowDecalStartBatchVertex >= 0 && nShadowDecalStartBatchIndex >= 0 &&
-				nShadowDecalVertsInBatch > 0 && nShadowDecalPolysInBatch > 0 &&
-				(static_cast<size_t>(nShadowDecalStartBatchVertex) + nShadowDecalVertsInBatch) <=
-					shadowDecalVertexBufferNative->Size() / sizeof(SHADOW_DECAL_VERTEX) &&
-				(static_cast<size_t>(nShadowDecalStartBatchIndex) + static_cast<size_t>(nShadowDecalPolysInBatch)*3) <=
-					shadowDecalIndexBufferNative->Size() / sizeof(unsigned short))
-			{
-				Matrix4x4 savedWorld;
-				DX8Wrapper::Get_Transform(D3DTS_WORLD, savedWorld);
-				DX8Wrapper::Set_Transform(D3DTS_WORLD, mWorld);
-				DX8Wrapper::Set_Texture(1, NULL);
-				DX8Wrapper::Apply_Render_State_Changes();
-				// Decals use their own UVs, not terrain-generated shroud coordinates.
-				DX8Wrapper::Set_DX8_Texture_Stage_State(0, D3DTSS_TEXCOORDINDEX, 0);
-				DX8Wrapper::Set_DX8_Texture_Stage_State(0, D3DTSS_TEXTURETRANSFORMFLAGS, D3DTTFF_DISABLE);
-				DX8Wrapper::Set_DX8_Texture_Stage_State(1, D3DTSS_COLOROP, D3DTOP_DISABLE);
-				DX8Wrapper::Apply_Native_Material(FVFInfoClass(SHADOW_DECAL_FVF));
-				const unsigned char* vertexData = static_cast<const unsigned char*>(
-					shadowDecalVertexBufferNative->Data()) +
-					static_cast<size_t>(nShadowDecalStartBatchVertex)*sizeof(SHADOW_DECAL_VERTEX);
-				const unsigned short* indexData = static_cast<const unsigned short*>(
-					shadowDecalIndexBufferNative->Data()) + nShadowDecalStartBatchIndex;
-				native->DrawIndexedTextured(vertexData,
-					static_cast<UINT>(nShadowDecalVertsInBatch * sizeof(SHADOW_DECAL_VERTEX)),
-					sizeof(SHADOW_DECAL_VERTEX), nShadowDecalVertsInBatch,
-					static_cast<UINT>(offsetof(SHADOW_DECAL_VERTEX, u)), indexData,
-					static_cast<UINT>(nShadowDecalPolysInBatch * 3),
-					D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, nativeTexture,
-					static_cast<UINT>(offsetof(SHADOW_DECAL_VERTEX, diffuse)));
-				DX8Wrapper::Set_Transform(D3DTS_WORLD, savedWorld);
-				DX8Wrapper::Apply_Render_State_Changes();
-			}
-		}
-		else
-			m_pDev->DrawIndexedPrimitive(D3DPT_TRIANGLELIST,0,nShadowDecalVertsInBatch,nShadowDecalStartBatchIndex,nShadowDecalPolysInBatch);
-	}
-
-//	m_pDev->SetRenderState(D3DRS_ALPHATESTENABLE, FALSE);	//should reject background pixels
-//	m_pDev->SetRenderState( D3DRS_STENCILENABLE, FALSE );
-//m_pDev->SetRenderState( D3DRS_ALPHABLENDENABLE, TRUE );
-
-
-	//Restore multiplicative sprite shader
-//	m_pDev->SetRenderState(D3DRS_DESTBLEND,D3DBLEND_SRCCOLOR);	//restore W3D state
-//	m_pDev->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_ZERO);
-
-/*	m_pDev->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
-	m_pDev->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
-	m_pDev->SetTextureStageState(0, D3DTSS_COLORARG2, D3DTA_CURRENT);
-	m_pDev->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_SELECTARG1);
-	m_pDev->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_TEXTURE);
-	m_pDev->SetTextureStageState(0, D3DTSS_ALPHAARG2, D3DTA_CURRENT);
-*/
-	nShadowDecalStartBatchVertex=nShadowDecalVertsInBuf;
-	nShadowDecalStartBatchIndex=nShadowDecalIndicesInBuf;
-	nShadowDecalPolysInBatch=0;	//reset number of polys in texture batch
-	nShadowDecalVertsInBatch=0;
+	nShadowDecalStartBatchVertex = nShadowDecalVertsInBuf;
+	nShadowDecalStartBatchIndex = nShadowDecalIndicesInBuf;
+	nShadowDecalPolysInBatch = nShadowDecalVertsInBatch = 0;
 }
 
 /*
@@ -1420,7 +1316,13 @@ void W3DProjectedShadowManager::queueSimpleDecal(W3DProjectedShadow *shadow)
 
 Int W3DProjectedShadowManager::renderShadows(RenderInfoClass & rinfo)
 {
-	///@todo: implement this method.
+	Matrix3D view;
+	Matrix4x4 projection;
+	rinfo.Camera.Get_View_Matrix(&view);
+	rinfo.Camera.Get_D3D_Projection_Matrix(&projection);
+	m_decalWorldView = Matrix4x4(view).Transpose();
+	m_decalWorldViewProjection = m_decalWorldView * projection.Transpose();
+	m_decalProjection = projection;
 	W3DProjectedShadow *shadow;
 	static AABoxClass aaBox;
 	static SphereClass sphere;
@@ -1517,11 +1419,8 @@ Int W3DProjectedShadowManager::renderShadows(RenderInfoClass & rinfo)
 					TexProjectClass *projector=shadow->getShadowProjector();
 
 					//terrain is always visible and affected by all shadows so must render
-					projector->Peek_Material_Pass()->Install_Materials();
-					DX8Wrapper::Apply_Render_State_Changes();	//force update of view and projection matrices
 					if (renderProjectedTerrainShadow(shadow, aaBox))
 						projectionCount++;
-					projector->Peek_Material_Pass()->UnInstall_Materials();
 
 					SimpleObjectIterator *iter;
 					Object *obj;

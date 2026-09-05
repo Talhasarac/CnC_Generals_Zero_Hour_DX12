@@ -54,6 +54,13 @@
 #include "matrix4.h"
 
 class INIClass;
+struct NativeMaterialCoordinates;
+struct NativeMaterialStage;
+struct NativeMapperContext {
+	Matrix4x4 worldView; // Native row-vector object-to-view matrix.
+	Matrix4x4 view; // Engine column-vector camera view, excluding object transform.
+	Matrix4x4 projection; // Engine column-vector projection.
+};
 
 /*
 ** TextureMapperClass
@@ -100,6 +107,22 @@ class TextureMapperClass : public W3DMPO, public RefCountClass
 
 		virtual bool							Is_Time_Variant(void) { return false; }
 		virtual void							Apply(int uv_array_index) = 0;
+		// Returns false for mapper families whose native authoring is not migrated.
+		// Failure leaves output unchanged; callers must not silently substitute UVs.
+		virtual bool Try_Get_Native_Coordinates(const Matrix4x4& worldView,
+			unsigned int uvOffset, NativeMaterialCoordinates& output);
+		// Raw column-vector mapping matrix for projector composition. Unlike
+		// Calculate_Texture_Matrix, this never obtains camera state from a cache.
+		virtual bool Try_Calculate_Native_Texture_Matrix(const NativeMapperContext& context,
+			Matrix4x4& output);
+		virtual bool Try_Get_Native_Coordinates_For_View(const NativeMapperContext& context,
+			unsigned int uvOffset, NativeMaterialCoordinates& output) {
+			return Try_Get_Native_Coordinates(context.worldView,uvOffset,output);
+		}
+		virtual bool Describe_Native_Mapping(const NativeMapperContext& context, unsigned int uvOffset,
+			NativeMaterialCoordinates& coordinates, NativeMaterialStage& stage) {
+			return Try_Get_Native_Coordinates_For_View(context,uvOffset,coordinates);
+		}
 		virtual void							Reset(void) { }
 		virtual bool							Needs_Normals(void) { return false; }
 		void										Set_Stage(int stage) { Stage = stage; }
@@ -373,6 +396,8 @@ class EdgeMapperClass : public TextureMapperClass
 	W3DMPO_GLUE(EdgeMapperClass)
 public:
 	EdgeMapperClass(unsigned int stage);
+	bool Try_Get_Native_Coordinates(const Matrix4x4& worldView, unsigned int uvOffset,
+		NativeMaterialCoordinates& output) override;
 	EdgeMapperClass(const INIClass &ini, const char *section, unsigned int stage);
 	EdgeMapperClass(const EdgeMapperClass & src);
 	virtual int	Mapper_ID(void) const { return MAPPER_ID_EDGE;}
@@ -392,6 +417,14 @@ protected:
 class WSEnvMapperClass : public TextureMapperClass
 {
 public:
+	bool Try_Get_Native_Coordinates_For_View(const NativeMapperContext& context,
+		unsigned int uvOffset, NativeMaterialCoordinates& output) override;
+	void Calculate_Texture_Matrix_For_View(Matrix4x4& matrix, const Matrix4x4& cameraMatrix);
+	bool Try_Calculate_Native_Texture_Matrix(const NativeMapperContext& context, Matrix4x4& output) override {
+		Calculate_Texture_Matrix_For_View(output,context.view);
+		return true;
+	}
+
 	enum AxisType { AXISTYPE_X=0, AXISTYPE_Y=1, AXISTYPE_Z=2 };
 	WSEnvMapperClass(AxisType axis, unsigned int stage) : TextureMapperClass(stage), Axis(axis) { }
 	WSEnvMapperClass(const WSEnvMapperClass & src) : TextureMapperClass(src), Axis(src.Axis) { }
@@ -464,6 +497,14 @@ class ScreenMapperClass : public LinearOffsetTextureMapperClass
 {
 	W3DMPO_GLUE(ScreenMapperClass)
 public:
+	bool Try_Get_Native_Coordinates_For_View(const NativeMapperContext& context,
+		unsigned int uvOffset, NativeMaterialCoordinates& output) override;
+	void Calculate_Texture_Matrix_For_View(Matrix4x4& matrix, const Matrix4x4& cameraMatrix);
+	bool Try_Calculate_Native_Texture_Matrix(const NativeMapperContext& context, Matrix4x4& output) override {
+		Calculate_Texture_Matrix_For_View(output,context.projection);
+		return true;
+	}
+
 	ScreenMapperClass(const Vector2 &offset_per_sec, const Vector2 & start_offset, bool clamp_fix,
 		const Vector2 &scale, unsigned int stage) : LinearOffsetTextureMapperClass(offset_per_sec, start_offset, clamp_fix, scale, stage) { }
 	ScreenMapperClass(const INIClass &ini, const char *section, unsigned int stage) : LinearOffsetTextureMapperClass(ini, section, stage) { }
@@ -513,6 +554,8 @@ class BumpEnvTextureMapperClass : public LinearOffsetTextureMapperClass
 {
 	W3DMPO_GLUE(BumpEnvTextureMapperClass)
 public:
+	bool Describe_Native_Mapping(const NativeMapperContext& context, unsigned int uvOffset,
+		NativeMaterialCoordinates& coordinates, NativeMaterialStage& stage) override;
 	BumpEnvTextureMapperClass(float rad_per_sec, float scale_factor, const Vector2 & offset_per_sec,
 		const Vector2 & start_offset, bool clamp_fix, const Vector2 &scale, unsigned int stage);
 	BumpEnvTextureMapperClass(INIClass &ini, char *section, unsigned int stage);
@@ -535,6 +578,14 @@ protected:
 class GridWSEnvMapperClass : public GridTextureMapperClass
 {
 public:
+	bool Try_Get_Native_Coordinates_For_View(const NativeMapperContext& context,
+		unsigned int uvOffset, NativeMaterialCoordinates& output) override;
+	void Calculate_Texture_Matrix_For_View(Matrix4x4& matrix, const Matrix4x4& cameraMatrix);
+	bool Try_Calculate_Native_Texture_Matrix(const NativeMapperContext& context, Matrix4x4& output) override {
+		Calculate_Texture_Matrix_For_View(output,context.view);
+		return true;
+	}
+
 	enum AxisType { AXISTYPE_X=0, AXISTYPE_Y=1, AXISTYPE_Z=2 };
 	GridWSEnvMapperClass(float fps, unsigned int gridwidth_log2, unsigned int last_frame, unsigned int offset, AxisType axis, unsigned int stage);
 	GridWSEnvMapperClass(const GridWSEnvMapperClass & src);

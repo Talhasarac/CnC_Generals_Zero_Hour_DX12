@@ -134,13 +134,35 @@ W3DBridge::~W3DBridge(void)
 /** Renders the bride.  It is assumed that the shared vertex and index buffers
 are already set.  */
 //=============================================================================
-void W3DBridge::renderBridge(Bool wireframe)
+#include "W3DDevice/GameClient/NativeTerrainDraw.h"
+#include "W3DDevice/GameClient/NativeWorldMaterial.h"
+#include "WW3D2/native_pipeline_description.h"
+
+void W3DBridge::renderBridge(Bool bindBaseTexture, DX8VertexBufferClass* vertices,
+	DX8IndexBufferClass* indices, const NativeMaterialDescription& passMaterial)
 {
-	if (m_visible && m_numPolygons && m_numVertex) {
-		if (!wireframe) DX8Wrapper::Set_Texture(0,m_bridgeTexture);
-		// Draw all the bridges.
-		DX8Wrapper::Draw_Triangles(	m_firstIndex, m_numPolygons, m_firstVertex,	m_numVertex);
+	NativeD3D12Renderer* native = NativeD3D12Renderer::Active();
+	if (!native || !m_visible || !m_numPolygons || !m_numVertex) return;
+	NativeMaterialDescription material = passMaterial;
+	if (bindBaseTexture && m_bridgeTexture) {
+		material.textures[0] = m_bridgeTexture->Prepare_Native_Texture();
+		material.samplers[0] = m_bridgeTexture->Get_Filter().Get_Native_Description();
 	}
+	Apply_Native_Material_Description(*native,material);
+	const auto* vb = vertices->Get_Native_Vertex_Buffer();
+	const auto* ib = indices->Get_Native_Index_Buffer();
+	if (!vb || !ib) return;
+	const UINT stride = sizeof(VertexFormatXYZNDUV1);
+	const auto* texture = First_Native_Material_Texture(material);
+	const auto* indexData = static_cast<const unsigned short*>(ib->Data())+m_firstIndex;
+	if (texture)
+		native->DrawIndexedTextured(vb->Data(),static_cast<UINT>(vb->Size()),stride,
+			m_firstVertex+m_numVertex,offsetof(VertexFormatXYZNDUV1,u1),indexData,m_numPolygons*3,
+			D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST,texture,offsetof(VertexFormatXYZNDUV1,diffuse),vb,ib);
+	else
+		native->DrawIndexed(vb->Data(),static_cast<UINT>(vb->Size()),stride,m_firstVertex+m_numVertex,
+			indexData,m_numPolygons*3,0,0,D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST,
+			offsetof(VertexFormatXYZNDUV1,diffuse),vb,ib);
 }
 
 //=============================================================================
@@ -1157,53 +1179,51 @@ void W3DBridgeBuffer::drawBridges(CameraClass * camera, Bool wireframe, TextureC
 		return;
 	}
 
-	DX8Wrapper::Set_Material(m_vertexMaterial);
-	// Setup the vertex buffer, shader & texture.
-	DX8Wrapper::Set_Index_Buffer(m_indexBridge,0);
-	DX8Wrapper::Set_Vertex_Buffer(m_vertexBridge);
-	DX8Wrapper::Set_Shader(detailAlphaShader);
-#ifdef _DEBUG
-	//DX8Wrapper::Set_Shader(detailShader); // shows alpha clipping.
-#endif
-
-	DX8Wrapper::Apply_Render_State_Changes();
-
-	if (!wireframe && cloudTexture)
-	{	//Force a cloud texture projection into stage 1
-		W3DShaderManager::setTexture(1,cloudTexture);
-		W3DShaderManager::setShader(W3DShaderManager::ST_CLOUD_TEXTURE,1);
+	NativeD3D12Renderer* native = NativeD3D12Renderer::Active();
+	if (!native) return;
+	NativeD3D12ScopedState pass(*native);
+	NativeTerrainSetCameraMatrices(*native,camera,Matrix3D(true));
+	NativeTerrainSetMaterial(*native,true,true,D3D12_CULL_MODE_NONE);
+	NativePipelineDescription pipeline = detailAlphaShader.Get_Native_Pipeline();
+	pipeline.Apply(*native);
+	native->SetVertexFog(0,0,1,1,0,false);
+	NativeMaterialDescription material = NativeWorldModulatedMaterial(NULL,
+		offsetof(VertexFormatXYZNDUV1,u1),NULL);
+	if (!wireframe && cloudTexture) {
+		material.textures[1] = cloudTexture->Prepare_Native_Texture();
+		material.stages[1] = material.stages[0];
+		material.stages[1].colorArg2 = material.stages[1].alphaArg2 = UINT(NativeMaterialSource::Current);
+		material.coordinates[1] = W3DShaderManager::nativeCloudCoordinates();
+		material.samplers[1] = {NativeD3D12FilterMode::Linear,NativeD3D12FilterMode::Linear,
+			NativeD3D12FilterMode::Linear,false,false,1};
 	}
+	for (curBridge=0;curBridge<m_numBridges;++curBridge)
+		if (m_bridges[curBridge].isEnabled() && m_bridges[curBridge].isVisible())
+			m_bridges[curBridge].renderBridge(!wireframe,m_vertexBridge,m_indexBridge,material);
 
-	for (curBridge=0; curBridge<m_numBridges; curBridge++) {
-		if (m_bridges[curBridge].isEnabled() && m_bridges[curBridge].isVisible()) {
-			m_bridges[curBridge].renderBridge(wireframe);
-		}
-	}
-
-	if (!wireframe && cloudTexture)
-		//Force a cloud texture projection into stage 1
-		W3DShaderManager::resetShader(W3DShaderManager::ST_CLOUD_TEXTURE);
-
-	//Render shroud pass over all the bridges
-	if (!wireframe && TheTerrainRenderObject->getShroud())
-	{
-		//Reset to a known shader.
-		DX8Wrapper::Invalidate_Cached_Render_States();
-		DX8Wrapper::Set_Shader(ShaderClass::_PresetOpaqueShader);
-		DX8Wrapper::Set_Material(m_vertexMaterial);
-		DX8Wrapper::Set_Index_Buffer(m_indexBridge,0);
-		DX8Wrapper::Set_Vertex_Buffer(m_vertexBridge);
-		DX8Wrapper::Apply_Render_State_Changes();
-		//Apply custom shroud projection shader.
-		W3DShaderManager::setTexture(0,TheTerrainRenderObject->getShroud()->getShroudTexture());
-		W3DShaderManager::setShader(W3DShaderManager::ST_SHROUD_TEXTURE, 0);
-		for (curBridge=0; curBridge<m_numBridges; curBridge++) {
-			if (m_bridges[curBridge].isEnabled() && m_bridges[curBridge].isVisible()) {
-				//Pretend we're in wireframe so function doesn't reset the shroud texture.
-				m_bridges[curBridge].renderBridge(TRUE);
-			}
-		}
-		W3DShaderManager::resetShader(W3DShaderManager::ST_SHROUD_TEXTURE);
+	// Keep the separate depth-equal shroud pass: combining it into an
+	// alpha-blended base draw changes the color at partially covered edges.
+	W3DShroud* shroud = TheTerrainRenderObject ? TheTerrainRenderObject->getShroud() : NULL;
+	if (!wireframe && shroud) {
+		const auto projected = NativeWorldModulatedMaterial(NULL,UINT_MAX,shroud);
+		if (!projected.textures[1]) return;
+		material = NativeMaterialDescription();
+		material.enabled = true;
+		material.stages[0].colorOp = material.stages[0].alphaOp = NativeMaterialOp::Select1;
+		material.stages[0].colorArg1 = material.stages[0].alphaArg1 = UINT(NativeMaterialSource::Texture);
+		material.textures[0] = projected.textures[1];
+		material.coordinates[0] = projected.coordinates[1];
+		material.samplers[0] = projected.samplers[1];
+		pipeline.depthCompare = D3D12_COMPARISON_FUNC_EQUAL;
+		pipeline.depthWrite = false;
+		pipeline.alphaTest = false;
+		pipeline.blend = true;
+		pipeline.source = D3D12_BLEND_DEST_COLOR;
+		pipeline.destination = D3D12_BLEND_ZERO;
+		pipeline.Apply(*native);
+		for (curBridge=0;curBridge<m_numBridges;++curBridge)
+			if (m_bridges[curBridge].isEnabled() && m_bridges[curBridge].isVisible())
+				m_bridges[curBridge].renderBridge(false,m_vertexBridge,m_indexBridge,material);
 	}
 }
 

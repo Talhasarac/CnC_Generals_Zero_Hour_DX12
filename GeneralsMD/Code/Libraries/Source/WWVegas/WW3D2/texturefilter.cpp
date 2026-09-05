@@ -67,6 +67,33 @@ TextureFilterClass::TextureFilterClass(MipCountType mip_level_count=MIP_LEVELS_1
 //! Apply filters (legacy)
 /*!
 */
+#include "native_draw_state.h"
+
+static TextureFilterClass::TextureFilterMode nativeFilterMode = TextureFilterClass::TEXTURE_FILTER_TRILINEAR;
+static TextureFilterClass::FilterType nativeDefaultFilters[3] = {
+	TextureFilterClass::FILTER_TYPE_BEST, TextureFilterClass::FILTER_TYPE_BEST, TextureFilterClass::FILTER_TYPE_BEST};
+
+NativeSamplerDesc TextureFilterClass::Get_Native_Description() const
+{
+	const auto resolve = [](FilterType filter, unsigned component) {
+		if (filter == FILTER_TYPE_DEFAULT) filter = nativeDefaultFilters[component];
+		if (filter == FILTER_TYPE_NONE) return NativeD3D12FilterMode::Point;
+		if (filter == FILTER_TYPE_FAST) return component == 2 ? NativeD3D12FilterMode::Point : NativeD3D12FilterMode::Linear;
+		if (nativeFilterMode == TEXTURE_FILTER_ANISOTROPIC && component != 2)
+			return NativeD3D12FilterMode::Anisotropic;
+		return component == 2 && nativeFilterMode == TEXTURE_FILTER_BILINEAR ?
+			NativeD3D12FilterMode::Point : NativeD3D12FilterMode::Linear;
+	};
+	NativeSamplerDesc result;
+	result.minFilter = resolve(TextureMinFilter, 0);
+	result.magFilter = resolve(TextureMagFilter, 1);
+	result.mipFilter = resolve(MipMapFilter, 2);
+	result.clampU = UAddressMode == TEXTURE_ADDRESS_CLAMP;
+	result.clampV = VAddressMode == TEXTURE_ADDRESS_CLAMP;
+	result.maxAnisotropy = nativeFilterMode == TEXTURE_FILTER_ANISOTROPIC ? 16 : 1;
+	return result;
+}
+
 void TextureFilterClass::Apply(unsigned int stage)
 {
 	DX8Wrapper::Set_DX8_Texture_Stage_State(stage,D3DTSS_MINFILTER,_MinTextureFilters[stage][TextureMinFilter]);
@@ -102,6 +129,8 @@ void TextureFilterClass::Apply(unsigned int stage)
 */
 void TextureFilterClass::_Init_Filters(TextureFilterMode filter_type)
 {
+	nativeFilterMode = filter_type;
+	for (auto& filter : nativeDefaultFilters) filter = FILTER_TYPE_BEST;
 	const D3DCAPS8& dx8caps=DX8Wrapper::Get_Current_Caps()->Get_DX8_Caps();
 
 #ifndef _XBOX
@@ -227,6 +256,7 @@ void TextureFilterClass::Set_Mip_Mapping(FilterType mipmap)
 */
 void TextureFilterClass::_Set_Default_Min_Filter(FilterType filter)
 {
+	if (filter != FILTER_TYPE_DEFAULT) nativeDefaultFilters[0] = filter;
 	for (int i=0;i<MAX_TEXTURE_STAGES;++i) 
 	{
 		_MinTextureFilters[i][FILTER_TYPE_DEFAULT]=_MinTextureFilters[i][filter];
@@ -240,6 +270,7 @@ void TextureFilterClass::_Set_Default_Min_Filter(FilterType filter)
 */
 void TextureFilterClass::_Set_Default_Mag_Filter(FilterType filter)
 {
+	if (filter != FILTER_TYPE_DEFAULT) nativeDefaultFilters[1] = filter;
 	for (int i=0;i<MAX_TEXTURE_STAGES;++i) 
 	{
 		_MagTextureFilters[i][FILTER_TYPE_DEFAULT]=_MagTextureFilters[i][filter];
@@ -252,6 +283,7 @@ void TextureFilterClass::_Set_Default_Mag_Filter(FilterType filter)
 */
 void TextureFilterClass::_Set_Default_Mip_Filter(FilterType filter)
 {
+	if (filter != FILTER_TYPE_DEFAULT) nativeDefaultFilters[2] = filter;
 	for (int i=0;i<MAX_TEXTURE_STAGES;++i) 
 	{
 		_MipMapFilters[i][FILTER_TYPE_DEFAULT]=_MipMapFilters[i][filter];
